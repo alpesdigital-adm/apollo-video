@@ -12,6 +12,7 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
@@ -28,6 +29,18 @@ const colorPipelineBindings = Object.freeze([Object.freeze({
   compilationId: colorCompilation.id, compilationHash: colorCompilation.compilationHash,
   pipelineHash: colorCompilation.pipeline.pipelineHash,
 })])
+
+function proxyActor(credentialId = 'credential-project-proxy-test') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-project-proxy-test', credentialId,
+    workspaceId: 'workspace-project-proxy-test', environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function createClock() {
   let current = Date.parse('2026-07-18T22:00:00.000Z')
@@ -357,7 +370,7 @@ test('T-FR-233 render-free selection completes by exact proxy reuse without colo
   })({
     workspaceId: 'workspace-project-proxy-test',
     projectId: 'project-proxy-test',
-    actor: { type: 'api-client', id: 'client-project-proxy-test' },
+    actor: proxyActor(),
     idempotencyKey: 'selection-proxy-reuse-test',
   })
   assert.equal(result.operation.status, 'succeeded')
@@ -387,7 +400,7 @@ test('T-FR-233 render-free selection fails closed when its base proxy is unavail
     })({
       workspaceId: 'workspace-project-proxy-test',
       projectId: 'project-proxy-test',
-      actor: { type: 'api-client', id: 'client-project-proxy-test' },
+      actor: proxyActor(),
       idempotencyKey: 'selection-proxy-missing-test',
     }),
     (error) => error.code === 'PRECONDITION_REQUIRED' && /completed proxy/.test(error.message),
@@ -406,7 +419,7 @@ test('proxy enqueue fails closed when a committed Command result is no longer cu
       workspaceId: 'workspace-project-proxy-test',
       projectId: 'project-proxy-test',
       expectedProjectVersionId: 'project-version-command-result',
-      actor: { type: 'api-client', id: 'client-project-proxy-test' },
+      actor: proxyActor(),
       idempotencyKey: 'proxy-version-fence-test',
     }),
     (error) => error.code === 'VERSION_CONFLICT' && error.details.currentProjectVersionId === 'project-version-proxy-test',
@@ -510,6 +523,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   })
   const persisted = await repository.createOrReplay({
     operation,
+    authenticationAudit: materializeActorAuditContext(proxyActor()),
     context,
     idempotencyKey: 'selection-proxy-persistence-test',
     requestFingerprint: '7'.repeat(64),
@@ -530,6 +544,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   await assert.rejects(
     repository.createOrReplay({
       operation,
+      authenticationAudit: materializeActorAuditContext(proxyActor()),
       context: { ...context, impactHash: '8'.repeat(64) },
       idempotencyKey: 'selection-proxy-tamper-test',
       requestFingerprint: '9'.repeat(64),

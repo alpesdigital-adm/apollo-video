@@ -17,6 +17,8 @@ import {
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import {
   hydrateLongFormIndexWorkflow,
   type LongFormIndexStageCheckpoint,
@@ -245,9 +247,32 @@ function iso(value: Date | null): string | undefined {
   return value?.toISOString()
 }
 
+function hydrateAuthenticationAudit(row: WorkflowWithStages): Readonly<ApiAccessAuditContext> {
+  try {
+    if (!row.actorCredentialId || !row.actorEnvironment || !row.actorAuthenticationKind || !row.actorContextHash) {
+      throw new Error('missing audit')
+    }
+    const audit = createApiAccessAuditContext({
+      clientId: row.createdByClientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored long-form workflow actor audit is invalid')
+  }
+}
+
 function hydrateWorkflow(
   row: WorkflowWithStages,
 ): Readonly<LongFormIndexWorkflow> {
+  hydrateAuthenticationAudit(row)
   const parsed = parseJson(
     row.workflowJson,
     `long-form workflow ${row.id}`,
@@ -347,6 +372,7 @@ function hydrateWorkflow(
 
 function workflowData(input: {
   workflow: Readonly<LongFormIndexWorkflow>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   operationId: string
   requestFingerprint: string
   idempotencyKey: string
@@ -385,6 +411,13 @@ function workflowData(input: {
     requestFingerprint: input.requestFingerprint,
     idempotencyKey: input.idempotencyKey,
     createdByClientId: workflow.createdByClientId,
+    actorCredentialId: input.authenticationAudit.credentialId,
+    actorEnvironment: input.authenticationAudit.environment,
+    actorAuthenticationKind: input.authenticationAudit.authenticationKind,
+    actorContextHash: input.authenticationAudit.contextHash,
+    delegatedUserId: input.authenticationAudit.delegatedUserId,
+    delegatedIdentityId: input.authenticationAudit.delegatedIdentityId,
+    workspaceRole: input.authenticationAudit.workspaceRole,
     createdAt: new Date(workflow.createdAt),
     updatedAt: new Date(workflow.updatedAt),
   }
@@ -523,6 +556,7 @@ function stageMutableData(
 function operationData(operation: Readonly<PublicOperation>, input: {
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   traceId?: string
 }) {
   assertPublicOperation(operation)
@@ -531,6 +565,13 @@ function operationData(operation: Readonly<PublicOperation>, input: {
     workspaceId: operation.workspaceId,
     projectId: operation.projectId,
     clientId: operation.clientId,
+    actorCredentialId: input.authenticationAudit.credentialId,
+    actorEnvironment: input.authenticationAudit.environment,
+    actorAuthenticationKind: input.authenticationAudit.authenticationKind,
+    actorContextHash: input.authenticationAudit.contextHash,
+    delegatedUserId: input.authenticationAudit.delegatedUserId,
+    delegatedIdentityId: input.authenticationAudit.delegatedIdentityId,
+    workspaceRole: input.authenticationAudit.workspaceRole,
     type: operation.type,
     status: operation.status,
     phase: operation.phase,
@@ -692,16 +733,26 @@ implements LongFormIndexWorkflowRepository {
     workspaceId: string
     projectId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }) {
     const row = await this.prisma.v2LongFormIndexWorkflow.findUnique({
       where: {
         workspaceId_projectId_createdByClientId_idempotencyKey:
-          input,
+          {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            createdByClientId: input.createdByClientId,
+            idempotencyKey: input.idempotencyKey,
+          },
       },
       include: { stages: { orderBy: { sequence: 'asc' } } },
     })
-    return row ? this.present(row) : null
+    if (!row) return null
+    if (hydrateAuthenticationAudit(row).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+    }
+    return this.present(row)
   }
 
   private async present(
@@ -714,7 +765,8 @@ implements LongFormIndexWorkflowRepository {
     if (
       !operation ||
       operation.context.kind !== 'long-form-index' ||
-      operation.context.workflowId !== row.id
+      operation.context.workflowId !== row.id ||
+      operation.authenticationAudit.contextHash !== hydrateAuthenticationAudit(row).contextHash
     ) {
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
@@ -733,12 +785,28 @@ implements LongFormIndexWorkflowRepository {
     input: {
       workflow: Readonly<LongFormIndexWorkflow>
       operation: Readonly<PublicOperation>
+      authenticationAudit: Readonly<ApiAccessAuditContext>
       requestFingerprint: string
       idempotencyKey: string
       expectedRightsSnapshotId: string
     },
     attempt = 1,
   ): ReturnType<LongFormIndexWorkflowRepository['create']> {
+    let audit: Readonly<ApiAccessAuditContext>
+    try {
+      audit = createApiAccessAuditContext({
+        clientId: input.authenticationAudit.clientId,
+        credentialId: input.authenticationAudit.credentialId,
+        workspaceId: input.authenticationAudit.workspaceId,
+        environment: input.authenticationAudit.environment,
+        authenticationKind: input.authenticationAudit.authenticationKind,
+        ...(input.authenticationAudit.delegatedUserId ? { delegatedUserId: input.authenticationAudit.delegatedUserId } : {}),
+        ...(input.authenticationAudit.delegatedIdentityId ? { delegatedIdentityId: input.authenticationAudit.delegatedIdentityId } : {}),
+        ...(input.authenticationAudit.workspaceRole ? { workspaceRole: input.authenticationAudit.workspaceRole } : {}),
+      })
+    } catch {
+      throw new DomainError('AUTH_INVALID', 'Long-form workflow authentication audit is invalid')
+    }
     const estimatedCostMinorUnits = input.workflow.stages.reduce(
       (total, stage) => total + stage.budget.estimatedCostMinorUnits,
       0,
@@ -751,6 +819,9 @@ implements LongFormIndexWorkflowRepository {
       input.workflow.projectId !== input.operation.projectId ||
       input.workflow.createdByClientId !==
         input.operation.clientId ||
+      audit.contextHash !== input.authenticationAudit.contextHash ||
+      audit.workspaceId !== input.workflow.workspaceId ||
+      audit.clientId !== input.workflow.createdByClientId ||
       input.workflow.sourceArtifactId !==
         input.operation.target.id ||
       input.workflow.sourceManifestId !==
@@ -782,11 +853,12 @@ implements LongFormIndexWorkflowRepository {
                   idempotencyKey: input.idempotencyKey,
                 },
             },
-            select: { requestFingerprint: true },
+            select: { requestFingerprint: true, actorContextHash: true },
           })
         if (replay) {
           if (
-            replay.requestFingerprint !== input.requestFingerprint
+            replay.requestFingerprint !== input.requestFingerprint ||
+            replay.actorContextHash !== audit.contextHash
           ) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -843,6 +915,7 @@ implements LongFormIndexWorkflowRepository {
         await transaction.v2LongFormIndexWorkflow.create({
           data: workflowData({
             workflow: input.workflow,
+            authenticationAudit: audit,
             operationId: input.operation.id,
             requestFingerprint: input.requestFingerprint,
             idempotencyKey: input.idempotencyKey,
@@ -874,6 +947,7 @@ implements LongFormIndexWorkflowRepository {
           workspaceId: input.workflow.workspaceId,
           projectId: input.workflow.projectId,
           createdByClientId: input.workflow.createdByClientId,
+          actorContextHash: audit.contextHash,
           idempotencyKey: input.idempotencyKey,
         })
         if (replay) {

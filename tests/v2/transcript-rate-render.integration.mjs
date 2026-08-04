@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
@@ -33,6 +34,18 @@ import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
+
+function proxyActor() {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-transcript-rate', credentialId: 'credential-transcript-rate',
+    workspaceId: WORKSPACE_ID, environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 // ---------------------------------------------------------------------------
 // F0.027 slice 3 — two journeys, no fixtures in the middle:
@@ -498,7 +511,7 @@ async function renderThroughRealWorker(input) {
     async createOrReplay(created) {
       operation = created.operation
       context = created.context
-      return { operation, context, replayed: false }
+      return { operation, context, authenticationAudit: created.authenticationAudit, replayed: false }
     },
     async claimNext(command) {
       assert.equal(command.type, 'project-proxy-render')
@@ -545,7 +558,7 @@ async function renderThroughRealWorker(input) {
   })({
     workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
     expectedProjectVersionId: input.projectVersionId,
-    actor: { type: 'api-client', id: 'client-transcript-rate' },
+    actor: proxyActor(),
     idempotencyKey: `proxy-${input.suffix}`,
   })
 

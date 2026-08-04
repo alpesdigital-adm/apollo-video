@@ -8,6 +8,9 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   const { createQueuedPublicOperation } = await import(
     '../../src/v2/domain/public-operation.ts'
   )
+  const { createApiAccessAuditContext } = await import(
+    '../../src/v2/domain/api-access-control.ts'
+  )
   const { createMediaArtifactManifest } = await import(
     '../../src/v2/domain/media-artifact.ts'
   )
@@ -21,6 +24,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   const client = new PrismaClient()
   const workspaceId = 'operation-integration-workspace'
   const clientId = 'operation-integration-client'
+  const credentialId = 'operation-integration-credential'
   const artifactId = 'operation-integration-artifact'
   const manifestId = 'operation-integration-manifest'
   const authorizationId = 'operation-integration-authorization'
@@ -30,6 +34,11 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   // execution clock when corruption scenarios update the stored record.
   const now = new Date('2026-01-01T15:30:00.000Z')
   const artifactKey = 'workspaces/operation/render-target.mp4'
+  const authenticationAuditFor = (auditWorkspaceId = workspaceId) => createApiAccessAuditContext({
+    clientId, credentialId, workspaceId: auditWorkspaceId,
+    environment: 'sandbox', authenticationKind: 'bearer',
+  })
+  const authenticationAudit = authenticationAuditFor()
   const targetManifest = createMediaArtifactManifest({
     artifactKey,
     artifactSha256: sha('a'),
@@ -80,6 +89,12 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         updatedAt: now,
       },
     })
+    await client.v2ApiCredential.create({
+      data: {
+        id: credentialId, workspaceId, clientId, status: 'active',
+        secretSalt: 'a'.repeat(22), secretHash: sha('b'), createdAt: now,
+      },
+    })
     await client.v2MediaArtifact.create({
       data: {
         id: artifactId,
@@ -120,6 +135,10 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         status: 'authorized',
         issuesJson: '[]',
         clientId,
+        actorCredentialId: authenticationAudit.credentialId,
+        actorEnvironment: authenticationAudit.environment,
+        actorAuthenticationKind: authenticationAudit.authenticationKind,
+        actorContextHash: authenticationAudit.contextHash,
         idempotencyKey: 'operation-authorization',
         requestFingerprint: sha('e'),
         evaluatedAt: now,
@@ -129,6 +148,17 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
 
     const repository = new PrismaPublicOperationRepository(client)
+    let controlCommandSequence = 0
+    const cancelOperation = (controlInput) => repository.cancel({
+      ...controlInput,
+      commandId: `operation-control-cancel-${++controlCommandSequence}`,
+      authenticationAudit: authenticationAuditFor(controlInput.workspaceId),
+    })
+    const retryOperation = (controlInput) => repository.retry({
+      ...controlInput,
+      commandId: `operation-control-retry-${++controlCommandSequence}`,
+      authenticationAudit: authenticationAuditFor(controlInput.workspaceId),
+    })
     const checkpoints = new PrismaArtifactRenderCheckpointRepository(client)
     const operation = createQueuedPublicOperation({
       id: operationId,
@@ -140,7 +170,8 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     const input = {
       operation,
-      context: { authorizationId, inputHash: sha('d') },
+      authenticationAudit,
+      context: { kind: 'artifact-render', authorizationId, inputHash: sha('d') },
       idempotencyKey: 'operation-render-request',
       requestFingerprint: sha('f'),
       traceId: 'request_trace_prisma_operation_001',
@@ -177,13 +208,30 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       status: 'queued',
     })
     assert.equal(await repository.findById('another-workspace', operationId), null)
+    assert.deepEqual(created.authenticationAudit, authenticationAudit)
 
     await assert.rejects(
       repository.findReplay({
         workspaceId,
         clientId,
+        actorContextHash: authenticationAudit.contextHash,
         idempotencyKey: input.idempotencyKey,
         requestFingerprint: sha('0'),
+      }),
+      (error) =>
+        error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+    )
+    const differentCredentialAudit = createApiAccessAuditContext({
+      ...authenticationAudit,
+      credentialId: 'operation-integration-credential-other',
+    })
+    await assert.rejects(
+      repository.findReplay({
+        workspaceId,
+        clientId,
+        actorContextHash: differentCredentialAudit.contextHash,
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.requestFingerprint,
       }),
       (error) =>
         error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -194,6 +242,8 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(storedCore.resultJson, null)
     assert.equal(JSON.stringify(storedCore).includes(authorizationId), false)
     assert.equal(JSON.stringify(storedCore).includes(sha('d')), false)
+    assert.equal(storedCore.actorCredentialId, authenticationAudit.credentialId)
+    assert.equal(storedCore.actorContextHash, authenticationAudit.contextHash)
 
     const claimInputs = ['worker-integration-one', 'worker-integration-two'].map(
       (leaseOwner) => ({
@@ -421,6 +471,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     await repository.createOrReplay({
       operation: exhaustedOperation,
+      authenticationAudit,
       context: input.context,
       idempotencyKey: 'operation-exhausted-request',
       requestFingerprint: sha('8'),
@@ -454,6 +505,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     await repository.createOrReplay({
       operation: scheduledOperation,
+      authenticationAudit,
       context: input.context,
       idempotencyKey: 'operation-scheduled-retry-request',
       requestFingerprint: sha('7'),
@@ -519,26 +571,27 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     await repository.createOrReplay({
       operation: cancelQueuedOperation,
+      authenticationAudit,
       context: input.context,
       idempotencyKey: 'operation-cancel-queued-request',
       requestFingerprint: sha('6'),
     })
     assert.equal(
-      await repository.cancel({
+      await cancelOperation({
         workspaceId: 'different-workspace-id',
         operationId: cancelQueuedOperation.id,
         canceledAt: '2026-01-01T15:36:01.000Z',
       }),
       null,
     )
-    const canceledQueued = await repository.cancel({
+    const canceledQueued = await cancelOperation({
       workspaceId,
       operationId: cancelQueuedOperation.id,
       canceledAt: '2026-01-01T15:36:01.000Z',
     })
     assert.equal(canceledQueued.operation.status, 'canceled')
     assert.equal(canceledQueued.operation.startedAt, undefined)
-    const canceledQueuedReplay = await repository.cancel({
+    const canceledQueuedReplay = await cancelOperation({
       workspaceId,
       operationId: cancelQueuedOperation.id,
       canceledAt: '2026-01-01T15:36:02.000Z',
@@ -552,6 +605,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     await repository.createOrReplay({
       operation: cancelRunningOperation,
+      authenticationAudit,
       context: input.context,
       idempotencyKey: 'operation-cancel-running-request',
       requestFingerprint: sha('5'),
@@ -578,7 +632,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         true,
       )
     }
-    const canceledRunning = await repository.cancel({
+    const canceledRunning = await cancelOperation({
       workspaceId,
       operationId: cancelRunningOperation.id,
       canceledAt: '2026-01-01T15:37:02.000Z',
@@ -632,6 +686,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     await repository.createOrReplay({
       operation: cancelRetryOperation,
+      authenticationAudit,
       context: input.context,
       idempotencyKey: 'operation-cancel-retry-request',
       requestFingerprint: sha('4'),
@@ -655,7 +710,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       },
     })
     assert.equal(retryBeforeCancel.operation.status, 'retrying')
-    const canceledRetry = await repository.cancel({
+    const canceledRetry = await cancelOperation({
       workspaceId,
       operationId: cancelRetryOperation.id,
       canceledAt: '2026-01-01T15:38:04.000Z',
@@ -680,6 +735,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       })
       await repository.createOrReplay({
         operation: cancelRaceOperation,
+        authenticationAudit,
         context: input.context,
         idempotencyKey: 'operation-cancel-race-request',
         requestFingerprint: sha('3'),
@@ -691,7 +747,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
           now: '2026-01-01T15:39:11.000Z',
           leaseUntil: '2026-01-01T15:39:41.000Z',
         }),
-        repository.cancel({
+        cancelOperation({
           workspaceId,
           operationId: cancelRaceOperation.id,
           canceledAt: '2026-01-01T15:39:12.000Z',
@@ -715,7 +771,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         )
       }
     }
-    const completedReplay = await repository.cancel({
+    const completedReplay = await cancelOperation({
       workspaceId,
       operationId,
       canceledAt: '2026-01-01T15:40:00.000Z',
@@ -723,7 +779,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(completedReplay.operation.status, 'succeeded')
     assert.equal(completedReplay.operation.completedAt, succeeded.operation.completedAt)
     await assert.rejects(
-      repository.retry({
+      retryOperation({
         workspaceId,
         operationId,
         requestedAt: '2026-01-01T15:40:01.000Z',
@@ -733,7 +789,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
         error instanceof DomainError && error.code === 'PUBLIC_OPERATION_RETRY_REJECTED',
     )
     assert.equal(
-      await repository.retry({
+      await retryOperation({
         workspaceId: 'different-workspace-id',
         operationId: cancelQueuedOperation.id,
         requestedAt: '2026-01-01T15:41:00.000Z',
@@ -741,7 +797,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       }),
       null,
     )
-    const retriedQueued = await repository.retry({
+    const retriedQueued = await retryOperation({
       workspaceId,
       operationId: cancelQueuedOperation.id,
       requestedAt: '2026-01-01T15:41:00.000Z',
@@ -750,7 +806,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(retriedQueued.operation.status, 'queued')
     assert.equal(retriedQueued.operation.attempt, 0)
     assert.equal(retriedQueued.operation.completedAt, undefined)
-    const retriedQueuedReplay = await repository.retry({
+    const retriedQueuedReplay = await retryOperation({
       workspaceId,
       operationId: cancelQueuedOperation.id,
       requestedAt: '2026-01-01T15:41:00.500Z',
@@ -764,13 +820,13 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       leaseUntil: '2026-01-01T15:41:31.000Z',
     })
     assert.equal(retriedQueuedClaim.operation.attempt, 1)
-    await repository.cancel({
+    await cancelOperation({
       workspaceId,
       operationId: cancelQueuedOperation.id,
       canceledAt: '2026-01-01T15:41:02.000Z',
     })
 
-    const retriedRunning = await repository.retry({
+    const retriedRunning = await retryOperation({
       workspaceId,
       operationId: cancelRunningOperation.id,
       requestedAt: '2026-01-01T15:42:00.000Z',
@@ -795,13 +851,13 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       leaseUntil: '2026-01-01T15:42:30.001Z',
     })
     assert.equal(retriedRunningClaim.operation.attempt, 2)
-    await repository.cancel({
+    await cancelOperation({
       workspaceId,
       operationId: cancelRunningOperation.id,
       canceledAt: '2026-01-01T15:42:01.000Z',
     })
 
-    const retriedDeadLetter = await repository.retry({
+    const retriedDeadLetter = await retryOperation({
       workspaceId,
       operationId: scheduledOperation.id,
       requestedAt: '2026-01-01T15:43:00.000Z',
@@ -818,7 +874,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       leaseUntil: '2026-01-01T15:43:30.001Z',
     })
     assert.equal(retriedDeadLetterClaim.operation.attempt, 3)
-    await repository.cancel({
+    await cancelOperation({
       workspaceId,
       operationId: scheduledOperation.id,
       canceledAt: '2026-01-01T15:43:01.000Z',
@@ -826,13 +882,13 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
 
     {
       const [firstRetry, secondRetry] = await Promise.all([
-        repository.retry({
+        retryOperation({
           workspaceId,
           operationId: cancelRetryOperation.id,
           requestedAt: '2026-01-01T15:44:00.000Z',
           nextAttemptAt: '2026-01-01T15:44:00.001Z',
         }),
-        repository.retry({
+        retryOperation({
           workspaceId,
           operationId: cancelRetryOperation.id,
           requestedAt: '2026-01-01T15:44:00.000Z',
@@ -842,7 +898,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       assert.equal(firstRetry.operation.status, 'retrying')
       assert.equal(secondRetry.operation.status, 'retrying')
       assert.equal(firstRetry.operation.maxAttempts, secondRetry.operation.maxAttempts)
-      await repository.cancel({
+      await cancelOperation({
         workspaceId,
         operationId: cancelRetryOperation.id,
         canceledAt: '2026-01-01T15:44:01.000Z',
@@ -856,6 +912,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
           id: `operation-integration-list-${suffix}`,
           createdAt: '2026-01-01T15:45:00.000Z',
         }),
+        authenticationAudit,
         context: input.context,
         idempotencyKey: `operation-list-${suffix}-request`,
         requestFingerprint: sha(suffix),
@@ -895,6 +952,20 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
       await repository.list({ workspaceId, limit: 10, targetId: 'missing-target-id' }),
       [],
     )
+    const controlCommands = await client.v2PublicOperationControlCommand.findMany({
+      where: { workspaceId },
+      orderBy: { occurredAt: 'asc' },
+    })
+    assert.equal(controlCommands.length, 12)
+    assert.equal(controlCommands.every((command) =>
+      command.actorClientId === authenticationAudit.clientId &&
+      command.actorCredentialId === authenticationAudit.credentialId &&
+      command.actorContextHash === authenticationAudit.contextHash &&
+      command.previousStatus !== command.resultStatus), true)
+    assert.deepEqual(
+      [...new Set(controlCommands.map((command) => command.action))].sort(),
+      ['cancel', 'retry'],
+    )
     const deadLetterList = await repository.list({
       workspaceId,
       limit: 10,
@@ -933,6 +1004,19 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     await client.v2ArtifactRenderOperation.update({
       where: { operationId },
       data: { outputSha256: sha('a') },
+    })
+
+    await client.v2PublicOperation.update({
+      where: { id: operationId },
+      data: { actorContextHash: sha('9') },
+    })
+    await assert.rejects(
+      repository.findById(workspaceId, operationId),
+      (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+    )
+    await client.v2PublicOperation.update({
+      where: { id: operationId },
+      data: { actorContextHash: authenticationAudit.contextHash },
     })
 
     await client.v2PublicOperation.update({

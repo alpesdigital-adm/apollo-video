@@ -25,6 +25,7 @@ import type {
 import type {
   SourceCleanupRepository,
 } from './ports/source-cleanup-repository.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -66,6 +67,7 @@ function requestFingerprint(input: {
   findingId: string
   policy: Readonly<SourceCleanupPolicy>
   actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'create-source-cleanup-request/v1',
@@ -90,7 +92,7 @@ export function createSourceCleanupService(dependencies: {
     expectedReportHash: string
     findingId: string
     policy?: Readonly<SourceCleanupPolicy>
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
@@ -108,12 +110,10 @@ export function createSourceCleanupService(dependencies: {
       'expectedReportHash',
     )
     const findingId = identity(request.findingId, 'findingId')
-    assertDomain(
-      request.actor?.type === 'api-client',
-      'AUTH_INVALID',
-      'Source cleanup requires an API client',
-    )
-    const actorClientId = identity(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match source cleanup')
+    const actorClientId = identity(audit.clientId, 'actor.id')
     const replayKey = idempotencyKey(request.idempotencyKey)
     const policy = request.policy ?? defaultSourceCleanupPolicy()
     const fingerprint = requestFingerprint({
@@ -124,11 +124,13 @@ export function createSourceCleanupService(dependencies: {
       findingId,
       policy,
       actorClientId,
+      actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       projectId,
       actorClientId,
+      actorContextHash: audit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -253,6 +255,7 @@ export function createSourceCleanupService(dependencies: {
           }
         : {}),
       requestFingerprint: fingerprint,
+      authenticationAudit: audit,
       idempotencyKey: replayKey,
       traceId: request.traceId,
     })

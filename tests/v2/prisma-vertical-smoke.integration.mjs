@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createColorPipelineCompilationService } from '../../src/v2/application/color-pipeline-compilations.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
@@ -147,6 +148,14 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       name: 'Vertical smoke client',
       environment: 'sandbox',
       scopes: ['media:write', 'projects:read', 'projects:write'],
+    })
+    const proxyAuditContext = createExternalAuditContext({
+      clientId, credentialId: issuedClient.credential.id, workspaceId, environment: 'sandbox',
+    })
+    const proxyActor = Object.freeze({
+      ...proxyAuditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext: proxyAuditContext,
     })
 
     const ingest = runNextMediaIngestOperationService({
@@ -335,7 +344,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       workspaceId,
       projectId: seed.project.id,
       expectedProjectVersionId: noLut.version.id,
-      actor: { type: 'api-client', id: clientId },
+      actor: proxyActor,
       idempotencyKey: 'vertical-smoke-proxy-v1',
     })
     const ffmpegRenderer = new FfmpegEditorialProxyRenderer({

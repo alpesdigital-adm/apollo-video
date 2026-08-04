@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -14,12 +16,19 @@ function validateId(value: string, field: string): string {
 export function retryPublicOperationService(dependencies: {
   operations: PublicOperationRepository
   clock?: () => Date
+  createId?: () => string
 }) {
   const clock = dependencies.clock ?? (() => new Date())
+  const createId = dependencies.createId ?? (() => `operation-control-${randomUUID()}`)
   return async function retryPublicOperationCommand(request: {
     workspaceId: string
     operationId: string
+    actor: AuthenticatedExternalActor
   }) {
+    requireScope(request.actor, 'operations:retry')
+    const audit = materializeActorAuditContext(request.actor)
+    const workspaceId = validateId(request.workspaceId, 'workspaceId')
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match operation retry')
     const requestedAt = clock()
     const nextAttemptAt = new Date(requestedAt.getTime() + 1)
     assertDomain(
@@ -28,8 +37,10 @@ export function retryPublicOperationService(dependencies: {
       'clock returned an invalid retry date',
     )
     const record = await dependencies.operations.retry({
-      workspaceId: validateId(request.workspaceId, 'workspaceId'),
+      workspaceId,
       operationId: validateId(request.operationId, 'operationId'),
+      commandId: validateId(createId(), 'commandId'),
+      authenticationAudit: audit,
       requestedAt: requestedAt.toISOString(),
       nextAttemptAt: nextAttemptAt.toISOString(),
     })

@@ -120,7 +120,7 @@ export async function POST(
         workspaceId: actor.workspaceId,
         projectId,
         expectedProjectVersionId: result.version.id,
-        actor: actor.auditContext.actor,
+        actor,
         idempotencyKey: `${idempotencyKey}:proxy`,
         traceId: requestId,
       })
@@ -252,7 +252,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       expectedProjectVersionId: result.version.id,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey: `${idempotencyKey}:proxy`,
       traceId: requestId,
     })

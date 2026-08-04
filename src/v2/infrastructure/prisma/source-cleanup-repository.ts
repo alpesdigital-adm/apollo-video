@@ -17,6 +17,8 @@ import {
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import {
   rehydratePublicOperation,
   type PublicOperation,
@@ -51,6 +53,42 @@ type CleanupRow = Prisma.V2SourceCleanupPlanGetPayload<{
 }>
 
 const HASH = /^[a-f0-9]{64}$/
+
+interface StoredAuditRow {
+  workspaceId: string
+  clientId?: string
+  createdByClientId?: string
+  actorCredentialId: string | null
+  actorEnvironment: string | null
+  actorAuthenticationKind: string | null
+  actorContextHash: string | null
+  delegatedUserId: string | null
+  delegatedIdentityId: string | null
+  workspaceRole: string | null
+}
+
+function hydrateAuthenticationAudit(row: StoredAuditRow): Readonly<ApiAccessAuditContext> {
+  try {
+    const clientId = row.clientId ?? row.createdByClientId
+    if (!clientId || !row.actorCredentialId || !row.actorEnvironment || !row.actorAuthenticationKind || !row.actorContextHash) {
+      throw new Error('missing audit')
+    }
+    const audit = createApiAccessAuditContext({
+      clientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored source cleanup actor audit is invalid')
+  }
+}
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -108,6 +146,7 @@ function hydrateOperation(
   row: NonNullable<CleanupRow['operation']>,
   plan: Readonly<SourceCleanupPlan>,
 ): Readonly<PublicOperation> {
+  hydrateAuthenticationAudit(row)
   if (
     plan.decision !== 'execute' ||
     row.id !== plan.operationId ||
@@ -188,6 +227,10 @@ function hydrateOperation(
 }
 
 function hydrateRecord(row: CleanupRow): Readonly<SourceCleanupRecord> {
+  const audit = hydrateAuthenticationAudit(row)
+  if (row.operation && hydrateAuthenticationAudit(row.operation).contextHash !== audit.contextHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Source cleanup operation actor differs from its plan')
+  }
   const report = hydrateContaminationReportRow(
     row.contaminationReport,
   )
@@ -318,6 +361,7 @@ function hydrateRecord(row: CleanupRow): Readonly<SourceCleanupRecord> {
 
 function operationData(
   operation: Readonly<PublicOperation>,
+  audit: Readonly<ApiAccessAuditContext>,
   idempotencyKey: string,
   requestFingerprint: string,
   traceId?: string,
@@ -327,6 +371,13 @@ function operationData(
     workspaceId: operation.workspaceId,
     projectId: operation.projectId,
     clientId: operation.clientId,
+    actorCredentialId: audit.credentialId,
+    actorEnvironment: audit.environment,
+    actorAuthenticationKind: audit.authenticationKind,
+    actorContextHash: audit.contextHash,
+    delegatedUserId: audit.delegatedUserId,
+    delegatedIdentityId: audit.delegatedIdentityId,
+    workspaceRole: audit.workspaceRole,
     type: operation.type,
     status: operation.status,
     phase: operation.phase,
@@ -388,6 +439,13 @@ function planData(record: Readonly<SourceCleanupCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: plan.createdByClientId,
+    actorCredentialId: record.authenticationAudit.credentialId,
+    actorEnvironment: record.authenticationAudit.environment,
+    actorAuthenticationKind: record.authenticationAudit.authenticationKind,
+    actorContextHash: record.authenticationAudit.contextHash,
+    delegatedUserId: record.authenticationAudit.delegatedUserId,
+    delegatedIdentityId: record.authenticationAudit.delegatedIdentityId,
+    workspaceRole: record.authenticationAudit.workspaceRole,
     createdAt: new Date(plan.createdAt),
   }
 }
@@ -404,6 +462,7 @@ implements SourceCleanupRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<SourceCleanupReplay> | null> {
     const row = await this.prisma.v2SourceCleanupPlan.findUnique({
@@ -417,17 +476,33 @@ implements SourceCleanupRepository {
       },
       include: CLEANUP_INCLUDE,
     })
-    return row
-      ? Object.freeze({
-          record: hydrateRecord(row),
-          requestFingerprint: row.requestFingerprint,
-        })
-      : null
+    if (!row) return null
+    if (hydrateAuthenticationAudit(row).contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key belongs to a different authentication context',
+      )
+    }
+    return Object.freeze({
+      record: hydrateRecord(row),
+      requestFingerprint: row.requestFingerprint,
+    })
   }
 
   async create(
     record: Readonly<SourceCleanupCreateRecord>,
   ): Promise<Readonly<SourceCleanupRecord & { replayed: boolean }>> {
+    const audit = hydrateAuthenticationAudit({
+      workspaceId: record.plan.workspaceId,
+      createdByClientId: record.plan.createdByClientId,
+      actorCredentialId: record.authenticationAudit.credentialId,
+      actorEnvironment: record.authenticationAudit.environment,
+      actorAuthenticationKind: record.authenticationAudit.authenticationKind,
+      actorContextHash: record.authenticationAudit.contextHash,
+      delegatedUserId: record.authenticationAudit.delegatedUserId ?? null,
+      delegatedIdentityId: record.authenticationAudit.delegatedIdentityId ?? null,
+      workspaceRole: record.authenticationAudit.workspaceRole ?? null,
+    })
     if (
       !HASH.test(record.requestFingerprint) ||
       record.idempotencyKey.length < 8 ||
@@ -501,6 +576,9 @@ implements SourceCleanupRepository {
               'Idempotency key was used with a different source cleanup request',
             )
           }
+          if (hydrateAuthenticationAudit(existing).contextHash !== audit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           return { row: existing, replayed: true }
         }
         if (record.operation) {
@@ -532,6 +610,7 @@ implements SourceCleanupRepository {
           await transaction.v2PublicOperation.create({
             data: operationData(
               record.operation,
+              audit,
               record.idempotencyKey,
               record.requestFingerprint,
               record.traceId,
@@ -563,6 +642,7 @@ implements SourceCleanupRepository {
           workspaceId: record.plan.workspaceId,
           projectId: record.plan.projectId,
           actorClientId: record.plan.createdByClientId,
+          actorContextHash: audit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

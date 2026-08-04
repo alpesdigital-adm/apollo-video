@@ -60,7 +60,7 @@ export async function POST(
       projectId,
       baseVersionId: record.baseVersionId,
       baseHash: record.baseHash,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey,
       traceId: requestId,
       ...(record.reason !== undefined ? { reason: record.reason } : {}),

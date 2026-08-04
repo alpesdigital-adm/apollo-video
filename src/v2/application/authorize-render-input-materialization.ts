@@ -17,6 +17,11 @@ import type {
   RenderTargetRegistry,
 } from './ports/render-reconstruction-readiness.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 import type { WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
 import { evaluateRenderInputLutRights } from './evaluate-render-input-lut-rights.ts'
 
@@ -48,13 +53,16 @@ export function authorizeRenderInputMaterializationService(dependencies: {
     use: string
     market?: string
     syntheticOperations?: readonly string[]
-    actor: { type: 'api-client'; id: string }
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const artifactId = validateId(request.artifactId, 'artifactId')
     const manifestId = validateId(request.manifestId, 'manifestId')
-    const clientId = validateId(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'artifacts:render')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match materialization request')
+    const clientId = validateId(audit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(
       idempotencyKey.length > 0 && idempotencyKey.length <= 128,
@@ -76,10 +84,12 @@ export function authorizeRenderInputMaterializationService(dependencies: {
       use: requestContext.use,
       market: requestContext.market,
       syntheticOperations: requestContext.syntheticOperations ?? [],
+      actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.authorizations.findReplay({
       workspaceId,
       clientId,
+      actorContextHash: audit.contextHash,
       idempotencyKey,
       requestFingerprint,
     })
@@ -179,11 +189,11 @@ export function authorizeRenderInputMaterializationService(dependencies: {
       issues,
       decisions,
       evaluatedAt: now.toISOString(),
-      actor: { type: 'api-client', id: clientId },
+      actor: { type: 'api-client', id: audit.clientId },
     })
     return dependencies.authorizations.createOrReplay({
       authorization,
-      clientId,
+      authenticationAudit: audit,
       idempotencyKey,
       requestFingerprint,
     })

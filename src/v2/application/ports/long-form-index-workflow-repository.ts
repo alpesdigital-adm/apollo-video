@@ -5,6 +5,7 @@ import type { MediaTranscript } from '../../domain/media-transcript.ts'
 import type {
   PublicOperation,
 } from '../../domain/public-operation.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface LongFormIndexWorkflowSourceContext {
   sourceArtifactId: string
@@ -66,11 +67,13 @@ export interface LongFormIndexWorkflowRepository {
     workspaceId: string
     projectId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<PersistedLongFormIndexWorkflow> | null>
   create(input: {
     workflow: Readonly<LongFormIndexWorkflow>
     operation: Readonly<PublicOperation>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     requestFingerprint: string
     idempotencyKey: string
     expectedRightsSnapshotId: string

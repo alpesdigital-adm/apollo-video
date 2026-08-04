@@ -14,6 +14,7 @@ import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -49,7 +50,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     projectVersionHash: string
     format: string
     approval: { approved: true; note?: string }
-    actor: { type: 'api-client'; id: string }
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
@@ -57,7 +58,10 @@ export function enqueueProjectFinalExportService(dependencies: {
     const projectId = validateId(request.projectId, 'projectId')
     const projectVersionId = validateId(request.projectVersionId, 'projectVersionId')
     const projectVersionHash = validateHash(request.projectVersionHash, 'projectVersionHash')
-    const clientId = validateId(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match export request')
+    const clientId = validateId(audit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length >= 1 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
     assertDomain(request.approval?.approved === true, 'INVALID_ARGUMENT', 'Explicit final approval is required')
@@ -132,8 +136,9 @@ export function enqueueProjectFinalExportService(dependencies: {
       format: request.format,
       approval: { approved: true, ...(approvalNote ? { note: approvalNote } : {}) },
       inputHash,
+      actorContextHash: audit.contextHash,
     })
-    const replay = await dependencies.operations.findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint })
+    const replay = await dependencies.operations.findReplay({ workspaceId, clientId, actorContextHash: audit.contextHash, idempotencyKey, requestFingerprint })
     if (replay) return replay
 
     const operationId = dependencies.createId('operation')
@@ -151,6 +156,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     })
     return dependencies.operations.createOrReplay({
       operation,
+      authenticationAudit: audit,
       context: {
         kind: 'project-final-export',
         projectId,
@@ -171,7 +177,7 @@ export function enqueueProjectFinalExportService(dependencies: {
         outputManifestId,
         outputSpec: finalOutputSpec,
         approval: {
-          actorType: request.actor.type,
+          actorType: 'api-client',
           actorId: clientId,
           approvedAt,
           ...(approvalNote ? { note: approvalNote } : {}),

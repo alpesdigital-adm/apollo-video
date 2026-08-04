@@ -6,6 +6,7 @@ import type { PublicOperation } from '../../domain/public-operation.ts'
 import type {
   SourceCleanupOperationContext,
 } from './public-operation-repository.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface SourceCleanupRecord {
   plan: Readonly<SourceCleanupPlan>
@@ -17,6 +18,7 @@ export interface SourceCleanupCreateRecord {
   plan: Readonly<SourceCleanupPlan>
   operation?: Readonly<PublicOperation>
   operationContext?: Readonly<SourceCleanupOperationContext>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   idempotencyKey: string
   traceId?: string
@@ -37,6 +39,7 @@ export interface SourceCleanupRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<SourceCleanupReplay> | null>
   create(

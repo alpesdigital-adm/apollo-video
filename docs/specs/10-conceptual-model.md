@@ -70,6 +70,8 @@ flowchart LR
 | V2AssetRightsSnapshot | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Cascade |
 | V2PublicOperation | workspace | workspaceId | V2Workspace | id | Restrict |
 | V2PublicOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict; opcional apenas para artifact-render global |
+| V2PublicOperationControlCommand | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade; somente transição efetiva de cancel/retry |
+| V2PublicOperationControlCommand | actorClient | actorClientId,workspaceId | V2ApiClient | id,workspaceId | Restrict; audit tuple completo permanece interno |
 | V2ProjectDirectorOperation | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade |
 | V2ProjectDirectorOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
 | V2ProjectDirectorOperation | baseVersion | baseVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |

@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })({
       workspaceId: actor.workspaceId,
       projectId,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey: `patch-batch-proxy:${calculateVersionHash(idempotencyKey).slice(0, 58)}`,
       traceId: requestId,
     })

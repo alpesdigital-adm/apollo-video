@@ -48,6 +48,10 @@ const committed = readdirSync(migrationsPath, { withFileTypes: true })
   .sort((left, right) => left.name.localeCompare(right.name))
   .map((entry) => readFileSync(`${migrationsPath}/${entry.name}/migration.sql`, 'utf8'))
   .join('\n')
+const operationActorAuditMigration = readFileSync(
+  `${migrationsPath}/20260805000000_public_operation_actor_audit/migration.sql`,
+  'utf8',
+)
 
 assert.match(
   committed,
@@ -69,6 +73,11 @@ const workspaceLutVersionModel = schema.match(/model V2WorkspaceLutVersion \{([\
 const workspaceLutStatusCommandModel = schema.match(/model V2WorkspaceLutStatusCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const workspaceLutDefaultVersionModel = schema.match(/model V2WorkspaceLutDefaultVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const editCommandModel = schema.match(/model V2EditCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const materializationAuthorizationModel = schema.match(/model V2MaterializationAuthorization \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const publicOperationModel = schema.match(/model V2PublicOperation \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const publicOperationControlCommandModel = schema.match(/model V2PublicOperationControlCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const longFormIndexWorkflowModel = schema.match(/model V2LongFormIndexWorkflow \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const sourceCleanupPlanModel = schema.match(/model V2SourceCleanupPlan \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -267,6 +276,42 @@ assert.match(
   'unattributable pre-contract access commands must be removed before audit fields become required',
 )
 
+for (const [model, label] of [
+  [materializationAuthorizationModel, 'MaterializationAuthorization'],
+  [publicOperationModel, 'PublicOperation'],
+  [longFormIndexWorkflowModel, 'LongFormIndexWorkflow'],
+  [sourceCleanupPlanModel, 'SourceCleanupPlan'],
+]) {
+  for (const field of [
+    'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+    'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  ]) {
+    assert.match(model, new RegExp(`\\b${field}\\b`), `${label} must persist ${field}`)
+  }
+}
+for (const field of [
+  'operationId', 'action', 'previousStatus', 'resultStatus', 'actorClientId',
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  'occurredAt',
+]) {
+  assert.match(
+    publicOperationControlCommandModel,
+    new RegExp(`\\b${field}\\b`),
+    `PublicOperationControlCommand must persist ${field}`,
+  )
+}
+assert.match(
+  committed,
+  /ALTER TABLE "materialization_authorizations"[\s\S]*ALTER TABLE "public_operations"[\s\S]*ALTER TABLE "long_form_index_workflows"[\s\S]*ALTER TABLE "source_cleanup_plans"[\s\S]*CREATE TABLE "public_operation_control_commands"/,
+  'operation-producing families must persist one constrained audit tuple and effective control commands',
+)
+assert.doesNotMatch(
+  operationActorAuditMigration,
+  /(?:UPDATE|INSERT INTO) "(?:materialization_authorizations|public_operations|long_form_index_workflows|source_cleanup_plans)"/,
+  'pre-contract operation actor identity must never be fabricated by backfill',
+)
+
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
   names(generated, /CREATE TABLE "([^"]+)"/g),
@@ -370,6 +415,7 @@ const requiredChecks = [
   'materialization_authorizations_status_check',
   'materialization_authorizations_validity_check',
   'materialization_authorizations_json_check',
+  'materialization_authorizations_actor_audit_check',
   'asset_use_decisions_ordinal_check',
   'asset_use_decisions_kind_check',
   'asset_use_decisions_outcome_check',
@@ -387,6 +433,9 @@ const requiredChecks = [
   'public_operations_state_check',
   'public_operations_dates_check',
   'public_operations_lease_check',
+  'public_operations_actor_audit_check',
+  'public_operation_control_commands_action_check',
+  'public_operation_control_commands_actor_audit_check',
   'artifact_render_operations_hash_check',
   'artifact_render_operations_output_check',
   'public_operations_retry_schedule_check',
@@ -560,6 +609,8 @@ const requiredChecks = [
   'contamination_overlaps_pair_check',
   'contamination_overlaps_region_check',
   'contamination_overlaps_hash_check',
+  'long_form_index_workflows_actor_audit_check',
+  'source_cleanup_plans_actor_audit_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

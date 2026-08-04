@@ -25,7 +25,7 @@ export async function POST(
     const retry = retryPublicOperationService({
       operations: createPublicOperationRepository(),
     })
-    const operation = await retry({ workspaceId: actor.workspaceId, operationId })
+    const operation = await retry({ workspaceId: actor.workspaceId, operationId, actor })
     return NextResponse.json(
       presentSuccess({ operation: presentPublicOperationV2(operation, { includeProjectId: true }) }),
       { status: 200, headers: publicApiHeaders(requestId) },

@@ -14,6 +14,7 @@ import type {
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import {
   hydrateLongFormIndexWorkflow,
   type LongFormIndexWorkflow,
@@ -21,6 +22,7 @@ import {
 import { parseCommandImpact } from '../../domain/command-impact.ts'
 import { createPublicOperationStatusEvents } from '../../domain/public-operation-event.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import {
   advancePublicOperationPhase,
   assertPublicOperation,
@@ -60,6 +62,7 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
             manifestId: true
             inputHash: true
             clientId: true
+            actorContextHash: true
             status: true
           }
         }
@@ -85,6 +88,7 @@ const OPERATION_INCLUDE = {
           manifestId: true,
           inputHash: true,
           clientId: true,
+          actorContextHash: true,
           status: true,
         },
       },
@@ -244,7 +248,68 @@ function hydrateLongFormCostSource(
   }
 }
 
+function hydrateOperationAuthenticationAudit(row: StoredOperation): Readonly<ApiAccessAuditContext> {
+  try {
+    if (
+      !row.actorCredentialId || !row.actorEnvironment ||
+      !row.actorAuthenticationKind || !row.actorContextHash
+    ) throw new Error('missing audit')
+    const audit = createApiAccessAuditContext({
+      clientId: row.clientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored PublicOperation actor audit is invalid')
+  }
+}
+
+function assertAuthenticationAudit(
+  audit: Readonly<ApiAccessAuditContext>,
+  workspaceId: string,
+): Readonly<ApiAccessAuditContext> {
+  try {
+    const canonical = createApiAccessAuditContext({
+      clientId: audit.clientId,
+      credentialId: audit.credentialId,
+      workspaceId: audit.workspaceId,
+      environment: audit.environment,
+      authenticationKind: audit.authenticationKind,
+      ...(audit.delegatedUserId ? { delegatedUserId: audit.delegatedUserId } : {}),
+      ...(audit.delegatedIdentityId ? { delegatedIdentityId: audit.delegatedIdentityId } : {}),
+      ...(audit.workspaceRole ? { workspaceRole: audit.workspaceRole } : {}),
+    })
+    if (canonical.contextHash !== audit.contextHash || canonical.workspaceId !== workspaceId) {
+      throw new Error('audit mismatch')
+    }
+    return canonical
+  } catch {
+    throw new DomainError('AUTH_INVALID', 'PublicOperation authentication audit is invalid')
+  }
+}
+
+function operationControlAuditData(audit: Readonly<ApiAccessAuditContext>) {
+  return {
+    actorClientId: audit.clientId,
+    actorCredentialId: audit.credentialId,
+    actorEnvironment: audit.environment,
+    actorAuthenticationKind: audit.authenticationKind,
+    actorContextHash: audit.contextHash,
+    delegatedUserId: audit.delegatedUserId,
+    delegatedIdentityId: audit.delegatedIdentityId,
+    workspaceRole: audit.workspaceRole,
+  }
+}
+
 function hydrateRecord(row: StoredOperation): PublicOperationRecord {
+  const authenticationAudit = hydrateOperationAuthenticationAudit(row)
   const renderDetail = row.artifactRender
   const ingestDetail = row.mediaIngest
   const projectRenderDetail = row.projectProxyRender
@@ -304,6 +369,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     renderDetail.authorization.manifestId !== renderDetail.manifestId ||
     renderDetail.authorization.inputHash !== renderDetail.inputHash ||
     renderDetail.authorization.clientId !== row.clientId ||
+    renderDetail.authorization.actorContextHash !== row.actorContextHash ||
     renderDetail.authorization.status !== 'authorized' ||
     !SHA256_PATTERN.test(renderDetail.inputHash)
   )) {
@@ -621,6 +687,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     })
     return Object.freeze({
       operation,
+      authenticationAudit,
       ...(row.traceId ? { traceId: row.traceId } : {}),
       context: Object.freeze(isRender ? {
         kind: 'artifact-render' as const,
@@ -797,11 +864,14 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   async cancel(input: {
     workspaceId: string
     operationId: string
+    commandId: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     canceledAt: string
   }): Promise<PublicOperationRecord | null> {
-    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId)) {
+    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId) || !ID_PATTERN.test(input.commandId)) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Cancellation target is invalid')
     }
+    const audit = assertAuthenticationAudit(input.authenticationAudit, input.workspaceId)
     const canceledAt = parseCommandDate(input.canceledAt, 'canceledAt')
     return this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2PublicOperation.findFirst({
@@ -845,6 +915,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydrateRecord(persisted)
       if (updated.count === 1) {
+        await transaction.v2PublicOperationControlCommand.create({
+          data: {
+            id: input.commandId,
+            workspaceId: input.workspaceId,
+            operationId: input.operationId,
+            action: 'cancel',
+            previousStatus: current.operation.status,
+            resultStatus: result.operation.status,
+            ...operationControlAuditData(audit),
+            occurredAt: canceledAt,
+          },
+        })
         await persistOperationStatusEvents(
           transaction,
           current.operation.status,
@@ -862,12 +944,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   async retry(input: {
     workspaceId: string
     operationId: string
+    commandId: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     requestedAt: string
     nextAttemptAt: string
   }): Promise<PublicOperationRecord | null> {
-    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId)) {
+    if (!ID_PATTERN.test(input.workspaceId) || !ID_PATTERN.test(input.operationId) || !ID_PATTERN.test(input.commandId)) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Retry target is invalid')
     }
+    const audit = assertAuthenticationAudit(input.authenticationAudit, input.workspaceId)
     const requestedAt = parseCommandDate(input.requestedAt, 'requestedAt')
     const nextAttemptAt = parseCommandDate(input.nextAttemptAt, 'nextAttemptAt')
     if (nextAttemptAt.getTime() <= requestedAt.getTime()) {
@@ -921,6 +1006,18 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       if (!persisted) return null
       const result = hydrateRecord(persisted)
       if (updated.count === 1) {
+        await transaction.v2PublicOperationControlCommand.create({
+          data: {
+            id: input.commandId,
+            workspaceId: input.workspaceId,
+            operationId: input.operationId,
+            action: 'retry',
+            previousStatus: current.operation.status,
+            resultStatus: result.operation.status,
+            ...operationControlAuditData(audit),
+            occurredAt: requestedAt,
+          },
+        })
         await persistOperationStatusEvents(
           transaction,
           current.operation.status,
@@ -1018,6 +1115,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
   async findReplay(input: {
     workspaceId: string
     clientId: string
+    actorContextHash: string
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<PublicOperationPersistenceResult | null> {
@@ -1027,6 +1125,13 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       input.idempotencyKey,
     )
     if (!stored) return null
+    const authenticationAudit = hydrateOperationAuthenticationAudit(stored)
+    if (authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key belongs to a different authentication context',
+      )
+    }
     if (stored.requestFingerprint !== input.requestFingerprint) {
       throw new DomainError(
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -1039,12 +1144,21 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
 
   async createOrReplay(input: {
     operation: PublicOperation
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string
     traceId?: string
   }, serializationAttempt = 1): Promise<PublicOperationPersistenceResult> {
     assertPublicOperation(input.operation)
+    const audit = assertAuthenticationAudit(
+      input.authenticationAudit,
+      input.operation.workspaceId,
+    )
+    if (
+      audit.workspaceId !== input.operation.workspaceId ||
+      audit.clientId !== input.operation.clientId
+    ) throw new DomainError('AUTH_INVALID', 'PublicOperation actor audit is inconsistent')
     const renderContext = input.operation.type === 'artifact-render' && 'authorizationId' in input.context
       ? input.context
       : undefined
@@ -1169,6 +1283,13 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was already used with a different request',
               { operationId: existing.id },
+            )
+          }
+          const existingAudit = hydrateOperationAuthenticationAudit(existing)
+          if (existingAudit.contextHash !== audit.contextHash) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key belongs to a different authentication context',
             )
           }
           return { ...hydrateRecord(existing), replayed: true }
@@ -1361,6 +1482,13 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             workspaceId: input.operation.workspaceId,
             projectId: input.operation.projectId,
             clientId: input.operation.clientId,
+            actorCredentialId: audit.credentialId,
+            actorEnvironment: audit.environment,
+            actorAuthenticationKind: audit.authenticationKind,
+            actorContextHash: audit.contextHash,
+            delegatedUserId: audit.delegatedUserId,
+            delegatedIdentityId: audit.delegatedIdentityId,
+            workspaceRole: audit.workspaceRole,
             type: input.operation.type,
             status: input.operation.status,
             phase: input.operation.phase,
@@ -1536,6 +1664,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         const replay = await this.findReplay({
           workspaceId: input.operation.workspaceId,
           clientId: input.operation.clientId,
+          actorContextHash: audit.contextHash,
           idempotencyKey: input.idempotencyKey,
           requestFingerprint: input.requestFingerprint,
         })

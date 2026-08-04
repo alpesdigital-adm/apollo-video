@@ -3917,9 +3917,10 @@ test('authenticated public API manages projects, clients and artifact inspection
     const storedAuthorization = await new PrismaMaterializationAuthorizationRepository(
       client,
     ).findById(workspaceId, materialization.data.authorization.id)
-    assert.equal(storedAuthorization.id, materialization.data.authorization.id)
-    assert.equal(storedAuthorization.status, 'authorized')
-    assert.equal(storedAuthorization.decisions[0].rightsSnapshotHash.length, 64)
+    assert.equal(storedAuthorization.authorization.id, materialization.data.authorization.id)
+    assert.equal(storedAuthorization.authorization.status, 'authorized')
+    assert.equal(storedAuthorization.authorization.decisions[0].rightsSnapshotHash.length, 64)
+    assert.deepEqual(storedAuthorization.authenticationAudit, webhookAuditContext)
     assert.equal(
       await new PrismaMaterializationAuthorizationRepository(client).findById(
         otherWorkspaceId,
@@ -4082,6 +4083,32 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(recoveredRetryOperationResponse.status, 200)
     assert.equal(recoveredRetryOperation.data.operation.status, 'queued')
     assert.equal(recoveredRetryOperation.data.operation.attempt, 0)
+    const storedOperationAudit = await client.v2PublicOperation.findUniqueOrThrow({
+      where: { id: renderOperation.data.operation.id },
+      select: {
+        actorCredentialId: true, actorEnvironment: true,
+        actorAuthenticationKind: true, actorContextHash: true,
+      },
+    })
+    assert.deepEqual(storedOperationAudit, {
+      actorCredentialId: webhookAuditContext.credentialId,
+      actorEnvironment: webhookAuditContext.environment,
+      actorAuthenticationKind: webhookAuditContext.authenticationKind,
+      actorContextHash: webhookAuditContext.contextHash,
+    })
+    const operationControlCommands = await client.v2PublicOperationControlCommand.findMany({
+      where: { workspaceId, operationId: renderOperation.data.operation.id },
+      orderBy: { occurredAt: 'asc' },
+    })
+    assert.equal(operationControlCommands.length, 4)
+    assert.deepEqual(operationControlCommands.map((command) => command.action), [
+      'cancel', 'retry', 'cancel', 'retry',
+    ])
+    assert.equal(operationControlCommands.every((command) =>
+      command.actorClientId === webhookAuditContext.clientId &&
+      command.actorCredentialId === webhookAuditContext.credentialId &&
+      command.actorContextHash === webhookAuditContext.contextHash &&
+      command.previousStatus !== command.resultStatus), true)
     const canceledReadResponse = await fetch(
       `${baseUrl}/v1/operations/${renderOperation.data.operation.id}`,
       { headers: { authorization } },

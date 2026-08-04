@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   createLongFormIndexWorkflowService,
   listLongFormIndexWorkflowsService,
@@ -49,6 +50,18 @@ const budget = Object.freeze({
   maximumConcurrency: 4,
 })
 
+function longFormActor(credentialId = 'credential-long-form') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-long-form', credentialId, workspaceId: 'workspace-long-form',
+    environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
+
 function request(overrides = {}) {
   return {
     workspaceId: 'workspace-long-form',
@@ -63,10 +76,7 @@ function request(overrides = {}) {
     versions,
     stageBudgets,
     budget,
-    actor: {
-      type: 'api-client',
-      id: 'client-long-form',
-    },
+    actor: longFormActor(),
     idempotencyKey: 'long-form-request-0001',
     ...overrides,
   }
@@ -100,6 +110,7 @@ function repositoryFixture() {
         record.workflow.projectId === input.projectId &&
         record.workflow.createdByClientId ===
           input.createdByClientId &&
+        record.authenticationAudit.contextHash === input.actorContextHash &&
         record.idempotencyKey === input.idempotencyKey) ?? null
     },
     async create(input) {
@@ -107,6 +118,7 @@ function repositoryFixture() {
       const record = Object.freeze({
         workflow: input.workflow,
         operation: input.operation,
+        authenticationAudit: input.authenticationAudit,
         requestFingerprint: input.requestFingerprint,
         idempotencyKey: input.idempotencyKey,
       })
@@ -152,6 +164,7 @@ test('F2.022 creates one API-first durable workflow and reuses exact probe and t
     'request_trace_long_form_001',
   )
   assert.equal(created.record.operation.type, 'long-form-index')
+  assert.deepEqual(fixture.createInputs[0].authenticationAudit, materializeActorAuditContext(request().actor))
   assert.deepEqual(created.record.operation.estimatedCost, {
     currency: 'USD',
     estimatedMinorUnits: 30,

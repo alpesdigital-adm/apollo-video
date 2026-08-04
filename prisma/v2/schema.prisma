@@ -48,6 +48,7 @@ model V2Workspace {
   materializations                       V2MaterializationAuthorization[]
   assetUseDecisions                      V2AssetUseDecision[]
   publicOperations                       V2PublicOperation[]
+  publicOperationControlCommands         V2PublicOperationControlCommand[]
   operationTelemetryEvents               V2OperationTelemetryEvent[]
   operationTelemetryAlerts               V2OperationTelemetryAlert[]
   uiSessions                             V2UiSession[]
@@ -177,6 +178,7 @@ model V2ApiClient {
   targetedApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandTarget")
   authoredWebhookAdministrationCommands V2WebhookAdministrationCommand[] @relation("WebhookAdministrationCommandActor")
   operations                      V2PublicOperation[]
+  publicOperationControlCommands  V2PublicOperationControlCommand[]
   uiSessions                      V2UiSession[]
   workspaceUiPrincipal            V2WorkspaceUiPrincipal?
   mediaUploads                    V2MediaUpload[]
@@ -1804,6 +1806,13 @@ model V2MaterializationAuthorization {
   status             String    @db.VarChar(32)
   issuesJson         String    @db.Text
   clientId           String    @db.VarChar(80)
+  actorCredentialId  String?   @db.VarChar(128)
+  actorEnvironment   String?   @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?   @db.Char(64)
+  delegatedUserId    String?   @db.VarChar(128)
+  delegatedIdentityId String?  @db.VarChar(128)
+  workspaceRole      String?   @db.VarChar(32)
   idempotencyKey     String    @db.VarChar(128)
   requestFingerprint String    @db.Char(64)
   evaluatedAt        DateTime  @db.Timestamptz(3)
@@ -1820,6 +1829,7 @@ model V2MaterializationAuthorization {
   @@unique([workspaceId, clientId, idempotencyKey])
   @@index([workspaceId, artifactId, evaluatedAt(sort: Desc)])
   @@index([workspaceId, status, validUntil])
+  @@index([workspaceId, actorContextHash, evaluatedAt(sort: Desc)], map: "materialization_authorizations_actor_context_idx")
   @@map("materialization_authorizations")
 }
 
@@ -1855,6 +1865,13 @@ model V2PublicOperation {
   workspaceId        String    @db.VarChar(128)
   projectId          String?   @db.VarChar(128)
   clientId           String    @db.VarChar(80)
+  actorCredentialId  String?   @db.VarChar(128)
+  actorEnvironment   String?   @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?   @db.Char(64)
+  delegatedUserId    String?   @db.VarChar(128)
+  delegatedIdentityId String?  @db.VarChar(128)
+  workspaceRole      String?   @db.VarChar(32)
   type               String    @db.VarChar(64)
   status             String    @db.VarChar(32)
   phase              String    @db.VarChar(64)
@@ -1896,6 +1913,7 @@ model V2PublicOperation {
   projectDirectorRun              V2ProjectDirectorOperation?
   reviewPatchProposal             V2ReviewPatchProposal?
   reviewPatchBatch                V2ReviewPatchBatch?
+  controlCommands                 V2PublicOperationControlCommand[]
   artifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
 
   @@unique([id, workspaceId])
@@ -1905,10 +1923,38 @@ model V2PublicOperation {
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@index([workspaceId, type, createdAt(sort: Desc)])
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "public_operations_actor_context_idx")
   @@index([workspaceId, targetType, targetId])
   @@index([status, leaseExpiresAt, createdAt])
   @@index([status, nextAttemptAt, createdAt])
   @@map("public_operations")
+}
+
+model V2PublicOperationControlCommand {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  operationId             String   @db.VarChar(128)
+  action                  String   @db.VarChar(16)
+  previousStatus          String   @db.VarChar(32)
+  resultStatus            String   @db.VarChar(32)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  occurredAt              DateTime @db.Timestamptz(3)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace   V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "public_operation_control_commands_workspace_fkey")
+  operation   V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "public_operation_control_commands_operation_fkey")
+  actorClient V2ApiClient       @relation(fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "public_operation_control_commands_actor_fkey")
+
+  @@index([workspaceId, operationId, occurredAt(sort: Desc)], map: "public_operation_control_commands_history_idx")
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)], map: "public_operation_control_commands_actor_idx")
+  @@map("public_operation_control_commands")
 }
 
 model V2OperationTelemetryEvent {
@@ -2567,6 +2613,13 @@ model V2LongFormIndexWorkflow {
   requestFingerprint    String   @db.Char(64)
   idempotencyKey        String   @db.VarChar(128)
   createdByClientId     String   @db.VarChar(80)
+  actorCredentialId     String?  @db.VarChar(128)
+  actorEnvironment      String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash      String?  @db.Char(64)
+  delegatedUserId       String?  @db.VarChar(128)
+  delegatedIdentityId   String?  @db.VarChar(128)
+  workspaceRole         String?  @db.VarChar(32)
   createdAt             DateTime @db.Timestamptz(3)
   updatedAt             DateTime @db.Timestamptz(3)
 
@@ -2587,6 +2640,7 @@ model V2LongFormIndexWorkflow {
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, createdAt(sort: Desc)])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "long_form_index_workflows_actor_context_idx")
   @@map("long_form_index_workflows")
 }
 
@@ -5314,6 +5368,13 @@ model V2SourceCleanupPlan {
   requestFingerprint        String   @db.Char(64)
   idempotencyKey            String   @db.VarChar(128)
   createdByClientId         String   @db.VarChar(80)
+  actorCredentialId         String?  @db.VarChar(128)
+  actorEnvironment          String?  @db.VarChar(16)
+  actorAuthenticationKind   String?  @db.VarChar(16)
+  actorContextHash          String?  @db.Char(64)
+  delegatedUserId           String?  @db.VarChar(128)
+  delegatedIdentityId       String?  @db.VarChar(128)
+  workspaceRole             String?  @db.VarChar(32)
   createdAt                 DateTime @db.Timestamptz(3)
 
   workspace           V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "source_cleanup_plans_workspace_fkey")
@@ -5334,6 +5395,7 @@ model V2SourceCleanupPlan {
   @@index([workspaceId, contaminationReportId, findingId, createdAt(sort: Desc)], map: "source_cleanup_plans_workspace_finding_created_idx")
   @@index([workspaceId, sourceArtifactId, selectedStrategy, decision], map: "source_cleanup_plans_workspace_source_strategy_idx")
   @@index([workspaceId, operationId], map: "source_cleanup_plans_workspace_operation_idx")
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "source_cleanup_plans_actor_context_idx")
   @@map("source_cleanup_plans")
 }
 

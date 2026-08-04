@@ -758,6 +758,20 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       }),
       1,
     )
+    const [storedCleanupPlan, storedCleanupOperation] = await Promise.all([
+      client.v2SourceCleanupPlan.findUniqueOrThrow({
+        where: { id: cleanupPayload.data.cleanup.plan.id },
+        select: { actorCredentialId: true, actorContextHash: true },
+      }),
+      client.v2PublicOperation.findUniqueOrThrow({
+        where: { id: cleanupPayload.data.cleanup.operation.id },
+        select: { actorCredentialId: true, actorContextHash: true },
+      }),
+    ])
+    assert.equal(storedCleanupPlan.actorCredentialId, issued.credential.id)
+    assert.equal(storedCleanupOperation.actorCredentialId, issued.credential.id)
+    assert.match(storedCleanupPlan.actorContextHash, /^[a-f0-9]{64}$/)
+    assert.equal(storedCleanupOperation.actorContextHash, storedCleanupPlan.actorContextHash)
     assert.equal(
       await client.v2MediaArtifact.count({
         where: { workspaceId },

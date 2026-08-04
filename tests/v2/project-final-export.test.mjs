@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { enqueueProjectFinalExportService } from '../../src/v2/application/enqueue-project-final-export.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { projectRenderSourcesFingerprint } from '../../src/v2/application/project-render-sources.ts'
 import { runNextProjectFinalExportOperationService } from '../../src/v2/application/run-project-final-export-worker.ts'
 import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
@@ -34,6 +35,18 @@ const colorPipelineBindings = Object.freeze([Object.freeze({
 const colorPipelines = {
   async listForSource() { return [{ compilation: colorCompilation }] },
   async read() { return { compilation: colorCompilation } },
+}
+
+function exportActor(credentialId = 'credential-final-export-test') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-final-export-test', credentialId, workspaceId,
+    environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
 }
 
 function rightsSnapshot() {
@@ -144,7 +157,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
     async findReplay(input) { return replays.get(`${input.clientId}:${input.idempotencyKey}`) ?? null },
     async createOrReplay(input) {
       created = input
-      const result = { operation: input.operation, context: input.context, replayed: false }
+      const result = { operation: input.operation, context: input.context, authenticationAudit: input.authenticationAudit, replayed: false }
       replays.set(`${input.operation.clientId}:${input.idempotencyKey}`, result)
       return result
     },
@@ -165,7 +178,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
     projectVersionHash: '1'.repeat(64),
     format: '9:16',
     approval: { approved: true, note: 'Aprovado para publicação.' },
-    actor: { type: 'api-client', id: 'client-final-export-test' },
+    actor: exportActor(),
     idempotencyKey: 'final-export-request-1',
   }
 
@@ -188,6 +201,7 @@ test('final export enqueue binds approval, exact Director evidence and 1080x1920
   assert.match(first.context.inputHash, /^[a-f0-9]{64}$/)
   assert.equal(replay.operation.id, first.operation.id)
   assert.equal(created.requestFingerprint.length, 64)
+  assert.equal(created.authenticationAudit.contextHash, first.authenticationAudit.contextHash)
   assert.deepEqual(ids, { operation: 1, artifact: 1, manifest: 1 })
 })
 
@@ -206,7 +220,7 @@ test('final export enqueue fails closed without current rendering rights', async
     projectVersionHash: '1'.repeat(64),
     format: '9:16',
     approval: { approved: true },
-    actor: { type: 'api-client', id: 'client-final-export-test' },
+    actor: exportActor(),
     idempotencyKey: 'final-export-blocked',
   }), (error) => error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED')
 })

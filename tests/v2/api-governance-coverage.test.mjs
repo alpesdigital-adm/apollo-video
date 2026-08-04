@@ -45,8 +45,12 @@ test('T-FR-242 every route uses the authenticated audit actor instead of rebuild
     const source = readFileSync(join(routesRoot, relative), 'utf8')
     if (manualActor.test(source)) offenders.push(relative)
     manualActor.lastIndex = 0
-    canonicalBindings += source.match(/actor\s*:\s*actor(?:\.auditContext\.actor)?/g)?.length ?? 0
-    fullActorBindings += source.match(/actor\s*:\s*actor(?!\.)/g)?.length ?? 0
+    const explicitBindings = source.match(/actor\s*:\s*actor(?:\.auditContext\.actor)?/g)?.length ?? 0
+    const authenticatedShorthandBindings = /const actor\s*=\s*await authenticateExternalRequest\(/.test(source)
+      ? source.match(/\bactor\s*,/g)?.length ?? 0
+      : 0
+    canonicalBindings += explicitBindings + authenticatedShorthandBindings
+    fullActorBindings += (source.match(/actor\s*:\s*actor(?!\.)/g)?.length ?? 0) + authenticatedShorthandBindings
   }
   assert.deepEqual(offenders, [])
   assert.ok(canonicalBindings >= 60, `expected broad audit propagation, found ${canonicalBindings}`)

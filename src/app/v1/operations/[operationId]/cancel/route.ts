@@ -25,7 +25,7 @@ export async function POST(
     const cancel = cancelPublicOperationService({
       operations: createPublicOperationRepository(),
     })
-    const operation = await cancel({ workspaceId: actor.workspaceId, operationId })
+    const operation = await cancel({ workspaceId: actor.workspaceId, operationId, actor })
     return NextResponse.json(
       presentSuccess({ operation: presentPublicOperationV2(operation, { includeProjectId: true }) }),
       { status: 200, headers: publicApiHeaders(requestId) },

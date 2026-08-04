@@ -1,16 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-control.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 
 function createMemoryPrisma() {
   const at = (value) => new Date(value)
+  const audit = createApiAccessAuditContext({
+    clientId: 'client-waiting-1', credentialId: 'credential-waiting-1',
+    workspaceId: 'workspace-waiting-1', environment: 'production', authenticationKind: 'bearer',
+  })
   const state = {
     row: {
       id: 'operation-waiting-1',
       workspaceId: 'workspace-waiting-1',
       projectId: 'project-waiting-1',
       clientId: 'client-waiting-1',
+      actorCredentialId: audit.credentialId,
+      actorEnvironment: audit.environment,
+      actorAuthenticationKind: audit.authenticationKind,
+      actorContextHash: audit.contextHash,
+      delegatedUserId: null,
+      delegatedIdentityId: null,
+      workspaceRole: null,
       type: 'media-ingest',
       status: 'running',
       phase: 'normalizing',
@@ -144,4 +156,9 @@ test('T-FR-236 waiting releases its lease and resumes atomically without a new a
     attempt: 1,
     now: '2026-08-02T15:00:05.000Z',
   }), null)
+  state.row.actorContextHash = 'f'.repeat(64)
+  await assert.rejects(
+    repository.findById(state.row.workspaceId, state.row.id),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
 })

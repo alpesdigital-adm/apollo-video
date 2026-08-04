@@ -16,6 +16,7 @@ import { createMaterializationAuthorization } from '../../src/v2/domain/material
 import { createRenderInputSpec } from '../../src/v2/domain/render-input.ts'
 import { assertRenderInputPayload } from '../../src/v2/domain/render-input-payload.ts'
 import { authorizeRenderInputMaterializationService } from '../../src/v2/application/authorize-render-input-materialization.ts'
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { renderAuthorizedInputService } from '../../src/v2/application/render-authorized-input.ts'
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
@@ -32,6 +33,17 @@ const ffmpegPath = path.join(
   'ffmpeg-static',
   `ffmpeg${executableSuffix}`,
 )
+
+function renderActor({ clientId, credentialId, workspaceId }) {
+  const auditContext = createExternalAuditContext({
+    clientId, credentialId, workspaceId, environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['artifacts:render']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 async function createSource(outputPath) {
   await execFileAsync(ffmpegPath, [
@@ -237,6 +249,9 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
     evaluatedAt: evaluatedAt.toISOString(),
     actor: { type: 'api-client', id: 'golden-client' },
   })
+  const goldenAuthenticationAudit = materializeActorAuditContext(renderActor({
+    clientId: 'golden-client', credentialId: 'golden-credential', workspaceId: 'golden-workspace',
+  }))
   const resolver = new LocalArtifactRenderInputResolver(
     {
       v2MediaArtifact: {
@@ -285,7 +300,7 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
         return new Map([['golden-source-artifact', rights]])
       },
     },
-    authorizations: { async findById() { return authorization } },
+    authorizations: { async findById() { return { authorization, authenticationAudit: goldenAuthenticationAudit } } },
     resolverForWorkspace: () => resolver,
     clock: () => new Date('2026-07-14T12:01:00.000Z'),
   })
@@ -347,7 +362,7 @@ test('authorized materialized lease produces and promotes a real Remotion smoke 
     assetAvailability: { async inspect() { return { available: true } } },
     targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
     rights: { async findCurrentForArtifacts() { return new Map([['golden-source-artifact', rights]]) } },
-    authorizations: { async findById() { return authorization } },
+    authorizations: { async findById() { return { authorization, authenticationAudit: goldenAuthenticationAudit } } },
     resolverForWorkspace: () => s3Resolver,
     clock: () => new Date('2026-07-14T12:01:00.000Z'),
   })
@@ -574,13 +589,17 @@ test('T-FR-234 saved manifest and protected RenderInput alone reconstruct the sa
   const storedAssets = new Map(saved.assets.map((item) => [item.artifactId, item]))
   const rightsByArtifact = new Map(saved.rights.map((item) => [item.artifactId, item]))
   const authorizations = new Map()
+  const reconstructionActor = renderActor({
+    clientId: 'reconstruction-client', credentialId: 'reconstruction-credential', workspaceId,
+  })
   let authorizationSequence = 0
   const authorizationRepository = {
     async findById(_workspaceId, id) { return authorizations.get(id) ?? null },
     async findReplay() { return null },
-    async createOrReplay({ authorization }) {
-      authorizations.set(authorization.id, authorization)
-      return { authorization, replayed: false }
+    async createOrReplay({ authorization, authenticationAudit }) {
+      const record = { authorization, authenticationAudit }
+      authorizations.set(authorization.id, record)
+      return { ...record, replayed: false }
     },
   }
   const protectedRenderInputs = {
@@ -642,7 +661,7 @@ test('T-FR-234 saved manifest and protected RenderInput alone reconstruct the sa
   for (const idempotencyKey of ['reconstruct-one', 'reconstruct-two']) {
     const result = await authorize({
       workspaceId, artifactId: artifact.id, manifestId: persistedManifest.id,
-      use: 'quality-assurance', actor: { type: 'api-client', id: 'reconstruction-client' }, idempotencyKey,
+      use: 'quality-assurance', actor: reconstructionActor, idempotencyKey,
     })
     const receipt = await render({ workspaceId, authorizationId: result.authorization.id })
     assert.equal(receipt.inputHash, saved.renderInput.inputHash)

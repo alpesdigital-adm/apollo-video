@@ -1,9 +1,11 @@
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
+  MaterializationAuthorizationRecord,
   MaterializationAuthorizationRepository,
   MaterializationAuthorizationResult,
 } from '../../application/ports/materialization-authorization-repository.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import {
   ASSET_USE_DENIAL_CODES,
   type AssetUseDenialCode,
@@ -16,6 +18,7 @@ import {
   type MaterializationAuthorization,
   type MaterializationAuthorizationIssue,
 } from '../../domain/materialization-authorization.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 type StoredAuthorization = Prisma.V2MaterializationAuthorizationGetPayload<{
   include: { decisions: { include: { rightsSnapshot: true } } }
@@ -76,6 +79,29 @@ function parseIssues(value: string): MaterializationAuthorizationIssue[] {
       ...(typeof issue.assetKind === 'string' ? { assetKind: issue.assetKind } : {}),
     }
   })
+}
+
+function hydrateAuthenticationAudit(row: StoredAuthorization): Readonly<ApiAccessAuditContext> {
+  try {
+    if (
+      !row.actorCredentialId || !row.actorEnvironment ||
+      !row.actorAuthenticationKind || !row.actorContextHash
+    ) throw new Error('missing audit')
+    const audit = createApiAccessAuditContext({
+      clientId: row.clientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored materialization actor audit is invalid')
+  }
 }
 
 function hydrateAuthorization(row: StoredAuthorization): MaterializationAuthorization {
@@ -142,6 +168,13 @@ function hydrateAuthorization(row: StoredAuthorization): MaterializationAuthoriz
   return authorization
 }
 
+function hydrateRecord(row: StoredAuthorization): MaterializationAuthorizationRecord {
+  return {
+    authorization: hydrateAuthorization(row),
+    authenticationAudit: hydrateAuthenticationAudit(row),
+  }
+}
+
 export class PrismaMaterializationAuthorizationRepository
   implements MaterializationAuthorizationRepository
 {
@@ -154,12 +187,12 @@ export class PrismaMaterializationAuthorizationRepository
   async findById(
     workspaceId: string,
     authorizationId: string,
-  ): Promise<MaterializationAuthorization | null> {
+  ): Promise<MaterializationAuthorizationRecord | null> {
     const stored = await this.client.v2MaterializationAuthorization.findFirst({
       where: { id: authorizationId, workspaceId },
       include: { decisions: { include: { rightsSnapshot: true } } },
     })
-    return stored ? hydrateAuthorization(stored) : null
+    return stored ? hydrateRecord(stored) : null
   }
 
   private async findStored(
@@ -184,6 +217,7 @@ export class PrismaMaterializationAuthorizationRepository
   async findReplay(input: {
     workspaceId: string
     clientId: string
+    actorContextHash: string
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<MaterializationAuthorizationResult | null> {
@@ -193,6 +227,13 @@ export class PrismaMaterializationAuthorizationRepository
       input.idempotencyKey,
     )
     if (!stored) return null
+    const authenticationAudit = hydrateAuthenticationAudit(stored)
+    if (authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Idempotency key belongs to a different authentication context',
+      )
+    }
     if (stored.requestFingerprint !== input.requestFingerprint) {
       throw new DomainError(
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -200,22 +241,45 @@ export class PrismaMaterializationAuthorizationRepository
         { authorizationId: stored.id },
       )
     }
-    return { authorization: hydrateAuthorization(stored), replayed: true }
+    return { ...hydrateRecord(stored), replayed: true }
   }
 
   async createOrReplay(input: {
     authorization: MaterializationAuthorization
-    clientId: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     requestFingerprint: string
   }, serializationAttempt = 1): Promise<MaterializationAuthorizationResult> {
+    let audit: Readonly<ApiAccessAuditContext>
+    try {
+      audit = createApiAccessAuditContext({
+        clientId: input.authenticationAudit.clientId,
+        credentialId: input.authenticationAudit.credentialId,
+        workspaceId: input.authenticationAudit.workspaceId,
+        environment: input.authenticationAudit.environment,
+        authenticationKind: input.authenticationAudit.authenticationKind,
+        ...(input.authenticationAudit.delegatedUserId ? { delegatedUserId: input.authenticationAudit.delegatedUserId } : {}),
+        ...(input.authenticationAudit.delegatedIdentityId ? { delegatedIdentityId: input.authenticationAudit.delegatedIdentityId } : {}),
+        ...(input.authenticationAudit.workspaceRole ? { workspaceRole: input.authenticationAudit.workspaceRole } : {}),
+      })
+    } catch {
+      throw new DomainError('AUTH_INVALID', 'Materialization authorization actor audit is invalid')
+    }
+    if (
+      audit.contextHash !== input.authenticationAudit.contextHash ||
+      audit.workspaceId !== input.authorization.workspaceId ||
+      audit.clientId !== input.authorization.actor.id ||
+      input.authorization.actor.type !== 'api-client'
+    ) {
+      throw new DomainError('AUTH_INVALID', 'Materialization authorization actor audit is inconsistent')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2MaterializationAuthorization.findUnique({
           where: {
             workspaceId_clientId_idempotencyKey: {
               workspaceId: input.authorization.workspaceId,
-              clientId: input.clientId,
+              clientId: audit.clientId,
               idempotencyKey: input.idempotencyKey,
             },
           },
@@ -229,7 +293,14 @@ export class PrismaMaterializationAuthorizationRepository
               { authorizationId: existing.id },
             )
           }
-          return { authorization: hydrateAuthorization(existing), replayed: true }
+          const existingAudit = hydrateAuthenticationAudit(existing)
+          if (existingAudit.contextHash !== audit.contextHash) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Idempotency key belongs to a different authentication context',
+            )
+          }
+          return { ...hydrateRecord(existing), replayed: true }
         }
 
         await transaction.v2MaterializationAuthorization.create({
@@ -245,7 +316,14 @@ export class PrismaMaterializationAuthorizationRepository
             syntheticOpsJson: stableSerialize(input.authorization.syntheticOperations),
             status: input.authorization.status,
             issuesJson: stableSerialize(input.authorization.issues),
-            clientId: input.clientId,
+            clientId: audit.clientId,
+            actorCredentialId: audit.credentialId,
+            actorEnvironment: audit.environment,
+            actorAuthenticationKind: audit.authenticationKind,
+            actorContextHash: audit.contextHash,
+            delegatedUserId: audit.delegatedUserId,
+            delegatedIdentityId: audit.delegatedIdentityId,
+            workspaceRole: audit.workspaceRole,
             idempotencyKey: input.idempotencyKey,
             requestFingerprint: input.requestFingerprint,
             evaluatedAt: new Date(input.authorization.evaluatedAt),
@@ -284,7 +362,7 @@ export class PrismaMaterializationAuthorizationRepository
             'Materialization authorization was not persisted',
           )
         }
-        return { authorization: hydrateAuthorization(created), replayed: false }
+        return { ...hydrateRecord(created), replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
@@ -299,7 +377,8 @@ export class PrismaMaterializationAuthorizationRepository
       if (isUniqueConstraintError(error)) {
         const replay = await this.findReplay({
           workspaceId: input.authorization.workspaceId,
-          clientId: input.clientId,
+          clientId: audit.clientId,
+          actorContextHash: audit.contextHash,
           idempotencyKey: input.idempotencyKey,
           requestFingerprint: input.requestFingerprint,
         })

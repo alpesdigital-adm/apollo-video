@@ -4,6 +4,7 @@ import type {
   PublicOperationRunningPhase,
   PublicOperationStatus,
 } from '../../domain/public-operation.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { RenderColorPipelineBinding } from '../resolve-render-color-pipelines.ts'
 
 export interface ArtifactRenderOperationContext {
@@ -138,6 +139,7 @@ export type PublicOperationCreationContext = Exclude<
 export interface PublicOperationRecord {
   operation: Readonly<PublicOperation>
   context: Readonly<PublicOperationContext>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   traceId?: string
 }
 
@@ -193,22 +195,28 @@ export interface PublicOperationRepository {
   cancel(input: {
     workspaceId: string
     operationId: string
+    commandId: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     canceledAt: string
   }): Promise<PublicOperationRecord | null>
   retry(input: {
     workspaceId: string
     operationId: string
+    commandId: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     requestedAt: string
     nextAttemptAt: string
   }): Promise<PublicOperationRecord | null>
   findReplay(input: {
     workspaceId: string
     clientId: string
+    actorContextHash: string
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<PublicOperationPersistenceResult | null>
   createOrReplay(input: {
     operation: PublicOperation
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     context: PublicOperationCreationContext
     idempotencyKey: string
     requestFingerprint: string

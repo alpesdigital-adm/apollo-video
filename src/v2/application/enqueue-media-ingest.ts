@@ -5,6 +5,11 @@ import type { MediaUpload } from '../domain/media-transfer.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import { stableSerialize } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 export function enqueueMediaIngestService(dependencies: {
   operations: PublicOperationRepository
@@ -13,8 +18,15 @@ export function enqueueMediaIngestService(dependencies: {
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const createId = dependencies.createId ?? ((kind) => `${kind}-${randomUUID()}`)
-  return async function enqueue(input: { upload: Readonly<MediaUpload>; traceId?: string }) {
+  return async function enqueue(input: { upload: Readonly<MediaUpload>; actor: AuthenticatedExternalActor; traceId?: string }) {
     const upload = input.upload
+    requireScope(input.actor, 'media:write')
+    const audit = materializeActorAuditContext(input.actor)
+    assertDomain(
+      audit.workspaceId === upload.workspaceId && audit.clientId === upload.clientId,
+      'AUTH_INVALID',
+      'Authenticated actor does not own the verified upload',
+    )
     assertDomain(upload.status === 'verified' && upload.actualSha256 === upload.expectedSha256, 'MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload must be verified before ingest')
     assertDomain(Boolean(upload.projectId && upload.fileName && upload.rightsConfirmed), 'MEDIA_UPLOAD_TRANSITION_REJECTED', 'Project, file name and rights confirmation are required before ingest')
     const idempotencyKey = `media-ingest:${upload.id}`
@@ -26,6 +38,7 @@ export function enqueueMediaIngestService(dependencies: {
       byteSize: upload.byteSize,
       mimeType: upload.mimeType,
       rightsConfirmed: upload.rightsConfirmed,
+      actorContextHash: audit.contextHash,
     })).digest('hex')
     const workspaceNamespace = createHash('sha256').update(upload.workspaceId).digest('hex').slice(0, 12)
     const sourceArtifactId = `artifact-${workspaceNamespace}-${upload.expectedSha256}`
@@ -43,6 +56,7 @@ export function enqueueMediaIngestService(dependencies: {
     })
     return dependencies.operations.createOrReplay({
       operation,
+      authenticationAudit: audit,
       context: {
         kind: 'media-ingest',
         uploadId: upload.id,

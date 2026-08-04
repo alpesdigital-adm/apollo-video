@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       createId: (kind) => `${kind}-${randomUUID()}`,
     })({
       workspaceId: actor.workspaceId, projectId, expectedProjectVersionId: result.version.id,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey: `lut-proxy:${calculateVersionHash(idempotencyKey).slice(0, 64)}`,
       traceId: requestId,
     })

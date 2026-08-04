@@ -123,16 +123,17 @@ export function materializeAuthorizedRenderInputService(dependencies: {
   }): Promise<AuthorizedMaterializedRenderInput> {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const authorizationId = validateId(request.authorizationId, 'authorizationId')
-    const authorization = await dependencies.authorizations.findById(
+    const authorizationRecord = await dependencies.authorizations.findById(
       workspaceId,
       authorizationId,
     )
-    if (!authorization) {
+    if (!authorizationRecord) {
       throw new DomainError(
         'MATERIALIZATION_AUTHORIZATION_NOT_FOUND',
         'Materialization authorization was not found',
       )
     }
+    const { authorization } = authorizationRecord
 
     const revalidatedAt = dependencies.clock()
     assertDomain(

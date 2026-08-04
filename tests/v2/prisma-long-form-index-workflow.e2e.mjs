@@ -308,6 +308,20 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     )
     const workflowId = created.data.workflow.id
     const operationId = created.data.operation.id
+    const [storedWorkflowAudit, storedOperationAudit] = await Promise.all([
+      prisma.v2LongFormIndexWorkflow.findUniqueOrThrow({
+        where: { id: workflowId },
+        select: { actorCredentialId: true, actorContextHash: true },
+      }),
+      prisma.v2PublicOperation.findUniqueOrThrow({
+        where: { id: operationId },
+        select: { actorCredentialId: true, actorContextHash: true },
+      }),
+    ])
+    assert.equal(storedWorkflowAudit.actorCredentialId, issued.credential.id)
+    assert.equal(storedOperationAudit.actorCredentialId, issued.credential.id)
+    assert.match(storedWorkflowAudit.actorContextHash, /^[a-f0-9]{64}$/)
+    assert.equal(storedOperationAudit.actorContextHash, storedWorkflowAudit.actorContextHash)
     const queuedOperationEvents = await prisma.v2PublicEventOutbox.findMany({
       where: { workspaceId, resourceId: operationId },
     })

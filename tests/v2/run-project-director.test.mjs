@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { enqueueProjectDirectorRunService } from '../../src/v2/application/enqueue-project-director-run.ts'
 import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
@@ -18,6 +19,19 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 
 const baseHash = 'a'.repeat(64)
+
+function directorEnqueueActor(credentialId = 'credential-director-1') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-1', credentialId, workspaceId: 'workspace-1', environment: 'production',
+    delegatedUserId: 'user-director-enqueue-1', delegatedIdentityId: 'identity-director-enqueue-1',
+    workspaceRole: 'director',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'ui-session',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function compiledEditorialPlan(selectedInsert = false) {
   const words = [
@@ -274,11 +288,12 @@ test('Director enqueue allocates one immutable result version and replays before
     async findReplay(input) {
       if (!stored) return null
       assert.equal(input.requestFingerprint, stored.requestFingerprint)
-      return { operation: stored.operation, context: stored.context, replayed: true }
+      assert.equal(input.actorContextHash, stored.authenticationAudit.contextHash)
+      return { operation: stored.operation, context: stored.context, authenticationAudit: stored.authenticationAudit, replayed: true }
     },
     async createOrReplay(input) {
       stored = input
-      return { operation: input.operation, context: input.context, replayed: false }
+      return { operation: input.operation, context: input.context, authenticationAudit: input.authenticationAudit, replayed: false }
     },
   }
   let sequence = 0
@@ -293,11 +308,7 @@ test('Director enqueue allocates one immutable result version and replays before
     projectId: 'project-1',
     baseVersionId: 'project-version-4',
     baseHash,
-    actor: {
-      type: 'api-client',
-      id: 'client-1',
-      delegatedUserId: 'user-director-enqueue-1',
-    },
+    actor: directorEnqueueActor(),
     idempotencyKey: 'director-enqueue-key-1',
     reason: 'Recompute the full editorial plan.',
     traceId: 'trace-director-enqueue-1',
@@ -306,6 +317,7 @@ test('Director enqueue allocates one immutable result version and replays before
   assert.equal(first.replayed, false)
   assert.equal(first.operation.type, 'project-director-run')
   assert.equal(first.operation.projectId, 'project-1')
+  assert.deepEqual(first.authenticationAudit, materializeActorAuditContext(input.actor))
   assert.deepEqual(first.operation.target, {
     type: 'project-version',
     id: 'project-version-director-enqueue-1',
@@ -344,7 +356,7 @@ test('Director enqueue fails closed for a stale immutable base', async () => {
       projectId: 'project-1',
       baseVersionId: 'project-version-stale-1',
       baseHash,
-      actor: { type: 'api-client', id: 'client-1' },
+      actor: directorEnqueueActor(),
       idempotencyKey: 'director-stale-enqueue-1',
     }),
     (error) => error instanceof DomainError && error.code === 'VERSION_CONFLICT',

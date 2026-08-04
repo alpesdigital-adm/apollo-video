@@ -3,6 +3,11 @@ import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { MaterializationAuthorizationRepository } from './ports/materialization-authorization-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -26,7 +31,7 @@ export function enqueueAuthorizedRenderService(dependencies: {
     artifactId: string
     manifestId: string
     authorizationId: string
-    actor: { type: 'api-client'; id: string }
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
@@ -34,7 +39,10 @@ export function enqueueAuthorizedRenderService(dependencies: {
     const artifactId = validateId(request.artifactId, 'artifactId')
     const manifestId = validateId(request.manifestId, 'manifestId')
     const authorizationId = validateId(request.authorizationId, 'authorizationId')
-    const clientId = validateId(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'artifacts:render')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match render request')
+    const clientId = validateId(audit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(
       idempotencyKey.length > 0 && idempotencyKey.length <= 128,
@@ -46,25 +54,28 @@ export function enqueueAuthorizedRenderService(dependencies: {
       artifactId,
       manifestId,
       authorizationId,
+      actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.operations.findReplay({
       workspaceId,
       clientId,
+      actorContextHash: audit.contextHash,
       idempotencyKey,
       requestFingerprint,
     })
     if (replay) return replay
 
-    const authorization = await dependencies.authorizations.findById(
+    const authorizationRecord = await dependencies.authorizations.findById(
       workspaceId,
       authorizationId,
     )
-    if (!authorization) {
+    if (!authorizationRecord) {
       throw new DomainError(
         'MATERIALIZATION_AUTHORIZATION_NOT_FOUND',
         'Materialization authorization was not found',
       )
     }
+    const { authorization, authenticationAudit: authorizationAudit } = authorizationRecord
     assertDomain(
       authorization.artifactId === artifactId &&
         authorization.manifestId === manifestId,
@@ -72,7 +83,8 @@ export function enqueueAuthorizedRenderService(dependencies: {
       'Authorization does not target the requested artifact manifest',
     )
     assertDomain(
-      authorization.actor.type === 'api-client' && authorization.actor.id === clientId,
+      authorization.actor.type === 'api-client' && authorization.actor.id === clientId &&
+        authorizationAudit.contextHash === audit.contextHash,
       'MATERIALIZATION_AUTHORIZATION_REJECTED',
       'Authorization belongs to a different API client',
     )
@@ -105,6 +117,7 @@ export function enqueueAuthorizedRenderService(dependencies: {
     })
     return dependencies.operations.createOrReplay({
       operation,
+      authenticationAudit: audit,
       context: {
         kind: 'artifact-render',
         authorizationId,

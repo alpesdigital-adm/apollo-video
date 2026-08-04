@@ -15,6 +15,7 @@ import {
 import type {
   LongFormIndexWorkflowRepository,
 } from './ports/long-form-index-workflow-repository.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -64,17 +65,6 @@ function canonicalInstant(value: Date, field: string): string {
     `${field} is invalid`,
   )
   return value.toISOString()
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Long-form indexing requires an API client',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function assertStageMap(
@@ -155,7 +145,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
       maximumElapsedMs: number
       maximumConcurrency: number
     }>
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
@@ -202,7 +192,10 @@ export function createLongFormIndexWorkflowService(dependencies: {
     const stageBudgets = normalizeStageBudgets(
       request.stageBudgets,
     )
-    const createdByClientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match long-form workflow')
+    const createdByClientId = identity(audit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'create-long-form-index-workflow-request/v1',
@@ -219,11 +212,13 @@ export function createLongFormIndexWorkflowService(dependencies: {
       stageBudgets,
       budget: request.budget,
       createdByClientId,
+      actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.repository.findReplay({
       workspaceId,
       projectId,
       createdByClientId,
+      actorContextHash: audit.contextHash,
       idempotencyKey: key,
     })
     if (replay) {
@@ -353,6 +348,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
     return dependencies.repository.create({
       workflow,
       operation,
+      authenticationAudit: audit,
       requestFingerprint,
       idempotencyKey: key,
       expectedRightsSnapshotId: context.rightsSnapshotId,

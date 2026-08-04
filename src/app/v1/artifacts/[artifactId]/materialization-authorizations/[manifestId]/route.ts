@@ -92,7 +92,7 @@ export async function POST(
       artifactId,
       manifestId,
       ...parseRequest(body),
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
     })
     const authorization = result.authorization

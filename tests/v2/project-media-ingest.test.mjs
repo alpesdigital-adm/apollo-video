@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { enqueueMediaIngestService } from '../../src/v2/application/enqueue-media-ingest.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { readArtifactContentService } from '../../src/v2/application/read-artifact-content.ts'
 import {
   readMediaColorProbeService,
@@ -42,17 +43,29 @@ function verifiedUpload(workspaceId = 'workspace-ingest-1') {
   })
 }
 
+function ingestActor(workspaceId) {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-ingest-1', credentialId: `credential-${workspaceId}`,
+    workspaceId, environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['media:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
+
 test('media ingest identity is stable inside one workspace and isolated between workspaces', async () => {
   const records = []
   const enqueue = enqueueMediaIngestService({
-    operations: { async createOrReplay(record) { records.push(record); return { operation: record.operation, context: record.context, replayed: false } } },
+    operations: { async createOrReplay(record) { records.push(record); return { operation: record.operation, context: record.context, authenticationAudit: record.authenticationAudit, replayed: false } } },
     clock: () => new Date('2026-07-18T18:15:00.000Z'), createId: () => 'operation-ingest-test-1',
   })
-  const first = await enqueue({ upload: verifiedUpload('workspace-ingest-1') })
-  const second = await enqueue({ upload: verifiedUpload('workspace-ingest-2') })
+  const first = await enqueue({ upload: verifiedUpload('workspace-ingest-1'), actor: ingestActor('workspace-ingest-1') })
+  const second = await enqueue({ upload: verifiedUpload('workspace-ingest-2'), actor: ingestActor('workspace-ingest-2') })
   const repeatedBytes = await enqueue({ upload: createMediaUpload({
     ...verifiedUpload('workspace-ingest-1'), id: '123e4567-e89b-42d3-a456-426614174902',
-  }) })
+  }), actor: ingestActor('workspace-ingest-1') })
   assert.equal(first.operation.type, 'media-ingest')
   assert.equal(first.operation.phase, 'queued')
   assert.notEqual(first.operation.target.id, second.operation.target.id)

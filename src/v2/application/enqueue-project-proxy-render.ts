@@ -11,6 +11,7 @@ import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -29,7 +30,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
     workspaceId: string
     projectId: string
     expectedProjectVersionId?: string
-    actor: { type: 'api-client'; id: string }
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
   }) {
@@ -38,7 +39,10 @@ export function enqueueProjectProxyRenderService(dependencies: {
     const expectedProjectVersionId = request.expectedProjectVersionId
       ? validateId(request.expectedProjectVersionId, 'expectedProjectVersionId')
       : undefined
-    const clientId = validateId(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+    assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match proxy request')
+    const clientId = validateId(audit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
     const source = await dependencies.projects.readCurrentSource({ workspaceId, projectId })
@@ -61,8 +65,8 @@ export function enqueueProjectProxyRenderService(dependencies: {
           repository: dependencies.colorPipelines, workspaceId, projectId, sources: source.renderSources,
         })
     const inputHash = projectProxyRenderInputHash({ source, colorPipelineBindings })
-    const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash })
-    const replay = await dependencies.operations.findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint })
+    const requestFingerprint = calculateVersionHash({ type: 'project-proxy-render', projectId, inputHash, actorContextHash: audit.contextHash })
+    const replay = await dependencies.operations.findReplay({ workspaceId, clientId, actorContextHash: audit.contextHash, idempotencyKey, requestFingerprint })
     if (replay) return replay
     const operationId = dependencies.createId('operation')
     const outputArtifactId = source.unchangedReuse?.artifactId ?? dependencies.createId('artifact')
@@ -79,6 +83,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
     }
     return dependencies.operations.createOrReplay({
       operation,
+      authenticationAudit: audit,
       context: source.unchangedReuse ? {
         kind: 'project-proxy-reuse', projectId, projectVersionId: source.projectVersionId,
         editPlanSnapshotId: source.editPlanSnapshotId,

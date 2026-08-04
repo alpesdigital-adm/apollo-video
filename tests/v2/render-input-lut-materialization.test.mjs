@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { authorizeRenderInputMaterializationService } from '../../src/v2/application/authorize-render-input-materialization.ts'
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
@@ -13,6 +14,18 @@ import { materializeCube3dIntensity, createWorkspaceLutVersion } from '../../src
 import { LocalArtifactRenderInputResolver } from '../../src/v2/infrastructure/local-artifact-render-input-resolver.ts'
 import { PrismaRenderInputAssetAvailability } from '../../src/v2/infrastructure/prisma/render-input-asset-availability.ts'
 import { PrismaMaterializationAuthorizationRepository } from '../../src/v2/infrastructure/prisma/materialization-authorization-repository.ts'
+
+function renderActor(credentialId = 'credential-render-1') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-render-1', credentialId, workspaceId: 'workspace-render-1',
+    environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['artifacts:render']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 const cube = `TITLE "Warm"
 LUT_3D_SIZE 2
@@ -109,11 +122,13 @@ test('T-FR-181 materialization authorization permits licensed immutable LUTs and
       targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
       rights: { async findCurrentForArtifacts(_workspaceId, ids) { assert.deepEqual(ids, []); return new Map() } },
       luts: repository(version),
-      authorizations: { async findReplay() { return null }, async createOrReplay(value) { return { authorization: value.authorization, replayed: false } } },
+      authorizations: { async findReplay() { return null }, async createOrReplay(value) { return { authorization: value.authorization, authenticationAudit: value.authenticationAudit, replayed: false } } },
       clock: () => new Date('2026-07-31T12:01:00.000Z'), createId: () => `authorization-${policy}-lut-1`,
     })
-    const result = await authorize({ workspaceId: version.workspaceId, artifactId: 'artifact-output-lut-1', manifestId: 'manifest-output-lut-1', use: 'quality-assurance', actor: { type: 'api-client', id: 'client-render-1' }, idempotencyKey: `authorize-${policy}-lut-1` })
+    const actor = renderActor()
+    const result = await authorize({ workspaceId: version.workspaceId, artifactId: 'artifact-output-lut-1', manifestId: 'manifest-output-lut-1', use: 'quality-assurance', actor, idempotencyKey: `authorize-${policy}-lut-1` })
     assert.equal(result.authorization.status, expected)
+    assert.deepEqual(result.authenticationAudit, materializeActorAuditContext(actor))
     assert.equal(result.authorization.decisions[0].rightsSnapshotId, version.id)
     assert.equal(result.authorization.decisions[0].rightsSnapshotHash, version.recordHash)
   }
@@ -136,7 +151,7 @@ test('T-FR-234 authorized worker revalidates LUT policy identity before resolvin
     protectedRenderInputs: { async read() { return input } }, assetAvailability: { async inspect() { return { available: true } } },
     targets: { supportsRenderer() { return true }, supportsComposition() { return true } },
     rights: { async findCurrentForArtifacts(_workspaceId, ids) { assert.deepEqual(ids, []); return new Map() } },
-    luts: repository(version), authorizations: { async findById() { return authorization } },
+    luts: repository(version), authorizations: { async findById() { return { authorization, authenticationAudit: materializeActorAuditContext(renderActor()) } } },
     resolverForWorkspace() { return { async resolve(value) { resolved += 1; return { uri: 'file:///private/cache/lut.cube', sha256: value.sha256, byteSize: value.byteSize } } } },
     clock: () => new Date('2026-07-31T12:02:00.000Z'),
   })
@@ -154,6 +169,9 @@ test('T-FR-234 Prisma authorization hydration preserves LUT policy identity with
     id: 'authorization-stored-lut-1', workspaceId: 'workspace-render-1', artifactId: 'artifact-output-lut-1',
     manifestId: 'manifest-output-lut-1', inputHash: 'd'.repeat(64), rightsUse: 'quality-assurance', market: null,
     locale: 'pt-BR', syntheticOpsJson: '[]', status: 'authorized', issuesJson: '[]', clientId: 'client-render-1',
+    actorCredentialId: 'credential-render-1', actorEnvironment: 'production', actorAuthenticationKind: 'bearer',
+    actorContextHash: materializeActorAuditContext(renderActor()).contextHash,
+    delegatedUserId: null, delegatedIdentityId: null, workspaceRole: null,
     evaluatedAt, validUntil,
     decisions: [{ artifactId: 'lut-version-render-1', assetOrdinal: 0, assetKind: 'lut', rightsSnapshotId: null, rightsSnapshot: null, policySnapshotId: 'lut-version-render-1', policySnapshotHash: 'e'.repeat(64), outcome: 'allow', reasonCodesJson: '[]', validUntil: null }],
   }
@@ -161,7 +179,13 @@ test('T-FR-234 Prisma authorization hydration preserves LUT policy identity with
     v2MaterializationAuthorization: { async findFirst() { return stored } },
   })
   const value = await repository.findById(stored.workspaceId, stored.id)
-  assert.equal(value.decisions[0].rightsSnapshotId, 'lut-version-render-1')
-  assert.equal(value.decisions[0].rightsSnapshotHash, 'e'.repeat(64))
-  assert.equal(value.validUntil, validUntil.toISOString())
+  assert.equal(value.authorization.decisions[0].rightsSnapshotId, 'lut-version-render-1')
+  assert.equal(value.authorization.decisions[0].rightsSnapshotHash, 'e'.repeat(64))
+  assert.equal(value.authorization.validUntil, validUntil.toISOString())
+  assert.deepEqual(value.authenticationAudit, materializeActorAuditContext(renderActor()))
+  stored.actorContextHash = 'f'.repeat(64)
+  await assert.rejects(
+    repository.findById(stored.workspaceId, stored.id),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
 })

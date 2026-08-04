@@ -21,7 +21,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       colorPipelines: createColorPipelineCompilationRepository(),
       clock: () => new Date(), createId: (kind) => `${kind}-${randomUUID()}`,
     })({
-      workspaceId: actor.workspaceId, projectId, actor: actor.auditContext.actor,
+      workspaceId: actor.workspaceId, projectId, actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
       traceId: requestId,
     })

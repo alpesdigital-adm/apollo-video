@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import test from 'node:test'
 
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
   OUTPUT_ASPECT_RATIOS,
@@ -88,6 +89,8 @@ import {
   waitPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
+import { cancelPublicOperationService } from '../../src/v2/application/cancel-public-operation.ts'
+import { retryPublicOperationService } from '../../src/v2/application/retry-public-operation.ts'
 import { listDeadLetterOperationsService } from '../../src/v2/application/list-dead-letter-operations.ts'
 import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
 import { readPublicEventCatalogService } from '../../src/v2/application/read-public-event-catalog.ts'
@@ -101,6 +104,18 @@ import {
 import {
   createPublicOperationStatusEvents,
 } from '../../src/v2/domain/public-operation-event.ts'
+
+function authenticatedActor({
+  clientId = 'client-1', credentialId = `credential-${clientId}`, workspaceId = 'workspace-1',
+  scopes = ['artifacts:render'],
+} = {}) {
+  const auditContext = createExternalAuditContext({ clientId, credentialId, workspaceId, environment: 'production' })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(scopes), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -820,11 +835,33 @@ test('PublicOperation creation retries serialization conflicts before failing ex
       throw error
     },
   })
+  const operationAudit = materializeActorAuditContext(authenticatedActor({
+    clientId: operation.clientId,
+    workspaceId: operation.workspaceId,
+  }))
 
   await assert.rejects(
     () => repository.createOrReplay({
       operation,
+      authenticationAudit: { ...operationAudit, contextHash: '0'.repeat(64) },
       context: {
+        kind: 'artifact-render',
+        authorizationId: 'authorization-serialization-retry-1',
+        inputHash: 'a'.repeat(64),
+      },
+      idempotencyKey: 'operation-serialization-retry-key-1',
+      requestFingerprint: 'b'.repeat(64),
+    }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+  assert.equal(attempts, 0)
+
+  await assert.rejects(
+    () => repository.createOrReplay({
+      operation,
+      authenticationAudit: operationAudit,
+      context: {
+        kind: 'artifact-render',
         authorizationId: 'authorization-serialization-retry-1',
         inputHash: 'a'.repeat(64),
       },
@@ -1412,6 +1449,8 @@ test('manual retry reopens only failed or canceled operations and preserves atte
 })
 
 test('authorized render enqueue is idempotent, actor-bound and expiry-aware', async () => {
+  const renderActor = authenticatedActor()
+  const renderAudit = materializeActorAuditContext(renderActor)
   const authorization = createMaterializationAuthorization({
     id: 'authorization-operation-1',
     workspaceId: 'workspace-1',
@@ -1438,10 +1477,10 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
   const stored = new Map()
   const operations = {
     async findById() { return null },
-    async findReplay({ workspaceId, clientId, idempotencyKey, requestFingerprint }) {
+    async findReplay({ workspaceId, clientId, actorContextHash, idempotencyKey, requestFingerprint }) {
       const value = stored.get(`${workspaceId}:${clientId}:${idempotencyKey}`)
       if (!value) return null
-      if (value.requestFingerprint !== requestFingerprint) {
+      if (value.requestFingerprint !== requestFingerprint || value.record.authenticationAudit.contextHash !== actorContextHash) {
         throw new DomainError(
           'IDEMPOTENCY_PAYLOAD_MISMATCH',
           'Idempotency payload mismatch',
@@ -1454,6 +1493,7 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
       const record = {
         operation: input.operation,
         context: Object.freeze({ ...input.context }),
+        authenticationAudit: input.authenticationAudit,
       }
       stored.set(key, { requestFingerprint: input.requestFingerprint, record })
       return { ...record, replayed: false }
@@ -1464,7 +1504,7 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
     authorizations: {
       async findById(workspaceId, id) {
         return workspaceId === authorization.workspaceId && id === authorization.id
-          ? authorization
+          ? { authorization, authenticationAudit: renderAudit }
           : null
       },
     },
@@ -1477,7 +1517,7 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
     artifactId: 'artifact-render-1',
     manifestId: 'manifest-render-1',
     authorizationId: authorization.id,
-    actor: { type: 'api-client', id: 'client-1' },
+    actor: renderActor,
     idempotencyKey: 'render-request-1',
   }
   const created = await enqueue(request)
@@ -1494,13 +1534,13 @@ test('authorized render enqueue is idempotent, actor-bound and expiry-aware', as
   assert.equal(ids, 1)
 
   await assert.rejects(
-    enqueue({ ...request, actor: { type: 'api-client', id: 'client-2' }, idempotencyKey: 'render-request-2' }),
+    enqueue({ ...request, actor: authenticatedActor({ clientId: 'client-2' }), idempotencyKey: 'render-request-2' }),
     (error) =>
       error instanceof DomainError &&
       error.code === 'MATERIALIZATION_AUTHORIZATION_REJECTED',
   )
   const expiredEnqueue = enqueueAuthorizedRenderService({
-    authorizations: { async findById() { return authorization } },
+    authorizations: { async findById() { return { authorization, authenticationAudit: renderAudit } } },
     operations,
     clock: () => new Date('2026-07-14T12:06:00.000Z'),
     createId: () => 'operation-render-expired',
@@ -1626,6 +1666,7 @@ test('asset rights persistence retries serialization conflicts before failing ex
 })
 
 test('materialization authorization evaluates every RenderInput asset and records a bounded decision', async () => {
+  const materializationActor = authenticatedActor()
   const input = createRenderInputSpec({
     schemaVersion: 'render-input/v1',
     renderer: { id: 'remotion', version: '4.0.489', digest: 'a'.repeat(64) },
@@ -1712,7 +1753,7 @@ test('materialization authorization evaluates every RenderInput asset and record
       async findReplay() { return null },
       async createOrReplay(value) {
         recorded = value
-        return { authorization: value.authorization, replayed: false }
+        return { authorization: value.authorization, authenticationAudit: value.authenticationAudit, replayed: false }
       },
     },
     clock: () => new Date('2026-07-14T12:01:00.000Z'),
@@ -1724,7 +1765,7 @@ test('materialization authorization evaluates every RenderInput asset and record
     manifestId: 'manifest-output',
     use: 'paid-ad',
     market: 'BR',
-    actor: { type: 'api-client', id: 'client-1' },
+    actor: materializationActor,
     idempotencyKey: 'authorization-request-1',
   })
   assert.equal(result.authorization.status, 'authorized')
@@ -1732,6 +1773,7 @@ test('materialization authorization evaluates every RenderInput asset and record
   assert.equal(result.authorization.validUntil, '2026-07-14T12:06:00.000Z')
   assert.deepEqual(result.authorization.decisions.map((decision) => decision.outcome), ['allow'])
   assert.equal(recorded.requestFingerprint.length, 64)
+  assert.deepEqual(recorded.authenticationAudit, materializeActorAuditContext(materializationActor))
   assert.equal(JSON.stringify(result).includes('must-not-leak'), false)
   assert.equal(JSON.stringify(result).includes('workspaces/1/source.mp4'), false)
 
@@ -1743,7 +1785,7 @@ test('materialization authorization evaluates every RenderInput asset and record
       manifestId: 'manifest-output',
       use: 'paid-ad',
       market: 'BR',
-      actor: { type: 'api-client', id: 'client-1' },
+      actor: materializationActor,
       idempotencyKey: 'authorization-lineage-mismatch-1',
     }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
@@ -1774,11 +1816,26 @@ test('materialization authorization retries serialization conflicts before faili
       throw error
     },
   })
+  const authorizationAudit = materializeActorAuditContext(authenticatedActor({
+    clientId: 'client-serialization-retry-1',
+    workspaceId: 'workspace-serialization-retry-1',
+  }))
 
   await assert.rejects(
     () => repository.createOrReplay({
       authorization,
-      clientId: 'client-serialization-retry-1',
+      authenticationAudit: { ...authorizationAudit, contextHash: '0'.repeat(64) },
+      idempotencyKey: 'authorization-serialization-retry-key-1',
+      requestFingerprint: 'd'.repeat(64),
+    }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+  assert.equal(attempts, 0)
+
+  await assert.rejects(
+    () => repository.createOrReplay({
+      authorization,
+      authenticationAudit: authorizationAudit,
       idempotencyKey: 'authorization-serialization-retry-key-1',
       requestFingerprint: 'd'.repeat(64),
     }),
@@ -1903,7 +1960,10 @@ test('authorized worker materialization revalidates rights and keeps locations i
         return new Map([['artifact-worker-source', currentRights]])
       },
     },
-    authorizations: { async findById() { return authorization } },
+    authorizations: { async findById() { return {
+      authorization,
+      authenticationAudit: materializeActorAuditContext(authenticatedActor()),
+    } } },
     resolverForWorkspace(_workspaceId, currentAuthorization) {
       resolverAuthorization = currentAuthorization
       return {
@@ -2150,6 +2210,54 @@ test('project versions are immutable and require a parent after sequence one', (
       }),
     'INVALID_PROJECT_VERSION',
   )
+})
+
+test('public operation control services persist the full authenticated actor only for effective commands', async () => {
+  const actor = authenticatedActor({ scopes: ['operations:cancel', 'operations:retry'] })
+  const audit = materializeActorAuditContext(actor)
+  const queued = createQueuedPublicOperation({
+    id: 'operation-control-service-1', workspaceId: 'workspace-1', clientId: 'client-owner-1',
+    type: 'artifact-render', target: {
+      type: 'media-artifact', id: 'artifact-control-service-1', manifestId: 'manifest-control-service-1',
+    },
+    createdAt: '2026-07-14T12:00:00.000Z',
+  })
+  const commands = []
+  const operations = {
+    async cancel(input) {
+      commands.push({ action: 'cancel', ...input })
+      return { operation: cancelPublicOperation(queued, input.canceledAt), authenticationAudit: audit, context: { kind: 'artifact-render', authorizationId: 'authorization-control-1', inputHash: 'a'.repeat(64) } }
+    },
+    async retry(input) {
+      commands.push({ action: 'retry', ...input })
+      const canceled = cancelPublicOperation(queued, '2026-07-14T12:00:01.000Z')
+      return { operation: retryPublicOperation(canceled, input.requestedAt, input.nextAttemptAt), authenticationAudit: audit, context: { kind: 'artifact-render', authorizationId: 'authorization-control-1', inputHash: 'a'.repeat(64) } }
+    },
+  }
+  const cancel = cancelPublicOperationService({
+    operations, clock: () => new Date('2026-07-14T12:00:01.000Z'),
+    createId: () => 'operation-control-cancel-service-1',
+  })
+  const retry = retryPublicOperationService({
+    operations, clock: () => new Date('2026-07-14T12:00:02.000Z'),
+    createId: () => 'operation-control-retry-service-1',
+  })
+  assert.equal((await cancel({ workspaceId: 'workspace-1', operationId: queued.id, actor })).status, 'canceled')
+  assert.equal((await retry({ workspaceId: 'workspace-1', operationId: queued.id, actor })).status, 'queued')
+  assert.deepEqual(commands.map(({ action, commandId, authenticationAudit }) => ({ action, commandId, authenticationAudit })), [
+    { action: 'cancel', commandId: 'operation-control-cancel-service-1', authenticationAudit: audit },
+    { action: 'retry', commandId: 'operation-control-retry-service-1', authenticationAudit: audit },
+  ])
+
+  await assert.rejects(
+    cancel({ workspaceId: 'workspace-other', operationId: queued.id, actor }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
+  )
+  await assert.rejects(
+    retry({ workspaceId: 'workspace-1', operationId: queued.id, actor: authenticatedActor({ scopes: ['operations:cancel'] }) }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
+  )
+  assert.equal(commands.length, 2)
 })
 
 test('T-FR-236 project transitions are exhaustive, convergent and fail closed', () => {
