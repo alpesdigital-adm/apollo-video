@@ -28,12 +28,19 @@ function memoryPrisma() {
     },
     idempotency: new Map(),
     transitions: new Map(),
+    events: [],
   }
   const idempotencyKey = (where) => {
     const key = where.workspaceId_clientId_key
     return `${key.workspaceId}:${key.clientId}:${key.key}`
   }
   const transaction = {
+    v2PublicEventOutbox: {
+      async createMany({ data }) {
+        state.events.push(...data)
+        return { count: data.length }
+      },
+    },
     v2IdempotencyRecord: {
       async findUnique({ where }) {
         return state.idempotency.get(idempotencyKey(where)) ?? null
@@ -133,6 +140,14 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   assert.equal(quarantined.replayed, false)
   assert.equal(quarantined.transition.changed, true)
   assert.equal(quarantined.transition.resultRevision, 2)
+  assert.equal(state.events.length, 1)
+  assert.equal(state.events[0].type, 'artifact.rejected')
+  assert.deepEqual(JSON.parse(state.events[0].dataJson), {
+    fromStatus: 'available',
+    lifecycleRevision: 2,
+    status: 'quarantined',
+    transitionId: quarantined.transition.id,
+  })
   assert.deepEqual(state.artifact, {
     id: state.artifact.id, workspaceId: state.workspace.id,
     status: 'quarantined', lifecycleRevision: 2,
@@ -159,6 +174,7 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   assert.equal(replay.replayed, true)
   assert.equal(replay.transition.id, quarantined.transition.id)
   assert.equal(state.transitions.size, 1)
+  assert.equal(state.events.length, 1)
 
   await assert.rejects(
     execute({
@@ -178,6 +194,8 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
     ...base, baseRevision: 2, targetStatus: 'available', idempotencyKey: 'lifecycle-command-2',
   })
   assert.equal(restored.transition.resultRevision, 3)
+  assert.equal(state.events.length, 2)
+  assert.equal(state.events[1].type, 'artifact.ready')
   const deleted = await execute({
     ...base, baseRevision: 3, targetStatus: 'deleted', idempotencyKey: 'lifecycle-command-3',
   })
@@ -194,6 +212,7 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   assert.equal(noop.transition.changed, false)
   assert.equal(noop.transition.resultRevision, 4)
   assert.equal(state.artifact.lifecycleRevision, 4)
+  assert.equal(state.events.length, 2)
 })
 
 test('T-FR-236 lifecycle public contract is exact, immutable and API-first', () => {

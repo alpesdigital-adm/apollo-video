@@ -14,7 +14,9 @@ import {
 } from '../../domain/api-access-control.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { PublicOperation, PublicOperationStatus } from '../../domain/public-operation.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 import { persistManyOperationStatusEvents } from './public-operation-repository.ts'
 
 type StoredCommand = {
@@ -88,9 +90,14 @@ function isConcurrentWrite(error: unknown): boolean {
 
 export class PrismaApiAccessControlRepository implements ApiAccessControlRepository {
   private readonly client: PrismaClient
+  private readonly createEventId: () => string
 
-  constructor(client: PrismaClient = getV2PostgresClient()) {
+  constructor(
+    client: PrismaClient = getV2PostgresClient(),
+    createEventId: () => string = randomUUID,
+  ) {
     this.client = client
+    this.createEventId = createEventId
   }
 
   async find(input: {
@@ -260,9 +267,34 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
                 updatedAt: command.changedAt,
               },
             })),
-            randomUUID,
+            this.createEventId,
           )
           canceledOperationCount = canceled.count
+        }
+
+        if (
+          command.targetType === 'client' &&
+          command.action === 'suspend' &&
+          command.previousStatus !== command.resultStatus
+        ) {
+          await persistPublicEvents(transaction, [createPublicEvent({
+            id: this.createEventId(),
+            type: 'client.suspended',
+            version: '1.0.0',
+            workspaceId: command.workspaceId,
+            occurredAt: command.changedAt,
+            actor: {
+              clientId: command.actorClientId,
+              ...(command.delegatedUserId ? { userId: command.delegatedUserId } : {}),
+            },
+            resource: { type: 'api-client', id: command.targetId },
+            data: {
+              commandId: command.id,
+              previousStatus: command.previousStatus,
+              status: command.resultStatus,
+              canceledOperationCount,
+            },
+          })])
         }
 
         const stored = await transaction.v2ApiAccessCommand.create({

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
@@ -13,6 +15,7 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
 import {
   createCommandArtifactInvalidations,
   normalizeCommandImpactOutputReferences,
@@ -24,6 +27,7 @@ import {
   hydrateReviewPatchProposal,
   hydrateReviewPatchVersion,
 } from './review-patch-repository.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -85,9 +89,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 
 export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchRepository {
   private readonly client: PrismaClient
+  private readonly createEventId: () => string
 
-  constructor(client: PrismaClient) {
+  constructor(client: PrismaClient, createEventId: () => string = randomUUID) {
     this.client = client
+    this.createEventId = createEventId
   }
 
   private batchById(input: { workspaceId: string; projectId: string; batchId: string }) {
@@ -415,12 +421,27 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
           resultCommandId: bundle.command.id, resultVersionId: bundle.version.id, comparisonJson: stableSerialize(bundle.comparison),
           appliedAt: new Date(bundle.command.createdAt), updatedAt: new Date(bundle.command.createdAt),
         } })
-        await transaction.v2PublicEventOutbox.create({ data: {
-          id: bundle.event.id, workspaceId: bundle.event.workspaceId, type: bundle.event.type, version: bundle.event.version,
-          occurredAt: new Date(bundle.event.occurredAt), sequence: bundle.event.sequence, actorClientId: bundle.event.actor?.clientId,
-          actorUserId: bundle.event.actor?.userId, resourceType: bundle.event.resource.type, resourceId: bundle.event.resource.id,
-          dataJson: stableSerialize(bundle.event.data),
-        } })
+        await persistPublicEvents(transaction, [
+          bundle.event,
+          ...included.map((item) => createPublicEvent({
+            id: this.createEventId(),
+            type: 'annotation.resolved',
+            version: '1.0.0',
+            workspaceId: bundle.command.workspaceId,
+            occurredAt: bundle.command.createdAt,
+            ...(bundle.event.actor ? { actor: bundle.event.actor } : {}),
+            resource: { type: 'annotation', id: item.annotationId },
+            data: {
+              projectId: bundle.command.projectId,
+              baseVersionId: bundle.command.baseVersionId,
+              resultVersionId: bundle.version.id,
+              commandId: bundle.command.id,
+              batchId: batch.id,
+              proposalId: item.proposalId,
+              status: 'applied',
+            },
+          })),
+        ])
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)

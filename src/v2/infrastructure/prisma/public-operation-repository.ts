@@ -43,6 +43,10 @@ import {
   projectStatusTransitionPath,
   projectStatusTransitionSources,
 } from '../../domain/project.ts'
+import {
+  persistPublicEvents,
+  type PublicEventOutboxTransaction,
+} from './public-event-outbox.ts'
 
 type StoredOperation = Prisma.V2PublicOperationGetPayload<{
   include: {
@@ -69,11 +73,6 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     projectDirectorRun: { include: { directorRun: true } }
   }
 }>
-
-export type PublicOperationEventTransaction = Pick<
-  Prisma.TransactionClient,
-  'v2PublicEventOutbox'
->
 
 const OPERATION_INCLUDE = {
   artifactRender: {
@@ -759,7 +758,7 @@ function hydrateClaim(row: StoredOperation): ClaimedPublicOperationRecord {
 }
 
 export async function persistOperationStatusEvents(
-  transaction: PublicOperationEventTransaction,
+  transaction: PublicEventOutboxTransaction,
   previousStatus: PublicOperation['status'] | undefined,
   operation: Parameters<typeof createPublicOperationStatusEvents>[0]['operation'],
   createEventId: () => string,
@@ -768,7 +767,7 @@ export async function persistOperationStatusEvents(
 }
 
 export async function persistManyOperationStatusEvents(
-  transaction: PublicOperationEventTransaction,
+  transaction: PublicEventOutboxTransaction,
   transitions: readonly Readonly<{
     previousStatus: PublicOperation['status'] | undefined
     operation: Parameters<typeof createPublicOperationStatusEvents>[0]['operation']
@@ -780,22 +779,7 @@ export async function persistManyOperationStatusEvents(
     operation,
     createEventId,
   }))
-  if (events.length === 0) return
-  await transaction.v2PublicEventOutbox.createMany({
-    data: events.map((event) => ({
-      id: event.id,
-      workspaceId: event.workspaceId,
-      type: event.type,
-      version: event.version,
-      occurredAt: new Date(event.occurredAt),
-      sequence: event.sequence,
-      actorClientId: event.actor?.clientId,
-      actorUserId: event.actor?.userId,
-      resourceType: event.resource.type,
-      resourceId: event.resource.id,
-      dataJson: stableSerialize(event.data),
-    })),
-  })
+  await persistPublicEvents(transaction, events)
 }
 
 export class PrismaPublicOperationRepository implements PublicOperationRepository {

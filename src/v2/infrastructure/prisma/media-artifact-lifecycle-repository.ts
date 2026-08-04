@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   Prisma,
   type PrismaClient,
@@ -17,6 +19,8 @@ import {
   MEDIA_ARTIFACT_LIFECYCLE_STATUSES,
   type MediaArtifactLifecycleStatus,
 } from '../../domain/media-artifact.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 
 interface StoredResponse {
   transitionId: string
@@ -101,9 +105,11 @@ function hydrateTransition(
 export class PrismaMediaArtifactLifecycleRepository
 implements MediaArtifactLifecycleRepository {
   private readonly client: PrismaClient
+  private readonly createEventId: () => string
 
-  constructor(client: PrismaClient) {
+  constructor(client: PrismaClient, createEventId: () => string = randomUUID) {
     this.client = client
+    this.createEventId = createEventId
   }
 
   async transitionOrReplay(
@@ -229,6 +235,25 @@ implements MediaArtifactLifecycleRepository {
             createdAt: new Date(bundle.createdAt),
           },
         })
+
+        if (changed && (bundle.targetStatus === 'available' || bundle.targetStatus === 'quarantined')) {
+          await persistPublicEvents(transaction, [createPublicEvent({
+            id: this.createEventId(),
+            type: bundle.targetStatus === 'available' ? 'artifact.ready' : 'artifact.rejected',
+            version: '1.0.0',
+            workspaceId: bundle.workspaceId,
+            occurredAt: bundle.createdAt,
+            sequence: resultRevision,
+            actor: { clientId: bundle.actorClientId },
+            resource: { type: 'media-artifact', id: bundle.artifactId },
+            data: {
+              fromStatus,
+              status: bundle.targetStatus,
+              lifecycleRevision: resultRevision,
+              transitionId: transition.id,
+            },
+          })])
+        }
 
         await transaction.v2IdempotencyRecord.update({
           where: { id: bundle.idempotencyRecordId },

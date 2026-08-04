@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { Prisma, PrismaClient, V2ReviewAnnotation } from '../../../../generated/prisma-v2/index.js'
 
 import type {
@@ -7,7 +9,9 @@ import type {
   ReviewSceneRecord,
 } from '../../application/ports/review-annotation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createPublicEvent } from '../../domain/public-event.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -110,9 +114,11 @@ interface ProxyCandidate {
 
 export class PrismaReviewAnnotationRepository implements ReviewAnnotationRepository {
   private readonly client: PrismaClient
+  private readonly createEventId: () => string
 
-  constructor(client: PrismaClient) {
+  constructor(client: PrismaClient, createEventId: () => string = randomUUID) {
     this.client = client
+    this.createEventId = createEventId
   }
 
   async readPreviewContext(input: { workspaceId: string; projectId: string; projectVersionId?: string }): Promise<Readonly<ReviewPreviewContext> | null> {
@@ -328,6 +334,25 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
           updatedAt: createdAt,
         },
       })
+      await persistPublicEvents(transaction, [createPublicEvent({
+        id: this.createEventId(),
+        type: 'annotation.created',
+        version: '1.0.0',
+        workspaceId: input.workspaceId,
+        occurredAt: input.annotation.createdAt,
+        actor: input.annotation.author.type === 'user'
+          ? { userId: input.annotation.author.id }
+          : { clientId: input.annotation.author.id },
+        resource: { type: 'annotation', id: input.annotation.id },
+        data: {
+          projectId: input.projectId,
+          projectVersionId: input.annotation.projectVersionId,
+          proxyArtifactId: input.annotation.proxyArtifactId,
+          frame: input.annotation.frame,
+          scope: input.annotation.scope,
+          status: input.annotation.status,
+        },
+      })])
       return toAnnotation(row)
     }, { isolationLevel: 'Serializable' })
   }

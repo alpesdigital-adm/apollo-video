@@ -10,6 +10,7 @@ import {
   transitionApiAccessControl,
 } from '../../src/v2/domain/api-access-control.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { PrismaApiAccessControlRepository } from '../../src/v2/infrastructure/prisma/api-access-control-repository.ts'
 import { assertKillSwitchRecoveryAccess } from '../../src/v2/public-api/kill-switch-access.ts'
 
 const ZERO_REVISION = '0'.repeat(64)
@@ -122,6 +123,74 @@ test('T-FR-242 kill switch command binds actor, delegated user, CAS, audit and c
   assert.equal(replay.replayed, true)
   assert.deepEqual(replay.command, first.command)
   assert.deepEqual(replay.access, first.access)
+})
+
+test('T-FR-244 client suspension atomically outboxes containment and the redacted client event', async () => {
+  const events = []
+  const transaction = {
+    v2ApiAccessCommand: {
+      async findUnique() { return null },
+      async create({ data }) { return { ...data, delegatedUserId: data.delegatedUserId ?? null } },
+    },
+    v2ApiClient: {
+      async findFirst() {
+        return {
+          id: 'client-target', workspaceId: 'workspace-1', status: 'active',
+          apiKillSwitchEngaged: false, apiAccessRevision: ZERO_REVISION,
+        }
+      },
+      async updateMany() { return { count: 1 } },
+    },
+    v2PublicOperation: {
+      async findMany() {
+        return [{
+          id: 'operation-client-target-1', workspaceId: 'workspace-1', projectId: null,
+          clientId: 'client-target', type: 'artifact-render', status: 'queued', attempt: 0,
+        }]
+      },
+      async updateMany() { return { count: 1 } },
+    },
+    v2PublicEventOutbox: {
+      async createMany({ data }) {
+        events.push(...data)
+        return { count: data.length }
+      },
+    },
+  }
+  const eventIds = [
+    '123e4567-e89b-42d3-a456-426614174001',
+    '123e4567-e89b-42d3-a456-426614174002',
+  ]
+  const repository = new PrismaApiAccessControlRepository({
+    ...transaction,
+    async $transaction(callback) { return callback(transaction) },
+  }, () => eventIds.shift())
+  const execute = changeApiAccessControlService({
+    repository,
+    clock: () => new Date('2026-08-03T22:05:00.000Z'),
+    createId: () => 'api-access-command-suspend-1',
+  })
+
+  const result = await execute({
+    actor: actor(), workspaceId: 'workspace-1', targetType: 'client', targetId: 'client-target',
+    action: 'suspend', baseRevision: ZERO_REVISION, reason: 'Contain compromised automation',
+    idempotencyKey: 'suspend-client-outbox-1', confirmed: true,
+  })
+
+  assert.equal(result.canceledOperationCount, 1)
+  assert.deepEqual(events.map((event) => event.type), [
+    'operation.status.changed',
+    'client.suspended',
+  ])
+  assert.deepEqual(JSON.parse(events[1].dataJson), {
+    canceledOperationCount: 1,
+    commandId: 'api-access-command-suspend-1',
+    previousStatus: 'active',
+    status: 'suspended',
+  })
+  assert.equal(events[1].actorClientId, 'client-admin')
+  assert.equal(events[1].actorUserId, 'member-admin')
+  assert.equal(events[1].dataJson.includes('Contain compromised automation'), false)
 })
 
 test('T-FR-242 API access administration rejects missing authority, confirmation and stale revisions', async () => {

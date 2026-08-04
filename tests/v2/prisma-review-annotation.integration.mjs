@@ -297,6 +297,20 @@ test('review annotations persist idempotently without mutating the project versi
     assert.deepEqual(firstPayload.data.annotation.applicationScope.formatIds, ['9:16'])
     assert.deepEqual(firstPayload.data.annotation.applicationScope.localeIds, ['pt-BR'])
     assert.equal(firstPayload.data.annotation.affectedCount, 1)
+    const regionalEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        type: 'annotation.created',
+        resourceId: firstPayload.data.annotation.id,
+      },
+    })
+    assert.equal(regionalEvents.length, 1)
+    assert.equal(regionalEvents[0].actorClientId, issued.client.id)
+    const regionalEventData = JSON.parse(regionalEvents[0].dataJson)
+    assert.equal(regionalEventData.projectId, projectResult.project.id)
+    assert.equal(regionalEventData.status, 'open')
+    assert.equal('text' in regionalEventData, false)
+    assert.equal('screenshotRef' in regionalEventData, false)
 
     const globalRequest = {
       ...annotationRequest,
@@ -348,6 +362,9 @@ test('review annotations persist idempotently without mutating the project versi
     assert.equal(regional.affectedCount, 1)
     assert.equal(global.applicationScope.global, true)
     assert.equal(global.affectedCount, 1)
+    assert.equal((await client.v2PublicEventOutbox.count({
+      where: { workspaceId, type: 'annotation.created' },
+    })), 2)
     assert.equal(projectAfterReview.currentVersionId, projectResult.version.id)
     assert.equal(projectAfterReview.versions.length, 1)
   } finally {

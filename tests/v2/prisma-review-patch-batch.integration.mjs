@@ -212,6 +212,18 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.equal(replayed.replayed, true)
     assert.equal(replayed.impact.impactHash, applied.impact.impactHash)
     assert.equal(replayed.invalidations.length, 1)
+    const firstResolutionEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        type: 'annotation.resolved',
+        resourceId: { in: [first.annotationId, second.annotationId] },
+      },
+    })
+    assert.equal(firstResolutionEvents.length, 2)
+    assert.ok(firstResolutionEvents.every((event) => {
+      const data = JSON.parse(event.dataJson)
+      return data.batchId === ready.batch.id && data.status === 'applied' && !('text' in data)
+    }))
     assert.match(JSON.stringify(applied.editPlan), /Primeira corrigida/)
     assert.match(JSON.stringify(applied.editPlan), /Segunda corrigida/)
 
@@ -233,6 +245,9 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.equal(partialApplied.version.sequence, 3)
     assert.equal(partialApplied.batch.items.find((item) => item.annotationId === safe.annotationId).status, 'applied')
     assert.equal(partialApplied.batch.items.find((item) => item.annotationId === conflictA.annotationId).status, 'retryable')
+    assert.equal((await client.v2PublicEventOutbox.count({
+      where: { workspaceId, type: 'annotation.resolved', resourceId: safe.annotationId },
+    })), 1)
     const conflictRows = await client.v2ReviewAnnotation.findMany({ where: { id: { in: [conflictA.annotationId, conflictB.annotationId] } }, select: { status: true } })
     assert.ok(conflictRows.every((row) => row.status === 'open'))
 
@@ -258,6 +273,13 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.equal(afterRollback.versions.length, 3)
     const rollbackAnnotations = await client.v2ReviewAnnotation.findMany({ where: { id: { in: [rollbackA.annotationId, rollbackB.annotationId] } }, select: { status: true } })
     assert.ok(rollbackAnnotations.every((row) => row.status === 'open'))
+    assert.equal((await client.v2PublicEventOutbox.count({
+      where: {
+        workspaceId,
+        type: 'annotation.resolved',
+        resourceId: { in: [rollbackA.annotationId, rollbackB.annotationId] },
+      },
+    })), 0)
     const persistedRollbackBatch = await client.v2ReviewPatchBatch.findUnique({ where: { id: rollbackBatch.batch.id } })
     assert.equal(persistedRollbackBatch.status, 'ready')
 

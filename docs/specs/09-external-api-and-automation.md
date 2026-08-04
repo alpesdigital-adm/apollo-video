@@ -554,6 +554,8 @@ Outbox transacional impede emitir evento de mutation não commitada.
 
 Para `PublicOperation`, somente mudança persistida de `status` publica evento. O commit grava `operation.status.changed` e acrescenta `operation.succeeded` ou `operation.failed` no terminal correspondente; mudança apenas de fase não cria um evento de status. Criação idempotente, CAS perdido e replay convergente não duplicam linhas. Cancelamentos em massa do controle de acesso selecionam as operações, aplicam a mudança e gravam todos os envelopes em uma única transação serializável, abortando se a cardinalidade mudar. O payload contém somente `operationType`, `previousStatus`, `status`, `phase`, `attempt` e `projectId` opcional.
 
+Writers adicionais seguem a mesma regra de commit: annotation criada/aplicada produz `annotation.created`/`annotation.resolved`; lifecycle realmente alterado para `available`/`quarantined` produz `artifact.ready`/`artifact.rejected`; ação `suspend` que altera um API client produz `client.suspended`. No-op, replay e rollback produzem zero linhas. Texto, screenshot, reason administrativo, credenciais e detalhes de storage são proibidos nesses payloads. `budget.threshold.reached` só pode nascer de um futuro ledger canônico que comprove cruzamento de limiar; preflight ou estimativa isolada não autorizam o evento.
+
 ## 20. Capability discovery e tool calling
 
 `GET /v1/capabilities` filtra por client/scopes/environment e retorna schemas, custo, confirmação e documentação.
