@@ -13,10 +13,15 @@ import type {
 } from '../../application/ports/project-duplication-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import type { CommandActorType } from '../../domain/edit-command.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  assertProjectCreationCommand,
+  projectCreationCommandData,
+} from './project-creation-command-persistence.ts'
 
 interface StoredDuplicationResponse {
   projectId: string
@@ -125,14 +130,22 @@ async function hydrateResult(
   client: Prisma.TransactionClient | PrismaClient,
   ids: StoredDuplicationResponse,
   replayed: boolean,
+  audit: Readonly<ApiAccessAuditContext>,
+  requestFingerprint: string,
 ): Promise<Readonly<ProjectDuplicationResult>> {
-  const [project, version, media] = await Promise.all([
+  const [project, version, media, command] = await Promise.all([
     client.v2Project.findUnique({ where: { id: ids.projectId } }),
     client.v2ProjectVersion.findUnique({ where: { id: ids.versionId } }),
     client.v2ProjectMediaAsset.findMany({
       where: { projectId: ids.projectId },
       orderBy: [{ role: 'asc' }, { artifactId: 'asc' }],
       select: { artifactId: true },
+    }),
+    client.v2ProjectCreationCommand.findUnique({
+      where: { projectId_workspaceId: {
+        projectId: ids.projectId,
+        workspaceId: audit.workspaceId,
+      } },
     }),
   ])
   if (
@@ -148,6 +161,16 @@ async function hydrateResult(
       'Stored project duplication result is inconsistent',
     )
   }
+  assertProjectCreationCommand(command, {
+    workspaceId: project.workspaceId,
+    action: 'duplicate',
+    projectId: project.id,
+    versionId: version.id,
+    sourceProjectId: project.duplicatedFromProjectId,
+    sourceVersionId: version.forkedFromVersionId,
+    audit,
+    requestFingerprint,
+  })
   return Object.freeze({
     project: hydrateProject(project),
     version: hydrateVersion(version),
@@ -170,6 +193,7 @@ implements ProjectDuplicationRepository {
     clientId: string
     key: string
     requestFingerprint: string
+    audit: Readonly<ApiAccessAuditContext>
   }) {
     const record = await this.client.v2IdempotencyRecord.findUnique({
       where: {
@@ -187,7 +211,13 @@ implements ProjectDuplicationRepository {
         'Idempotency key was already used with a different duplication request',
       )
     }
-    return hydrateResult(this.client, parseStoredResponse(record), true)
+    return hydrateResult(
+      this.client,
+      parseStoredResponse(record),
+      true,
+      input.audit,
+      input.requestFingerprint,
+    )
   }
 
   async readSource(input: {
@@ -224,6 +254,18 @@ implements ProjectDuplicationRepository {
     bundle: Readonly<ProjectDuplicationBundle>,
     attempt = 1,
   ): Promise<Readonly<ProjectDuplicationResult>> {
+    if (
+      bundle.auditCommand.action !== 'duplicate' ||
+      bundle.auditCommand.workspaceId !== bundle.project.workspaceId ||
+      bundle.auditCommand.projectId !== bundle.project.id ||
+      bundle.auditCommand.versionId !== bundle.version.id ||
+      bundle.auditCommand.sourceProjectId !== bundle.sourceProjectId ||
+      bundle.auditCommand.sourceVersionId !== bundle.sourceVersionId ||
+      bundle.auditCommand.requestFingerprint !== bundle.idempotency.requestFingerprint ||
+      bundle.auditCommand.audit.clientId !== bundle.idempotency.clientId
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Project duplication audit command is invalid')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const key = {
@@ -250,6 +292,8 @@ implements ProjectDuplicationRepository {
             transaction,
             parseStoredResponse(existing),
             true,
+            bundle.auditCommand.audit,
+            bundle.idempotency.requestFingerprint,
           )
         }
         if (existing) {
@@ -419,6 +463,9 @@ implements ProjectDuplicationRepository {
           where: { id: bundle.project.id },
           data: { currentVersionId: bundle.version.id },
         })
+        await transaction.v2ProjectCreationCommand.create({
+          data: projectCreationCommandData(bundle.auditCommand),
+        })
         const response = {
           projectId: bundle.project.id,
           versionId: bundle.version.id,
@@ -431,7 +478,13 @@ implements ProjectDuplicationRepository {
             responseJson: JSON.stringify(response),
           },
         })
-        return hydrateResult(transaction, response, false)
+        return hydrateResult(
+          transaction,
+          response,
+          false,
+          bundle.auditCommand.audit,
+          bundle.idempotency.requestFingerprint,
+        )
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       })
@@ -451,6 +504,7 @@ implements ProjectDuplicationRepository {
           clientId: bundle.idempotency.clientId,
           key: bundle.idempotency.key,
           requestFingerprint: bundle.idempotency.requestFingerprint,
+          audit: bundle.auditCommand.audit,
         })
         if (replay) return replay
         throw new DomainError(

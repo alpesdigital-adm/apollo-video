@@ -247,10 +247,14 @@ test('project source seed arguments are explicit, bounded and deterministic', ()
     '--seed-id', 'welcome-v1',
     '--workspace-id', 'workspace-seed-1',
     '--client-id', 'client-seed-1',
+    '--credential-id', 'credential-seed-1',
+    '--api-environment', 'sandbox',
     '--project-name', 'Projeto de boas-vindas',
     '--source-file', './master.mp4',
   ])
   assert.equal(parsed.seedId, 'welcome-v1')
+  assert.equal(parsed.credentialId, 'credential-seed-1')
+  assert.equal(parsed.apiEnvironment, 'sandbox')
   assert.equal(parsed.objective, 'discovery')
   assert.equal(parsed.format, '9:16')
   assert.equal(parsed.locale, 'pt-BR')
@@ -262,7 +266,8 @@ test('project source seed arguments are explicit, bounded and deterministic', ()
   ]), /more than once/)
   assert.throws(() => readSeedArguments([
     '--seed-id', 'welcome-v1', '--workspace-id', 'workspace-seed-1',
-    '--client-id', 'client-seed-1', '--project-name', 'Projeto',
+    '--client-id', 'client-seed-1', '--credential-id', 'credential-seed-1',
+    '--api-environment', 'sandbox', '--project-name', 'Projeto',
     '--source-file', './master.mp4', '--unsafe-bypass', 'true',
   ]), /not a supported seed argument/)
 })

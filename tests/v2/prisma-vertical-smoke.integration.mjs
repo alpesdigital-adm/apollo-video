@@ -136,7 +136,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       status: 'active',
       createdAt: clock().toISOString(),
     }))
-    await createApiClientService({
+    const issuedClient = await createApiClientService({
       repository: new PrismaApiClientRepository(prisma),
       credentialCrypto: nodeApiCredentialCrypto,
       clock,
@@ -198,6 +198,8 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
         seedId: 'vertical-smoke-v1',
         workspaceId,
         clientId,
+        credentialId: issuedClient.credential.id,
+        apiEnvironment: 'sandbox',
         projectName: 'Vertical Smoke Project',
         sourceFile: fixturePath,
         sourceMime: 'video/mp4',

@@ -67,6 +67,7 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })

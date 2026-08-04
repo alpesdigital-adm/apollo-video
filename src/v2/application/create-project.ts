@@ -18,6 +18,12 @@ import {
   resolveStrategicObjective,
   type StrategicObjectiveId,
 } from '../domain/strategic-objective.ts'
+import { createProjectCreationCommand } from '../domain/project-creation-command.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 import type {
   ProjectCreationRepository,
   ProjectCreationResult,
@@ -28,6 +34,7 @@ export type ProjectEntityKind =
   | 'project'
   | 'project-version'
   | 'project-snapshot'
+  | 'project-creation-command'
   | 'idempotency-record'
 
 export interface CreateProjectRequest {
@@ -38,7 +45,7 @@ export interface CreateProjectRequest {
   locale?: string
   briefing?: string
   destination?: string
-  actor: CommandActor
+  actor: AuthenticatedExternalActor
   idempotency: {
     clientId: string
     key: string
@@ -77,8 +84,16 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
     const productionBrief = createProductionBrief({ ownerText: request.briefing })
     const ttlSeconds = request.idempotency.ttlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
 
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+
     assertDomain(workspaceId.length > 0, 'INVALID_PROJECT', 'workspaceId is required')
     assertDomain(clientId.length > 0, 'INVALID_ARGUMENT', 'idempotency clientId is required')
+    assertDomain(
+      audit.workspaceId === workspaceId && audit.clientId === clientId,
+      'AUTH_INVALID',
+      'Project creation actor does not match its workspace and client',
+    )
     assertDomain(idempotencyKey.length > 0, 'INVALID_ARGUMENT', 'idempotency key is required')
     assertDomain(idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'idempotency key is too long')
     assertDomain(
@@ -94,6 +109,10 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
     const briefSnapshotId = dependencies.createId('project-snapshot')
     const editPlanSnapshotId = dependencies.createId('project-snapshot')
     const policiesSnapshotId = dependencies.createId('project-snapshot')
+    const creationCommandId = dependencies.createId('project-creation-command')
+    const commandActor: CommandActor = audit.delegatedUserId
+      ? { type: 'api-client', id: audit.clientId, delegatedUserId: audit.delegatedUserId }
+      : { type: 'api-client', id: audit.clientId }
 
     const briefContent = {
       schemaVersion: 1,
@@ -156,9 +175,9 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
       objective: objective.id,
       format: request.format,
       locale,
-      ownerId: request.actor.id,
+      ownerId: commandActor.id,
       currentVersionId: versionId,
-      createdBy: request.actor,
+      createdBy: commandActor,
       createdAt,
     })
     const snapshots = [
@@ -204,19 +223,15 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
         policies: policiesSnapshotId,
       },
       baseHash: versionHash,
-      createdBy: request.actor.id,
+      createdBy: commandActor.id,
       createdAt,
     })
-    const eventActor = request.actor.type === 'api-client'
-      ? {
-          clientId: request.actor.id,
-          ...(request.actor.delegatedUserId
-            ? { userId: request.actor.delegatedUserId }
-            : {}),
-        }
-      : request.actor.type === 'system'
-        ? undefined
-        : { userId: request.actor.id }
+    const eventActor = {
+      clientId: commandActor.id,
+      ...(commandActor.delegatedUserId
+        ? { userId: commandActor.delegatedUserId }
+        : {}),
+    }
     const events = [
       createPublicEvent({
         id: dependencies.createEventId(),
@@ -264,6 +279,17 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
       locale,
       briefing: productionBrief.ownerInput?.text ?? null,
       desiredAction,
+      actorContextHash: audit.contextHash,
+    })
+    const auditCommand = createProjectCreationCommand({
+      id: creationCommandId,
+      workspaceId,
+      action: 'create',
+      projectId,
+      versionId,
+      audit,
+      requestFingerprint,
+      createdAt,
     })
 
     return dependencies.repository.createOrReplay({
@@ -271,6 +297,7 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
       version,
       snapshots,
       events,
+      auditCommand,
       idempotency: {
         id: dependencies.createId('idempotency-record'),
         workspaceId,

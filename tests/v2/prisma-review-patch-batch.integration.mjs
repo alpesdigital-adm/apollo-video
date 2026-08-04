@@ -60,6 +60,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })

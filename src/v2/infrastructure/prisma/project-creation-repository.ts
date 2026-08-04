@@ -17,6 +17,10 @@ import type {
   ProjectCreationResult,
 } from '../../application/ports/project-creation-repository.ts'
 import type { CommandActorType } from '../../domain/edit-command.ts'
+import {
+  assertProjectCreationCommand,
+  projectCreationCommandData,
+} from './project-creation-command-persistence.ts'
 
 interface StoredProjectCreationResponse {
   projectId: string
@@ -108,6 +112,16 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
     serializationAttempt = 1,
   ): Promise<ProjectCreationResult> {
     assertUniquePublicEventIds(bundle.events)
+    if (
+      bundle.auditCommand.action !== 'create' ||
+      bundle.auditCommand.workspaceId !== bundle.project.workspaceId ||
+      bundle.auditCommand.projectId !== bundle.project.id ||
+      bundle.auditCommand.versionId !== bundle.version.id ||
+      bundle.auditCommand.requestFingerprint !== bundle.idempotency.requestFingerprint ||
+      bundle.auditCommand.audit.clientId !== bundle.idempotency.clientId
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Project creation audit command is invalid')
+    }
     for (const event of bundle.events) {
       if (event.workspaceId !== bundle.project.workspaceId) {
         throw new DomainError(
@@ -146,6 +160,20 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
               idempotencyRecordId: existing.id,
             })
           }
+          const command = await transaction.v2ProjectCreationCommand.findUnique({
+            where: { projectId_workspaceId: {
+              projectId: stored.projectId,
+              workspaceId: bundle.project.workspaceId,
+            } },
+          })
+          assertProjectCreationCommand(command, {
+            workspaceId: bundle.project.workspaceId,
+            action: 'create',
+            projectId: stored.projectId,
+            versionId: stored.versionId,
+            audit: bundle.auditCommand.audit,
+            requestFingerprint: bundle.idempotency.requestFingerprint,
+          })
           return hydrateResult(projectRow, versionRow, true)
         }
 
@@ -221,6 +249,9 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
           where: { id: projectRow.id },
           data: { currentVersionId: versionRow.id },
         })
+        await transaction.v2ProjectCreationCommand.create({
+          data: projectCreationCommandData(bundle.auditCommand),
+        })
         await transaction.v2PublicEventOutbox.createMany({
           data: bundle.events.map((event) => ({
             id: event.id,
@@ -279,11 +310,27 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
             )
           }
           const stored = parseStoredResponse(existing)
-          const [projectRow, versionRow] = await Promise.all([
+          const [projectRow, versionRow, command] = await Promise.all([
             this.client.v2Project.findUnique({ where: { id: stored.projectId } }),
             this.client.v2ProjectVersion.findUnique({ where: { id: stored.versionId } }),
+            this.client.v2ProjectCreationCommand.findUnique({
+              where: { projectId_workspaceId: {
+                projectId: stored.projectId,
+                workspaceId: bundle.project.workspaceId,
+              } },
+            }),
           ])
-          if (projectRow && versionRow) return hydrateResult(projectRow, versionRow, true)
+          if (projectRow && versionRow) {
+            assertProjectCreationCommand(command, {
+              workspaceId: bundle.project.workspaceId,
+              action: 'create',
+              projectId: stored.projectId,
+              versionId: stored.versionId,
+              audit: bundle.auditCommand.audit,
+              requestFingerprint: bundle.idempotency.requestFingerprint,
+            })
+            return hydrateResult(projectRow, versionRow, true)
+          }
         }
         throw new DomainError(
           'PERSISTENCE_CONFLICT',

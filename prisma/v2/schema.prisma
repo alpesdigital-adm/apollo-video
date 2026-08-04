@@ -21,6 +21,7 @@ model V2Workspace {
   updatedAt             DateTime @updatedAt @db.Timestamptz(3)
 
   projects                               V2Project[]
+  projectCreationCommands                V2ProjectCreationCommand[]
   snapshots                              V2ProjectSnapshot[]
   apiClients                             V2ApiClient[]
   apiAccessCommands                      V2ApiAccessCommand[]
@@ -183,6 +184,7 @@ model V2ApiClient {
   mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaArtifactLifecycleTransitions V2MediaArtifactLifecycleTransition[] @relation("MediaArtifactLifecycleTransitionActor")
   authoredAssetRightsChanges        V2AssetRightsChange[]                @relation("AssetRightsChangeExternalActor")
+  authoredProjectCreationCommands   V2ProjectCreationCommand[]           @relation("ProjectCreationCommandActor")
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions     V2WebhookSubscription[]          @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions            V2ProxyReviewDecision[]
@@ -442,6 +444,38 @@ model V2MediaUploadPart {
   @@map("media_upload_parts")
 }
 
+model V2ProjectCreationCommand {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  action                   String   @db.VarChar(16)
+  projectId                String   @db.VarChar(128)
+  versionId                String   @db.VarChar(128)
+  sourceProjectId          String?  @db.VarChar(128)
+  sourceVersionId          String?  @db.VarChar(128)
+  actorClientId            String   @db.VarChar(80)
+  actorCredentialId        String   @db.VarChar(128)
+  actorEnvironment         String   @db.VarChar(16)
+  actorAuthenticationKind  String   @db.VarChar(16)
+  actorContextHash         String   @db.Char(64)
+  actorDelegatedUserId     String?  @db.VarChar(128)
+  actorDelegatedIdentityId String?  @db.VarChar(128)
+  actorWorkspaceRole       String?  @db.VarChar(32)
+  requestFingerprint       String   @db.Char(64)
+  commandHash              String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace   V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project     V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  version     V2ProjectVersion @relation(fields: [versionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  actorClient V2ApiClient      @relation("ProjectCreationCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([projectId, workspaceId])
+  @@unique([versionId, projectId, workspaceId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@index([workspaceId, action, createdAt(sort: Desc)])
+  @@map("project_creation_commands")
+}
+
 model V2Project {
   id                      String   @id @db.VarChar(128)
   workspaceId             String   @db.VarChar(128)
@@ -540,6 +574,7 @@ model V2Project {
   colorPipelineCompilations              V2ColorPipelineCompilation[]
   lutSelections                          V2ProjectLutSelection[]
   lutSelectionHead                       V2ProjectLutSelectionHead?
+  creationCommand                        V2ProjectCreationCommand?
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -634,6 +669,7 @@ model V2ProjectVersion {
   mvpCoreGatesAsCompanion       V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase           V2ProjectLutSelection[]         @relation("ProjectLutSelectionBase")
   lutSelectionAsResult          V2ProjectLutSelection?          @relation("ProjectLutSelectionResult")
+  creationCommand               V2ProjectCreationCommand?
   artifactInvalidationsAsBase   V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationResultVersion")
   proxyReusesAsBase             V2ProjectProxyRenderOperation[] @relation("ProjectProxyReuseBaseVersion")

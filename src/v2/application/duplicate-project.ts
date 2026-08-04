@@ -1,7 +1,13 @@
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import type { CommandActor } from '../domain/edit-command.ts'
+import { createProjectCreationCommand } from '../domain/project-creation-command.ts'
 import { createProject, normalizeProjectName } from '../domain/project.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 import type {
   ProjectDuplicationRepository,
   ProjectDuplicationResult,
@@ -15,7 +21,8 @@ export function duplicateProjectService(dependencies: {
   repository: ProjectDuplicationRepository
   clock: () => Date
   createId: (
-    kind: 'project' | 'project-version' | 'project-media-asset' | 'idempotency-record',
+    kind: 'project' | 'project-version' | 'project-media-asset' |
+      'project-creation-command' | 'idempotency-record',
   ) => string
 }) {
   return async function duplicate(request: {
@@ -24,7 +31,7 @@ export function duplicateProjectService(dependencies: {
     expectedVersionId: string
     expectedVersionHash: string
     name?: string
-    actor: Readonly<CommandActor>
+    actor: AuthenticatedExternalActor
     idempotency: Readonly<{
       clientId: string
       key: string
@@ -38,6 +45,11 @@ export function duplicateProjectService(dependencies: {
     const key = request.idempotency.key.trim()
     const ttlSeconds =
       request.idempotency.ttlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
+    requireScope(request.actor, 'projects:write')
+    const audit = materializeActorAuditContext(request.actor)
+    const commandActor: Readonly<CommandActor> = audit.delegatedUserId
+      ? { type: 'api-client', id: audit.clientId, delegatedUserId: audit.delegatedUserId }
+      : { type: 'api-client', id: audit.clientId }
     assertDomain(workspaceId.length > 0, 'INVALID_ARGUMENT', 'workspaceId is required')
     assertDomain(projectId.length > 0, 'INVALID_ARGUMENT', 'projectId is required')
     assertDomain(
@@ -51,10 +63,9 @@ export function duplicateProjectService(dependencies: {
       'expectedVersionHash must be SHA-256',
     )
     assertDomain(
-      request.actor.type === 'api-client' &&
-        request.actor.id === clientId,
+      audit.workspaceId === workspaceId && audit.clientId === clientId,
       'AUTH_INVALID',
-      'Project duplication actor must match the authenticated API client',
+      'Project duplication actor must match the authenticated workspace and client',
     )
     assertDomain(
       key.length >= 1 && key.length <= 128,
@@ -78,13 +89,14 @@ export function duplicateProjectService(dependencies: {
       sourceVersionId: expectedVersionId,
       sourceVersionHash: request.expectedVersionHash,
       requestedName,
-      actor: request.actor,
+      actorContextHash: audit.contextHash,
     })
     const existing = await dependencies.repository.findIdempotent({
       workspaceId,
       clientId,
       key,
       requestFingerprint,
+      audit,
     })
     if (existing) return existing
 
@@ -126,10 +138,10 @@ export function duplicateProjectService(dependencies: {
         : {}),
       ...(source.project.format ? { format: source.project.format } : {}),
       ...(source.project.locale ? { locale: source.project.locale } : {}),
-      ownerId: request.actor.id,
+      ownerId: commandActor.id,
       currentVersionId: duplicateVersionId,
       duplicatedFromProjectId: source.project.id,
-      createdBy: request.actor,
+      createdBy: commandActor,
       createdAt,
     })
     const version = createProjectVersion({
@@ -147,7 +159,7 @@ export function duplicateProjectService(dependencies: {
         forkedFromVersionId: source.version.id,
         snapshotRefs: source.version.snapshotRefs,
       }),
-      createdBy: request.actor.id,
+      createdBy: commandActor.id,
       createdAt,
     })
     const media = source.media.map((item) => Object.freeze({
@@ -157,6 +169,18 @@ export function duplicateProjectService(dependencies: {
       originalFileName: item.originalFileName,
       createdAt,
     }))
+    const auditCommand = createProjectCreationCommand({
+      id: dependencies.createId('project-creation-command'),
+      workspaceId,
+      action: 'duplicate',
+      projectId: duplicateProjectId,
+      versionId: duplicateVersionId,
+      sourceProjectId: source.project.id,
+      sourceVersionId: source.version.id,
+      audit,
+      requestFingerprint,
+      createdAt,
+    })
     return dependencies.repository.duplicateOrReplay({
       sourceProjectId: source.project.id,
       sourceVersionId: source.version.id,
@@ -164,6 +188,7 @@ export function duplicateProjectService(dependencies: {
       project,
       version,
       media,
+      auditCommand,
       idempotency: {
         id: dependencies.createId('idempotency-record'),
         workspaceId,

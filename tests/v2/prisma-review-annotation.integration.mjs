@@ -36,6 +36,9 @@ async function waitForServer(baseUrl, child) {
 test('review annotations persist idempotently without mutating the project version', async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext } = await import(
+    '../../src/v2/application/authenticate-api-client.ts'
+  )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -74,6 +77,7 @@ test('review annotations persist idempotently without mutating the project versi
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
@@ -99,6 +103,22 @@ test('review annotations persist idempotently without mutating the project versi
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    const projectActor = Object.freeze({
+      ...auditContext,
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
 
     let entityCounter = 0
     let eventCounter = 0
@@ -112,7 +132,7 @@ test('review annotations persist idempotently without mutating the project versi
       name: 'Projeto de revisão',
       objective: 'discovery',
       format: '9:16',
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: projectActor,
       idempotency: { clientId: 'review-integration-client', key: 'review-integration-project' },
     })
 

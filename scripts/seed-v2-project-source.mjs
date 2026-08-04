@@ -8,6 +8,7 @@ import { Readable } from 'node:stream'
 import { PrismaClient } from '../generated/prisma-v2/index.js'
 
 import { beginMediaUploadService } from '../src/v2/application/begin-media-upload.ts'
+import { createExternalAuditContext } from '../src/v2/application/authenticate-api-client.ts'
 import { enqueueMediaIngestService } from '../src/v2/application/enqueue-media-ingest.ts'
 import { createProjectService } from '../src/v2/application/create-project.ts'
 import { issueMediaUploadSessionService } from '../src/v2/application/issue-media-upload-session.ts'
@@ -31,7 +32,8 @@ const DEFAULTS = Object.freeze({
 export function readSeedArguments(values) {
   const parsed = new Map()
   const allowed = new Set([
-    'seed-id', 'workspace-id', 'client-id', 'project-name', 'source-file',
+    'seed-id', 'workspace-id', 'client-id', 'credential-id', 'api-environment',
+    'project-name', 'source-file',
     'source-mime', 'objective', 'format', 'locale', 'briefing', 'wait-seconds',
   ])
   for (let index = 0; index < values.length; index += 2) {
@@ -61,10 +63,16 @@ export function readSeedArguments(values) {
   if (!Number.isSafeInteger(waitSeconds) || waitSeconds < 10 || waitSeconds > 3_600) {
     throw new Error('--wait-seconds must be an integer between 10 and 3600')
   }
+  const apiEnvironment = required('api-environment')
+  if (!['sandbox', 'production'].includes(apiEnvironment)) {
+    throw new Error('--api-environment must be sandbox or production')
+  }
   return Object.freeze({
     seedId,
     workspaceId: required('workspace-id'),
     clientId: required('client-id'),
+    credentialId: required('credential-id'),
+    apiEnvironment,
     projectName: required('project-name'),
     sourceFile: resolve(required('source-file')),
     sourceMime,
@@ -92,9 +100,51 @@ export async function seedV2ProjectSource({
 }) {
   const clientRow = await client.v2ApiClient.findFirst({
     where: { id: input.clientId, workspaceId: input.workspaceId, status: 'active' },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      apiKillSwitchEngaged: true,
+      allowedEnvironmentsJson: true,
+      scopeGrantsJson: true,
+      workspace: {
+        select: { apiAccessStatus: true, apiKillSwitchEngaged: true },
+      },
+      credentials: {
+        where: { id: input.credentialId },
+        select: { id: true, status: true, expiresAt: true },
+        take: 1,
+      },
+    },
   })
   if (!clientRow) throw new Error('Active API client was not found in the requested workspace')
+  const credential = clientRow.credentials[0]
+  if (
+    !credential || credential.status !== 'active' ||
+    (credential.expiresAt && credential.expiresAt <= clock())
+  ) {
+    throw new Error('The exact active API credential was not found for the seed actor')
+  }
+  const environments = JSON.parse(clientRow.allowedEnvironmentsJson)
+  const scopes = JSON.parse(clientRow.scopeGrantsJson)
+  if (!environments.includes(input.apiEnvironment) || !scopes.includes('projects:write')) {
+    throw new Error('The seed actor is not authorized to create projects in this environment')
+  }
+  const auditContext = createExternalAuditContext({
+    clientId: clientRow.id,
+    credentialId: credential.id,
+    workspaceId: input.workspaceId,
+    environment: input.apiEnvironment,
+  })
+  const actor = Object.freeze({
+    ...auditContext,
+    scopes: new Set(scopes),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: clientRow.apiKillSwitchEngaged,
+    workspaceKillSwitchEngaged: clientRow.workspace.apiKillSwitchEngaged,
+    clientAccessStatus: clientRow.status,
+    workspaceAccessStatus: clientRow.workspace.apiAccessStatus,
+    auditContext,
+  })
 
   const sourceMetadata = await stat(input.sourceFile)
   if (!sourceMetadata.isFile() || sourceMetadata.size < 1) {
@@ -117,7 +167,7 @@ export async function seedV2ProjectSource({
     format: input.format,
     locale: input.locale,
     ...(input.briefing ? { briefing: input.briefing } : {}),
-    actor: { type: 'api-client', id: input.clientId },
+    actor,
     idempotency: { clientId: input.clientId, key: `seed-project:${input.seedId}` },
   })
 

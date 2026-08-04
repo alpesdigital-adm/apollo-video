@@ -54,6 +54,12 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
   const { createApiClientService } = await import(
     '../../src/v2/application/create-api-client.ts'
   )
+  const { createApiAccessAuditContext } = await import(
+    '../../src/v2/domain/api-access-control.ts'
+  )
+  const { createProjectCreationCommand } = await import(
+    '../../src/v2/domain/project-creation-command.ts'
+  )
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
@@ -380,6 +386,65 @@ test('T-FR-053 duplicates a project copy-on-write through the public API with Po
       crossWorkspaceResponse.status,
       404,
       JSON.stringify(await crossWorkspaceResponse.json()),
+    )
+
+    const creationCommands = await client.v2ProjectCreationCommand.findMany({
+      where: { workspaceId },
+      orderBy: { createdAt: 'asc' },
+    })
+    assert.equal(creationCommands.length, 2)
+    const sourceCommand = creationCommands.find((command) => command.action === 'create')
+    const duplicateCommand = creationCommands.find((command) => command.action === 'duplicate')
+    assert.equal(sourceCommand?.projectId, sourceProject.id)
+    assert.equal(sourceCommand?.sourceProjectId, null)
+    assert.equal(duplicateCommand?.projectId, duplicateProjectId)
+    assert.equal(duplicateCommand?.versionId, duplicateVersionId)
+    assert.equal(duplicateCommand?.sourceProjectId, sourceProject.id)
+    assert.equal(duplicateCommand?.sourceVersionId, sourceVersion.id)
+    assert.equal(duplicateCommand?.actorClientId, issued.client.id)
+    assert.equal(duplicateCommand?.actorCredentialId, issued.credential.id)
+    const expectedAudit = createApiAccessAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      authenticationKind: 'bearer',
+    })
+    const validatedDuplicateCommand = createProjectCreationCommand({
+      id: duplicateCommand.id,
+      workspaceId,
+      action: 'duplicate',
+      projectId: duplicateProjectId,
+      versionId: duplicateVersionId,
+      sourceProjectId: sourceProject.id,
+      sourceVersionId: sourceVersion.id,
+      audit: expectedAudit,
+      requestFingerprint: duplicateCommand.requestFingerprint,
+      createdAt: duplicateCommand.createdAt.toISOString(),
+    })
+    assert.equal(duplicateCommand.actorContextHash, expectedAudit.contextHash)
+    assert.equal(duplicateCommand.commandHash, validatedDuplicateCommand.commandHash)
+
+    await client.v2ProjectCreationCommand.update({
+      where: { id: duplicateCommand.id },
+      data: { actorCredentialId: `tampered-${suffix}` },
+    })
+    const tamperedReplayResponse = await fetch(
+      `${baseUrl}/v1/projects/${sourceProject.id}/duplicates`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': duplicationKey,
+        },
+        body: JSON.stringify(duplicateBody),
+      },
+    )
+    assert.equal(
+      tamperedReplayResponse.status,
+      409,
+      JSON.stringify(await tamperedReplayResponse.json()),
     )
   } finally {
     if (server && server.exitCode === null) {

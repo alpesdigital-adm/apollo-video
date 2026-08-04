@@ -77,6 +77,7 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })

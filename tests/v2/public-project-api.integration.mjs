@@ -243,6 +243,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2ApiAccessCommand.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2ProjectCreationCommand.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })

@@ -64,6 +64,7 @@ const mediaArtifactLifecycleTransitionModel = schema.match(/model V2MediaArtifac
 const mediaDownloadGrantModel = schema.match(/model V2MediaDownloadGrant \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const mediaUploadAuditEntryModel = schema.match(/model V2MediaUploadAuditEntry \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const assetRightsChangeModel = schema.match(/model V2AssetRightsChange \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const projectCreationCommandModel = schema.match(/model V2ProjectCreationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -127,6 +128,29 @@ assert.doesNotMatch(
   committed,
   /(?:UPDATE|INSERT INTO) "asset_rights_changes"[\s\S]*asset_rights_snapshots/,
   'pre-contract asset rights authorship must never be fabricated by backfill',
+)
+for (const field of [
+  'workspaceId', 'action', 'projectId', 'versionId', 'sourceProjectId',
+  'sourceVersionId', 'actorClientId', 'actorCredentialId', 'actorEnvironment',
+  'actorAuthenticationKind', 'actorContextHash', 'actorDelegatedUserId',
+  'actorDelegatedIdentityId', 'actorWorkspaceRole', 'requestFingerprint',
+  'commandHash', 'createdAt',
+]) {
+  assert.match(
+    projectCreationCommandModel,
+    new RegExp(`\\b${field}\\b`),
+    `ProjectCreationCommand must persist ${field}`,
+  )
+}
+assert.match(
+  committed,
+  /CREATE TABLE "project_creation_commands"[\s\S]*project_creation_commands_action_check[\s\S]*project_creation_commands_actor_check[\s\S]*project_creation_commands_hash_check/,
+  'project creation and duplication must use one constrained immutable actor ledger',
+)
+assert.doesNotMatch(
+  committed,
+  /(?:UPDATE|INSERT INTO) "project_creation_commands"[\s\S]*projects/,
+  'pre-contract project creation authorship must never be fabricated by backfill',
 )
 for (const field of [
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
@@ -257,6 +281,9 @@ const requiredChecks = [
   'asset_rights_changes_sequence_check',
   'asset_rights_changes_hashes_check',
   'asset_rights_changes_actor_check',
+  'project_creation_commands_action_check',
+  'project_creation_commands_actor_check',
+  'project_creation_commands_hash_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

@@ -5,12 +5,22 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 test('Prisma adapter atomically creates and replays a v2 project', async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
+  const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext } = await import(
+    '../../src/v2/application/authenticate-api-client.ts'
+  )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const { PrismaProjectCreationRepository } = await import(
     '../../src/v2/infrastructure/prisma/project-creation-repository.ts'
   )
+  const { PrismaApiClientRepository } = await import(
+    '../../src/v2/infrastructure/prisma/api-client-repository.ts'
+  )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+  )
+  const { nodeApiCredentialCrypto } = await import(
+    '../../src/v2/infrastructure/security/api-credential.ts'
   )
 
   const client = new PrismaClient()
@@ -21,7 +31,9 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
   try {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
 
     const workspaceRepository = new PrismaWorkspaceRepository(client)
@@ -34,6 +46,34 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
         createdAt: '2026-07-12T14:00:00.000Z',
       }),
     )
+    const issued = await createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => testNow,
+    })({
+      id: clientId,
+      credentialId: 'integration-credential-v2',
+      workspaceId,
+      name: 'Project repository integration client',
+      environment: 'sandbox',
+      scopes: ['projects:write'],
+    })
+    const auditContext = createExternalAuditContext({
+      clientId,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'sandbox',
+    })
+    const actor = Object.freeze({
+      ...auditContext,
+      scopes: new Set(['projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
 
     const counters = new Map()
     const createEntityId = (kind) => {
@@ -58,7 +98,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
       objective: 'discovery',
       format: '9:16',
       briefing: 'Público: gestores. Oferta: conteúdo. Tom: direto.',
-      actor: { type: 'api-client', id: clientId },
+      actor,
       idempotency: { clientId, key: 'integration-create-project' },
     }
 
@@ -72,6 +112,15 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 3)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 1)
+    const firstAuditCommand = await client.v2ProjectCreationCommand.findUnique({
+      where: { projectId_workspaceId: { projectId: first.project.id, workspaceId } },
+    })
+    assert.equal(firstAuditCommand?.action, 'create')
+    assert.equal(firstAuditCommand?.actorClientId, clientId)
+    assert.equal(firstAuditCommand?.actorCredentialId, issued.credential.id)
+    assert.equal(firstAuditCommand?.actorContextHash, auditContext.contextHash)
+    assert.equal(firstAuditCommand?.projectId, first.project.id)
+    assert.equal(firstAuditCommand?.versionId, first.version.id)
     const outbox = await client.v2PublicEventOutbox.findMany({
       where: { workspaceId },
       orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
@@ -164,6 +213,7 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId } }), 12)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 4)
     assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2ProjectCreationCommand.count({ where: { workspaceId } }), 4)
 
     let collisionEventCall = 0
     const createProjectWithCollision = createProjectService({
@@ -190,10 +240,22 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(await client.v2Project.count({ where: { workspaceId } }), 4)
     assert.equal(await client.v2IdempotencyRecord.count({ where: { workspaceId } }), 4)
     assert.equal(await client.v2PublicEventOutbox.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2ProjectCreationCommand.count({ where: { workspaceId } }), 4)
+
+    await client.v2ProjectCreationCommand.update({
+      where: { id: firstAuditCommand.id },
+      data: { actorCredentialId: 'integration-credential-tampered' },
+    })
+    await assert.rejects(
+      () => createProject(request),
+      (error) => error?.code === 'PERSISTENCE_CONFLICT',
+    )
   } finally {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
+    await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
     await client.$disconnect()
   }

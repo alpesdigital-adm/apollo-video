@@ -1,5 +1,7 @@
 import type { Project } from '../../domain/project.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { ProjectCreationCommand } from '../../domain/project-creation-command.ts'
 
 export interface ProjectDuplicationSource {
   project: Readonly<Project>
@@ -24,6 +26,7 @@ export interface ProjectDuplicationBundle {
     originalFileName: string
     createdAt: string
   }>[]
+  auditCommand: Readonly<ProjectCreationCommand>
   idempotency: Readonly<{
     id: string
     workspaceId: string
@@ -48,6 +51,7 @@ export interface ProjectDuplicationRepository {
     clientId: string
     key: string
     requestFingerprint: string
+    audit: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<ProjectDuplicationResult> | null>
   readSource(input: {
     workspaceId: string
