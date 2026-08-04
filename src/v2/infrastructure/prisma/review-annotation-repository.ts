@@ -12,6 +12,10 @@ import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { REVIEW_SCOPE_KINDS, type ReviewScope } from '../../domain/review-system.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
 
 function parseObject(value: string, field: string): Record<string, unknown> {
   try {
@@ -21,6 +25,11 @@ function parseObject(value: string, field: string): Record<string, unknown> {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function isPrismaCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null &&
+    'code' in error && error.code === code
 }
 
 function parseStringArray(value: string, field: string): string[] {
@@ -52,6 +61,29 @@ function parseReviewScope(value: string): Readonly<ReviewScope> {
 }
 
 function toAnnotation(row: V2ReviewAnnotation): Readonly<PersistedReviewAnnotation> {
+  const authenticationAudit = hydrateExternalActorAudit(
+    row,
+    row.actorClientId ?? '',
+  )
+  const expectedAuthor = authenticationAudit.delegatedUserId
+    ? {
+        id: authenticationAudit.delegatedUserId,
+        name: authenticationAudit.delegatedUserId,
+        type: 'user' as const,
+      }
+    : {
+        id: authenticationAudit.clientId,
+        name: authenticationAudit.clientId,
+        type: 'api-client' as const,
+      }
+  if (
+    row.authorId !== expectedAuthor.id ||
+    row.authorName !== expectedAuthor.name ||
+    row.authorType !== expectedAuthor.type
+  ) throw new DomainError(
+    'PERSISTENCE_CONFLICT',
+    'Stored review annotation author does not match its authentication audit',
+  )
   const region = row.scope === 'region'
     ? {
         x: row.regionX as number,
@@ -79,6 +111,7 @@ function toAnnotation(row: V2ReviewAnnotation): Readonly<PersistedReviewAnnotati
       name: row.authorName,
       type: row.authorType as 'user' | 'api-client',
     }),
+    authenticationAudit,
     status: row.status as PersistedReviewAnnotation['status'],
     createdAt: row.createdAt.toISOString(),
   })
@@ -256,11 +289,19 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     return Object.freeze(rows.map(toAnnotation))
   }
 
-  async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
+  async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2ReviewAnnotation.findFirst({
       where: { workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey },
     })
-    return row ? Object.freeze({ requestFingerprint: row.requestFingerprint, annotation: toAnnotation(row) }) : null
+    if (!row) return null
+    const annotation = toAnnotation(row)
+    if (
+      annotation.authenticationAudit.contextHash !== input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Review annotation idempotency key belongs to another authentication context',
+    )
+    return Object.freeze({ requestFingerprint: row.requestFingerprint, annotation })
   }
 
   async create(input: {
@@ -270,13 +311,22 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
     idempotencyKey: string
     requestFingerprint: string
   }) {
-    return this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
+    try {
+      return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
       const existing = await transaction.v2ReviewAnnotation.findFirst({
         where: { workspaceId: input.workspaceId, projectId: input.projectId, idempotencyKey: input.idempotencyKey },
       })
       if (existing) {
         if (existing.requestFingerprint !== input.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Annotation idempotency payload changed')
-        return toAnnotation(existing)
+        const annotation = toAnnotation(existing)
+        if (
+          annotation.authenticationAudit.contextHash !==
+            input.annotation.authenticationAudit.contextHash
+        ) throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Review annotation replay belongs to another authentication context',
+        )
+        return annotation
       }
       const project = await transaction.v2Project.findFirst({
         where: { id: input.projectId, workspaceId: input.workspaceId },
@@ -327,6 +377,12 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
           authorType: input.annotation.author.type,
           authorId: input.annotation.author.id,
           authorName: input.annotation.author.name,
+          actorClientId: input.annotation.authenticationAudit.clientId,
+          ...externalActorAuditData(
+            input.annotation.authenticationAudit,
+            input.workspaceId,
+            input.annotation.authenticationAudit.clientId,
+          ),
           status: input.annotation.status,
           idempotencyKey: input.idempotencyKey,
           requestFingerprint: input.requestFingerprint,
@@ -354,6 +410,28 @@ export class PrismaReviewAnnotationRepository implements ReviewAnnotationReposit
         },
       })])
       return toAnnotation(row)
-    }, { isolationLevel: 'Serializable' })
+      }, { isolationLevel: 'Serializable' })
+    } catch (error) {
+      if (!isPrismaCode(error, 'P2002')) {
+        throw error
+      }
+      const replay = await this.findIdempotent({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        idempotencyKey: input.idempotencyKey,
+        actorContextHash: input.annotation.authenticationAudit.contextHash,
+      })
+      if (!replay) throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Concurrent review annotation did not publish an idempotent winner',
+      )
+      if (replay.requestFingerprint !== input.requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Concurrent review annotation changed its idempotency payload',
+        )
+      }
+      return replay.annotation
+    }
   }
 }

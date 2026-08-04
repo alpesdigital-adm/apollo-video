@@ -79,10 +79,18 @@ export function proposeReviewPatchBatchService(dependencies: {
     projectId: string
     proposalIds: readonly string[]
     mode?: ReviewPatchBatchMode
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }): Promise<Readonly<{ batch: ReviewPatchBatch; replayed: boolean }>> {
     const workspaceId = validateIdentity(request.workspaceId, 'workspaceId')
     const projectId = validateIdentity(request.projectId, 'projectId')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Review patch batch actor belongs to another workspace',
+    )
     const proposalIds = validateProposalIds(request.proposalIds)
     const mode = request.mode ?? 'all-or-nothing'
     assertDomain(mode === 'all-or-nothing' || mode === 'partial-retry', 'INVALID_ARGUMENT', 'Batch review mode is invalid')
@@ -114,8 +122,14 @@ export function proposeReviewPatchBatchService(dependencies: {
       })),
       currentVersionId: context.currentVersion.id,
       editPlanHash: context.editPlanHash,
+      actorContextHash: authenticationAudit.contextHash,
     })
-    const existing = await dependencies.repository.findBatchIdempotent({ workspaceId, projectId, idempotencyKey })
+    const existing = await dependencies.repository.findBatchIdempotent({
+      workspaceId,
+      projectId,
+      idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
+    })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different batch review request')
       return Object.freeze({ batch: existing.batch, replayed: true })
@@ -161,6 +175,7 @@ export function proposeReviewPatchBatchService(dependencies: {
       })),
       createdAt,
       updatedAt: createdAt,
+      authenticationAudit,
     })
     return Object.freeze({
       batch: await dependencies.repository.createBatch({ batch, idempotencyKey, requestFingerprint }),

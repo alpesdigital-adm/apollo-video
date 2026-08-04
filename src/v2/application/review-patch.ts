@@ -72,7 +72,7 @@ function resolvePolicy(policies: Readonly<Record<string, unknown>>) {
   })
 }
 
-function proposalFingerprint(input: { workspaceId: string; projectId: string; annotationId: string; selectedChoiceId?: string; contextHash: string }) {
+function proposalFingerprint(input: { workspaceId: string; projectId: string; annotationId: string; selectedChoiceId?: string; contextHash: string; actorContextHash: string }) {
   return calculateVersionHash({
     type: 'review-patch-proposal',
     interpreterVersion: INTERPRETER_VERSION,
@@ -90,11 +90,19 @@ export function proposeReviewPatchService(dependencies: {
     projectId: string
     annotationId: string
     selectedChoiceId?: string
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }): Promise<Readonly<{ proposal: ReviewPatchProposal; replayed: boolean }>> {
     const workspaceId = validateIdentity(request.workspaceId, 'workspaceId')
     const projectId = validateIdentity(request.projectId, 'projectId')
     const annotationId = validateIdentity(request.annotationId, 'annotationId')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Review patch proposal actor belongs to another workspace',
+    )
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length >= 8 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is invalid')
     const context = await dependencies.repository.readProposalContext({ workspaceId, projectId, annotationId })
@@ -111,8 +119,13 @@ export function proposeReviewPatchService(dependencies: {
       policies: context.policies,
       availableAssetIds: context.availableAssetIds,
     })
-    const requestFingerprint = proposalFingerprint({ workspaceId, projectId, annotationId, ...(request.selectedChoiceId ? { selectedChoiceId: request.selectedChoiceId } : {}), contextHash })
-    const existing = await dependencies.repository.findProposalIdempotent({ workspaceId, projectId, idempotencyKey })
+    const requestFingerprint = proposalFingerprint({ workspaceId, projectId, annotationId, ...(request.selectedChoiceId ? { selectedChoiceId: request.selectedChoiceId } : {}), contextHash, actorContextHash: authenticationAudit.contextHash })
+    const existing = await dependencies.repository.findProposalIdempotent({
+      workspaceId,
+      projectId,
+      idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
+    })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different patch proposal request')
       return Object.freeze({ proposal: existing.proposal, replayed: true })
@@ -150,6 +163,7 @@ export function proposeReviewPatchService(dependencies: {
       gates: result.gates,
       createdAt,
       updatedAt: createdAt,
+      authenticationAudit,
     })
     return Object.freeze({
       proposal: await dependencies.repository.createProposal({ proposal, idempotencyKey, requestFingerprint }),

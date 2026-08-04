@@ -43,6 +43,7 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
   skip: process.env.APOLLO_REVIEW_PATCH_E2E !== '1' && 'set APOLLO_REVIEW_PATCH_E2E=1 and use an isolated V2 database',
 }, async () => {
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createProjectProxyRenderWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
@@ -109,6 +110,17 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     const policiesId = `patch-e2e-policies-${suffix}`
     await client.v2Workspace.create({ data: { id: workspaceId, slug: workspaceId, name: 'Patch E2E Workspace', status: 'active', createdAt: new Date(createdAt), updatedAt: new Date(createdAt) } })
     const issued = await createApiClientService({ repository: new PrismaApiClientRepository(client), credentialCrypto: nodeApiCredentialCrypto, clock: () => new Date(createdAt) })({ id: `patch-e2e-client-${suffix}`, workspaceId, name: 'Patch E2E Client', environment: 'production', scopes: ['projects:read', 'projects:write'] })
+    const seedAuditContext = createExternalAuditContext({ clientId: issued.client.id, credentialId: issued.credential.id, workspaceId, environment: 'production' })
+    const seedAuthenticationAudit = materializeActorAuditContext(Object.freeze({
+      ...seedAuditContext,
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext: seedAuditContext,
+    }))
     await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'Patch E2E Project', status: 'reviewing-proxy', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: issued.client.id, createdAt: new Date(createdAt), updatedAt: new Date(createdAt) } })
     for (const [id, kind, content] of [[briefId, 'brief', brief], [editPlanId, 'edit-plan', editPlan], [policiesId, 'policies', policies]]) {
       await client.v2ProjectSnapshot.create({ data: { id, workspaceId, projectId, kind, schemaVersion: kind === 'edit-plan' ? 2 : 1, contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: new Date(createdAt) } })
@@ -122,7 +134,7 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
       { id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'editing-proxy', originalFileName: 'master.mp4', createdAt: new Date(createdAt) },
     ] })
     const seedOperationId = `patch-e2e-seed-operation-${suffix}`
-    await client.v2PublicOperation.create({ data: { id: seedOperationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render', status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: sourceArtifactId, cancelable: false, retryable: false, attempt: 1, resultJson: JSON.stringify({ artifactId: sourceArtifactId }), idempotencyKey: `patch-e2e-seed-${suffix}`, requestFingerprint: sha('seed-request'), createdAt: new Date(createdAt), updatedAt: new Date(createdAt), startedAt: new Date(createdAt), completedAt: new Date(createdAt) } })
+    await client.v2PublicOperation.create({ data: { id: seedOperationId, workspaceId, projectId, clientId: issued.client.id, actorClientId: seedAuthenticationAudit.clientId, actorCredentialId: seedAuthenticationAudit.credentialId, actorEnvironment: seedAuthenticationAudit.environment, actorAuthenticationKind: seedAuthenticationAudit.authenticationKind, actorContextHash: seedAuthenticationAudit.contextHash, type: 'project-proxy-render', status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: sourceArtifactId, cancelable: false, retryable: false, attempt: 1, resultJson: JSON.stringify({ artifactId: sourceArtifactId }), idempotencyKey: `patch-e2e-seed-${suffix}`, requestFingerprint: sha('seed-request'), createdAt: new Date(createdAt), updatedAt: new Date(createdAt), startedAt: new Date(createdAt), completedAt: new Date(createdAt) } })
     await client.v2ProjectProxyRenderOperation.create({ data: { operationId: seedOperationId, workspaceId, projectId, projectVersionId: versionId, editPlanSnapshotId: editPlanId, sourceArtifactId, sourceManifestId: manifestId, inputHash: sha('seed-input'), outputArtifactId: sourceArtifactId, outputManifestId: manifestId, originalFileName: 'master.mp4', createdAt: new Date(createdAt) } })
     const map = buildRenderElementMap({ proxyHash: sourceHash, fps: 30, durationFrames: 150, canvas: { width: 540, height: 960 }, source: { width: 640, height: 360 }, clips: editPlan.videoTracks[0].clips, subtitleCues: editPlan.subtitleTracks[0].cues, composition: editPlan.composition })
     await new PrismaRenderElementMapRepository(client).persistOrReplay({ workspaceId, projectId, projectVersionId: versionId, proxyArtifactId: sourceArtifactId, map, createdAt })
@@ -157,6 +169,13 @@ test('T-FR-214 public review patch E2E persists valid, ambiguous, prohibited and
     const ambiguous = await propose(ambiguousAnnotation.id, `patch-ambiguous-proposal-${suffix}`)
     const prohibited = await propose(prohibitedAnnotation.id, `patch-prohibited-proposal-${suffix}`)
     assert.equal(ready.status, 'ready')
+    assert.equal('authenticationAudit' in ready, false)
+    const storedReadyProposal = await client.v2ReviewPatchProposal.findUniqueOrThrow({
+      where: { id: ready.id },
+    })
+    assert.equal(storedReadyProposal.actorClientId, issued.client.id)
+    assert.equal(storedReadyProposal.actorCredentialId, issued.credential.id)
+    assert.match(storedReadyProposal.actorContextHash, /^[a-f0-9]{64}$/)
     assert.equal(ambiguous.status, 'ambiguous')
     assert.equal(ambiguous.choices.length, 2)
     assert.equal(prohibited.status, 'prohibited')

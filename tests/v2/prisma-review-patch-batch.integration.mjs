@@ -33,7 +33,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   const { proposeReviewPatchBatchService, applyReviewPatchBatchService } = await import('../../src/v2/application/review-patch-batch.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
-  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaReviewPatchBatchRepository } = await import('../../src/v2/infrastructure/prisma/review-patch-batch-repository.ts')
@@ -69,6 +69,17 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   }
 
   const seedAnnotationAndProposal = async ({ versionId, targetId, text, operationText }) => {
+    const audit = materializeActorAuditContext(authenticatedActor)
+    const actorAuditData = {
+      actorClientId: audit.clientId,
+      actorCredentialId: audit.credentialId,
+      actorEnvironment: audit.environment,
+      actorAuthenticationKind: audit.authenticationKind,
+      actorContextHash: audit.contextHash,
+      delegatedUserId: audit.delegatedUserId ?? null,
+      delegatedIdentityId: audit.delegatedIdentityId ?? null,
+      workspaceRole: audit.workspaceRole ?? null,
+    }
     const annotationId = randomUUID()
     const proposalId = randomUUID()
     const frame = targetId.endsWith('2') ? 60 : 30
@@ -93,7 +104,8 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       frame, timeStartMs: frame * 33, timeEndMs: frame * 33, scope: 'point',
       targetIdsJson: stableSerialize([targetId]), applicationScopeJson: stableSerialize({ kind: 'scene', targetIds: ['scene:clip-1'], formatIds: ['9:16'], localeIds: ['pt-BR'], recipeIds: ['project-proxy-render'], global: false }),
       affectedCount: 1, screenshotRef: 'data:image/jpeg;base64,/9j/2Q==', text,
-      authorType: 'api-client', authorId: 'batch-test-client', authorName: 'Batch Test', status: 'open',
+      authorType: 'api-client', authorId: audit.clientId, authorName: audit.clientId, status: 'open',
+      ...actorAuditData,
       idempotencyKey: `annotation-${annotationId}`, requestFingerprint: calculateVersionHash({ annotationId }), createdAt, updatedAt: createdAt,
     } })
     await client.v2ReviewPatchProposal.create({ data: {
@@ -106,6 +118,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
         { gate: 'policy', passed: true, message: 'allowed', targetIds: [targetId] },
         { gate: 'budget', passed: true, message: 'allowed', targetIds: [targetId] },
       ]),
+      ...actorAuditData,
       idempotencyKey: `proposal-${proposalId}`, requestFingerprint: calculateVersionHash({ proposalId }), createdAt, updatedAt: createdAt,
     } })
     return { annotationId, proposalId }
@@ -115,7 +128,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     repository,
     clock: () => createdAt,
     createId: (kind) => kind === 'patch' ? `patch-${randomUUID()}` : randomUUID(),
-  })({ workspaceId, projectId, proposalIds, mode, idempotencyKey: key })
+  })({ workspaceId, projectId, proposalIds, mode, actor: authenticatedActor, idempotencyKey: key })
 
   const applyBatch = (batchId, key, selectedRepository = repository) => applyReviewPatchBatchService({
     repository: selectedRepository,
@@ -198,8 +211,14 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       { id: randomUUID(), workspaceId, projectId, artifactId, role: 'editing-proxy', originalFileName: 'batch.mp4', createdAt },
     ] })
     const seedOperationId = `batch-review-seed-operation-${suffix}`
+    const seedAuthenticationAudit = materializeActorAuditContext(authenticatedActor)
     await client.v2PublicOperation.create({ data: {
       id: seedOperationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render',
+      actorClientId: seedAuthenticationAudit.clientId,
+      actorCredentialId: seedAuthenticationAudit.credentialId,
+      actorEnvironment: seedAuthenticationAudit.environment,
+      actorAuthenticationKind: seedAuthenticationAudit.authenticationKind,
+      actorContextHash: seedAuthenticationAudit.contextHash,
       status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
       cancelable: false, retryable: false, attempt: 1, resultJson: stableSerialize({ artifactId }),
       idempotencyKey: `batch-review-seed-${suffix}`, requestFingerprint: calculateVersionHash({ seedOperationId }),
@@ -217,6 +236,13 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     const second = await seedAnnotationAndProposal({ versionId: initialVersionId, targetId: 'subtitle:cue-2', text: 'Trocar segunda legenda.', operationText: 'Segunda corrigida' })
     const ready = await proposeBatch([first.proposalId, second.proposalId], 'all-or-nothing', `batch-ready-${suffix}`)
     assert.equal(ready.batch.status, 'ready')
+    assert.equal(ready.batch.authenticationAudit.credentialId, authenticatedActor.credentialId)
+    const storedReadyBatch = await client.v2ReviewPatchBatch.findUniqueOrThrow({
+      where: { id: ready.batch.id },
+    })
+    assert.equal(storedReadyBatch.actorClientId, authenticatedActor.clientId)
+    assert.equal(storedReadyBatch.actorCredentialId, authenticatedActor.credentialId)
+    assert.match(storedReadyBatch.actorContextHash, /^[a-f0-9]{64}$/)
     assert.equal(ready.batch.patch.operations.length, 2)
     const applied = await applyBatch(ready.batch.id, `batch-ready-apply-${suffix}`)
     assert.equal(applied.version.sequence, 2)

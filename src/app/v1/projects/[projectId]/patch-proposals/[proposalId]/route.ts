@@ -6,6 +6,7 @@ import { createReviewPatchRepository } from '@/v2/infrastructure/repository-fact
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentReviewPatchProposal } from '@/v2/public-api/collaborative-review-presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     requireScope(actor, 'projects:read')
     const { projectId, proposalId } = await context.params
     const proposal = await readReviewPatchService({ repository: createReviewPatchRepository() })({ workspaceId: actor.workspaceId, projectId, proposalId })
-    return NextResponse.json(presentSuccess({ proposal }), { headers: publicApiHeaders(requestId) })
+    return NextResponse.json(presentSuccess({ proposal: presentReviewPatchProposal(proposal) }), { headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
   }

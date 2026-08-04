@@ -28,6 +28,10 @@ import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
 } from './edit-command-actor-audit.ts'
+import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -56,11 +60,24 @@ export function hydrateInvalidation(item: Prisma.V2CommandArtifactInvalidationGe
 }
 
 export function hydrateReviewAnnotation(row: {
-  id: string; projectVersionId: string; proxyArtifactId: string; proxyHash: string; frame: number; timeStartMs: number; timeEndMs: number
+  id: string; workspaceId: string; projectVersionId: string; proxyArtifactId: string; proxyHash: string; frame: number; timeStartMs: number; timeEndMs: number
   screenshotRef: string; scope: string; regionX: number | null; regionY: number | null; regionWidth: number | null; regionHeight: number | null
   targetIdsJson: string; applicationScopeJson: string; affectedCount: number; text: string; authorId: string; authorName: string; authorType: string
-  status: string; createdAt: Date
+  status: string; createdAt: Date; actorClientId: string | null; actorCredentialId: string | null; actorEnvironment: string | null
+  actorAuthenticationKind: string | null; actorContextHash: string | null; delegatedUserId: string | null
+  delegatedIdentityId: string | null; workspaceRole: string | null
 }): Readonly<ReviewAnnotation> {
+  const audit = hydrateExternalActorAudit(row, row.actorClientId ?? '')
+  const expectedAuthor = audit.delegatedUserId
+    ? { id: audit.delegatedUserId, name: audit.delegatedUserId, type: 'user' }
+    : { id: audit.clientId, name: audit.clientId, type: 'api-client' }
+  if (
+    row.authorId !== expectedAuthor.id || row.authorName !== expectedAuthor.name ||
+    row.authorType !== expectedAuthor.type
+  ) throw new DomainError(
+    'PERSISTENCE_CONFLICT',
+    'Stored review annotation author does not match its authentication audit',
+  )
   return createReviewAnnotation({
     id: row.id,
     projectVersionId: row.projectVersionId,
@@ -110,6 +127,10 @@ type ProposalRow = Prisma.V2ReviewPatchProposalGetPayload<{ include: { renderOpe
 
 export function hydrateReviewPatchProposal(row: ProposalRow): Readonly<ReviewPatchProposal> {
   const operation = row.renderOperation
+  const authenticationAudit = hydrateExternalActorAudit(
+    row,
+    row.actorClientId ?? '',
+  )
   return Object.freeze({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -129,6 +150,7 @@ export function hydrateReviewPatchProposal(row: ProposalRow): Readonly<ReviewPat
     ...(operation ? { render: Object.freeze({ operationId: operation.id, status: operation.status, phase: operation.phase, ...(operation.errorCode || operation.errorMessage ? { error: { code: operation.errorCode ?? 'RENDER_FAILED', message: operation.errorMessage ?? 'Patch render failed' } } : {}) }) } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    authenticationAudit,
   } as ReviewPatchProposal)
 }
 
@@ -152,12 +174,26 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     })
   }
 
-  async findProposalIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
+  async findProposalIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2ReviewPatchProposal.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: {
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       include: { renderOperation: true },
     })
-    return row ? Object.freeze({ requestFingerprint: row.requestFingerprint, proposal: hydrateReviewPatchProposal(row) }) : null
+    if (!row) return null
+    const proposal = hydrateReviewPatchProposal(row)
+    if (
+      proposal.authenticationAudit.contextHash !== input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Review patch proposal idempotency key belongs to another authentication context',
+    )
+    return Object.freeze({ requestFingerprint: row.requestFingerprint, proposal })
   }
 
   private async contextForAnnotation(input: { workspaceId: string; projectId: string; annotationId: string }): Promise<Readonly<ReviewPatchProposalContext> | null> {
@@ -237,8 +273,9 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
   }
 
   async createProposal(input: { proposal: ReviewPatchProposal; idempotencyKey: string; requestFingerprint: string }) {
-    const row = await this.client.v2ReviewPatchProposal.create({
-      data: {
+    try {
+      const row = await this.client.v2ReviewPatchProposal.create({
+        data: {
         id: input.proposal.id,
         workspaceId: input.proposal.workspaceId,
         projectId: input.proposal.projectId,
@@ -252,12 +289,38 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
         gatesJson: stableSerialize(input.proposal.gates),
         idempotencyKey: input.idempotencyKey,
         requestFingerprint: input.requestFingerprint,
+        actorClientId: input.proposal.authenticationAudit.clientId,
+        ...externalActorAuditData(
+          input.proposal.authenticationAudit,
+          input.proposal.workspaceId,
+          input.proposal.authenticationAudit.clientId,
+        ),
         createdAt: new Date(input.proposal.createdAt),
         updatedAt: new Date(input.proposal.updatedAt),
-      },
-      include: { renderOperation: true },
-    })
-    return hydrateReviewPatchProposal(row)
+        },
+        include: { renderOperation: true },
+      })
+      return hydrateReviewPatchProposal(row)
+    } catch (error) {
+      if (!isPrismaCode(error, 'P2002')) throw error
+      const replay = await this.findProposalIdempotent({
+        workspaceId: input.proposal.workspaceId,
+        projectId: input.proposal.projectId,
+        idempotencyKey: input.idempotencyKey,
+        actorContextHash: input.proposal.authenticationAudit.contextHash,
+      })
+      if (!replay) throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Concurrent review patch proposal did not publish an idempotent winner',
+      )
+      if (replay.requestFingerprint !== input.requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Concurrent review patch proposal changed its idempotency payload',
+        )
+      }
+      return replay.proposal
+    }
   }
 
   async readProposal(input: { workspaceId: string; projectId: string; proposalId: string }) {

@@ -14,6 +14,7 @@ import {
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { presentReviewPatchBatch } from '@/v2/public-api/collaborative-review-presenters'
 import { presentProjectVersionV2, presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       renderOperationId: render.operation.id,
     })
     return NextResponse.json(presentSuccess({
-      batch,
+      batch: presentReviewPatchBatch(batch),
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
       version: presentProjectVersionV2(
         { id: result.version.id, sequence: result.version.sequence, parentVersionId: result.version.parentVersionId, baseHash: result.version.baseHash, snapshotRefs: result.version.snapshotRefs, createdAt: result.version.createdAt },

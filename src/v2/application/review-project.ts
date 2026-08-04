@@ -12,6 +12,11 @@ import {
   type ReviewScope,
   type ReviewScopeKind,
 } from '../domain/review-system.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const SCREENSHOT_PATTERN = /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/]+=*$/
 
@@ -94,12 +99,30 @@ export function createProjectReviewAnnotationService(dependencies: {
     confirmedGlobal?: boolean
     screenshotRef: string
     text: string
-    author: { id: string; name: string; type: 'user' | 'api-client' }
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = input.workspaceId.trim()
     const projectId = input.projectId.trim()
     const idempotencyKey = input.idempotencyKey.trim()
+    requireScope(input.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(input.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Review annotation actor belongs to another workspace',
+    )
+    const author = Object.freeze(authenticationAudit.delegatedUserId
+      ? {
+          id: authenticationAudit.delegatedUserId,
+          name: authenticationAudit.delegatedUserId,
+          type: 'user' as const,
+        }
+      : {
+          id: authenticationAudit.clientId,
+          name: authenticationAudit.clientId,
+          type: 'api-client' as const,
+        })
     assertDomain(
       /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(workspaceId) &&
         /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(projectId) &&
@@ -212,9 +235,15 @@ export function createProjectReviewAnnotationService(dependencies: {
       affectedCount: resolvedScope.affectedCount,
       screenshotHash: calculateVersionHash(input.screenshotRef),
       text: input.text.trim(),
-      author: input.author,
+      author,
+      actorContextHash: authenticationAudit.contextHash,
     })
-    const existing = await dependencies.repository.findIdempotent({ workspaceId, projectId, idempotencyKey })
+    const existing = await dependencies.repository.findIdempotent({
+      workspaceId,
+      projectId,
+      idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
+    })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
         throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different annotation input')
@@ -222,23 +251,26 @@ export function createProjectReviewAnnotationService(dependencies: {
       return Object.freeze({ annotation: existing.annotation, replayed: true })
     }
     const createdAt = dependencies.clock().toISOString()
-    const annotation = createReviewAnnotation({
-      id: dependencies.createId(),
-      projectVersionId: input.projectVersionId,
-      proxyArtifactId: input.proxyArtifactId,
-      proxyHash: input.proxyHash,
-      frame: input.frame,
-      timeRangeMs: input.timeRangeMs,
-      screenshotRef: input.screenshotRef,
-      scope: input.scope,
-      ...(input.region ? { region: input.region } : {}),
-      targetIds: input.targetIds,
-      applicationScope: resolvedScope.scope,
-      affectedCount: resolvedScope.affectedCount,
-      text: input.text,
-      author: input.author,
-      status: 'open',
-      createdAt,
+    const annotation = Object.freeze({
+      ...createReviewAnnotation({
+        id: dependencies.createId(),
+        projectVersionId: input.projectVersionId,
+        proxyArtifactId: input.proxyArtifactId,
+        proxyHash: input.proxyHash,
+        frame: input.frame,
+        timeRangeMs: input.timeRangeMs,
+        screenshotRef: input.screenshotRef,
+        scope: input.scope,
+        ...(input.region ? { region: input.region } : {}),
+        targetIds: input.targetIds,
+        applicationScope: resolvedScope.scope,
+        affectedCount: resolvedScope.affectedCount,
+        text: input.text,
+        author,
+        status: 'open',
+        createdAt,
+      }),
+      authenticationAudit,
     }) as PersistedReviewAnnotation
     const persisted = await dependencies.repository.create({
       workspaceId,

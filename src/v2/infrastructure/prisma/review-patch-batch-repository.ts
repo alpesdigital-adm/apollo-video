@@ -32,6 +32,10 @@ import {
   editCommandExternalActorAuditData,
   hydrateEditCommandExternalActorAudit,
 } from './edit-command-actor-audit.ts'
+import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -59,6 +63,10 @@ function hydrateBatchItem(row: BatchRow['items'][number]): Readonly<ReviewPatchB
 
 function hydrateBatch(row: BatchRow): Readonly<ReviewPatchBatch> {
   const operation = row.renderOperation
+  const authenticationAudit = hydrateExternalActorAudit(
+    row,
+    row.actorClientId ?? '',
+  )
   return Object.freeze({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -84,6 +92,7 @@ function hydrateBatch(row: BatchRow): Readonly<ReviewPatchBatch> {
     } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    authenticationAudit,
   } as ReviewPatchBatch)
 }
 
@@ -107,12 +116,26 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     })
   }
 
-  async findBatchIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
+  async findBatchIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2ReviewPatchBatch.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: {
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       include: { items: true, renderOperation: true },
     })
-    return row ? Object.freeze({ requestFingerprint: row.requestFingerprint, batch: hydrateBatch(row) }) : null
+    if (!row) return null
+    const batch = hydrateBatch(row)
+    if (
+      batch.authenticationAudit.contextHash !== input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Review patch batch idempotency key belongs to another authentication context',
+    )
+    return Object.freeze({ requestFingerprint: row.requestFingerprint, batch })
   }
 
   async readProposalSet(input: { workspaceId: string; projectId: string; proposalIds: readonly string[] }): Promise<Readonly<ReviewPatchBatchProposalContext> | null> {
@@ -194,8 +217,9 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
   }
 
   async createBatch(input: { batch: ReviewPatchBatch; idempotencyKey: string; requestFingerprint: string }) {
-    const row = await this.client.v2ReviewPatchBatch.create({
-      data: {
+    try {
+      const row = await this.client.v2ReviewPatchBatch.create({
+        data: {
         id: input.batch.id,
         workspaceId: input.batch.workspaceId,
         projectId: input.batch.projectId,
@@ -207,6 +231,12 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
         conflictsJson: stableSerialize(input.batch.conflicts),
         idempotencyKey: input.idempotencyKey,
         requestFingerprint: input.requestFingerprint,
+        actorClientId: input.batch.authenticationAudit.clientId,
+        ...externalActorAuditData(
+          input.batch.authenticationAudit,
+          input.batch.workspaceId,
+          input.batch.authenticationAudit.clientId,
+        ),
         createdAt: new Date(input.batch.createdAt),
         updatedAt: new Date(input.batch.updatedAt),
         items: {
@@ -222,10 +252,30 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
             updatedAt: new Date(item.updatedAt),
           })),
         },
-      },
-      include: { items: true, renderOperation: true },
-    })
-    return hydrateBatch(row)
+        },
+        include: { items: true, renderOperation: true },
+      })
+      return hydrateBatch(row)
+    } catch (error) {
+      if (!isPrismaCode(error, 'P2002')) throw error
+      const replay = await this.findBatchIdempotent({
+        workspaceId: input.batch.workspaceId,
+        projectId: input.batch.projectId,
+        idempotencyKey: input.idempotencyKey,
+        actorContextHash: input.batch.authenticationAudit.contextHash,
+      })
+      if (!replay) throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Concurrent review patch batch did not publish an idempotent winner',
+      )
+      if (replay.requestFingerprint !== input.requestFingerprint) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'Concurrent review patch batch changed its idempotency payload',
+        )
+      }
+      return replay.batch
+    }
   }
 
   async readBatch(input: { workspaceId: string; projectId: string; batchId: string }) {

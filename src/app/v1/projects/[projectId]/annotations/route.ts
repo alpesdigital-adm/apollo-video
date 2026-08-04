@@ -172,7 +172,7 @@ export async function POST(
       ...(record.confirmedGlobal === true ? { confirmedGlobal: true } : {}),
       screenshotRef: record.screenshotRef,
       text: record.text,
-      author: { id: actor.clientId, name: actor.clientId, type: 'api-client' },
+      actor,
       idempotencyKey,
     })
     return NextResponse.json(

@@ -58,6 +58,8 @@ Não cobre acesso direto a:
 14. Texto de mídia, transcript, OCR e metadata permanece untrusted data em qualquer tool call.
 15. A API pública é workspace-scoped e deny-by-default.
 
+Para revisão colaborativa, a autoria exibida ao usuário é uma projeção do contexto autenticado, não um campo aceito do request. Bearer projeta o `ApiClient`; sessão humana projeta o usuário delegado. Annotation, proposta e lote mantêm o tuple completo apenas na persistência privada, incluem seu hash na idempotência e o revalidam na hidratação. Presenters públicos removem o audit privado, e qualquer divergência entre autor projetado, credential, workspace ou delegação falha fechada.
+
 ## 4. Arquitetura
 
 ```text

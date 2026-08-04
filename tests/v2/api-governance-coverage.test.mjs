@@ -6,6 +6,10 @@ import { API_SCOPES, isApiScope } from '../../src/v2/domain/api-client.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import { applicationServicesForEndpoint } from '../../scripts/generate-ui-capability-parity-report.mjs'
+import {
+  presentReviewPatchBatch,
+  presentReviewPatchProposal,
+} from '../../src/v2/public-api/collaborative-review-presenters.ts'
 
 const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
 const root = resolve(import.meta.dirname, '../..')
@@ -304,6 +308,78 @@ test('T-FR-242 project analysis preserves initiating audit across direct API and
     assert.match(source, /projectAnalysisExecutionData/)
     assert.match(source, /assertProjectAnalysisFenceBinding/)
   }
+})
+
+test('T-FR-242 collaborative review creation binds private audit without leaking it publicly', () => {
+  for (const relative of [
+    'projects/[projectId]/annotations/route.ts',
+    'projects/[projectId]/patch-proposals/route.ts',
+    'projects/[projectId]/patch-batches/route.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    assert.match(source, /requireScope\(actor, 'projects:write'\)/)
+    assert.match(source, /\n\s*actor,\n/)
+    assert.doesNotMatch(source, /author:\s*\{[^}]*actor\.clientId/s)
+  }
+  for (const relative of [
+    'review-project.ts',
+    'review-patch.ts',
+    'review-patch-batch.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /requireScope\([^,]+, 'projects:write'\)/)
+    assert.match(source, /materializeActorAuditContext/)
+    assert.match(source, /actorContextHash:\s*authenticationAudit\.contextHash/)
+  }
+  for (const relative of [
+    'review-annotation-repository.ts',
+    'review-patch-repository.ts',
+    'review-patch-batch-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /externalActorAuditData/)
+    assert.match(source, /hydrateExternalActorAudit/)
+  }
+  for (const relative of [
+    'review-patch-repository.ts',
+    'review-patch-batch-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.doesNotMatch(
+      source,
+      /workspaceId_projectId_idempotencyKey:\s*input/,
+      'actorContextHash must not leak into the Prisma compound unique input',
+    )
+  }
+  const privateAudit = Object.freeze({
+    credentialId: 'credential-private',
+    contextHash: 'a'.repeat(64),
+  })
+  assert.deepEqual(
+    presentReviewPatchProposal({ id: 'proposal-public', authenticationAudit: privateAudit }),
+    { id: 'proposal-public' },
+  )
+  assert.deepEqual(
+    presentReviewPatchBatch({ id: 'batch-public', authenticationAudit: privateAudit }),
+    { id: 'batch-public' },
+  )
+
+  const migration = readFileSync(join(
+    root,
+    'prisma/v2/migrations/20260805060000_collaborative_review_actor_audit/migration.sql',
+  ), 'utf8')
+  for (const field of [
+    'actorClientId', 'actorCredentialId', 'actorEnvironment',
+    'actorAuthenticationKind', 'actorContextHash',
+  ]) {
+    assert.equal(
+      migration.split(`"${field}" IS NOT NULL`).length - 1,
+      3,
+      `${field} must be explicitly non-null in all three complete tuples`,
+    )
+  }
+  assert.match(migration, /"authorId" = "delegatedUserId"/)
+  assert.match(migration, /"authorId" = "actorClientId"/)
 })
 
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {

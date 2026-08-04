@@ -9,8 +9,14 @@ import {
 } from '../../src/v2/application/review-project.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import { authenticatedActor } from './helpers/authentication-audit.mjs'
 
 const screenshotRef = `data:image/jpeg;base64,${Buffer.from('project-review-frame').toString('base64')}`
+const reviewActor = authenticatedActor({
+  clientId: 'client-review-1',
+  credentialId: 'credential-review-1',
+  workspaceId: 'workspace-review-1',
+})
 const context = Object.freeze({
   currentProjectVersionId: 'project-version-review-1',
   projectVersionId: 'project-version-review-1',
@@ -148,7 +154,7 @@ test('F1-040 persists a bounded regional annotation independently and replays id
     targetIds: [],
     screenshotRef,
     text: '  Mover a legenda para baixo.  ',
-    author: { id: 'client-review-1', name: 'Editor', type: 'api-client' },
+    actor: reviewActor,
     idempotencyKey: 'review-region-request-1',
   }
   const first = await create(request)
@@ -163,6 +169,47 @@ test('F1-040 persists a bounded regional annotation independently and replays id
   assert.equal(first.annotation.affectedCount, 1)
   assert.equal(repository.annotations.length, 1)
   assert.equal(first.annotation.projectVersionId, context.projectVersionId)
+  assert.match(first.annotation.authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
+  assert.equal(first.annotation.authenticationAudit.clientId, reviewActor.clientId)
+  assert.deepEqual(first.annotation.author, {
+    id: reviewActor.clientId,
+    name: reviewActor.clientId,
+    type: 'api-client',
+  })
+  await assert.rejects(
+    () => create({
+      ...request,
+      actor: authenticatedActor({
+        clientId: reviewActor.clientId,
+        credentialId: 'credential-review-other',
+        workspaceId: reviewActor.workspaceId,
+      }),
+    }),
+    (error) => error?.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+
+  const delegated = await create({
+    ...request,
+    actor: authenticatedActor({
+      clientId: 'client-review-ui',
+      credentialId: 'session-review-ui',
+      workspaceId: reviewActor.workspaceId,
+      authenticationKind: 'ui-session',
+      delegatedUserId: 'member-review-ui',
+      delegatedIdentityId: 'identity-review-ui',
+      workspaceRole: 'reviewer',
+    }),
+    idempotencyKey: 'review-region-delegated-request',
+  })
+  assert.deepEqual(delegated.annotation.author, {
+    id: 'member-review-ui',
+    name: 'member-review-ui',
+    type: 'user',
+  })
+  assert.equal(
+    delegated.annotation.authenticationAudit.delegatedIdentityId,
+    'identity-review-ui',
+  )
 })
 
 test('F1-040 rejects stale preview identity and validates an exact scene range', async () => {
@@ -177,7 +224,7 @@ test('F1-040 rejects stale preview identity and validates an exact scene range',
     projectVersionId: context.projectVersionId, proxyArtifactId: context.proxyArtifactId,
     proxyHash: context.proxyHash, frame: 315, timeRangeMs: [10500, 10500],
     scope: 'point', targetIds: [], screenshotRef, text: 'Ajustar este frame.',
-    author: { id: 'client-review-1', name: 'Editor', type: 'api-client' },
+    actor: reviewActor,
     idempotencyKey: 'review-stale-request-1',
   }
   await assert.rejects(() => createStale(base), (error) => error?.code === 'VERSION_CONFLICT')
@@ -218,7 +265,7 @@ test('F1-041 rejects unconfirmed global scope and persists its deterministic aff
     proxyHash: context.proxyHash, frame: 315, timeRangeMs: [10500, 10500],
     scope: 'point', targetIds: [], applicationScope: { kind: 'formats', global: true },
     screenshotRef, text: 'Aplicar a identidade visual em todos os formatos.',
-    author: { id: 'client-review-1', name: 'Editor', type: 'api-client' },
+    actor: reviewActor,
     idempotencyKey: 'review-global-request-1',
   }
   await assert.rejects(() => create(request), (error) => error?.code === 'PRECONDITION_REQUIRED')

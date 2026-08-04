@@ -4,6 +4,7 @@ import type {
   ReviewScope,
   ReviewScopeKind,
 } from '../../domain/review-system.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ReviewSceneRecord {
   id: string
@@ -43,6 +44,7 @@ export interface PersistedReviewAnnotation extends ReviewAnnotation {
   applicationScope: ReviewScope
   affectedCount: number
   author: { id: string; name: string; type: 'user' | 'api-client' }
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ReviewAnnotationRepository {
@@ -61,6 +63,7 @@ export interface ReviewAnnotationRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{ requestFingerprint: string; annotation: PersistedReviewAnnotation }> | null>
   create(input: {
     workspaceId: string

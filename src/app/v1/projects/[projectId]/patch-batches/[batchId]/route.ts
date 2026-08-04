@@ -6,6 +6,7 @@ import { createReviewPatchBatchRepository } from '@/v2/infrastructure/repository
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentReviewPatchBatch } from '@/v2/public-api/collaborative-review-presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
       projectId,
       batchId,
     })
-    return NextResponse.json(presentSuccess({ batch }), { headers: publicApiHeaders(requestId) })
+    return NextResponse.json(presentSuccess({ batch: presentReviewPatchBatch(batch) }), { headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
   }

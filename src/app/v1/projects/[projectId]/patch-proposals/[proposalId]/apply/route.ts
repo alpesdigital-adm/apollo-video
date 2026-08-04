@@ -9,6 +9,7 @@ import { DomainError } from '@/v2/domain/errors'
 import { createColorPipelineCompilationRepository, createProjectProxyRenderRepository, createPublicOperationRepository, createReviewPatchRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { presentReviewPatchProposal } from '@/v2/public-api/collaborative-review-presenters'
 import { presentProjectVersionV2, presentPublicOperation, presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     })
     const proposal = await repository.attachRenderOperation({ workspaceId: actor.workspaceId, projectId, proposalId, renderOperationId: render.operation.id })
     return NextResponse.json(presentSuccess({
-      proposal,
+      proposal: presentReviewPatchProposal(proposal),
       command: { id: result.command.id, type: result.command.type, baseVersionId: result.command.baseVersionId, resultVersionId: result.version.id, createdAt: result.command.createdAt },
       version: presentProjectVersionV2(
         { id: result.version.id, sequence: result.version.sequence, parentVersionId: result.version.parentVersionId, baseHash: result.version.baseHash, snapshotRefs: result.version.snapshotRefs, createdAt: result.version.createdAt },

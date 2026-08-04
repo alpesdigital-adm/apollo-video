@@ -34,6 +34,7 @@ export interface ReviewPatchProposal {
   }>
   createdAt: string
   updatedAt: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ReviewPatchProposalContext {
@@ -76,7 +77,7 @@ export interface ReviewPatchApplyResult {
 }
 
 export interface ReviewPatchRepository {
-  findProposalIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }): Promise<Readonly<{ requestFingerprint: string; proposal: ReviewPatchProposal }> | null>
+  findProposalIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }): Promise<Readonly<{ requestFingerprint: string; proposal: ReviewPatchProposal }> | null>
   readProposalContext(input: { workspaceId: string; projectId: string; annotationId: string }): Promise<Readonly<ReviewPatchProposalContext> | null>
   createProposal(input: { proposal: ReviewPatchProposal; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchProposal>>
   readProposal(input: { workspaceId: string; projectId: string; proposalId: string }): Promise<Readonly<ReviewPatchProposal> | null>

@@ -48,6 +48,7 @@ export interface ReviewPatchBatch {
   }>
   createdAt: string
   updatedAt: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ReviewPatchBatchProposalContext {
@@ -89,7 +90,7 @@ export interface ReviewPatchBatchApplyResult {
 }
 
 export interface ReviewPatchBatchRepository {
-  findBatchIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string }): Promise<Readonly<{ requestFingerprint: string; batch: ReviewPatchBatch }> | null>
+  findBatchIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }): Promise<Readonly<{ requestFingerprint: string; batch: ReviewPatchBatch }> | null>
   readProposalSet(input: { workspaceId: string; projectId: string; proposalIds: readonly string[] }): Promise<Readonly<ReviewPatchBatchProposalContext> | null>
   createBatch(input: { batch: ReviewPatchBatch; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchBatch>>
   readBatch(input: { workspaceId: string; projectId: string; batchId: string }): Promise<Readonly<ReviewPatchBatch> | null>

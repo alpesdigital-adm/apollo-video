@@ -36,7 +36,7 @@ async function waitForServer(baseUrl, child) {
 test('review annotations persist idempotently without mutating the project version', async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
-  const { createExternalAuditContext } = await import(
+  const { createExternalAuditContext, materializeActorAuditContext } = await import(
     '../../src/v2/application/authenticate-api-client.ts'
   )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -119,6 +119,7 @@ test('review annotations persist idempotently without mutating the project versi
       workspaceAccessStatus: 'active',
       auditContext,
     })
+    const projectAuthenticationAudit = materializeActorAuditContext(projectActor)
 
     let entityCounter = 0
     let eventCounter = 0
@@ -180,6 +181,11 @@ test('review annotations persist idempotently without mutating the project versi
         workspaceId,
         projectId,
         clientId: issued.client.id,
+        actorClientId: projectAuthenticationAudit.clientId,
+        actorCredentialId: projectAuthenticationAudit.credentialId,
+        actorEnvironment: projectAuthenticationAudit.environment,
+        actorAuthenticationKind: projectAuthenticationAudit.authenticationKind,
+        actorContextHash: projectAuthenticationAudit.contextHash,
         type: 'project-proxy-render',
         status: 'succeeded',
         phase: 'completed',
@@ -317,6 +323,14 @@ test('review annotations persist idempotently without mutating the project versi
     assert.deepEqual(firstPayload.data.annotation.applicationScope.formatIds, ['9:16'])
     assert.deepEqual(firstPayload.data.annotation.applicationScope.localeIds, ['pt-BR'])
     assert.equal(firstPayload.data.annotation.affectedCount, 1)
+    assert.equal('authenticationAudit' in firstPayload.data.annotation, false)
+    const storedRegionalRow = await client.v2ReviewAnnotation.findUniqueOrThrow({
+      where: { id: firstPayload.data.annotation.id },
+    })
+    assert.equal(storedRegionalRow.actorClientId, issued.client.id)
+    assert.equal(storedRegionalRow.actorCredentialId, issued.credential.id)
+    assert.equal(storedRegionalRow.actorAuthenticationKind, 'bearer')
+    assert.match(storedRegionalRow.actorContextHash, /^[a-f0-9]{64}$/)
     const regionalEvents = await client.v2PublicEventOutbox.findMany({
       where: {
         workspaceId,
@@ -379,6 +393,7 @@ test('review annotations persist idempotently without mutating the project versi
     const regional = stored.find((annotation) => annotation.applicationScope.kind === 'region')
     const global = stored.find((annotation) => annotation.applicationScope.kind === 'formats')
     assert.deepEqual(regional.region, annotationRequest.region)
+    assert.equal(regional.authenticationAudit.credentialId, issued.credential.id)
     assert.equal(regional.affectedCount, 1)
     assert.equal(global.applicationScope.global, true)
     assert.equal(global.affectedCount, 1)

@@ -8,6 +8,7 @@ import { createReviewPatchRepository } from '@/v2/infrastructure/repository-fact
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
+import { presentReviewPatchProposal } from '@/v2/public-api/collaborative-review-presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,9 +34,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectId,
       annotationId: record.annotationId,
       ...(record.selectedChoiceId ? { selectedChoiceId: record.selectedChoiceId as string } : {}),
+      actor,
       idempotencyKey,
     })
-    return NextResponse.json(presentSuccess({ proposal: result.proposal, replayed: result.replayed }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
+    return NextResponse.json(presentSuccess({ proposal: presentReviewPatchProposal(result.proposal), replayed: result.replayed }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)
   }
