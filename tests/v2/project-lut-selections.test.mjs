@@ -6,6 +6,7 @@ import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
@@ -13,6 +14,7 @@ import { createProjectLutSelection, projectLutRef } from '../../src/v2/domain/pr
 import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
 import { createProjectLutSelectionImpact, createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../src/v2/domain/project-lut-selection-impact.ts'
 import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
+import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
 import { parseSetProjectLutSelectionBody, presentProjectLutSelectionResult } from '../../src/v2/public-api/project-lut-selection-contract.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
@@ -28,6 +30,25 @@ const cube = `LUT_3D_SIZE 2
 1 1 0
 1 1 1
 `
+
+function externalActor(credentialId = 'credential-project-lut') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-project-lut',
+    credentialId,
+    workspaceId: 'workspace-project-lut',
+    environment: 'sandbox',
+  })
+  return Object.freeze({
+    ...auditContext,
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+}
 
 function baseVersion(overrides = {}) {
   return createProjectVersion({
@@ -86,7 +107,7 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   const apply = service(repository)
   const request = {
     workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
-    selection: { mode: 'workspace-default' }, reason: 'Use the approved look.', actor: { type: 'api-client', id: 'client-project-lut' },
+    selection: { mode: 'workspace-default' }, reason: 'Use the approved look.', actor: externalActor(),
     idempotencyKey: 'project-lut-selection-default-1',
   }
   const result = await apply(request)
@@ -111,8 +132,14 @@ test('T-FR-181 workspace default resolves to an exact immutable LUT in a Command
   assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 180 }] }])
   assert.equal(result.invalidations.length, 1)
   assert.equal(repository.commits[0].event.data.commandImpactHash, result.impact.impactHash)
+  assert.equal(repository.commits[0].authenticationAudit.credentialId, 'credential-project-lut')
+  assert.match(repository.commits[0].authenticationAudit.contextHash, /^[a-f0-9]{64}$/)
   assert.equal((await apply(request)).replayed, true)
   await assert.rejects(apply({ ...request, selection: { mode: 'none' } }), /another project LUT selection/)
+  await assert.rejects(
+    apply({ ...request, actor: externalActor('credential-project-lut-other') }),
+    /another project LUT selection/,
+  )
 })
 
 test('T-FR-181 explicit none is version-bound and stale project bases are rejected before commit', async () => {
@@ -135,7 +162,7 @@ test('T-FR-233 LUT selection requests a full proxy without fabricating stale row
   const repository = memoryRepository({ currentVersion: base, outputReferences: [] })
   const result = await service(repository)({
     workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
-    selection: { mode: 'none' }, actor: { type: 'api-client', id: 'client-project-lut' },
+    selection: { mode: 'none' }, actor: externalActor(),
     idempotencyKey: 'project-lut-selection-no-output-1',
   })
   assert.deepEqual(result.impact.affectedArtifacts, [])
@@ -148,7 +175,7 @@ test('T-FR-233 LUT selection before a timeline defers rendering without fabricat
   const repository = memoryRepository({ currentVersion: base, currentDurationFrames: 0, outputReferences: [] })
   const result = await service(repository)({
     workspaceId: base.workspaceId, projectId: base.projectId, baseVersionId: base.id, baseHash: base.baseHash,
-    selection: { mode: 'none' }, actor: { type: 'api-client', id: 'client-project-lut' },
+    selection: { mode: 'none' }, actor: externalActor(),
     idempotencyKey: 'project-lut-selection-deferred-1',
   })
   assert.equal(result.impact.renderDeferredUntilTimeline, true)
@@ -157,6 +184,116 @@ test('T-FR-233 LUT selection before a timeline defers rendering without fabricat
   assert.deepEqual(result.impact.affectedArtifacts, [])
   assert.deepEqual(result.impact.minimalRenders, [])
   assert.deepEqual(result.invalidations, [])
+})
+
+test('T-FR-242 project LUT selection rejects an unauthenticated external actor', async () => {
+  const base = baseVersion()
+  const repository = memoryRepository({ currentVersion: base })
+  await assert.rejects(service(repository)({
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    baseVersionId: base.id,
+    baseHash: base.baseHash,
+    selection: { mode: 'none' },
+    actor: { type: 'api-client', id: 'client-project-lut' },
+    idempotencyKey: 'project-lut-selection-raw-client',
+  }), /not trusted/)
+  assert.equal(repository.commits.length, 0)
+})
+
+test('T-FR-242 project LUT command hydration rejects a tampered credential audit', async () => {
+  const base = baseVersion()
+  const memory = memoryRepository({ currentVersion: base, outputReferences: [] })
+  await service(memory)({
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    baseVersionId: base.id,
+    baseHash: base.baseHash,
+    selection: { mode: 'none' },
+    actor: externalActor(),
+    idempotencyKey: 'project-lut-selection-audit-hydration',
+  })
+  const committed = memory.commits[0]
+  const commandRow = {
+    id: committed.command.id,
+    workspaceId: committed.command.workspaceId,
+    projectId: committed.command.projectId,
+    baseVersionId: committed.command.baseVersionId,
+    baseHash: committed.command.baseHash,
+    type: committed.command.type,
+    scopeJson: stableSerialize(committed.command.scope),
+    payloadJson: stableSerialize(committed.command.payload),
+    reason: committed.command.reason ?? null,
+    actorType: committed.command.author.type,
+    actorId: committed.command.author.id,
+    delegatedUserId: committed.command.author.delegatedUserId ?? null,
+    actorCredentialId: committed.authenticationAudit.credentialId,
+    actorEnvironment: committed.authenticationAudit.environment,
+    actorAuthenticationKind: committed.authenticationAudit.authenticationKind,
+    actorContextHash: committed.authenticationAudit.contextHash,
+    actorDelegatedIdentityId: null,
+    actorWorkspaceRole: null,
+    idempotencyKey: committed.command.idempotencyKey,
+    requestFingerprint: committed.requestFingerprint,
+    createdAt: new Date(committed.command.createdAt),
+    artifactInvalidations: [],
+  }
+  const resultVersion = {
+    id: committed.version.id,
+    workspaceId: committed.version.workspaceId,
+    projectId: committed.version.projectId,
+    sequence: committed.version.sequence,
+    parentVersionId: committed.version.parentVersionId,
+    forkedFromProjectId: null,
+    forkedFromVersionId: null,
+    briefSnapshotId: committed.version.snapshotRefs.brief,
+    treatmentSnapshotId: null,
+    storySnapshotId: null,
+    editPlanSnapshotId: committed.version.snapshotRefs.editPlan,
+    policiesSnapshotId: committed.version.snapshotRefs.policies,
+    baseHash: committed.version.baseHash,
+    createdBy: committed.version.createdBy,
+    commandId: committed.command.id,
+    createdAt: new Date(committed.version.createdAt),
+  }
+  const selection = committed.selection
+  const selectionRow = {
+    id: selection.id,
+    workspaceId: selection.workspaceId,
+    projectId: selection.projectId,
+    commandId: selection.commandId,
+    baseVersionId: selection.baseVersionId,
+    resultVersionId: selection.resultVersionId,
+    requestedMode: selection.requested.mode,
+    requestedLutId: null,
+    requestedLutVersion: null,
+    resolvedMode: selection.resolved.mode,
+    resolvedLutVersionId: null,
+    workspaceDefaultRevision: null,
+    intensity: selection.intensity,
+    selectionJson: stableSerialize(selection),
+    selectionHash: selection.selectionHash,
+    createdAt: new Date(selection.createdAt),
+    command: commandRow,
+    resultVersion,
+    resolvedLutVersion: null,
+  }
+  const repository = new PrismaProjectLutSelectionRepository({
+    v2EditCommand: { async findUnique() { return { id: commandRow.id, requestFingerprint: commandRow.requestFingerprint } } },
+    v2ProjectLutSelection: { async findUnique() { return selectionRow } },
+  })
+  const replay = await repository.findIdempotent({
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    idempotencyKey: committed.command.idempotencyKey,
+  })
+  assert.equal(replay.result.command.author.id, 'client-project-lut')
+  commandRow.actorCredentialId = 'credential-project-lut-tampered'
+  await assert.rejects(repository.findIdempotent({
+    workspaceId: base.workspaceId,
+    projectId: base.projectId,
+    idempotencyKey: committed.command.idempotencyKey,
+  }), /command audit/)
 })
 
 test('project LUT impact survives canonical persistence key ordering', () => {

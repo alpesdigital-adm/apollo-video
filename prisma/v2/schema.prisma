@@ -696,6 +696,12 @@ model V2EditCommand {
   actorType          String   @db.VarChar(32)
   actorId            String   @db.VarChar(128)
   delegatedUserId    String?  @db.VarChar(128)
+  actorCredentialId        String? @db.VarChar(128)
+  actorEnvironment         String? @db.VarChar(16)
+  actorAuthenticationKind  String? @db.VarChar(16)
+  actorContextHash         String? @db.Char(64)
+  actorDelegatedIdentityId String? @db.VarChar(128)
+  actorWorkspaceRole       String? @db.VarChar(32)
   idempotencyKey     String   @db.VarChar(128)
   requestFingerprint String   @db.Char(64)
   createdAt          DateTime @db.Timestamptz(3)
@@ -713,6 +719,7 @@ model V2EditCommand {
   @@unique([workspaceId, projectId, idempotencyKey])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, baseVersionId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("edit_commands")
 }
 

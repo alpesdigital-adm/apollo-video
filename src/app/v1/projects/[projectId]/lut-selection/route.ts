@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const body = parseSetProjectLutSelectionBody(await request.json())
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     const result = await setProjectLutSelectionService({ repository: createProjectLutSelectionRepository(), createId: (kind) => `project-lut-${kind}-${randomUUID()}`, createEventId: () => randomUUID() })({
-      ...body, workspaceId: actor.workspaceId, projectId, actor: actor.auditContext.actor, idempotencyKey,
+      ...body, workspaceId: actor.workspaceId, projectId, actor: actor, idempotencyKey,
     })
     const presented = presentProjectLutSelectionResult(result)
     if (result.impact.renderDeferredUntilTimeline) {

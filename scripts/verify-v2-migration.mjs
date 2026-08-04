@@ -68,6 +68,7 @@ const projectCreationCommandModel = schema.match(/model V2ProjectCreationCommand
 const workspaceLutVersionModel = schema.match(/model V2WorkspaceLutVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const workspaceLutStatusCommandModel = schema.match(/model V2WorkspaceLutStatusCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const workspaceLutDefaultVersionModel = schema.match(/model V2WorkspaceLutDefaultVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const editCommandModel = schema.match(/model V2EditCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -177,6 +178,22 @@ assert.doesNotMatch(
   committed,
   /(?:UPDATE|INSERT INTO) "workspace_lut_(?:versions|status_commands|default_versions)"[\s\S]*(?:api_clients|api_credentials)/,
   'pre-contract LUT actor identity must never be fabricated by backfill',
+)
+for (const field of [
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'actorDelegatedIdentityId', 'actorWorkspaceRole',
+]) {
+  assert.match(editCommandModel, new RegExp(`\\b${field}\\b`), `EditCommand must persist ${field}`)
+}
+assert.match(
+  committed,
+  /ALTER TABLE "edit_commands"[\s\S]*ADD COLUMN "actorCredentialId"[\s\S]*edit_commands_actor_audit_check/,
+  'EditCommand external audit must be stored as one constrained tuple',
+)
+assert.doesNotMatch(
+  committed,
+  /(?:UPDATE|INSERT INTO) "edit_commands"[\s\S]*(?:api_clients|api_credentials)/,
+  'pre-contract EditCommand actor identity must never be fabricated by backfill',
 )
 for (const field of [
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
@@ -420,6 +437,7 @@ const requiredChecks = [
   'webhook_worker_shard_leases_dates_check',
   'edit_commands_type_check',
   'edit_commands_actor_type_check',
+  'edit_commands_actor_audit_check',
   'edit_commands_base_hash_check',
   'edit_commands_request_fingerprint_check',
   'project_proxy_render_operations_hash_check',

@@ -5,6 +5,7 @@ import type { PublicEvent } from '../../domain/public-event.ts'
 import type { WorkspaceLutVersion } from '../../domain/workspace-lut.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { ProjectLutSelectionImpactV1 } from '../../domain/project-lut-selection-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export type ProjectLutSelectionCommandPayloadV2 = ProjectLutSelectionRequest & Readonly<{
   schemaVersion: 2
@@ -34,6 +35,7 @@ export interface EffectiveProjectLutSelection {
 }
 export interface ProjectLutSelectionCommit {
   command: Readonly<EditCommand<ProjectLutSelectionCommandPayloadV2>>
+  authenticationAudit?: Readonly<ApiAccessAuditContext>
   version: Readonly<ProjectVersion>
   selection: Readonly<ProjectLutSelection>
   requestFingerprint: string

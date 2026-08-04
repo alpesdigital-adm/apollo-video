@@ -4791,6 +4791,14 @@ test('authenticated public API manages projects, clients and artifact inspection
       include: { command: { include: { artifactInvalidations: true } }, resultVersion: true, resolvedLutVersion: true },
     })
     assert.equal(storedProjectLut.command.type, 'set-project-lut-selection')
+    assert.equal(storedProjectLut.command.actorId, apiClientId)
+    assert.equal(storedProjectLut.command.actorCredentialId, issued.credential.id)
+    assert.equal(storedProjectLut.command.actorEnvironment, apiEnvironment)
+    assert.equal(storedProjectLut.command.actorAuthenticationKind, 'bearer')
+    assert.match(storedProjectLut.command.actorContextHash, /^[a-f0-9]{64}$/)
+    assert.equal(storedProjectLut.command.delegatedUserId, null)
+    assert.equal(storedProjectLut.command.actorDelegatedIdentityId, null)
+    assert.equal(storedProjectLut.command.actorWorkspaceRole, null)
     assert.equal(JSON.parse(storedProjectLut.command.payloadJson).schemaVersion, 2)
     assert.equal(JSON.parse(storedProjectLut.command.payloadJson).impact.impactHash, projectLut.data.impact.impactHash)
     assert.equal(storedProjectLut.command.artifactInvalidations.length, 0)
@@ -4822,6 +4830,19 @@ test('authenticated public API manages projects, clients and artifact inspection
     })
     assert.equal(staleProjectLutResponse.status, 409)
     assert.equal(await client.v2ProjectLutSelection.count({ where: { workspaceId, projectId: created.data.project.id } }), 2)
+    const projectLutCommands = await client.v2EditCommand.findMany({
+      where: {
+        workspaceId,
+        projectId: created.data.project.id,
+        type: 'set-project-lut-selection',
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+    assert.equal(projectLutCommands.length, 2)
+    assert.equal(new Set(projectLutCommands.map((command) => command.actorContextHash)).size, 1)
+    assert.equal(projectLutCommands.every((command) => command.actorCredentialId === issued.credential.id), true)
+    assert.equal(JSON.stringify({ projectLut, projectLutReplayed, noneProjectLut }).includes(issued.credential.id), false)
+    assert.equal(JSON.stringify({ projectLut, projectLutReplayed, noneProjectLut }).includes(issued.token), false)
     await client.v2ProjectMediaAsset.create({
       data: {
         id: '00000000-0000-4000-8000-000000000970',

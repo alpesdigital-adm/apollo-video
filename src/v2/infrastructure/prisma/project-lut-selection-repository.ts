@@ -11,6 +11,8 @@ import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } 
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createProjectLutSelectionInvalidations, parseProjectLutSelectionImpact } from '../../domain/project-lut-selection-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 const selectionInclude = Prisma.validator<Prisma.V2ProjectLutSelectionInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -19,6 +21,124 @@ const selectionInclude = Prisma.validator<Prisma.V2ProjectLutSelectionInclude>()
 })
 type StoredSelection = Prisma.V2ProjectLutSelectionGetPayload<{ include: typeof selectionInclude }>
 type DbClient = PrismaClient | Prisma.TransactionClient
+
+interface StoredCommandAuthenticationAudit {
+  workspaceId: string
+  actorType: string
+  actorId: string
+  delegatedUserId: string | null
+  actorCredentialId: string | null
+  actorEnvironment: string | null
+  actorAuthenticationKind: string | null
+  actorContextHash: string | null
+  actorDelegatedIdentityId: string | null
+  actorWorkspaceRole: string | null
+}
+
+function hydrateCommandAuthenticationAudit(
+  row: StoredCommandAuthenticationAudit,
+): Readonly<ApiAccessAuditContext> | undefined {
+  const authenticationValues = [
+    row.actorCredentialId,
+    row.actorEnvironment,
+    row.actorAuthenticationKind,
+    row.actorContextHash,
+    row.actorDelegatedIdentityId,
+    row.actorWorkspaceRole,
+  ]
+  if (row.actorType !== 'api-client') {
+    if (
+      !['director', 'system'].includes(row.actorType) ||
+      authenticationValues.some((value) => value !== null)
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT command actor is invalid')
+    }
+    return undefined
+  }
+  try {
+    if (
+      !row.actorCredentialId || !row.actorEnvironment ||
+      !row.actorAuthenticationKind || !row.actorContextHash
+    ) {
+      throw new Error('missing authentication audit')
+    }
+    const audit = createApiAccessAuditContext({
+      clientId: row.actorId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.actorDelegatedIdentityId
+        ? { delegatedIdentityId: row.actorDelegatedIdentityId }
+        : {}),
+      ...(row.actorWorkspaceRole
+        ? { workspaceRole: row.actorWorkspaceRole as WorkspaceMemberRole }
+        : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT command audit is invalid')
+  }
+}
+
+function commandAuditData(audit: Readonly<ApiAccessAuditContext> | undefined) {
+  return audit ? {
+    actorCredentialId: audit.credentialId,
+    actorEnvironment: audit.environment,
+    actorAuthenticationKind: audit.authenticationKind,
+    actorContextHash: audit.contextHash,
+    actorDelegatedIdentityId: audit.delegatedIdentityId,
+    actorWorkspaceRole: audit.workspaceRole,
+  } : {}
+}
+
+function assertCommandAuditBinding(input: Readonly<ProjectLutSelectionCommit>): void {
+  const audit = hydrateCommandAuthenticationAudit({
+    workspaceId: input.command.workspaceId,
+    actorType: input.command.author.type,
+    actorId: input.command.author.id,
+    delegatedUserId: input.command.author.delegatedUserId ?? null,
+    actorCredentialId: input.authenticationAudit?.credentialId ?? null,
+    actorEnvironment: input.authenticationAudit?.environment ?? null,
+    actorAuthenticationKind: input.authenticationAudit?.authenticationKind ?? null,
+    actorContextHash: input.authenticationAudit?.contextHash ?? null,
+    actorDelegatedIdentityId: input.authenticationAudit?.delegatedIdentityId ?? null,
+    actorWorkspaceRole: input.authenticationAudit?.workspaceRole ?? null,
+  })
+  if (
+    audit && (
+      audit.clientId !== input.command.author.id ||
+      audit.workspaceId !== input.command.workspaceId ||
+      audit.delegatedUserId !== input.command.author.delegatedUserId
+    )
+  ) {
+    throw new DomainError('AUTH_INVALID', 'Project LUT command audit does not match its author')
+  }
+}
+
+function validateWorkspaceLutAuthenticationAudit(row: V2WorkspaceLutVersion): void {
+  try {
+    const audit = createApiAccessAuditContext({
+      clientId: row.createdByClientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.actorDelegatedUserId ? { delegatedUserId: row.actorDelegatedUserId } : {}),
+      ...(row.actorDelegatedIdentityId
+        ? { delegatedIdentityId: row.actorDelegatedIdentityId }
+        : {}),
+      ...(row.actorWorkspaceRole
+        ? { workspaceRole: row.actorWorkspaceRole as WorkspaceMemberRole }
+        : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored selected LUT actor audit is invalid')
+  }
+}
 
 function parse(value: string, field: string): Record<string, unknown> {
   try { const result = JSON.parse(value) as unknown; if (!result || typeof result !== 'object' || Array.isArray(result) || stableSerialize(result) !== value) throw new Error('invalid'); return result as Record<string, unknown> }
@@ -50,6 +170,7 @@ function hydrateVersion(row: V2ProjectVersion) {
 }
 
 function hydrateLut(row: V2WorkspaceLutVersion) {
+  validateWorkspaceLutAuthenticationAudit(row)
   const preview = Buffer.from(row.previewPng)
   if (preview.byteLength !== row.previewByteSize || createHash('sha256').update(preview).digest('hex') !== row.previewSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored selected LUT preview is invalid')
   const value = createWorkspaceLutVersion({
@@ -83,6 +204,7 @@ function hydrate(row: StoredSelection, replayed: boolean): Readonly<ProjectLutSe
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT selection projections are invalid')
   if (selection.resolved.mode === 'lut-version' && (!row.resolvedLutVersion || row.resolvedLutVersion.id !== selection.resolved.lut.versionId || hydrateLut(row.resolvedLutVersion).recordHash !== selection.resolved.lut.recordHash)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project LUT resolution is invalid')
   const commandRow = row.command
+  hydrateCommandAuthenticationAudit(commandRow)
   const payload = parse(commandRow.payloadJson, 'project LUT command payload') as unknown as ProjectLutSelectionCommandPayloadV2
   const impact = parseProjectLutSelectionImpact(payload.impact)
   const command = createEditCommand<ProjectLutSelectionCommandPayloadV2>({
@@ -227,6 +349,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
   }
 
   async commitOrReplay(input: Readonly<ProjectLutSelectionCommit>, serializationAttempt = 1): Promise<Readonly<ProjectLutSelectionResult>> {
+    assertCommandAuditBinding(input)
     try {
       return await this.client.$transaction(async (transaction) => {
         const project = await transaction.v2Project.findFirst({ where: { id: input.command.projectId, workspaceId: input.command.workspaceId }, include: { currentVersion: true } })
@@ -253,6 +376,7 @@ export class PrismaProjectLutSelectionRepository implements ProjectLutSelectionR
           id: input.command.id, workspaceId: input.command.workspaceId, projectId: input.command.projectId, baseVersionId: input.command.baseVersionId, baseHash: input.command.baseHash,
           type: input.command.type, scopeJson: stableSerialize(input.command.scope), payloadJson: stableSerialize(input.command.payload), reason: input.command.reason,
           actorType: input.command.author.type, actorId: input.command.author.id, delegatedUserId: input.command.author.delegatedUserId,
+          ...commandAuditData(input.authenticationAudit),
           idempotencyKey: input.command.idempotencyKey, requestFingerprint: input.requestFingerprint, createdAt: new Date(input.command.createdAt),
         } })
         await transaction.v2ProjectVersion.create({ data: {
