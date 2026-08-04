@@ -87,6 +87,7 @@ function createOperations() {
   let lease
   let denyHeartbeat = false
   let allowExpiredClaim = false
+  const phaseHistory = []
   const context = Object.freeze({
     kind: 'artifact-render',
     authorizationId: 'authorization-worker-test',
@@ -101,6 +102,7 @@ function createOperations() {
 
   return {
     get operation() { return operation },
+    get phaseHistory() { return [...phaseHistory] },
     cancel(canceledAt) {
       operation = cancelPublicOperation(operation, canceledAt)
       lease = undefined
@@ -121,6 +123,7 @@ function createOperations() {
           Date.parse(operation.nextAttemptAt) > Date.parse(input.now)
         ) return null
         operation = startPublicOperationAttempt(operation, input.now)
+        phaseHistory.push(operation.phase)
         allowExpiredClaim = false
         lease = {
           owner: input.leaseOwner,
@@ -139,6 +142,7 @@ function createOperations() {
       async advancePhase(input) {
         if (!matches(input)) return false
         operation = advancePublicOperationPhase(operation, input.phase, input.now)
+        phaseHistory.push(operation.phase)
         return true
       },
       async succeed(input) {
@@ -160,6 +164,11 @@ function createOperations() {
       },
     },
   }
+}
+
+async function verifyAndCommit(request) {
+  await request.beforeVerification()
+  await request.beforeCommit()
 }
 
 function receipt() {
@@ -213,7 +222,7 @@ test('durable worker fences promotion with heartbeat and persists a safe termina
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
     async render(request) {
-      await request.beforeCommit()
+      await verifyAndCommit(request)
       committed = true
       return receipt()
     },
@@ -224,6 +233,17 @@ test('durable worker fences promotion with heartbeat and persists a safe termina
     status: 'succeeded',
   })
   assert.equal(committed, true)
+  assert.deepEqual(operations.phaseHistory, [
+    'materializing',
+    'rendering',
+    'verifying',
+    'persisting',
+  ])
+  assert.deepEqual(operations.operation.progress, {
+    completed: 4,
+    total: 4,
+    unit: 'render',
+  })
   assert.equal(operations.operation.status, 'succeeded')
   assert.equal(checkpoints.checkpoint.output.outputSha256, 'c'.repeat(64))
   assert.deepEqual(operations.operation.result.resource, operations.operation.target)
@@ -244,7 +264,7 @@ test('lost lease aborts before commit and cannot publish a stale result', async 
     heartbeatIntervalMs: 1_000,
     async render(request) {
       operations.loseLease()
-      await request.beforeCommit()
+      await request.beforeVerification()
       committed = true
       return receipt()
     },
@@ -267,7 +287,14 @@ test('cancellation invalidates the lease and aborts before output commit', async
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
     async render(request) {
-      operations.cancel('2026-07-14T12:00:00.250Z')
+      await request.beforeVerification()
+      assert.equal(operations.operation.phase, 'verifying')
+      assert.deepEqual(operations.operation.progress, {
+        completed: 2,
+        total: 4,
+        unit: 'render',
+      })
+      operations.cancel('2026-07-14T12:00:00.450Z')
       await request.beforeCommit()
       committed = true
       return receipt()
@@ -295,7 +322,7 @@ test('retryable failure is reclaimed after restart and succeeds on the next atte
     async render(request) {
       renders += 1
       if (renders === 1) throw new Error('private renderer detail')
-      await request.beforeCommit()
+      await verifyAndCommit(request)
       return receipt()
     },
   })
@@ -371,7 +398,7 @@ test('output committed before checkpoint is recovered by the next fenced attempt
     heartbeatIntervalMs: 1_000,
     async render(request) {
       renders += 1
-      await request.beforeCommit()
+      await verifyAndCommit(request)
       return receipt()
     },
   })

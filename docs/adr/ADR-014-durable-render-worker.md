@@ -15,7 +15,8 @@ O endpoint público de render cria uma `PublicOperation`, mas codificação de m
 - Toda mutação do worker usa compare-and-swap sobre operation ID, status, fase, dono, tentativa, validade e versão temporal observada.
 - Lease expirada permite novo claim e nova tentativa; o `attempt` funciona como fencing token, portanto comandos da tentativa anterior deixam de vencer.
 - Heartbeat só renova lease ainda válida. Falha ou rejeição aborta o renderer e impede novas transições pelo worker antigo.
-- A última renovação e a transição para `persisting` acontecem depois da segunda materialização/revalidação e imediatamente antes do commit do output.
+- Uma renovação cercada e a transição para `verifying` acontecem antes da segunda materialização/revalidação de direitos e inputs.
+- Outra renovação cercada e a transição para `persisting` acontecem somente depois dessa revalidação e imediatamente antes do commit do output.
 - O renderer descarta o arquivo parcial quando o gate pré-commit falha.
 - Resultado terminal público referencia somente artifact e manifest. Erros terminais são sanitizados; paths, output keys, stack e detalhes do renderer não são persistidos no contrato público.
 - Falha retryable volta a `retrying` enquanto houver tentativas. O ADR-016 adiciona backoff e marcação de esgotamento; o ADR-017 usa a mesma lease para tornar cancelamento cooperativo sem enfraquecer o fencing.
@@ -35,4 +36,5 @@ O endpoint público de render cria uma `PublicOperation`, mas codificação de m
 - recuperação após expiração incrementando attempt;
 - worker antigo incapaz de avançar fase ou concluir;
 - falha no gate pré-commit descartando partial;
+- sequência observável `materializing → rendering → verifying → persisting`, com cancelamento ou perda de lease em `verifying` incapaz de promover output;
 - reinício, retry limitado e resultado terminal sem internals.

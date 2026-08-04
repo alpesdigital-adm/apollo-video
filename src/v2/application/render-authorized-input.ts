@@ -39,6 +39,7 @@ export function renderAuthorizedInputService(dependencies: {
     workspaceId: string
     authorizationId: string
     signal?: AbortSignal
+    beforeVerification?: () => Promise<void>
     beforeCommit?: () => Promise<void>
   }): Promise<Readonly<AuthorizedRenderCompletion>> {
     const initialLease = await dependencies.materialize({
@@ -71,6 +72,10 @@ export function renderAuthorizedInputService(dependencies: {
       })
     }
     const revalidate = async () => {
+      if (request.signal?.aborted) {
+        throw new DomainError('RENDER_EXECUTION_FAILED', 'Render execution was cancelled')
+      }
+      await request.beforeVerification?.()
       if (request.signal?.aborted) {
         throw new DomainError('RENDER_EXECUTION_FAILED', 'Render execution was cancelled')
       }

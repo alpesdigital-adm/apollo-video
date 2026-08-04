@@ -565,9 +565,12 @@ test('authorized render promotes staged output only after a matching second mate
     renderer,
     outputKeyFor: () => 'workspaces/1/renders/output.mp4',
   })
+  const verificationGates = []
   const result = await render({
     workspaceId: 'workspace-1',
     authorizationId: 'authorization-render-1',
+    async beforeVerification() { verificationGates.push('verifying') },
+    async beforeCommit() { verificationGates.push('persisting') },
   })
   assert.equal(materializations, 2)
   assert.equal(commits, 1)
@@ -575,6 +578,7 @@ test('authorized render promotes staged output only after a matching second mate
   assert.equal(result.output.outputSha256, '7'.repeat(64))
   assert.equal(result.getOutputKey(), 'workspaces/1/renders/output.mp4')
   assert.equal(JSON.stringify(result).includes('workspaces/1/renders/output.mp4'), false)
+  assert.deepEqual(verificationGates, ['verifying', 'persisting'])
 
   materializations = 0
   commits = 0
@@ -604,6 +608,9 @@ test('authorized render promotes staged output only after a matching second mate
     render({
       workspaceId: 'workspace-1',
       authorizationId: 'authorization-render-1',
+      async beforeVerification() {
+        verificationGates.push('verifying-before-rejected-commit')
+      },
       async beforeCommit() {
         throw new DomainError('RENDER_EXECUTION_FAILED', 'Worker lease was lost')
       },
@@ -615,7 +622,7 @@ test('authorized render promotes staged output only after a matching second mate
   assert.equal(discards, 1)
 
   materializations = 0
-  let recoveryGates = 0
+  const recoveryGates = []
   const recovered = await renderAuthorizedInputService({
     async materialize() {
       materializations += 1
@@ -644,10 +651,11 @@ test('authorized render promotes staged output only after a matching second mate
   })({
     workspaceId: 'workspace-1',
     authorizationId: 'authorization-render-1',
-    async beforeCommit() { recoveryGates += 1 },
+    async beforeVerification() { recoveryGates.push('verifying') },
+    async beforeCommit() { recoveryGates.push('persisting') },
   })
   assert.equal(materializations, 2)
-  assert.equal(recoveryGates, 1)
+  assert.deepEqual(recoveryGates, ['verifying', 'persisting'])
   assert.equal(recovered.output.stageId, 'recovered-render-1')
 })
 

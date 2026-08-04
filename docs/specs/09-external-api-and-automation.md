@@ -354,7 +354,7 @@ Para `artifact-render`, a implementação durável aplica estas regras adicionai
 7. a retomada de `waiting` preserva `attempt` e `startedAt`, cerca workspace/status/attempt e instala uma nova lease atomicamente; claim genérico não seleciona waiting;
 8. somente target/result/error seguros atravessam o presenter público. Owner, heartbeat, authorization, input hash, output key e diagnóstico interno permanecem privados.
 
-As fases reais iniciais são `materializing → rendering → persisting`. `verifying` já pertence à state machine e será usado quando probe/quality gates forem separados do renderer. Progresso continua 0/1 até existir medição determinística mais granular.
+As fases reais do artifact render são `materializing → rendering → verifying → persisting`. `verifying` começa antes da segunda materialização/revalidação de direitos e inputs; `persisting` só começa após esse gate e imediatamente antes da promoção. O progresso de fases é determinístico de 0/4 a 4/4; métricas internas do encode permanecem indeterminadas enquanto o renderer não oferecer observações confiáveis.
 
 Uma operação de reconstrução só chega a `succeeded` depois de persistir o checkpoint técnico do output. O checkpoint prova que os bytes comprometidos correspondem ao SHA-256, tamanho, container e probe do artifact/manifest alvo. Se o processo cair depois do commit físico, a key determinística é inspecionada e validada; o encode não é repetido quando a identidade coincide. Storage key, stage ID e receipt técnico são internos e nunca ampliam o `PublicOperation` exposto.
 

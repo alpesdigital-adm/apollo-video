@@ -9,6 +9,7 @@ type RenderAuthorized = (request: {
   workspaceId: string
   authorizationId: string
   signal?: AbortSignal
+  beforeVerification?: () => Promise<void>
   beforeCommit?: () => Promise<void>
 }) => Promise<Readonly<AuthorizedRenderCompletion>>
 
@@ -183,6 +184,21 @@ export function runNextPublicOperationService(dependencies: {
         workspaceId: claimed.operation.workspaceId,
         authorizationId: context.authorizationId,
         signal: abortController.signal,
+        beforeVerification: async () => {
+          if (!(await heartbeat())) {
+            throw new DomainError('RENDER_EXECUTION_FAILED', 'Render lease was lost')
+          }
+          const verifyingAt = clock()
+          const enteredVerifying = await dependencies.operations.advancePhase({
+            ...command(verifyingAt),
+            phase: 'verifying',
+          })
+          if (!enteredVerifying) {
+            leaseLost = true
+            abortController.abort()
+            throw new DomainError('RENDER_EXECUTION_FAILED', 'Render lease was lost')
+          }
+        },
         beforeCommit: async () => {
           if (!(await heartbeat())) {
             throw new DomainError('RENDER_EXECUTION_FAILED', 'Render lease was lost')
