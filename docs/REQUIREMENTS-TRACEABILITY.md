@@ -337,6 +337,8 @@ Evidência local F0.036/FR-242 (audit binding) — os dois autenticadores deriva
 
 Evidência local F0.036/FR-242 (containment) — comandos revisionados de suspend/revoke/kill switch já cercam state, operações canceláveis, outbox e audit identity na mesma transação. O hardening atual exige role humana `administrator` para scopes administrativos e para recovery durante containment, recusa role persistida desconhecida e impede o client autenticante de suspender/revogar a si próprio. Testes preservam kill switch próprio recuperável, bloqueiam recovery por reviewer e comprovam o erro de self-lockout antes da persistência. PostgreSQL/HTTP hospedado, deploy e aceite permanecem abertos.
 
+Evidência preparada F0.036/FR-242 (security E2E) — a jornada HTTP/PostgreSQL existente foi ampliada para falsificar empréstimo de scopes administrativos do client UI a um reviewer, self suspend/revoke sem persistência de command e credential expirada sem atualização de `lastUsedAt`. Ela conserva as provas anteriores de capability filtering, ocultação cross-workspace, overlap zero, token substituído e revogação terminal. A execução hospedada desta ampliação, deploy e aceite permanecem pendentes; por isso a microtarefa continua aberta.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

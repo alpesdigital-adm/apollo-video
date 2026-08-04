@@ -837,6 +837,8 @@ Valores são calibráveis por ADR/SLO, mas devem ser medidos por environment e c
 **When** admin revoga client e ativa kill switch  
 **Then** novos requests falham e operations canceláveis são canceladas/auditadas.
 
+O security E2E também deve provar em HTTP/PostgreSQL que reviewer não herda scopes administrativos do principal UI, client não pode persistir a própria suspensão/revogação, credential expirada não atualiza `lastUsedAt`, overlap zero invalida o token anterior e credential revogada permanece inválida.
+
 ### API-10 — Paridade quebrada
 
 **Given** nova ação é adicionada à UI sem capability pública  

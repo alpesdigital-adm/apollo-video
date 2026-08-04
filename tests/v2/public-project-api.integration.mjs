@@ -1310,6 +1310,45 @@ test('authenticated public API manages projects, clients and artifact inspection
       { headers: { authorization } },
     )).status, 404)
 
+    await client.v2WorkspaceMember.update({
+      where: { id: persistedMember.id },
+      data: { role: 'reviewer' },
+    })
+    assert.equal((await fetch(clientAccessUrl, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
+    })).status, 403, 'the shared UI client must not lend admin scopes to a reviewer')
+    await client.v2WorkspaceMember.update({
+      where: { id: persistedMember.id },
+      data: { role: 'administrator' },
+    })
+
+    for (const action of ['suspend', 'revoke']) {
+      const selfDeactivateResponse = await fetch(clientAccessUrl, {
+        method: 'PATCH',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': `public-api-self-${action}-client-1`,
+        },
+        body: JSON.stringify({
+          action,
+          baseRevision: initialClientAccess.data.access.revision,
+          reason: `The authenticating client must not ${action} itself`,
+          confirmed: true,
+        }),
+      })
+      assert.equal(selfDeactivateResponse.status, 409)
+      assert.equal((await selfDeactivateResponse.json()).error.code, 'PERSISTENCE_CONFLICT')
+    }
+    assert.equal(await client.v2ApiAccessCommand.count({
+      where: {
+        workspaceId,
+        targetType: 'client',
+        targetId: apiClientId,
+        action: { in: ['suspend', 'revoke'] },
+      },
+    }), 0, 'rejected self-deactivation must not persist a command')
+
     const engageClientKillResponse = await fetch(clientAccessUrl, {
       method: 'PATCH',
       headers: {
@@ -4615,6 +4654,50 @@ test('authenticated public API manages projects, clients and artifact inspection
       new Set(list.data.projects.map((project) => project.id)),
       new Set([created.data.project.id, uiProjectCreated.data.project.id]),
     )
+
+    const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
+      where: {
+        id_clientId: {
+          id: issued.credential.id,
+          clientId: apiClientId,
+        },
+      },
+    })
+    await client.v2ApiCredential.update({
+      where: {
+        id_clientId: {
+          id: issued.credential.id,
+          clientId: apiClientId,
+        },
+      },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    })
+    const expiredBearerResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization },
+    })
+    assert.equal(expiredBearerResponse.status, 401)
+    assert.equal((await expiredBearerResponse.json()).error.code, 'AUTH_INVALID')
+    assert.equal((await client.v2ApiCredential.findUniqueOrThrow({
+      where: {
+        id_clientId: {
+          id: issued.credential.id,
+          clientId: apiClientId,
+        },
+      },
+    })).lastUsedAt?.toISOString(), credentialBeforeExpiry.lastUsedAt?.toISOString())
+    await client.v2ApiCredential.update({
+      where: {
+        id_clientId: {
+          id: issued.credential.id,
+          clientId: apiClientId,
+        },
+      },
+      data: { expiresAt: null },
+    })
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization },
+    })).status, 200, 'clearing the test-only expiry must restore the otherwise valid credential')
+
     const finalWorkspaceAccess = await (await fetch(workspaceAccessUrl, {
       headers: { authorization },
     })).json()
