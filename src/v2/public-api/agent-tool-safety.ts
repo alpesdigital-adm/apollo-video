@@ -83,6 +83,14 @@ export function createFoundationAgentToolSafety(
   capabilities: readonly PublicCapability[],
 ) {
   return defineAgentToolSafetyRegistry(capabilities, {
+    'apollo.api-access.workspace.change': {
+      impact: 'destructive', confirmation: 'human-approval',
+      reason: 'Can suspend or permanently revoke every API client in the workspace and cancel their active public operations.',
+    },
+    'apollo.api-access.clients.change': {
+      impact: 'destructive', confirmation: 'human-approval',
+      reason: 'Can suspend or permanently revoke one API client and cancel its active public operations.',
+    },
     'apollo.artifacts.lifecycle.transition': {
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Can quarantine an artifact or make deletion terminal while preserving retained immutable bytes and audit history.',

@@ -55,14 +55,15 @@ test('UI session and throttle identities are one-way and source-wide', () => {
 
 test('UI session resolves the active Postgres API actor and its scopes', async () => {
   const repository = {
-    async findActiveClientById(id) {
+    async findActiveClientAccessById(id) {
       return id === 'apollo-ui-client'
-        ? {
+        ? { client: {
             id,
             workspaceId: 'workspace-1',
+            status: 'active',
             allowedEnvironments: ['production'],
             scopeGrants: ['projects:read', 'projects:write'],
-          }
+          }, clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, workspaceAccessStatus: 'active' }
         : null
     },
   }
@@ -82,6 +83,11 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
   assert.equal(actor.delegatedUserId, 'member-1')
   assert.equal(actor.delegatedIdentityId, 'identity-1')
   assert.equal(actor.workspaceRole, 'director')
+  assert.equal(actor.authenticationKind, 'ui-session')
+  assert.equal(actor.clientKillSwitchEngaged, false)
+  assert.equal(actor.workspaceKillSwitchEngaged, false)
+  assert.equal(actor.clientAccessStatus, 'active')
+  assert.equal(actor.workspaceAccessStatus, 'active')
   assert.deepEqual(actor.auditContext, {
     clientId: 'apollo-ui-client',
     credentialId: `ui-session:${'a'.repeat(64)}`,
@@ -108,8 +114,11 @@ test('UI session refresh requests bounded deterministic identifier rotation', as
     idleExpiresAt: '2026-08-02T20:40:00.000Z', expiresAt: '2026-08-03T08:00:00.000Z',
   }
   const actor = await authenticateUiSessionService({
-    repository: { async findActiveClientById() {
-      return { id: 'apollo-ui-client', workspaceId: 'workspace-1', allowedEnvironments: ['production'], scopeGrants: [] }
+    repository: { async findActiveClientAccessById() {
+      return {
+        client: { id: 'apollo-ui-client', workspaceId: 'workspace-1', status: 'active', allowedEnvironments: ['production'], scopeGrants: [] },
+        clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, workspaceAccessStatus: 'active',
+      }
     } },
     sessions: { async refreshActiveSession(input) {
       calls.push(input)

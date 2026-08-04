@@ -11,6 +11,7 @@ import { createApiClientRepository, createUiSessionSecurityRepository } from '..
 import { nodeApiCredentialCrypto } from '../infrastructure/security/api-credential.ts'
 import {
   APOLLO_SESSION_COOKIE,
+  isTrustedUiMutationOrigin,
   uiSessionNonceHash,
   verifyUiSession,
 } from '../infrastructure/security/ui-session.ts'
@@ -22,6 +23,26 @@ import {
   defineCapabilityAccessPolicy,
   type PublicCapability,
 } from './capability-registry.ts'
+import { assertKillSwitchRecoveryAccess } from './kill-switch-access.ts'
+
+export function assertExternalMutationOrigin(
+  request: NextRequest,
+  actor: AuthenticatedExternalActor,
+): void {
+  if (actor.authenticationKind !== 'ui-session') return
+  const trustProxy = process.env.APOLLO_UI_TRUST_PROXY_HEADERS === 'true'
+  const trusted = isTrustedUiMutationOrigin({
+    origin: request.headers.get('origin'),
+    fetchSite: request.headers.get('sec-fetch-site'),
+    host: trustProxy
+      ? request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ?? null
+      : request.headers.get('host'),
+    protocol: trustProxy
+      ? request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() ?? null
+      : request.nextUrl.protocol.slice(0, -1),
+  })
+  if (!trusted) throw new DomainError('AUTH_INVALID', 'UI mutation origin is not authorized')
+}
 
 export function resolveApiEnvironment(): ApiEnvironment {
   const configured = process.env.APOLLO_API_ENVIRONMENT
@@ -58,6 +79,7 @@ export async function authenticateExternalRequest(request: NextRequest) {
     })
     actor = await authenticate(authorization)
   }
+  assertKillSwitchRecoveryAccess(actor, capability.id)
   assertCapabilityAccess(FOUNDATION_CAPABILITIES, capability.id, {
     environment,
     actor,

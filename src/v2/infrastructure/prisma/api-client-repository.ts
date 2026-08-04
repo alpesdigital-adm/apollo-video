@@ -20,6 +20,7 @@ import {
   type ApiCredentialStatus,
 } from '../../domain/api-credential.ts'
 import type {
+  ApiClientAuthenticationAccess,
   ApiClientRepository,
   CreatedApiClientCredential,
   StoredApiClientCredential,
@@ -124,10 +125,24 @@ export class PrismaApiClientRepository
   async findActiveClientById(clientId: string): Promise<ApiClient | null> {
     const row = await this.client.v2ApiClient.findUnique({
       where: { id: clientId },
-      include: { workspace: { select: { status: true } } },
+      include: { workspace: { select: { status: true, apiAccessStatus: true } } },
     })
     if (!row || row.status !== 'active' || row.workspace.status !== 'active') return null
     return hydrateClient(row)
+  }
+
+  async findActiveClientAccessById(clientId: string): Promise<ApiClientAuthenticationAccess | null> {
+    const row = await this.client.v2ApiClient.findUnique({
+      where: { id: clientId },
+      include: { workspace: { select: { status: true, apiAccessStatus: true, apiKillSwitchEngaged: true } } },
+    })
+    if (!row || row.status !== 'active' || row.workspace.status !== 'active') return null
+    return {
+      client: hydrateClient(row),
+      clientKillSwitchEngaged: row.apiKillSwitchEngaged,
+      workspaceKillSwitchEngaged: row.workspace.apiKillSwitchEngaged,
+      workspaceAccessStatus: row.workspace.apiAccessStatus as ApiClientAuthenticationAccess['workspaceAccessStatus'],
+    }
   }
 
   async findCredentialById(
@@ -137,10 +152,10 @@ export class PrismaApiClientRepository
     const row = await this.client.v2ApiCredential.findUnique({
       where: { id_clientId: { id: credentialId, clientId } },
       include: {
-        client: { include: { workspace: { select: { status: true } } } },
+        client: { include: { workspace: { select: { status: true, apiAccessStatus: true, apiKillSwitchEngaged: true } } } },
       },
     })
-    if (!row || row.client.workspace.status !== 'active') return null
+    if (!row || row.client.workspace.status !== 'active' || row.client.workspace.apiAccessStatus !== 'active') return null
 
     return {
       client: createApiClient({
@@ -167,6 +182,9 @@ export class PrismaApiClientRepository
       }),
       secretSalt: row.secretSalt,
       secretHash: row.secretHash,
+      clientKillSwitchEngaged: row.client.apiKillSwitchEngaged,
+      workspaceKillSwitchEngaged: row.client.workspace.apiKillSwitchEngaged,
+      workspaceAccessStatus: row.client.workspace.apiAccessStatus as StoredApiClientCredential['workspaceAccessStatus'],
     }
   }
 

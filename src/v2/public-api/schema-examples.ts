@@ -9392,6 +9392,48 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/api-client-list/v2': [
       { data: { clients: [] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/api-access-change-request/v1': [
+      {
+        action: 'engage-kill-switch',
+        baseRevision: '0'.repeat(64),
+        reason: 'Emergency containment requested by the workspace owner',
+        confirmed: true,
+      },
+    ],
+    'apollo://schemas/api-access-read-response/v1': [
+      {
+        data: {
+          access: {
+            schemaVersion: 1, workspaceId, targetType: 'client', targetId: clientId,
+            status: 'active', killSwitchEngaged: false, revision: '0'.repeat(64),
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/api-access-changed-response/v1': [
+      {
+        data: {
+          access: {
+            schemaVersion: 1, workspaceId, targetType: 'client', targetId: clientId,
+            status: 'active', killSwitchEngaged: true, revision: '2'.repeat(64),
+          },
+          command: {
+            schemaVersion: 1, id: 'api-access-command-example-1', workspaceId,
+            targetType: 'client', targetId: clientId, action: 'engage-kill-switch',
+            baseRevision: '0'.repeat(64), resultRevision: '2'.repeat(64),
+            previousStatus: 'active', resultStatus: 'active',
+            previousKillSwitchEngaged: false, resultKillSwitchEngaged: true,
+            reason: 'Emergency containment requested by the workspace owner',
+            actorClientId: 'client-example-admin', delegatedUserId: 'member-example-admin',
+            idempotencyKey: 'access-example-1', requestFingerprint: '1'.repeat(64), changedAt: createdAt,
+          },
+          canceledOperationCount: 2,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/create-api-client-request/v1': [
       {
         name: 'Automation Agent',

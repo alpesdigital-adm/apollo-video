@@ -6686,6 +6686,71 @@ const apiClientV2Schema = {
   },
 }
 
+const apiAccessControlSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'workspaceId', 'targetType', 'targetId', 'status', 'killSwitchEngaged', 'revision'],
+  properties: {
+    schemaVersion: { const: 1 },
+    workspaceId: idSchema,
+    targetType: { enum: ['client', 'workspace'] },
+    targetId: idSchema,
+    status: { enum: ['active', 'suspended', 'revoked'] },
+    killSwitchEngaged: { type: 'boolean' },
+    revision: sha256Schema,
+  },
+} as const
+
+const apiAccessCommandSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'targetType', 'targetId', 'action',
+    'baseRevision', 'resultRevision', 'previousStatus', 'resultStatus',
+    'previousKillSwitchEngaged', 'resultKillSwitchEngaged', 'reason',
+    'actorClientId', 'idempotencyKey', 'requestFingerprint', 'changedAt',
+  ],
+  properties: {
+    schemaVersion: { const: 1 }, id: idSchema, workspaceId: idSchema,
+    targetType: { enum: ['client', 'workspace'] }, targetId: idSchema,
+    action: { enum: ['activate', 'suspend', 'revoke', 'engage-kill-switch', 'release-kill-switch'] },
+    baseRevision: sha256Schema, resultRevision: sha256Schema,
+    previousStatus: { enum: ['active', 'suspended', 'revoked'] },
+    resultStatus: { enum: ['active', 'suspended', 'revoked'] },
+    previousKillSwitchEngaged: { type: 'boolean' }, resultKillSwitchEngaged: { type: 'boolean' },
+    reason: { type: 'string', minLength: 3, maxLength: 500 }, actorClientId: idSchema,
+    delegatedUserId: idSchema, idempotencyKey: { type: 'string', minLength: 1, maxLength: 128 },
+    requestFingerprint: sha256Schema, changedAt: dateTimeSchema,
+  },
+} as const
+
+const apiAccessChangeRequestSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['action', 'baseRevision', 'reason', 'confirmed'],
+  properties: {
+    action: { enum: ['activate', 'suspend', 'revoke', 'engage-kill-switch', 'release-kill-switch'] },
+    baseRevision: sha256Schema,
+    reason: { type: 'string', minLength: 3, maxLength: 500 },
+    confirmed: { const: true },
+  },
+} as const
+
+const apiAccessReadResponseSchema = successSchema({
+  type: 'object', additionalProperties: false, required: ['access'],
+  properties: { access: apiAccessControlSchema },
+})
+
+const apiAccessChangedResponseSchema = successSchema({
+  type: 'object', additionalProperties: false,
+  required: ['access', 'command', 'canceledOperationCount', 'replayed'],
+  properties: {
+    access: apiAccessControlSchema,
+    command: apiAccessCommandSchema,
+    canceledOperationCount: { type: 'integer', minimum: 0 },
+    replayed: { type: 'boolean' },
+  },
+})
+
 const reviewVersionVisibleStateSchema = {
   type: 'object',
   additionalProperties: false,
@@ -18739,6 +18804,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { clients: { type: 'array', items: apiClientV2Schema } },
     }),
   ),
+  defineSchema('api-access-change-request', 1, 'Explicit API access lifecycle or kill-switch command', apiAccessChangeRequestSchema),
+  defineSchema('api-access-read-response', 1, 'Current API access lifecycle and kill-switch state', apiAccessReadResponseSchema),
+  defineSchema('api-access-changed-response', 1, 'Applied API access command with cancellation evidence', apiAccessChangedResponseSchema),
   defineSchema('create-api-client-request', 1, 'Create API client request', {
     type: 'object',
     additionalProperties: false,

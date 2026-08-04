@@ -226,6 +226,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2IdempotencyRecord.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2ApiAccessCommand.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
@@ -1285,6 +1288,170 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal('details' in unauthorizedError, false)
 
     const authorization = `Bearer ${issued.token}`
+    await client.v2PublicOperation.create({
+      data: {
+        id: 'public-api-client-kill-operation-v2', workspaceId, clientId: apiClientId,
+        type: 'artifact-render', status: 'queued', phase: 'queued',
+        targetType: 'media-artifact', targetId: derivedArtifactId,
+        cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
+        idempotencyKey: 'public-api-client-kill-operation-v2', requestFingerprint: sha('1'),
+        createdAt: new Date('2026-07-12T16:06:00.000Z'),
+        updatedAt: new Date('2026-07-12T16:06:00.000Z'),
+      },
+    })
+    const clientAccessUrl = `${baseUrl}/v1/workspaces/${workspaceId}/clients/${apiClientId}/access`
+    const initialClientAccessResponse = await fetch(clientAccessUrl, { headers: { authorization } })
+    const initialClientAccess = await initialClientAccessResponse.json()
+    assert.equal(initialClientAccessResponse.status, 200, JSON.stringify(initialClientAccess))
+    assert.equal(initialClientAccess.data.access.revision, sha('0'))
+    assert.equal(initialClientAccess.data.access.killSwitchEngaged, false)
+    assert.equal((await fetch(
+      `${baseUrl}/v1/workspaces/${otherWorkspaceId}/clients/${apiClientId}/access`,
+      { headers: { authorization } },
+    )).status, 404)
+
+    const engageClientKillResponse = await fetch(clientAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-engage-client-kill-1',
+      },
+      body: JSON.stringify({
+        action: 'engage-kill-switch', baseRevision: initialClientAccess.data.access.revision,
+        reason: 'Contain the external client during incident response', confirmed: true,
+      }),
+    })
+    const engagedClientKill = await engageClientKillResponse.json()
+    assert.equal(engageClientKillResponse.status, 201, JSON.stringify(engagedClientKill))
+    assert.equal(engagedClientKill.data.access.killSwitchEngaged, true)
+    assert.equal(engagedClientKill.data.canceledOperationCount, 1)
+    assert.equal((await client.v2PublicOperation.findUnique({
+      where: { id: 'public-api-client-kill-operation-v2' },
+    }))?.status, 'canceled')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 503)
+    assert.equal((await fetch(clientAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-release-client-kill-bearer-1',
+      },
+      body: JSON.stringify({
+        action: 'release-kill-switch', baseRevision: engagedClientKill.data.access.revision,
+        reason: 'Bearer must not release its own containment', confirmed: true,
+      }),
+    })).status, 503)
+    const delegatedClientAccessResponse = await fetch(clientAccessUrl, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
+    })
+    assert.equal(delegatedClientAccessResponse.status, 200)
+    assert.equal((await fetch(clientAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}`,
+        'content-type': 'application/json', 'idempotency-key': 'public-api-release-client-kill-cross-origin-1',
+        origin: 'https://attacker.example', 'sec-fetch-site': 'cross-site',
+      },
+      body: JSON.stringify({
+        action: 'release-kill-switch', baseRevision: engagedClientKill.data.access.revision,
+        reason: 'Cross origin release must fail', confirmed: true,
+      }),
+    })).status, 401)
+    const releaseClientKillResponse = await fetch(clientAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}`,
+        'content-type': 'application/json', 'idempotency-key': 'public-api-release-client-kill-1',
+        origin: baseUrl, 'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({
+        action: 'release-kill-switch', baseRevision: engagedClientKill.data.access.revision,
+        reason: 'Human administrator completed incident review', confirmed: true,
+      }),
+    })
+    const releasedClientKill = await releaseClientKillResponse.json()
+    assert.equal(releaseClientKillResponse.status, 201, JSON.stringify(releasedClientKill))
+    assert.equal(releasedClientKill.data.access.killSwitchEngaged, false)
+    assert.equal(releasedClientKill.data.command.delegatedUserId, persistedMember.id)
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 200)
+
+    await client.v2PublicOperation.create({
+      data: {
+        id: 'public-api-workspace-kill-operation-v2', workspaceId, clientId: apiClientId,
+        type: 'artifact-render', status: 'queued', phase: 'queued',
+        targetType: 'media-artifact', targetId: sourceArtifactId,
+        cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
+        idempotencyKey: 'public-api-workspace-kill-operation-v2', requestFingerprint: sha('2'),
+        createdAt: new Date('2026-07-12T16:07:00.000Z'),
+        updatedAt: new Date('2026-07-12T16:07:00.000Z'),
+      },
+    })
+    const workspaceAccessUrl = `${baseUrl}/v1/workspaces/${workspaceId}/api-access`
+    const initialWorkspaceAccess = await (await fetch(workspaceAccessUrl, {
+      headers: { authorization },
+    })).json()
+    const engageWorkspaceKillResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-engage-workspace-kill-1',
+      },
+      body: JSON.stringify({
+        action: 'engage-kill-switch', baseRevision: initialWorkspaceAccess.data.access.revision,
+        reason: 'Contain all workspace automation during incident response', confirmed: true,
+      }),
+    })
+    const engagedWorkspaceKill = await engageWorkspaceKillResponse.json()
+    assert.equal(engageWorkspaceKillResponse.status, 201, JSON.stringify(engagedWorkspaceKill))
+    assert.equal(engagedWorkspaceKill.data.canceledOperationCount, 1)
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 503)
+    const releaseWorkspaceKillResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}`,
+        'content-type': 'application/json', 'idempotency-key': 'public-api-release-workspace-kill-1',
+        origin: baseUrl, 'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({
+        action: 'release-kill-switch', baseRevision: engagedWorkspaceKill.data.access.revision,
+        reason: 'Human administrator released workspace containment', confirmed: true,
+      }),
+    })
+    const releasedWorkspaceKill = await releaseWorkspaceKillResponse.json()
+    assert.equal(releaseWorkspaceKillResponse.status, 201, JSON.stringify(releasedWorkspaceKill))
+    assert.equal(releasedWorkspaceKill.data.access.killSwitchEngaged, false)
+    assert.equal(releasedWorkspaceKill.data.command.delegatedUserId, persistedMember.id)
+    assert.equal((await client.v2ApiAccessCommand.count({ where: { workspaceId } })), 4)
+    const suspendWorkspaceResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-suspend-workspace-1',
+      },
+      body: JSON.stringify({
+        action: 'suspend', baseRevision: releasedWorkspaceKill.data.access.revision,
+        reason: 'Temporarily suspend external workspace access', confirmed: true,
+      }),
+    })
+    const suspendedWorkspace = await suspendWorkspaceResponse.json()
+    assert.equal(suspendWorkspaceResponse.status, 201, JSON.stringify(suspendedWorkspace))
+    assert.equal(suspendedWorkspace.data.access.status, 'suspended')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 401)
+    const activateWorkspaceResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}`,
+        'content-type': 'application/json', 'idempotency-key': 'public-api-activate-workspace-1',
+        origin: baseUrl, 'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({
+        action: 'activate', baseRevision: suspendedWorkspace.data.access.revision,
+        reason: 'Human administrator restored external workspace access', confirmed: true,
+      }),
+    })
+    const activatedWorkspace = await activateWorkspaceResponse.json()
+    assert.equal(activateWorkspaceResponse.status, 201, JSON.stringify(activatedWorkspace))
+    assert.equal(activatedWorkspace.data.access.status, 'active')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 200)
     const anonymousCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`)
     const anonymousCapabilities = await anonymousCapabilitiesResponse.json()
     assert.equal(anonymousCapabilitiesResponse.status, 200)
@@ -2698,6 +2865,64 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(listedChild.allowedEnvironments, [apiEnvironment])
     assert.deepEqual(listedChild.scopeGrants, ['projects:read'])
     assert.equal(listedChild.createdBy, apiClientId)
+
+    const childAuthorization = `Bearer ${childCreated.data.token}`
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 200)
+    const childAccessUrl = `${baseUrl}/v1/workspaces/${workspaceId}/clients/${childCreated.data.client.id}/access`
+    const childAccess = await (await fetch(childAccessUrl, { headers: { authorization } })).json()
+    const changeChildAccess = (action, baseRevision, idempotencyKey, reason) => fetch(childAccessUrl, {
+      method: 'PATCH',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+      body: JSON.stringify({ action, baseRevision, reason, confirmed: true }),
+    })
+    const suspendChildResponse = await changeChildAccess(
+      'suspend', childAccess.data.access.revision, 'public-api-suspend-child-1',
+      'Suspend the child client for a bounded security review',
+    )
+    const suspendedChild = await suspendChildResponse.json()
+    assert.equal(suspendChildResponse.status, 201, JSON.stringify(suspendedChild))
+    assert.equal(suspendedChild.data.access.status, 'suspended')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 401)
+    const suspendReplayResponse = await changeChildAccess(
+      'suspend', childAccess.data.access.revision, 'public-api-suspend-child-1',
+      'Suspend the child client for a bounded security review',
+    )
+    assert.equal(suspendReplayResponse.status, 200)
+    assert.equal((await suspendReplayResponse.json()).data.replayed, true)
+    const mismatchChildResponse = await changeChildAccess(
+      'revoke', childAccess.data.access.revision, 'public-api-suspend-child-1',
+      'A different command cannot reuse this idempotency key',
+    )
+    assert.equal(mismatchChildResponse.status, 409)
+    const activateChildResponse = await changeChildAccess(
+      'activate', suspendedChild.data.access.revision, 'public-api-activate-child-1',
+      'Security review completed without findings',
+    )
+    const activatedChild = await activateChildResponse.json()
+    assert.equal(activateChildResponse.status, 201, JSON.stringify(activatedChild))
+    assert.equal(activatedChild.data.access.status, 'active')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 200)
+    const revokeChildResponse = await changeChildAccess(
+      'revoke', activatedChild.data.access.revision, 'public-api-revoke-child-1',
+      'Permanently revoke the retired child integration',
+    )
+    const revokedChild = await revokeChildResponse.json()
+    assert.equal(revokeChildResponse.status, 201, JSON.stringify(revokedChild))
+    assert.equal(revokedChild.data.access.status, 'revoked')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 401)
+    const reactivateRevokedChildResponse = await changeChildAccess(
+      'activate', revokedChild.data.access.revision, 'public-api-reactivate-revoked-child-1',
+      'Revoked access must remain terminal',
+    )
+    assert.equal(reactivateRevokedChildResponse.status, 422)
 
     const responseLossRequest = () =>
       fetch(`${baseUrl}/v1/workspaces/${workspaceId}/clients`, {
@@ -4345,6 +4570,43 @@ test('authenticated public API manages projects, clients and artifact inspection
       new Set(list.data.projects.map((project) => project.id)),
       new Set([created.data.project.id, uiProjectCreated.data.project.id]),
     )
+    const finalWorkspaceAccess = await (await fetch(workspaceAccessUrl, {
+      headers: { authorization },
+    })).json()
+    const revokeWorkspaceResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-revoke-workspace-1',
+      },
+      body: JSON.stringify({
+        action: 'revoke', baseRevision: finalWorkspaceAccess.data.access.revision,
+        reason: 'Terminate external API access after the completed security journey', confirmed: true,
+      }),
+    })
+    const revokedWorkspace = await revokeWorkspaceResponse.json()
+    assert.equal(revokeWorkspaceResponse.status, 201, JSON.stringify(revokedWorkspace))
+    assert.equal(revokedWorkspace.data.access.status, 'revoked')
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 401)
+    const delegatedRevokedWorkspaceResponse = await fetch(workspaceAccessUrl, {
+      headers: { cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}` },
+    })
+    const delegatedRevokedWorkspace = await delegatedRevokedWorkspaceResponse.json()
+    assert.equal(delegatedRevokedWorkspaceResponse.status, 200, JSON.stringify(delegatedRevokedWorkspace))
+    assert.equal(delegatedRevokedWorkspace.data.access.status, 'revoked')
+    const reactivateRevokedWorkspaceResponse = await fetch(workspaceAccessUrl, {
+      method: 'PATCH',
+      headers: {
+        cookie: `${APOLLO_SESSION_COOKIE}=${formUiSession}`,
+        'content-type': 'application/json', 'idempotency-key': 'public-api-reactivate-revoked-workspace-1',
+        origin: baseUrl, 'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({
+        action: 'activate', baseRevision: revokedWorkspace.data.access.revision,
+        reason: 'Revoked workspace access must remain terminal', confirmed: true,
+      }),
+    })
+    assert.equal(reactivateRevokedWorkspaceResponse.status, 422)
   } finally {
     if (server && server.exitCode === null) {
       server.kill()

@@ -4,9 +4,9 @@
     "uiActions": 73,
     "capabilities": 66,
     "endpoints": 66,
-    "registeredCapabilities": 189,
-    "operableCapabilities": 189,
-    "publicContractCapabilities": 189,
+    "registeredCapabilities": 193,
+    "operableCapabilities": 193,
+    "publicContractCapabilities": 193,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3170,6 +3170,50 @@
       "endpoint": "GET /v1/workspaces/{workspaceId}/clients",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/api-client-list/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.api-access.workspace.read",
+      "exposure": "workspace-admin",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/api-access",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/api-access-read-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.api-access.workspace.change",
+      "exposure": "workspace-admin",
+      "endpoint": "PATCH /v1/workspaces/{workspaceId}/api-access",
+      "inputSchemaRef": "apollo://schemas/api-access-change-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-access-changed-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.api-access.clients.read",
+      "exposure": "workspace-admin",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/clients/{clientId}/access",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/api-access-read-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.api-access.clients.change",
+      "exposure": "workspace-admin",
+      "endpoint": "PATCH /v1/workspaces/{workspaceId}/clients/{clientId}/access",
+      "inputSchemaRef": "apollo://schemas/api-access-change-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-access-changed-response/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

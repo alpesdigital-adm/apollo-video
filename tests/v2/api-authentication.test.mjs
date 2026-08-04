@@ -148,6 +148,11 @@ test('authentication returns workspace-scoped actor and updates last use', async
   assert.equal(actor.clientId, issued.client.id)
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.scopes.has('projects:write'), true)
+  assert.equal(actor.authenticationKind, 'bearer')
+  assert.equal(actor.clientKillSwitchEngaged, false)
+  assert.equal(actor.workspaceKillSwitchEngaged, false)
+  assert.equal(actor.clientAccessStatus, 'active')
+  assert.equal(actor.workspaceAccessStatus, 'active')
   assert.deepEqual(actor.auditContext, {
     clientId: issued.client.id,
     credentialId: issued.credential.id,

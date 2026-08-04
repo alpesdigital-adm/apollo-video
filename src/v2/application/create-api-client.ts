@@ -45,6 +45,9 @@ export function createApiClientService(dependencies: CreateApiClientDependencies
       credential,
       secretSalt: issued.secretSalt,
       secretHash: issued.secretHash,
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      workspaceAccessStatus: 'active',
     })
 
     return Object.freeze({ ...persisted, token: issued.token })

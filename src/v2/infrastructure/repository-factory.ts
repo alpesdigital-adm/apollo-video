@@ -42,6 +42,7 @@ import {
 import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
+import type { ApiAccessControlRepository } from '../application/ports/api-access-control-repository.ts'
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
 import type { AssetSelectionRepository } from '../application/ports/asset-selection-repository.ts'
 import type { QualityIterationRepository } from '../application/ports/quality-iteration-repository.ts'
@@ -137,6 +138,7 @@ import type {
 } from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
+import { PrismaApiAccessControlRepository } from './prisma/api-access-control-repository.ts'
 import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-render-checkpoint-repository.ts'
 import { PrismaAssetRightsRepository } from './prisma/asset-rights-repository.ts'
 import { PrismaAssetSelectionRepository } from './prisma/asset-selection-repository.ts'
@@ -298,6 +300,10 @@ export function createApiClientRepository(): ApiClientRepository {
 
 export function createApiClientAdministrationRepository(): ApiClientAdministrationRepository {
   return new PrismaApiClientRepository(resolveV2Client())
+}
+
+export function createApiAccessControlRepository(): ApiAccessControlRepository {
+  return new PrismaApiAccessControlRepository(resolveV2Client())
 }
 
 export function createAssetRightsRepository(): AssetRightsRepository {

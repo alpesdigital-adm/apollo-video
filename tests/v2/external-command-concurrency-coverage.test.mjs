@@ -4,6 +4,14 @@ import test from 'node:test'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.api-access.workspace.change': {
+    mode: 'durable-covered',
+    evidence: 'F0.036 serializable workspace revision CAS, actor-bound idempotency, immutable access-command audit and atomic cancellation of eligible public operations',
+  },
+  'apollo.api-access.clients.change': {
+    mode: 'durable-covered',
+    evidence: 'F0.036 serializable client revision CAS, actor-bound idempotency, immutable access-command audit and atomic cancellation of eligible public operations',
+  },
   'apollo.artifacts.reconstruction.preflight': {
     mode: 'read-only-deterministic', evidence: 'domain reconstruction preflight contracts',
   },
@@ -308,7 +316,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    88,
+    90,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

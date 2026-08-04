@@ -1,0 +1,261 @@
+import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
+
+import type {
+  ApiAccessCommandResult,
+  ApiAccessControlRepository,
+} from '../../application/ports/api-access-control-repository.ts'
+import {
+  createApiAccessControl,
+  type ApiAccessCommand,
+  type ApiAccessControl,
+  type ApiAccessStatus,
+} from '../../domain/api-access-control.ts'
+import { DomainError } from '../../domain/errors.ts'
+import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+
+type StoredCommand = {
+  id: string
+  workspaceId: string
+  targetType: string
+  targetId: string
+  action: string
+  baseRevision: string
+  resultRevision: string
+  previousStatus: string
+  resultStatus: string
+  previousKillSwitchEngaged: boolean
+  resultKillSwitchEngaged: boolean
+  reason: string
+  actorClientId: string
+  delegatedUserId: string | null
+  idempotencyKey: string
+  requestFingerprint: string
+  canceledOperationCount: number
+  changedAt: Date
+}
+
+function hydrateCommand(row: StoredCommand): Readonly<ApiAccessCommand> {
+  return Object.freeze({
+    schemaVersion: 1,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    targetType: row.targetType as ApiAccessCommand['targetType'],
+    targetId: row.targetId,
+    action: row.action as ApiAccessCommand['action'],
+    baseRevision: row.baseRevision,
+    resultRevision: row.resultRevision,
+    previousStatus: row.previousStatus as ApiAccessStatus,
+    resultStatus: row.resultStatus as ApiAccessStatus,
+    previousKillSwitchEngaged: row.previousKillSwitchEngaged,
+    resultKillSwitchEngaged: row.resultKillSwitchEngaged,
+    reason: row.reason,
+    actorClientId: row.actorClientId,
+    ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+    idempotencyKey: row.idempotencyKey,
+    requestFingerprint: row.requestFingerprint,
+    changedAt: row.changedAt.toISOString(),
+  })
+}
+
+function accessFromCommand(row: StoredCommand): Readonly<ApiAccessControl> {
+  return createApiAccessControl({
+    workspaceId: row.workspaceId,
+    targetType: row.targetType as ApiAccessCommand['targetType'],
+    targetId: row.targetId,
+    status: row.resultStatus as ApiAccessStatus,
+    killSwitchEngaged: row.resultKillSwitchEngaged,
+    revision: row.resultRevision,
+  })
+}
+
+function replayResult(row: StoredCommand): Readonly<ApiAccessCommandResult> {
+  return Object.freeze({
+    access: accessFromCommand(row),
+    command: hydrateCommand(row),
+    canceledOperationCount: row.canceledOperationCount,
+    replayed: true,
+  })
+}
+
+function isConcurrentWrite(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error &&
+    (error.code === 'P2002' || error.code === 'P2034')
+}
+
+export class PrismaApiAccessControlRepository implements ApiAccessControlRepository {
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
+
+  async find(input: {
+    workspaceId: string
+    targetType: 'client' | 'workspace'
+    targetId: string
+  }): Promise<Readonly<ApiAccessControl> | null> {
+    if (input.targetType === 'workspace') {
+      const row = await this.client.v2Workspace.findUnique({ where: { id: input.workspaceId } })
+      return row ? createApiAccessControl({
+        workspaceId: row.id,
+        targetType: 'workspace',
+        targetId: row.id,
+        status: row.apiAccessStatus as ApiAccessStatus,
+        killSwitchEngaged: row.apiKillSwitchEngaged,
+        revision: row.apiAccessRevision,
+      }) : null
+    }
+    const row = await this.client.v2ApiClient.findFirst({
+      where: { id: input.targetId, workspaceId: input.workspaceId },
+    })
+    return row ? createApiAccessControl({
+      workspaceId: row.workspaceId,
+      targetType: 'client',
+      targetId: row.id,
+      status: row.status as ApiAccessStatus,
+      killSwitchEngaged: row.apiKillSwitchEngaged,
+      revision: row.apiAccessRevision,
+    }) : null
+  }
+
+  async findReplay(input: {
+    workspaceId: string
+    actorClientId: string
+    idempotencyKey: string
+    requestFingerprint: string
+  }): Promise<Readonly<ApiAccessCommandResult> | null> {
+    const row = await this.client.v2ApiAccessCommand.findUnique({
+      where: { workspaceId_actorClientId_idempotencyKey: {
+        workspaceId: input.workspaceId,
+        actorClientId: input.actorClientId,
+        idempotencyKey: input.idempotencyKey,
+      } },
+    })
+    if (!row) return null
+    if (row.requestFingerprint !== input.requestFingerprint) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
+    }
+    return replayResult(row)
+  }
+
+  async apply(command: Readonly<ApiAccessCommand>, attempt = 1): Promise<Readonly<ApiAccessCommandResult>> {
+    try {
+      return await this.client.$transaction(async (transaction) => {
+        const replay = await transaction.v2ApiAccessCommand.findUnique({
+          where: { workspaceId_actorClientId_idempotencyKey: {
+            workspaceId: command.workspaceId,
+            actorClientId: command.actorClientId,
+            idempotencyKey: command.idempotencyKey,
+          } },
+        })
+        if (replay) {
+          if (replay.requestFingerprint !== command.requestFingerprint) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
+          }
+          return replayResult(replay)
+        }
+
+        const current = command.targetType === 'workspace'
+          ? await transaction.v2Workspace.findUnique({ where: { id: command.workspaceId } })
+          : await transaction.v2ApiClient.findFirst({ where: { id: command.targetId, workspaceId: command.workspaceId } })
+        if (!current) throw new DomainError('API_CLIENT_NOT_FOUND', 'API access target was not found')
+        const currentStatus = command.targetType === 'workspace'
+          ? (current as typeof current & { apiAccessStatus: string }).apiAccessStatus
+          : current.status
+        if (
+          current.apiAccessRevision !== command.baseRevision ||
+          currentStatus !== command.previousStatus ||
+          current.apiKillSwitchEngaged !== command.previousKillSwitchEngaged
+        ) {
+          throw new DomainError('VERSION_CONFLICT', 'API access state changed before commit')
+        }
+
+        const updated = command.targetType === 'workspace'
+          ? await transaction.v2Workspace.updateMany({
+              where: { id: command.workspaceId, apiAccessRevision: command.baseRevision },
+              data: {
+                apiAccessStatus: command.resultStatus,
+                apiKillSwitchEngaged: command.resultKillSwitchEngaged,
+                apiAccessRevision: command.resultRevision,
+              },
+            })
+          : await transaction.v2ApiClient.updateMany({
+              where: { id: command.targetId, workspaceId: command.workspaceId, apiAccessRevision: command.baseRevision },
+              data: {
+                status: command.resultStatus,
+                apiKillSwitchEngaged: command.resultKillSwitchEngaged,
+                apiAccessRevision: command.resultRevision,
+              },
+            })
+        if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'API access state changed before commit')
+
+        let canceledOperationCount = 0
+        if (
+          command.action === 'suspend' ||
+          command.action === 'revoke' ||
+          command.action === 'engage-kill-switch'
+        ) {
+          const canceled = await transaction.v2PublicOperation.updateMany({
+            where: {
+              workspaceId: command.workspaceId,
+              ...(command.targetType === 'client' ? { clientId: command.targetId } : {}),
+              status: { in: ['queued', 'running', 'waiting', 'retrying'] },
+              cancelable: true,
+            },
+            data: {
+              status: 'canceled',
+              phase: 'canceled',
+              cancelable: false,
+              retryable: false,
+              resultJson: null,
+              errorCode: null,
+              errorMessage: null,
+              errorRetryable: null,
+              completedAt: new Date(command.changedAt),
+              nextAttemptAt: null,
+              deadLetteredAt: null,
+              updatedAt: new Date(command.changedAt),
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              heartbeatAt: null,
+            },
+          })
+          canceledOperationCount = canceled.count
+        }
+
+        const stored = await transaction.v2ApiAccessCommand.create({
+          data: {
+            id: command.id,
+            workspaceId: command.workspaceId,
+            targetType: command.targetType,
+            targetId: command.targetId,
+            action: command.action,
+            baseRevision: command.baseRevision,
+            resultRevision: command.resultRevision,
+            previousStatus: command.previousStatus,
+            resultStatus: command.resultStatus,
+            previousKillSwitchEngaged: command.previousKillSwitchEngaged,
+            resultKillSwitchEngaged: command.resultKillSwitchEngaged,
+            reason: command.reason,
+            actorClientId: command.actorClientId,
+            delegatedUserId: command.delegatedUserId,
+            idempotencyKey: command.idempotencyKey,
+            requestFingerprint: command.requestFingerprint,
+            canceledOperationCount,
+            changedAt: new Date(command.changedAt),
+          },
+        })
+        return Object.freeze({
+          access: accessFromCommand(stored),
+          command: hydrateCommand(stored),
+          canceledOperationCount,
+          replayed: false,
+        })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (isConcurrentWrite(error) && attempt < 3) return this.apply(command, attempt + 1)
+      if (isConcurrentWrite(error)) throw new DomainError('PERSISTENCE_CONFLICT', 'API access command conflicted with another write')
+      throw error
+    }
+  }
+}

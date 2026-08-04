@@ -2,6 +2,104 @@
   "schemaVersion": 1,
   "apiMajor": "v1",
   "capabilities": {
+    "apollo.api-access.clients.change": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/api-access-change-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-access-changed-response/v1",
+      "endpoint": {
+        "method": "PATCH",
+        "path": "/v1/workspaces/{workspaceId}/clients/{clientId}/access"
+      },
+      "toolName": "apollo.api-access.clients.change",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.api-access.clients.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/api-access-read-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/clients/{clientId}/access"
+      },
+      "toolName": "apollo.api-access.clients.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.api-access.workspace.change": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/api-access-change-request/v1",
+      "outputSchemaRef": "apollo://schemas/api-access-changed-response/v1",
+      "endpoint": {
+        "method": "PATCH",
+        "path": "/v1/workspaces/{workspaceId}/api-access"
+      },
+      "toolName": "apollo.api-access.workspace.change",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.api-access.workspace.read": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/api-access-read-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/api-access"
+      },
+      "toolName": "apollo.api-access.workspace.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.artifacts.color-probe.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -6739,6 +6837,321 @@
                       }
                     }
                   }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-access-change-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "baseRevision",
+        "reason",
+        "confirmed"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "activate",
+            "suspend",
+            "revoke",
+            "engage-kill-switch",
+            "release-kill-switch"
+          ]
+        },
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500
+        },
+        "confirmed": {
+          "const": true
+        }
+      }
+    },
+    "apollo://schemas/api-access-changed-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "access",
+            "command",
+            "canceledOperationCount",
+            "replayed"
+          ],
+          "properties": {
+            "access": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "workspaceId",
+                "targetType",
+                "targetId",
+                "status",
+                "killSwitchEngaged",
+                "revision"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetType": {
+                  "enum": [
+                    "client",
+                    "workspace"
+                  ]
+                },
+                "targetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "killSwitchEngaged": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "targetType",
+                "targetId",
+                "action",
+                "baseRevision",
+                "resultRevision",
+                "previousStatus",
+                "resultStatus",
+                "previousKillSwitchEngaged",
+                "resultKillSwitchEngaged",
+                "reason",
+                "actorClientId",
+                "idempotencyKey",
+                "requestFingerprint",
+                "changedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetType": {
+                  "enum": [
+                    "client",
+                    "workspace"
+                  ]
+                },
+                "targetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "action": {
+                  "enum": [
+                    "activate",
+                    "suspend",
+                    "revoke",
+                    "engage-kill-switch",
+                    "release-kill-switch"
+                  ]
+                },
+                "baseRevision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "resultRevision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "previousStatus": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "resultStatus": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "previousKillSwitchEngaged": {
+                  "type": "boolean"
+                },
+                "resultKillSwitchEngaged": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 500
+                },
+                "actorClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "delegatedUserId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "idempotencyKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "requestFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "changedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "canceledOperationCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/api-access-read-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "access"
+          ],
+          "properties": {
+            "access": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "workspaceId",
+                "targetType",
+                "targetId",
+                "status",
+                "killSwitchEngaged",
+                "revision"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetType": {
+                  "enum": [
+                    "client",
+                    "workspace"
+                  ]
+                },
+                "targetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "suspended",
+                    "revoked"
+                  ]
+                },
+                "killSwitchEngaged": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }

@@ -5,6 +5,14 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.api-access.workspace.change': {
+    mode: 'explicit-precondition', mechanism: 'body-revision',
+    evidence: 'F0.036 requires the exact workspace API access revision and applies the transition, audit row and eligible operation cancellations in one serializable transaction',
+  },
+  'apollo.api-access.clients.change': {
+    mode: 'explicit-precondition', mechanism: 'body-revision',
+    evidence: 'F0.036 requires the exact client API access revision and applies the transition, audit row and eligible operation cancellations in one serializable transaction',
+  },
   'apollo.artifacts.reconstruction.preflight': {
     mode: 'read-only-preflight', evidence: 'deterministic reconstruction preflight',
   },
@@ -495,7 +503,7 @@ test('the current public surface has no unguarded state replacement', () => {
   }, {})
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
-    'explicit-precondition': 5,
+    'explicit-precondition': 7,
     'idempotent-create': 48,
     'state-machine-action': 16,
     'single-flight-action': 1,

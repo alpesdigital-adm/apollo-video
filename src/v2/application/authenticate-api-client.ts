@@ -1,4 +1,5 @@
 import type { ApiEnvironment } from '../domain/api-client.ts'
+import type { ApiAccessStatus } from '../domain/api-access-control.ts'
 import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
@@ -13,6 +14,11 @@ export interface AuthenticatedExternalActor {
   delegatedUserId?: string
   delegatedIdentityId?: string
   workspaceRole?: string
+  authenticationKind: 'bearer' | 'ui-session'
+  clientKillSwitchEngaged: boolean
+  workspaceKillSwitchEngaged: boolean
+  clientAccessStatus: ApiAccessStatus
+  workspaceAccessStatus: ApiAccessStatus
   auditContext: ExternalAuditContext
 }
 
@@ -122,6 +128,11 @@ export function authenticateApiClientService(
     return Object.freeze({
       ...auditContext,
       scopes: new Set(stored.client.scopeGrants),
+      authenticationKind: 'bearer' as const,
+      clientKillSwitchEngaged: stored.clientKillSwitchEngaged,
+      workspaceKillSwitchEngaged: stored.workspaceKillSwitchEngaged,
+      clientAccessStatus: 'active' as const,
+      workspaceAccessStatus: stored.workspaceAccessStatus,
       auditContext,
     }) as AuthenticatedExternalActor
   }

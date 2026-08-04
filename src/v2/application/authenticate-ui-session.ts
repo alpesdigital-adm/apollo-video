@@ -51,8 +51,9 @@ export function authenticateUiSessionService(dependencies: {
     ) {
       throw new DomainError('AUTH_INVALID', 'Apollo session is no longer authorized')
     }
-    const client = await dependencies.repository.findActiveClientById(durable.clientId)
-    if (!client || !client.allowedEnvironments.includes(dependencies.environment) || client.workspaceId !== durable.workspaceId) {
+    const access = await dependencies.repository.findActiveClientAccessById(durable.clientId)
+    const client = access?.client
+    if (!access || !client || !client.allowedEnvironments.includes(dependencies.environment) || client.workspaceId !== durable.workspaceId) {
       throw new DomainError('AUTH_INVALID', 'Apollo session is no longer authorized')
     }
     const auditContext = createExternalAuditContext({
@@ -67,6 +68,11 @@ export function authenticateUiSessionService(dependencies: {
     return Object.freeze({
       ...auditContext,
       scopes: new Set(client.scopeGrants),
+      authenticationKind: 'ui-session' as const,
+      clientKillSwitchEngaged: access.clientKillSwitchEngaged,
+      workspaceKillSwitchEngaged: access.workspaceKillSwitchEngaged,
+      clientAccessStatus: client.status,
+      workspaceAccessStatus: access.workspaceAccessStatus,
       auditContext,
       sessionExpiresAt: durable.expiresAt,
       sessionTokenRotated: refreshed?.rotated ?? false,
