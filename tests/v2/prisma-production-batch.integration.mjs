@@ -316,8 +316,8 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       ],
       budget: {
         currency: 'USD',
-        maxCostMinorUnits: 10_000,
-        reservedCostMinorUnits: 3_000,
+        maxCostMinorUnits: 10,
+        reservedCostMinorUnits: 3,
       },
       items: [
         {
@@ -500,7 +500,8 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       batch = started.payload.data.batch
       const running = batch.items.find((candidate) =>
         candidate.id === secondItemId)
-      const failed = await action(secondItemId, {
+      const failureKey = `batch-second-materializing-fail-${suffix}`
+      const failureBody = {
         action: 'fail-step',
         step: 'materializing',
         expectedBatchRevision: batch.revision,
@@ -511,8 +512,50 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
           code: 'PROVIDER_TIMEOUT',
           message: 'Provider timed out during the bounded attempt.',
         },
-      }, `batch-second-materializing-fail-${suffix}`)
+      }
+      const failed = await action(
+        secondItemId,
+        failureBody,
+        failureKey,
+      )
       batch = failed.payload.data.batch
+      const thresholdEvents = await client.v2PublicEventOutbox.findMany({
+        where: {
+          workspaceId,
+          type: 'budget.threshold.reached',
+        },
+      })
+      assert.equal(thresholdEvents.length, 1)
+      assert.equal(thresholdEvents[0].resourceType, 'workspace')
+      assert.equal(thresholdEvents[0].resourceId, workspaceId)
+      assert.deepEqual(JSON.parse(thresholdEvents[0].dataJson), {
+        batchId: batch.id,
+        budgetScope: 'production-batch',
+        currency: 'USD',
+        maximumMinorUnits: 10,
+        policyVersion: 'production-batch-budget-thresholds/v1',
+        previousSpentMinorUnits: 6,
+        projectId,
+        spentMinorUnits: 9,
+        thresholdBasisPoints: 8_000,
+        thresholdLevel: 'warning',
+      })
+      const failureReplay = await action(
+        secondItemId,
+        failureBody,
+        failureKey,
+      )
+      assert.equal(failureReplay.response.status, 200)
+      assert.equal(failureReplay.payload.data.replayed, true)
+      assert.equal(
+        await client.v2PublicEventOutbox.count({
+          where: {
+            workspaceId,
+            type: 'budget.threshold.reached',
+          },
+        }),
+        1,
+      )
     }
 
     const thirdItemId = batch.items[2].id

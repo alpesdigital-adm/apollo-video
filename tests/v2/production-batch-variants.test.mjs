@@ -12,6 +12,10 @@ import {
   transitionBatchItem,
 } from '../../src/v2/domain/production-batch.ts'
 import {
+  createProductionBatchBudgetThresholdEvents,
+  PRODUCTION_BATCH_BUDGET_THRESHOLD_POLICY_VERSION,
+} from '../../src/v2/domain/production-batch-budget-event.ts'
+import {
   presentProductionBatchVisibleStates,
 } from '../../src/v2/domain/visible-state.ts'
 import {
@@ -21,7 +25,11 @@ import {
 const at = (second) =>
   new Date(Date.UTC(2026, 6, 27, 18, 0, second)).toISOString()
 
-function batchFixture() {
+function batchFixture(budget = {
+  currency: 'USD',
+  maxCostMinorUnits: 10_000,
+  reservedCostMinorUnits: 3_000,
+}) {
   return createProductionBatch({
     id: 'batch-fixture-001',
     workspaceId: 'workspace-fixture',
@@ -66,11 +74,7 @@ function batchFixture() {
         locale: 'pt-BR',
       },
     ],
-    budget: {
-      currency: 'USD',
-      maxCostMinorUnits: 10_000,
-      reservedCostMinorUnits: 3_000,
-    },
+    budget,
     itemDefinitions: [
       {
         id: 'batch-item-one',
@@ -99,6 +103,26 @@ function batchFixture() {
       id: 'api-client-fixture',
     },
     createdAt: at(0),
+  })
+}
+
+const budgetAudit = Object.freeze({
+  clientId: 'api-client-fixture',
+  credentialId: 'credential-fixture',
+  workspaceId: 'workspace-fixture',
+  environment: 'production',
+  authenticationKind: 'bearer',
+  contextHash: 'a'.repeat(64),
+})
+
+function budgetEvents(previousBatch, resultingBatch, ids) {
+  let index = 0
+  return createProductionBatchBudgetThresholdEvents({
+    previousBatch,
+    resultingBatch,
+    authenticationAudit: budgetAudit,
+    occurredAt: resultingBatch.updatedAt,
+    createEventId: () => ids[index++],
   })
 }
 
@@ -185,6 +209,126 @@ test('T-FR-080 creates an immutable explicit batch without materializing a Carte
   assert.throws(() => batch.items.push(batch.items[0]))
   assert.throws(() => batch.sourceGroups[0].sourceArtifactIds.push('other'))
   assert.equal(hydrateProductionBatch(batch).definitionHash, batch.definitionHash)
+})
+
+test('T-FR-128 emits canonical budget thresholds only when persisted consumption crosses them', () => {
+  const ids = [
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+  ]
+  let batch = batchFixture({
+    currency: 'USD',
+    maxCostMinorUnits: 100,
+    reservedCostMinorUnits: 100,
+  })
+  const zero = batch
+  batch = actOnItem(batch, 'batch-item-one', 'start-step', 1, {
+    step: 'planning',
+  })
+  assert.deepEqual(budgetEvents(zero, batch, ids), [])
+
+  const beforeFirstCharge = batch
+  batch = actOnItem(batch, 'batch-item-one', 'complete-step', 2, {
+    step: 'planning',
+    costMinorUnits: 79,
+  })
+  assert.deepEqual(budgetEvents(beforeFirstCharge, batch, ids), [])
+  batch = actOnItem(batch, 'batch-item-one', 'start-step', 3, {
+    step: 'materializing',
+  })
+  const beforeCrossing = batch
+  batch = actOnItem(batch, 'batch-item-one', 'complete-step', 4, {
+    step: 'materializing',
+    costMinorUnits: 21,
+  })
+
+  const events = budgetEvents(beforeCrossing, batch, ids)
+  assert.equal(events.length, 2)
+  assert.deepEqual(events.map((event) => event.data.thresholdBasisPoints), [
+    8_000,
+    10_000,
+  ])
+  assert.deepEqual(events[0], {
+    id: ids[0],
+    type: 'budget.threshold.reached',
+    version: '1.0.0',
+    workspaceId: 'workspace-fixture',
+    occurredAt: at(4),
+    actor: { clientId: 'api-client-fixture' },
+    resource: { type: 'workspace', id: 'workspace-fixture' },
+    data: {
+      budgetScope: 'production-batch',
+      policyVersion: PRODUCTION_BATCH_BUDGET_THRESHOLD_POLICY_VERSION,
+      batchId: 'batch-fixture-001',
+      projectId: 'project-fixture',
+      currency: 'USD',
+      thresholdBasisPoints: 8_000,
+      thresholdLevel: 'warning',
+      previousSpentMinorUnits: 79,
+      spentMinorUnits: 100,
+      maximumMinorUnits: 100,
+    },
+  })
+  assert.equal(events[1].data.thresholdLevel, 'exhausted')
+  assert.ok(Object.isFrozen(events))
+  assert.ok(Object.isFrozen(events[0].data))
+})
+
+test('T-FR-128 emits each threshold once and rejects decreasing or foreign budget transitions', () => {
+  const ids = [
+    '20000000-0000-4000-8000-000000000001',
+    '20000000-0000-4000-8000-000000000002',
+  ]
+  let batch = batchFixture({
+    currency: 'USD',
+    maxCostMinorUnits: 100,
+    reservedCostMinorUnits: 0,
+  })
+  batch = actOnItem(batch, 'batch-item-one', 'start-step', 1, {
+    step: 'planning',
+  })
+  const beforeWarning = batch
+  batch = actOnItem(batch, 'batch-item-one', 'complete-step', 2, {
+    step: 'planning',
+    costMinorUnits: 80,
+  })
+  assert.deepEqual(
+    budgetEvents(beforeWarning, batch, ids)
+      .map((event) => event.data.thresholdLevel),
+    ['warning'],
+  )
+  batch = actOnItem(batch, 'batch-item-one', 'start-step', 3, {
+    step: 'materializing',
+  })
+  const beforeExhausted = batch
+  batch = actOnItem(batch, 'batch-item-one', 'complete-step', 4, {
+    step: 'materializing',
+    costMinorUnits: 20,
+  })
+  assert.deepEqual(
+    budgetEvents(beforeExhausted, batch, ids.slice(1))
+      .map((event) => event.data.thresholdLevel),
+    ['exhausted'],
+  )
+  assert.throws(
+    () => budgetEvents(batch, beforeExhausted, ids),
+    (error) => error?.code === 'PERSISTENCE_CONFLICT' &&
+      /monotonic/.test(error.message),
+  )
+  assert.throws(
+    () => createProductionBatchBudgetThresholdEvents({
+      previousBatch: beforeExhausted,
+      resultingBatch: batch,
+      authenticationAudit: {
+        ...budgetAudit,
+        workspaceId: 'workspace-foreign',
+      },
+      occurredAt: batch.updatedAt,
+      createEventId: () => ids[0],
+    }),
+    (error) => error?.code === 'PERSISTENCE_CONFLICT' &&
+      /bound to one budget/.test(error.message),
+  )
 })
 
 test('T-FR-080 derives partial progress from real steps and resumes only unfinished items', () => {

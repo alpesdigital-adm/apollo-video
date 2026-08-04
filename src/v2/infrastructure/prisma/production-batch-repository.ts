@@ -29,6 +29,10 @@ import {
 } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  createProductionBatchBudgetThresholdEvents,
+} from '../../domain/production-batch-budget-event.ts'
+import { createPublicEventId } from '../../domain/public-event.ts'
+import {
   batchProgress,
   deriveBatchStatus,
   hydrateProductionBatch,
@@ -42,6 +46,7 @@ import {
 } from '../../domain/production-batch.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
+import { persistPublicEvents } from './public-event-outbox.ts'
 
 type ItemRow = V2ProductionBatchItem & {
   steps: V2ProductionBatchStep[]
@@ -541,6 +546,7 @@ export class PrismaProductionBatchRepository
 implements ProductionBatchRepository {
   constructor(
     private readonly prisma: PrismaClient = getV2PostgresClient(),
+    private readonly createEventId: () => string = createPublicEventId,
   ) {}
 
   async findCreateReplay(input: {
@@ -1188,6 +1194,16 @@ implements ProductionBatchRepository {
             })),
           })
         }
+        await persistPublicEvents(
+          transaction,
+          createProductionBatchBudgetThresholdEvents({
+            previousBatch: current,
+            resultingBatch: next,
+            authenticationAudit: record.authenticationAudit,
+            occurredAt: record.createdAt,
+            createEventId: this.createEventId,
+          }),
+        )
         const persisted =
           await transaction.v2ProductionBatch.findUniqueOrThrow({
             where: { id: next.id },
