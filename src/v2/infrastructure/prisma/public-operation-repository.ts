@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
@@ -17,6 +19,7 @@ import {
   type LongFormIndexWorkflow,
 } from '../../domain/long-form-index-workflow.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
+import { createPublicOperationStatusEvents } from '../../domain/public-operation-event.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import {
   advancePublicOperationPhase,
@@ -66,6 +69,11 @@ type StoredOperation = Prisma.V2PublicOperationGetPayload<{
     projectDirectorRun: { include: { directorRun: true } }
   }
 }>
+
+export type PublicOperationEventTransaction = Pick<
+  Prisma.TransactionClient,
+  'v2PublicEventOutbox'
+>
 
 const OPERATION_INCLUDE = {
   artifactRender: {
@@ -750,11 +758,56 @@ function hydrateClaim(row: StoredOperation): ClaimedPublicOperationRecord {
   })
 }
 
+export async function persistOperationStatusEvents(
+  transaction: PublicOperationEventTransaction,
+  previousStatus: PublicOperation['status'] | undefined,
+  operation: Parameters<typeof createPublicOperationStatusEvents>[0]['operation'],
+  createEventId: () => string,
+): Promise<void> {
+  await persistManyOperationStatusEvents(transaction, [{ previousStatus, operation }], createEventId)
+}
+
+export async function persistManyOperationStatusEvents(
+  transaction: PublicOperationEventTransaction,
+  transitions: readonly Readonly<{
+    previousStatus: PublicOperation['status'] | undefined
+    operation: Parameters<typeof createPublicOperationStatusEvents>[0]['operation']
+  }>[],
+  createEventId: () => string,
+): Promise<void> {
+  const events = transitions.flatMap(({ previousStatus, operation }) => createPublicOperationStatusEvents({
+    ...(previousStatus ? { previousStatus } : {}),
+    operation,
+    createEventId,
+  }))
+  if (events.length === 0) return
+  await transaction.v2PublicEventOutbox.createMany({
+    data: events.map((event) => ({
+      id: event.id,
+      workspaceId: event.workspaceId,
+      type: event.type,
+      version: event.version,
+      occurredAt: new Date(event.occurredAt),
+      sequence: event.sequence,
+      actorClientId: event.actor?.clientId,
+      actorUserId: event.actor?.userId,
+      resourceType: event.resource.type,
+      resourceId: event.resource.id,
+      dataJson: stableSerialize(event.data),
+    })),
+  })
+}
+
 export class PrismaPublicOperationRepository implements PublicOperationRepository {
   private readonly client: PrismaClient
+  private readonly createEventId: () => string
 
-  constructor(client: PrismaClient) {
+  constructor(
+    client: PrismaClient,
+    createEventId: () => string = randomUUID,
+  ) {
     this.client = client
+    this.createEventId = createEventId
   }
 
   async cancel(input: {
@@ -807,7 +860,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       })
       if (!persisted) return null
       const result = hydrateRecord(persisted)
-      if (updated.count === 1 || result.operation.status === 'canceled') return result
+      if (updated.count === 1) {
+        await persistOperationStatusEvents(
+          transaction,
+          current.operation.status,
+          result.operation,
+          this.createEventId,
+        )
+        return result
+      }
+      if (result.operation.status === 'canceled') return result
       if (isTerminalPublicOperation(result.operation)) return result
       throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation cancellation collided')
     })
@@ -874,7 +936,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       })
       if (!persisted) return null
       const result = hydrateRecord(persisted)
-      if (updated.count === 1 || !isTerminalPublicOperation(result.operation)) return result
+      if (updated.count === 1) {
+        await persistOperationStatusEvents(
+          transaction,
+          current.operation.status,
+          result.operation,
+          this.createEventId,
+        )
+        return result
+      }
+      if (!isTerminalPublicOperation(result.operation)) return result
       throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation retry collided')
     })
   }
@@ -1458,7 +1529,14 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         if (!created) {
           throw new DomainError('PERSISTENCE_CONFLICT', 'PublicOperation was not persisted')
         }
-        return { ...hydrateRecord(created), replayed: false }
+        const record = hydrateRecord(created)
+        await persistOperationStatusEvents(
+          transaction,
+          undefined,
+          record.operation,
+          this.createEventId,
+        )
+        return { ...record, replayed: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
@@ -1522,7 +1600,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         const current = hydrateRecord(candidate).operation
         if (candidate.attempt >= candidate.maxAttempts) {
           if (candidate.status === 'running') {
-            await transaction.v2PublicOperation.updateMany({
+            const exhausted = await transaction.v2PublicOperation.updateMany({
               where: {
                 id: candidate.id,
                 status: 'running',
@@ -1550,6 +1628,24 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 heartbeatAt: null,
               },
             })
+            if (exhausted.count === 1) {
+              const failed = await transaction.v2PublicOperation.findUnique({
+                where: { id: candidate.id },
+                include: OPERATION_INCLUDE,
+              })
+              if (!failed) {
+                throw new DomainError(
+                  'PERSISTENCE_CONFLICT',
+                  'Exhausted PublicOperation disappeared',
+                )
+              }
+              await persistOperationStatusEvents(
+                transaction,
+                current.status,
+                hydrateRecord(failed).operation,
+                this.createEventId,
+              )
+            }
           }
           continue
         }
@@ -1599,7 +1695,14 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         if (!stored) {
           throw new DomainError('PERSISTENCE_CONFLICT', 'Claimed PublicOperation disappeared')
         }
-        return hydrateClaim(stored)
+        const result = hydrateClaim(stored)
+        await persistOperationStatusEvents(
+          transaction,
+          current.status,
+          result.operation,
+          this.createEventId,
+        )
+        return result
       }
       return null
     })
@@ -1700,7 +1803,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
       })
-      return persisted ? hydrateRecord(persisted) : null
+      if (!persisted) return null
+      const result = hydrateRecord(persisted)
+      await persistOperationStatusEvents(
+        transaction,
+        record.operation.status,
+        result.operation,
+        this.createEventId,
+      )
+      return result
     })
   }
 
@@ -1780,7 +1891,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         where: { id: input.operationId },
         include: OPERATION_INCLUDE,
       })
-      return persisted ? hydrateClaim(persisted) : null
+      if (!persisted) return null
+      const result = hydrateClaim(persisted)
+      await persistOperationStatusEvents(
+        transaction,
+        record.operation.status,
+        result.operation,
+        this.createEventId,
+      )
+      return result
     })
   }
 

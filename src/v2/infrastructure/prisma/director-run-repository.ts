@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
@@ -26,6 +28,7 @@ import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../domain/director-run-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
+import { persistOperationStatusEvents } from './public-operation-repository.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -518,6 +521,32 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           if (settled.count !== 1) {
             throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost during commit')
           }
+          const settledOperation = await transaction.v2PublicOperation.findUnique({
+            where: { id: bundle.operationFence.operationId },
+            select: { clientId: true },
+          })
+          if (!settledOperation) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              'Settled Director operation disappeared during commit',
+            )
+          }
+          await persistOperationStatusEvents(
+            transaction,
+            'running',
+            {
+              id: bundle.operationFence.operationId,
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              clientId: settledOperation.clientId,
+              type: 'project-director-run',
+              status: 'succeeded',
+              phase: 'completed',
+              attempt: bundle.operationFence.attempt,
+              updatedAt: bundle.operationFence.now,
+            },
+            randomUUID,
+          )
         }
         const stored = await transaction.v2DirectorRun.findUniqueOrThrow({ where: { id: bundle.run.id }, include: directorRunInclude })
         return hydrateStoredRun(stored, false)

@@ -488,6 +488,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
           },
           async create({ data }) { operationData = data },
         },
+        v2PublicEventOutbox: { async createMany() { return { count: 2 } } },
         v2ProjectVersion: { async findFirst() { return {
           id: resultVersionId,
           parentVersionId: baseVersionId,

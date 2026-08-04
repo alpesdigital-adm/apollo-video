@@ -41,6 +41,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
   })
 
   const cleanup = async () => {
+    await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2ArtifactRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2AssetUseDecision.deleteMany({ where: { workspaceId } })
@@ -162,6 +163,18 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.deepEqual(replayed.context, { kind: 'artifact-render', ...input.context })
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ArtifactRenderOperation.count({ where: { workspaceId } }), 1)
+    const queuedEvents = await client.v2PublicEventOutbox.findMany({
+      where: { workspaceId, resourceId: operationId },
+    })
+    assert.equal(queuedEvents.length, 1)
+    assert.equal(queuedEvents[0].type, 'operation.status.changed')
+    assert.deepEqual(JSON.parse(queuedEvents[0].dataJson), {
+      attempt: 0,
+      operationType: 'artifact-render',
+      phase: 'queued',
+      previousStatus: null,
+      status: 'queued',
+    })
     assert.equal(await repository.findById('another-workspace', operationId), null)
 
     await assert.rejects(
@@ -379,6 +392,25 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(terminalRow.leaseOwner, null)
     assert.equal(terminalRow.leaseExpiresAt, null)
     assert.equal(terminalRow.heartbeatAt, null)
+    const settledEvents = await client.v2PublicEventOutbox.findMany({
+      where: { workspaceId, resourceId: operationId },
+      orderBy: [{ occurredAt: 'asc' }, { type: 'asc' }],
+    })
+    assert.deepEqual(settledEvents.map((event) => event.type), [
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.succeeded',
+    ])
+    assert.equal(
+      settledEvents.some((event) =>
+        event.dataJson.includes('worker-integration') ||
+        event.dataJson.includes(authorizationId) ||
+        event.dataJson.includes('workspaces/operation/renders')),
+      false,
+    )
 
     const exhaustedOperation = createQueuedPublicOperation({
       ...operation,

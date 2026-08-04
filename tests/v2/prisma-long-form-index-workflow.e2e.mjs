@@ -307,6 +307,15 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       undefined,
     )
     const workflowId = created.data.workflow.id
+    const operationId = created.data.operation.id
+    const queuedOperationEvents = await prisma.v2PublicEventOutbox.findMany({
+      where: { workspaceId, resourceId: operationId },
+    })
+    assert.equal(queuedOperationEvents.length, 1)
+    assert.equal(
+      queuedOperationEvents[0].type,
+      'operation.status.changed',
+    )
     const publicOperations = new PrismaPublicOperationRepository(prisma)
     const projectOperations = await publicOperations.list({
       workspaceId,
@@ -617,6 +626,18 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       currency: 'USD',
       minorUnits: stored.workflow.summary.costMinorUnits,
     })
+    const operationEvents = await prisma.v2PublicEventOutbox.findMany({
+      where: { workspaceId, resourceId: operationId },
+      orderBy: [{ occurredAt: 'asc' }, { type: 'asc' }],
+    })
+    assert.deepEqual(operationEvents.map((event) => event.type), [
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.status.changed',
+      'operation.succeeded',
+    ])
     assert.equal(stored.workflow.sourceTranscriptId, undefined)
     assert.equal(stored.workflow.durationMs, 7_200_000)
     assert.equal(stored.workflow.summary.completedStageCount, 5)

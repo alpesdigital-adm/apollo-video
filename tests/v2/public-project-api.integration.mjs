@@ -1328,6 +1328,23 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal((await client.v2PublicOperation.findUnique({
       where: { id: 'public-api-client-kill-operation-v2' },
     }))?.status, 'canceled')
+    const clientKillOperationEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        resourceType: 'operation',
+        resourceId: 'public-api-client-kill-operation-v2',
+      },
+      orderBy: { occurredAt: 'asc' },
+    })
+    assert.equal(clientKillOperationEvents.length, 1)
+    assert.equal(clientKillOperationEvents[0].type, 'operation.status.changed')
+    assert.deepEqual(JSON.parse(clientKillOperationEvents[0].dataJson), {
+      attempt: 0,
+      operationType: 'artifact-render',
+      phase: 'canceled',
+      previousStatus: 'queued',
+      status: 'canceled',
+    })
     assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 503)
     assert.equal((await fetch(clientAccessUrl, {
       method: 'PATCH',
@@ -1403,6 +1420,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     const engagedWorkspaceKill = await engageWorkspaceKillResponse.json()
     assert.equal(engageWorkspaceKillResponse.status, 201, JSON.stringify(engagedWorkspaceKill))
     assert.equal(engagedWorkspaceKill.data.canceledOperationCount, 1)
+    const workspaceKillOperationEvents = await client.v2PublicEventOutbox.findMany({
+      where: {
+        workspaceId,
+        resourceType: 'operation',
+        resourceId: 'public-api-workspace-kill-operation-v2',
+      },
+    })
+    assert.equal(workspaceKillOperationEvents.length, 1)
+    assert.equal(workspaceKillOperationEvents[0].type, 'operation.status.changed')
     assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 503)
     const releaseWorkspaceKillResponse = await fetch(workspaceAccessUrl, {
       method: 'PATCH',

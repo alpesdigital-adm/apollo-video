@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   Prisma,
   type PrismaClient,
@@ -20,6 +22,7 @@ import {
   type PublicOperation,
   type PublicOperationResult,
 } from '../../domain/public-operation.ts'
+import { persistOperationStatusEvents } from './public-operation-repository.ts'
 import {
   hydratePostCleanupReview,
   hydrateSourceCleanupPlan,
@@ -534,6 +537,12 @@ implements SourceCleanupRepository {
               record.traceId,
             ),
           })
+          await persistOperationStatusEvents(
+            transaction,
+            undefined,
+            record.operation,
+            randomUUID,
+          )
         }
         const created = await transaction.v2SourceCleanupPlan.create({
           data: planData(record),

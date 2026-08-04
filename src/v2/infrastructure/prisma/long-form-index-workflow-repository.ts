@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import {
   Prisma,
   type PrismaClient,
@@ -31,7 +33,10 @@ import {
   type PublicOperation,
 } from '../../domain/public-operation.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
-import { PrismaPublicOperationRepository } from './public-operation-repository.ts'
+import {
+  persistOperationStatusEvents,
+  PrismaPublicOperationRepository,
+} from './public-operation-repository.ts'
 
 type WorkflowWithStages = V2LongFormIndexWorkflow & {
   stages: V2LongFormIndexStageCheckpoint[]
@@ -847,6 +852,12 @@ implements LongFormIndexWorkflowRepository {
           data: input.workflow.stages.map((stage) =>
             stageData(input.workflow, stage)),
         })
+        await persistOperationStatusEvents(
+          transaction,
+          undefined,
+          input.operation,
+          randomUUID,
+        )
       }, {
         isolationLevel:
           Prisma.TransactionIsolationLevel.Serializable,

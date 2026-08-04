@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { Prisma, type PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type {
@@ -11,7 +13,9 @@ import {
   type ApiAccessStatus,
 } from '../../domain/api-access-control.ts'
 import { DomainError } from '../../domain/errors.ts'
+import type { PublicOperation, PublicOperationStatus } from '../../domain/public-operation.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { persistManyOperationStatusEvents } from './public-operation-repository.ts'
 
 type StoredCommand = {
   id: string
@@ -195,6 +199,23 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
           command.action === 'revoke' ||
           command.action === 'engage-kill-switch'
         ) {
+          const cancelableOperations = await transaction.v2PublicOperation.findMany({
+            where: {
+              workspaceId: command.workspaceId,
+              ...(command.targetType === 'client' ? { clientId: command.targetId } : {}),
+              status: { in: ['queued', 'running', 'waiting', 'retrying'] },
+              cancelable: true,
+            },
+            select: {
+              id: true,
+              workspaceId: true,
+              projectId: true,
+              clientId: true,
+              type: true,
+              status: true,
+              attempt: true,
+            },
+          })
           const canceled = await transaction.v2PublicOperation.updateMany({
             where: {
               workspaceId: command.workspaceId,
@@ -220,6 +241,27 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
               heartbeatAt: null,
             },
           })
+          if (canceled.count !== cancelableOperations.length) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Cancelable operations changed before access containment committed')
+          }
+          await persistManyOperationStatusEvents(
+            transaction,
+            cancelableOperations.map((operation) => ({
+              previousStatus: operation.status as PublicOperationStatus,
+              operation: {
+                id: operation.id,
+                workspaceId: operation.workspaceId,
+                ...(operation.projectId ? { projectId: operation.projectId } : {}),
+                clientId: operation.clientId,
+                type: operation.type as PublicOperation['type'],
+                status: 'canceled' as const,
+                phase: 'canceled' as const,
+                attempt: operation.attempt,
+                updatedAt: command.changedAt,
+              },
+            })),
+            randomUUID,
+          )
           canceledOperationCount = canceled.count
         }
 

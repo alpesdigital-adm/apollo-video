@@ -1860,6 +1860,8 @@ Ingestão, percepção, direção, geração, sincronização, lote, render e ex
 
 Clientes podem assinar eventos autorizados de projeto, versão, job, annotation, aprovação, artifact e budget. Entregas possuem assinatura, timestamp, ID único, retry, deduplicação, replay controlado e observabilidade.
 
+Atualização local de implementação: transições canônicas de status de `PublicOperation` produzem `operation.status.changed` e os terminais `operation.succeeded`/`operation.failed` no mesmo commit serializável que altera a operação. A regra também cobre criação de long-form/source-cleanup, conclusão do Diretor e cancelamento em massa provocado por suspensão, revogação ou kill switch. Replay e convergência não republicam; o envelope expõe somente identidade, tipo, status, fase, tentativa e projeto opcional, sem lease, autorização, storage ou erro interno. A prova PostgreSQL hospedada, deploy e aceite permanecem pendentes, portanto FR-244 continua aberta.
+
 ### FR-245 — Idempotência e concorrência externa
 
 Mutações aceitam idempotency key; alterações versionadas exigem `baseVersionId` ou precondition equivalente. A API retorna conflito estruturado, nunca sobrescreve silenciosamente e preserva o resultado de requests repetidas.

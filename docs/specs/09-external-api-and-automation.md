@@ -552,6 +552,8 @@ Entrega:
 
 Outbox transacional impede emitir evento de mutation não commitada.
 
+Para `PublicOperation`, somente mudança persistida de `status` publica evento. O commit grava `operation.status.changed` e acrescenta `operation.succeeded` ou `operation.failed` no terminal correspondente; mudança apenas de fase não cria um evento de status. Criação idempotente, CAS perdido e replay convergente não duplicam linhas. Cancelamentos em massa do controle de acesso selecionam as operações, aplicam a mudança e gravam todos os envelopes em uma única transação serializável, abortando se a cardinalidade mudar. O payload contém somente `operationType`, `previousStatus`, `status`, `phase`, `attempt` e `projectId` opcional.
+
 ## 20. Capability discovery e tool calling
 
 `GET /v1/capabilities` filtra por client/scopes/environment e retorna schemas, custo, confirmação e documentação.

@@ -55,6 +55,9 @@ function createMemoryPrisma() {
     },
   }
   const transaction = {
+    v2PublicEventOutbox: {
+      async createMany() { return { count: 1 } },
+    },
     v2PublicOperation: {
       async findUnique({ where }) {
         return where.id === state.row.id ? { ...state.row } : null

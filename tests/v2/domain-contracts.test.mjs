@@ -96,6 +96,9 @@ import {
   createPublicEvent,
   createPublicEventId,
 } from '../../src/v2/domain/public-event.ts'
+import {
+  createPublicOperationStatusEvents,
+} from '../../src/v2/domain/public-operation-event.ts'
 
 function expectDomainError(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
@@ -463,6 +466,89 @@ test('Apollo Video props compiler resolves only declared materialized asset IDs'
     })(unsafe).then(compileApolloVideoRenderProps),
     (error) => error instanceof DomainError && error.code === 'INVALID_RENDER_INPUT',
   )
+})
+
+test('PublicOperation status events are transition-bound, terminal-specific and redacted', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-event-render-1',
+    workspaceId: 'workspace-event-1',
+    clientId: 'client-event-1',
+    type: 'artifact-render',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-event-1',
+      manifestId: 'manifest-event-1',
+    },
+    createdAt: '2026-08-04T02:00:00.000Z',
+  })
+  const ids = [
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000002',
+    '00000000-0000-4000-8000-000000000003',
+    '00000000-0000-4000-8000-000000000004',
+    '00000000-0000-4000-8000-000000000005',
+  ]
+  const createEventId = () => ids.shift()
+  const created = createPublicOperationStatusEvents({
+    operation: queued,
+    createEventId,
+  })
+  assert.deepEqual(created.map((event) => event.type), [
+    'operation.status.changed',
+  ])
+  assert.deepEqual(created[0].data, {
+    operationType: 'artifact-render',
+    previousStatus: null,
+    status: 'queued',
+    phase: 'queued',
+    attempt: 0,
+  })
+  assert.deepEqual(
+    createPublicOperationStatusEvents({
+      previousStatus: 'queued',
+      operation: queued,
+      createEventId,
+    }),
+    [],
+  )
+
+  const running = startPublicOperationAttempt(
+    queued,
+    '2026-08-04T02:00:01.000Z',
+  )
+  const succeeded = succeedPublicOperation(
+    advancePublicOperationPhase(
+      running,
+      'persisting',
+      '2026-08-04T02:00:02.000Z',
+    ),
+    '2026-08-04T02:00:03.000Z',
+  )
+  const successEvents = createPublicOperationStatusEvents({
+    previousStatus: 'running',
+    operation: succeeded,
+    createEventId,
+  })
+  assert.deepEqual(successEvents.map((event) => event.type), [
+    'operation.status.changed',
+    'operation.succeeded',
+  ])
+  const failed = retryOrFailPublicOperation(
+    running,
+    { code: 'provider_failed', message: 'safe public error', retryable: false },
+    '2026-08-04T02:00:04.000Z',
+  )
+  const failureEvents = createPublicOperationStatusEvents({
+    previousStatus: 'running',
+    operation: failed,
+    createEventId,
+  })
+  assert.deepEqual(failureEvents.map((event) => event.type), [
+    'operation.status.changed',
+    'operation.failed',
+  ])
+  assert.equal(JSON.stringify(failureEvents).includes('safe public error'), false)
+  assert.ok(Object.isFrozen(failureEvents))
 })
 
 test('T-FR-234 Apollo Video props bind an exact materialized font and typed render data', () => {
