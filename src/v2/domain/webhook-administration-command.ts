@@ -7,6 +7,7 @@ import { assertDomain } from './errors.ts'
 export const WEBHOOK_ADMINISTRATION_ACTIONS = [
   'webhook-endpoint.create',
   'webhook-endpoint.status.set',
+  'webhook-endpoint.challenge',
   'webhook-subscription.create',
   'webhook-subscription.status.set',
   'webhook-signing-secret.provision',
@@ -101,15 +102,18 @@ export function createWebhookAdministrationCommand(
 
   const isCreation = input.action.endsWith('.create')
   const isReplay = input.action.endsWith('.replay')
+  const isChallenge = input.action === 'webhook-endpoint.challenge'
   const isIdempotent = isCreation || isReplay || input.action.endsWith('.provision') || input.action.endsWith('.stage')
-  const requiresBaseRevision = !isCreation && !isReplay
+  const requiresBaseRevision = !isCreation && !isReplay && !isChallenge
   assertDomain(
     (isIdempotent ? Boolean(input.idempotencyKey) : input.idempotencyKey === undefined) &&
       (requiresBaseRevision ? Boolean(input.baseRevision) : input.baseRevision === undefined),
     'INVALID_ARGUMENT',
     'Webhook administration replay semantics are invalid',
   )
-  const allowedTargetStatuses = input.action === 'webhook-endpoint.status.set'
+  const allowedTargetStatuses = isChallenge
+    ? ['active']
+    : input.action === 'webhook-endpoint.status.set'
     ? ['active', 'suspended', 'revoked']
     : input.action === 'webhook-subscription.status.set'
       ? ['active', 'paused', 'revoked']

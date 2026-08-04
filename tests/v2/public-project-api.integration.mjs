@@ -62,6 +62,14 @@ async function waitForServer(baseUrl, child) {
 
 test('authenticated public API manages projects, clients and artifact inspection', async () => {
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
+  const { createWebhookAdministrationCommand } = await import(
+    '../../src/v2/domain/webhook-administration-command.ts'
+  )
+  const { webhookAdministrationCommandData } = await import(
+    '../../src/v2/infrastructure/prisma/webhook-administration-command-persistence.ts'
+  )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const {
     createMediaArtifactManifest,
@@ -499,6 +507,30 @@ test('authenticated public API manages projects, clients and artifact inspection
         createdAt: new Date(sourceColorProbe.createdAt),
         probeHash: sourceColorProbe.probeHash,
       },
+    })
+    const webhookAuditContext = createApiAccessAuditContext({
+      clientId: apiClientId,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: apiEnvironment,
+      authenticationKind: 'bearer',
+    })
+    await client.v2WebhookAdministrationCommand.create({
+      data: webhookAdministrationCommandData(createWebhookAdministrationCommand({
+        id: '00000000-0000-4000-8000-000000000909',
+        workspaceId,
+        action: 'webhook-endpoint.challenge',
+        targetType: 'webhook-endpoint',
+        targetId: webhookEndpointId,
+        targetStatus: 'active',
+        audit: webhookAuditContext,
+        requestFingerprint: calculateVersionHash({
+          action: 'webhook-endpoint-challenge/v1',
+          actorContextHash: webhookAuditContext.contextHash,
+          endpointId: webhookEndpointId,
+        }),
+        occurredAt: webhookCreatedAt.toISOString(),
+      })),
     })
     const derivedRenderInput = createRenderInputSpec({
       schemaVersion: 'render-input/v1',
@@ -1819,6 +1851,17 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(concurrentWebhookChallengeReplay.data, webhookChallenge.data)
     assert.equal(JSON.stringify(webhookChallenge).includes('keyRef'), false)
     assert.equal(JSON.stringify(webhookChallenge).includes('/public-api'), false)
+    const challengeAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.challenge',
+        targetId: webhookEndpointId,
+      },
+    })
+    assert.equal(challengeAudit.length, 1)
+    assert.equal(challengeAudit[0].actorClientId, apiClientId)
+    assert.equal(challengeAudit[0].actorCredentialId, issued.credential.id)
+    assert.equal(challengeAudit[0].targetStatus, 'active')
 
     const webhookChallengeBodyResponse = await fetch(webhookChallengeUrl, {
       method: 'POST',

@@ -100,6 +100,11 @@ assert.match(
 )
 assert.match(
   committed,
+  /'webhook-endpoint\.challenge'[\s\S]*"action" = 'webhook-endpoint\.challenge' AND "targetStatus" = 'active'/,
+  'webhook challenge administration must constrain its convergent activation intent in SQL',
+)
+assert.match(
+  committed,
   /DELETE FROM "idempotency_records"[\s\S]*'api-client\.create'[\s\S]*'api-credential\.rotate'/,
   'pre-contract administrative replays without audit identity must be removed',
 )

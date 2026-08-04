@@ -147,6 +147,25 @@ function replayAdministration({ id, action, targetId, idempotencyKey, requestFin
   })
 }
 
+function challengeAdministration(id, targetId) {
+  const audit = materializeActorAuditContext(WEBHOOK_ADMINISTRATOR)
+  return createWebhookAdministrationCommand({
+    id,
+    workspaceId: 'workspace-1',
+    action: 'webhook-endpoint.challenge',
+    targetType: 'webhook-endpoint',
+    targetId,
+    targetStatus: 'active',
+    audit,
+    requestFingerprint: calculateVersionHash({
+      action: 'webhook-endpoint-challenge/v1',
+      actorContextHash: audit.contextHash,
+      endpointId: targetId,
+    }),
+    occurredAt: '2026-07-16T16:00:00.000Z',
+  })
+}
+
 test('webhook administration commands fail closed on invalid intent and actor-bound replay', () => {
   const audit = materializeActorAuditContext(WEBHOOK_ADMINISTRATOR)
   const base = {
@@ -2786,6 +2805,8 @@ test('endpoint activation keeps the one-shot token inside the challenge workflow
     },
     async verify(command) {
       assert.equal(command.responseHash, storedChallenge.tokenHash)
+      assert.equal(command.administration.action, 'webhook-endpoint.challenge')
+      assert.equal(command.administration.audit.credentialId, 'credential-1')
       return { challenge: storedChallenge, activatedSubscriptions: 2 }
     },
   }
@@ -2805,6 +2826,7 @@ test('endpoint activation keeps the one-shot token inside the challenge workflow
   const result = await activate({
     workspaceId: 'workspace-1',
     endpointId: ids['webhook-endpoint'],
+    actor: WEBHOOK_ADMINISTRATOR,
   })
   assert.equal(transportedToken, issued.token)
   assert.equal(JSON.stringify(storedChallenge).includes(issued.token), false)
@@ -2817,6 +2839,7 @@ test('public endpoint challenge activates once and converges after a lost respon
   let issues = 0
   let transports = 0
   let activationLeaseTokenHash
+  let persistedAdministration
   let activationLeaseByte = 22
   const issued = issueWebhookChallengeToken(() => Buffer.alloc(32, 21))
   const repository = {
@@ -2826,7 +2849,9 @@ test('public endpoint challenge activates once and converges after a lost respon
         : { status: 'pending', workspaceId, endpointId, url: 'https://hooks.example.com/apollo' }
     },
     async claimActivationLease(command) {
+      assert.equal(command.administration.action, 'webhook-endpoint.challenge')
       if (state === 'active') {
+        assert.equal(command.administration.audit.contextHash, persistedAdministration.audit.contextHash)
         return { status: 'active', workspaceId: command.workspaceId, endpointId: command.endpointId }
       }
       if (activationLeaseTokenHash) {
@@ -2847,6 +2872,7 @@ test('public endpoint challenge activates once and converges after a lost respon
     async verify(command) {
       assert.equal(command.responseHash, issued.tokenHash)
       assert.equal(command.activationLeaseTokenHash, activationLeaseTokenHash)
+      persistedAdministration = command.administration
       state = 'active'
       activationLeaseTokenHash = undefined
       return { challenge: {}, activatedSubscriptions: 3 }
@@ -2873,6 +2899,7 @@ test('public endpoint challenge activates once and converges after a lost respon
   const request = {
     workspaceId: 'workspace-1',
     endpointId: '00000000-0000-4000-8000-000000000127',
+    actor: WEBHOOK_ADMINISTRATOR,
   }
   const concurrent = await Promise.all([activate(request), activate(request)])
   assert.deepEqual(concurrent.map((result) => result.replayed).sort(), [false, true])
@@ -2910,6 +2937,10 @@ test('webhook activation lease retries concurrent write conflicts before failing
 
   await assert.rejects(
     () => repository.claimActivationLease({
+      administration: challengeAdministration(
+        '00000000-0000-4000-8000-000000000131',
+        '00000000-0000-4000-8000-000000000130',
+      ),
       workspaceId: 'workspace-1',
       endpointId: '00000000-0000-4000-8000-000000000130',
       leaseTokenHash: 'a'.repeat(64),
@@ -2943,6 +2974,7 @@ test('public endpoint challenge cannot bypass suspended or revoked lifecycle', a
     () => activate({
       workspaceId: 'workspace-1',
       endpointId: '00000000-0000-4000-8000-000000000129',
+      actor: WEBHOOK_ADMINISTRATOR,
     }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
   )

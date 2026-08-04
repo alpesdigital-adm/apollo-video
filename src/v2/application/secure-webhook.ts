@@ -14,6 +14,43 @@ import type {
   WebhookReplayReceiptRepository,
 } from './ports/webhook-security-repository.ts'
 import type { WebhookChallengeTransport } from './ports/webhook-challenge-transport.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { createWebhookAdministrationCommand } from '../domain/webhook-administration-command.ts'
+import { calculateVersionHash } from './version-hash.ts'
+
+function createChallengeAdministration(input: {
+  actor: AuthenticatedExternalActor
+  workspaceId: string
+  endpointId: string
+  id: string
+  occurredAt: string
+}) {
+  requireScope(input.actor, 'webhooks:admin')
+  if (input.actor.workspaceId !== input.workspaceId) {
+    throw new DomainError('WEBHOOK_CHALLENGE_NOT_FOUND', 'Webhook endpoint was not found')
+  }
+  const audit = materializeActorAuditContext(input.actor)
+  const requestFingerprint = calculateVersionHash({
+    action: 'webhook-endpoint-challenge/v1',
+    actorContextHash: audit.contextHash,
+    endpointId: input.endpointId,
+  })
+  return createWebhookAdministrationCommand({
+    id: input.id,
+    workspaceId: input.workspaceId,
+    action: 'webhook-endpoint.challenge',
+    targetType: 'webhook-endpoint',
+    targetId: input.endpointId,
+    targetStatus: 'active',
+    audit,
+    requestFingerprint,
+    occurredAt: input.occurredAt,
+  })
+}
 
 export interface IssueWebhookChallengeDependencies {
   repository: WebhookChallengeRepository
@@ -70,6 +107,7 @@ export function verifyWebhookChallengeService(dependencies: {
     endpointId: string
     challengeId: string
     echoedToken: string
+    administration: ReturnType<typeof createChallengeAdministration>
     activationLeaseTokenHash?: string
   }) {
     return dependencies.repository.verify({
@@ -78,6 +116,7 @@ export function verifyWebhookChallengeService(dependencies: {
       challengeId: request.challengeId,
       responseHash: hashWebhookChallengeToken(request.echoedToken),
       verifiedAt: dependencies.clock().toISOString(),
+      administration: request.administration,
       ...(request.activationLeaseTokenHash
         ? { activationLeaseTokenHash: request.activationLeaseTokenHash }
         : {}),
@@ -98,9 +137,19 @@ export function activateWebhookEndpointService(dependencies: {
   return async function execute(request: {
     workspaceId: string
     endpointId: string
+    actor: AuthenticatedExternalActor
     ttlSeconds?: number
     maxAttempts?: number
   }) {
+    const administrationAt = dependencies.clock()
+    assertDomain(!Number.isNaN(administrationAt.getTime()), 'INVALID_WEBHOOK', 'Webhook challenge clock is invalid')
+    const administration = createChallengeAdministration({
+      actor: request.actor,
+      workspaceId: request.workspaceId,
+      endpointId: request.endpointId,
+      id: dependencies.createId(),
+      occurredAt: administrationAt.toISOString(),
+    })
     const target = await dependencies.repository.getPendingTarget(
       request.workspaceId,
       request.endpointId,
@@ -117,6 +166,7 @@ export function activateWebhookEndpointService(dependencies: {
       endpointId: request.endpointId,
       challengeId: issued.challenge.id,
       echoedToken: response.echoedToken,
+      administration,
     })
   }
 }
@@ -165,9 +215,19 @@ export function activateWebhookEndpointConvergentlyService(dependencies: {
   return async function execute(request: {
     workspaceId: string
     endpointId: string
+    actor: AuthenticatedExternalActor
     ttlSeconds?: number
     maxAttempts?: number
   }) {
+    const administrationAt = dependencies.clock()
+    assertDomain(!Number.isNaN(administrationAt.getTime()), 'INVALID_WEBHOOK', 'Webhook challenge clock is invalid')
+    const administration = createChallengeAdministration({
+      actor: request.actor,
+      workspaceId: request.workspaceId,
+      endpointId: request.endpointId,
+      id: dependencies.createId(),
+      occurredAt: administrationAt.toISOString(),
+    })
     const startedWaitingAt = Date.now()
     while (Date.now() - startedWaitingAt <= followerMaxWaitMs) {
       const claimedAt = dependencies.clock()
@@ -178,6 +238,7 @@ export function activateWebhookEndpointConvergentlyService(dependencies: {
       )
       const activationLease = issueActivationLeaseToken()
       const claim = await dependencies.repository.claimActivationLease({
+        administration,
         workspaceId: request.workspaceId,
         endpointId: request.endpointId,
         leaseTokenHash: activationLease.tokenHash,
@@ -210,6 +271,7 @@ export function activateWebhookEndpointConvergentlyService(dependencies: {
           challengeId: issued.challenge.id,
           echoedToken: response.echoedToken,
           activationLeaseTokenHash: activationLease.tokenHash,
+          administration,
         })
         return Object.freeze({
           activatedSubscriptions: verified.activatedSubscriptions,

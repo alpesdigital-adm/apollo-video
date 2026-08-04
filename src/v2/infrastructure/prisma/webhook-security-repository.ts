@@ -14,6 +14,11 @@ import type {
 } from '../../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
+import {
   createWebhookVerificationChallenge,
   type WebhookReplayReceipt,
   type WebhookVerificationChallenge,
@@ -90,12 +95,32 @@ export class PrismaWebhookSecurityRepository
   }
 
   async claimActivationLease(command: {
+    administration: Parameters<WebhookEndpointActivationLeaseRepository['claimActivationLease']>[0]['administration']
     workspaceId: string
     endpointId: string
     leaseTokenHash: string
     claimedAt: string
     leaseExpiresAt: string
   }, concurrentWriteAttempt = 1): Promise<Readonly<WebhookEndpointActivationLeaseClaim>> {
+    assertWebhookAdministrationCommandTarget(command.administration, {
+      action: 'webhook-endpoint.challenge',
+      targetType: 'webhook-endpoint',
+      targetId: command.endpointId,
+      targetStatus: 'active',
+      workspaceId: command.workspaceId,
+      requestFingerprint: command.administration.requestFingerprint,
+    })
+    const assertActiveReplay = async () => {
+      const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-endpoint',
+          targetId: command.endpointId,
+          action: 'webhook-endpoint.challenge',
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, command.administration)
+    }
     if (!/^[a-f0-9]{64}$/.test(command.leaseTokenHash)) {
       throw new DomainError('INVALID_WEBHOOK', 'Webhook activation lease token hash is invalid')
     }
@@ -120,6 +145,7 @@ export class PrismaWebhookSecurityRepository
         throw new DomainError('WEBHOOK_CHALLENGE_NOT_FOUND', 'Webhook endpoint was not found')
       }
       if (initialEndpoint.status === 'active') {
+        await assertActiveReplay()
         return Object.freeze({
           status: 'active' as const,
           workspaceId: initialEndpoint.workspaceId,
@@ -180,6 +206,7 @@ export class PrismaWebhookSecurityRepository
         await this.client.v2WebhookEndpointActivationLease.deleteMany({
           where: { endpointId: endpoint.id, workspaceId: endpoint.workspaceId },
         })
+        if (endpoint.status === 'active') await assertActiveReplay()
         return Object.freeze({
           status: endpoint.status === 'active' ? 'active' as const : 'blocked' as const,
           workspaceId: endpoint.workspaceId,
@@ -312,6 +339,14 @@ export class PrismaWebhookSecurityRepository
   }
 
   async verify(command: VerifyWebhookChallengeCommand) {
+    assertWebhookAdministrationCommandTarget(command.administration, {
+      action: 'webhook-endpoint.challenge',
+      targetType: 'webhook-endpoint',
+      targetId: command.endpointId,
+      targetStatus: 'active',
+      workspaceId: command.workspaceId,
+      requestFingerprint: command.administration.requestFingerprint,
+    })
     const verifiedAt = new Date(command.verifiedAt)
     const outcome = await this.client.$transaction(async (transaction) => {
       const stored = await transaction.v2WebhookVerificationChallenge.findFirst({
@@ -391,6 +426,9 @@ export class PrismaWebhookSecurityRepository
           status: 'pending-verification',
         },
         data: { status: 'active' },
+      })
+      await transaction.v2WebhookAdministrationCommand.create({
+        data: webhookAdministrationCommandData(command.administration),
       })
       if (command.activationLeaseTokenHash) {
         await transaction.v2WebhookEndpointActivationLease.deleteMany({

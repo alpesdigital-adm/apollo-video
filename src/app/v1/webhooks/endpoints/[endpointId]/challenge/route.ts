@@ -27,7 +27,7 @@ export async function POST(
     }
     const { endpointId } = await context.params
     const activate = createWebhookEndpointActivator(process.env, () => new Date())
-    const activation = await activate({ workspaceId: actor.workspaceId, endpointId })
+    const activation = await activate({ workspaceId: actor.workspaceId, endpointId, actor })
     const read = readWebhookEndpointService({
       repository: createWebhookAdministrationQueryRepository(),
     })

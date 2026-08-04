@@ -263,6 +263,22 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         occurredAt,
       })
     }
+    const challengeAdministration = (targetId, occurredAt) =>
+      createWebhookAdministrationCommand({
+        id: `00000000-0000-4000-8000-${String(administrationCommandId++).padStart(12, '0')}`,
+        workspaceId,
+        action: 'webhook-endpoint.challenge',
+        targetType: 'webhook-endpoint',
+        targetId,
+        targetStatus: 'active',
+        audit: actorAudit,
+        requestFingerprint: calculateVersionHash({
+          action: 'webhook-endpoint-challenge/v1',
+          actorContextHash: actorAudit.contextHash,
+          endpointId: targetId,
+        }),
+        occurredAt,
+      })
 
     const endpointCipher = createAesRecipeParameterCipher({
       keyId: 'webhook-integration-key',
@@ -602,6 +618,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         endpointId: endpoint.id,
         challengeId: exhausted.challenge.id,
         echoedToken: wrongToken,
+        administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_000).toISOString()),
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
     )
@@ -617,6 +634,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         endpointId: endpoint.id,
         challengeId: exhausted.challenge.id,
         echoedToken: exhausted.token,
+        administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_000).toISOString()),
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
     )
@@ -637,6 +655,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         endpointId: endpoint.id,
         challengeId: expiring.challenge.id,
         echoedToken: expiring.token,
+        administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 61_000).toISOString()),
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
     )
@@ -669,6 +688,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         endpointId: endpoint.id,
         challengeId: issued.challenge.id,
         echoedToken: wrongToken,
+        administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_000).toISOString()),
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
     )
@@ -682,6 +702,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const secondActivationLeaseHash = createHash('sha256').update('activation-lease-2').digest('hex')
     const takeoverActivationLeaseHash = createHash('sha256').update('activation-lease-3').digest('hex')
     const firstLeaseClaim = await security.claimActivationLease({
+      administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_001).toISOString()),
       workspaceId,
       endpointId: endpoint.id,
       leaseTokenHash: firstActivationLeaseHash,
@@ -690,6 +711,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     assert.equal(firstLeaseClaim.status, 'leader')
     const followerLeaseClaim = await security.claimActivationLease({
+      administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_005).toISOString()),
       workspaceId,
       endpointId: endpoint.id,
       leaseTokenHash: secondActivationLeaseHash,
@@ -698,6 +720,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     assert.equal(followerLeaseClaim.status, 'follower')
     const takeoverLeaseClaim = await security.claimActivationLease({
+      administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_012).toISOString()),
       workspaceId,
       endpointId: endpoint.id,
       leaseTokenHash: takeoverActivationLeaseHash,
@@ -739,8 +762,8 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       followerMaxWaitMs: 15_000,
     })
     const concurrentActivationResults = await Promise.all([
-      concurrentActivation({ workspaceId, endpointId: endpoint.id }),
-      concurrentActivation({ workspaceId, endpointId: endpoint.id }),
+      concurrentActivation({ workspaceId, endpointId: endpoint.id, actor: webhookActor }),
+      concurrentActivation({ workspaceId, endpointId: endpoint.id, actor: webhookActor }),
     ])
     assert.deepEqual(
       concurrentActivationResults.map((result) => result.replayed).sort(),
@@ -760,6 +783,18 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(await client.v2WebhookEndpointActivationLease.count({
       where: { endpointId: endpoint.id, workspaceId },
     }), 0)
+    const challengeAuditRows = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.challenge',
+        targetId: endpoint.id,
+      },
+    })
+    assert.equal(challengeAuditRows.length, 1)
+    assert.equal(challengeAuditRows[0].targetStatus, 'active')
+    assert.equal(challengeAuditRows[0].actorClientId, clientId)
+    assert.equal(challengeAuditRows[0].actorCredentialId, clientId)
+    assert.equal(challengeAuditRows[0].actorContextHash, actorAudit.contextHash)
     const convergentActivation = activateWebhookEndpointConvergentlyService({
       repository: security,
       transport: { async send() { throw new Error('active replay must not use network') } },
@@ -767,7 +802,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       createId: () => '00000000-0000-4000-8000-000000000299',
     })
     assert.deepEqual(
-      await convergentActivation({ workspaceId, endpointId: endpoint.id }),
+      await convergentActivation({ workspaceId, endpointId: endpoint.id, actor: webhookActor }),
       { activatedSubscriptions: 0, replayed: true },
     )
     const activeRotationEndpointRow = await client.v2WebhookEndpoint.findUniqueOrThrow({
@@ -1355,6 +1390,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         endpointId: endpoint.id,
         challengeId: issued.challenge.id,
         echoedToken: issued.token,
+        administration: challengeAdministration(endpoint.id, new Date(now.getTime() + 1_000).toISOString()),
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_CHALLENGE_REJECTED',
     )

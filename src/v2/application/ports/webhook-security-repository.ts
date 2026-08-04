@@ -2,8 +2,10 @@ import type {
   WebhookReplayReceipt,
   WebhookVerificationChallenge,
 } from '../../domain/webhook-security.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface VerifyWebhookChallengeCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   workspaceId: string
   endpointId: string
   challengeId: string
@@ -59,6 +61,7 @@ export type WebhookEndpointActivationLeaseClaim =
 
 export interface WebhookEndpointActivationLeaseRepository {
   claimActivationLease(command: Readonly<{
+    administration: Readonly<WebhookAdministrationCommand>
     workspaceId: string
     endpointId: string
     leaseTokenHash: string
