@@ -9,6 +9,7 @@ function record() {
     operation: createQueuedPublicOperation({
       id: 'operation-span-test',
       workspaceId: 'workspace-span-test',
+      projectId: 'project-span-test',
       clientId: 'client-span-test',
       type: 'project-proxy-render',
       target: {

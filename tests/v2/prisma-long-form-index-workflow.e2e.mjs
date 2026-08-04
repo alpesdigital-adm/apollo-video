@@ -307,6 +307,24 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       undefined,
     )
     const workflowId = created.data.workflow.id
+    const publicOperations = new PrismaPublicOperationRepository(prisma)
+    const projectOperations = await publicOperations.list({
+      workspaceId,
+      projectId,
+      limit: 10,
+    })
+    assert.deepEqual(
+      projectOperations.map(({ operation }) => ({
+        id: operation.id,
+        projectId: operation.projectId,
+      })),
+      [{ id: created.data.operation.id, projectId }],
+    )
+    assert.deepEqual(await publicOperations.list({
+      workspaceId,
+      projectId: `other-project-${suffix}`,
+      limit: 10,
+    }), [])
 
     const transcriptSegments = Array.from({ length: 24 }, (_, index) => {
       const start = index * 300 + 60

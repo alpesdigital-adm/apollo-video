@@ -243,6 +243,7 @@ test('T-FR-219 persists a server-evidenced closed quality loop through the publi
         data: {
           id: operationId,
           workspaceId,
+          projectId,
           clientId: issued.client.id,
           type: 'project-proxy-render',
           status: 'succeeded',

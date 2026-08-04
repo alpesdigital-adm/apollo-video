@@ -1662,7 +1662,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v7",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1673,7 +1673,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/dead-letter",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v7",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1684,7 +1684,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1706,7 +1706,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/cancel",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1717,7 +1717,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/retry",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v7",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

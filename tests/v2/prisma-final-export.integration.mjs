@@ -406,6 +406,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
       data: {
         id: proxyOperationId,
         workspaceId,
+        projectId,
         clientId: issued.client.id,
         type: 'project-proxy-render',
         status: 'succeeded',

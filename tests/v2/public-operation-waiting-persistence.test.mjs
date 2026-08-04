@@ -9,6 +9,7 @@ function createMemoryPrisma() {
     row: {
       id: 'operation-waiting-1',
       workspaceId: 'workspace-waiting-1',
+      projectId: 'project-waiting-1',
       clientId: 'client-waiting-1',
       type: 'media-ingest',
       status: 'running',

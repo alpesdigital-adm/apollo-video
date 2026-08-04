@@ -524,6 +524,7 @@ function operationData(operation: Readonly<PublicOperation>, input: {
   return {
     id: operation.id,
     workspaceId: operation.workspaceId,
+    projectId: operation.projectId,
     clientId: operation.clientId,
     type: operation.type,
     status: operation.status,
@@ -737,6 +738,7 @@ implements LongFormIndexWorkflowRepository {
       input.operation.type !== 'long-form-index' ||
       input.operation.status !== 'queued' ||
       input.workflow.workspaceId !== input.operation.workspaceId ||
+      input.workflow.projectId !== input.operation.projectId ||
       input.workflow.createdByClientId !==
         input.operation.clientId ||
       input.workflow.sourceArtifactId !==

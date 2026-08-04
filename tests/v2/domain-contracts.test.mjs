@@ -767,11 +767,13 @@ test('operation listing binds stable opaque cursors to workspace and allowlisted
     limit: 1,
     status: 'queued',
     type: 'artifact-render',
+    projectId: 'project-list-1',
     targetId: 'artifact-list-1',
   })
   assert.deepEqual(first.operations.map((operation) => operation.id), ['operation-list-3'])
   assert.match(first.nextCursor, /^[A-Za-z0-9_-]+$/)
   assert.equal(queries[0].limit, 2)
+  assert.equal(queries[0].projectId, 'project-list-1')
 
   const second = await list({
     workspaceId: 'workspace-list-1',
@@ -779,6 +781,7 @@ test('operation listing binds stable opaque cursors to workspace and allowlisted
     after: first.nextCursor,
     status: 'queued',
     type: 'artifact-render',
+    projectId: 'project-list-1',
     targetId: 'artifact-list-1',
   })
   assert.deepEqual(queries[1].after, {
@@ -793,6 +796,7 @@ test('operation listing binds stable opaque cursors to workspace and allowlisted
       after: first.nextCursor,
       status: 'failed',
       type: 'artifact-render',
+      projectId: 'project-list-1',
       targetId: 'artifact-list-1',
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
@@ -806,6 +810,7 @@ test('operation listing binds stable opaque cursors to workspace and allowlisted
     { limit: 101 },
     { status: 'unknown' },
     { type: 'internal-render' },
+    { projectId: 'x' },
     { after: 'not-a-cursor' },
   ]) {
     await assert.rejects(
@@ -843,11 +848,13 @@ test('dead-letter listing fixes exhaustion semantics and binds them into its cur
     workspaceId: 'workspace-dead-letter-list-1',
     limit: 1,
     type: 'artifact-render',
+    projectId: 'project-dead-letter-list-1',
     targetId: 'artifact-dead-letter-list-1',
   })
   assert.equal(queries[0].status, 'failed')
   assert.equal(queries[0].deadLettered, true)
   assert.equal(queries[0].limit, 2)
+  assert.equal(queries[0].projectId, 'project-dead-letter-list-1')
   assert.match(first.nextCursor, /^[A-Za-z0-9_-]+$/)
 
   const listAll = listPublicOperationsService({ operations })
@@ -1009,6 +1016,43 @@ test('T-FR-236 real PublicOperation waiting transitions and visible states are h
   assert.ok(projections.every((state) => Object.isFrozen(state) && Object.isFrozen(state.progress)))
   expectDomainError(
     () => presentPublicOperationV2({ ...queued, status: 'invented' }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+})
+
+test('project-bound PublicOperation exposes projectId only in the versioned operation projection', () => {
+  const operation = createQueuedPublicOperation({
+    id: 'operation-project-projection-1',
+    workspaceId: 'workspace-project-projection-1',
+    projectId: 'project-projection-1',
+    clientId: 'client-project-projection-1',
+    type: 'media-ingest',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-project-projection-1',
+      manifestId: 'manifest-project-projection-1',
+    },
+    createdAt: '2026-08-03T12:00:00.000Z',
+  })
+  assert.equal('projectId' in presentPublicOperationV2(operation), false)
+  assert.equal(
+    presentPublicOperationV2(operation, { includeProjectId: true }).projectId,
+    'project-projection-1',
+  )
+  expectDomainError(
+    () => createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-project-projection-missing',
+      projectId: undefined,
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => createQueuedPublicOperation({
+      ...operation,
+      id: 'operation-artifact-projection-project',
+      type: 'artifact-render',
+    }),
     'INVALID_PUBLIC_OPERATION',
   )
 })

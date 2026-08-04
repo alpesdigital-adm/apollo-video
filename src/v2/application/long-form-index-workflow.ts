@@ -332,6 +332,7 @@ export function createLongFormIndexWorkflowService(dependencies: {
     const operation = createQueuedPublicOperation({
       id: operationId,
       workspaceId,
+      projectId,
       clientId: createdByClientId,
       type: 'long-form-index',
       target: {

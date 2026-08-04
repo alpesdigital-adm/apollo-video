@@ -212,6 +212,7 @@ test('T-FR-230 persists the post-render proxy verdict and exposes an API/UI warn
       data: {
         id: operationId,
         workspaceId,
+        projectId,
         clientId: issued.client.id,
         type: 'project-proxy-render',
         status: 'succeeded',

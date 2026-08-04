@@ -243,6 +243,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   }
   if (isRender && (
     !renderDetail || ingestDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || longFormDetail || row.targetId !== renderDetail.artifactId ||
+    row.projectId !== null ||
     row.workspaceId !== renderDetail.workspaceId ||
     renderDetail.manifest.artifactId !== renderDetail.artifactId ||
     renderDetail.authorization.artifactId !== renderDetail.artifactId ||
@@ -256,6 +257,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   }
   if (isIngest && (
     !ingestDetail || renderDetail || projectRenderDetail || finalExportDetail || sourceCleanupDetail || longFormDetail || row.targetId !== ingestDetail.sourceArtifactId ||
+    row.projectId !== ingestDetail.projectId ||
     row.workspaceId !== ingestDetail.workspaceId ||
     !ID_PATTERN.test(ingestDetail.projectId) || !ID_PATTERN.test(ingestDetail.sourceManifestId) ||
     ingestDetail.originalFileName.trim().length < 1
@@ -265,6 +267,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   if (isProjectRender && (
     !projectRenderDetail || renderDetail || ingestDetail || finalExportDetail || sourceCleanupDetail || longFormDetail ||
     row.targetId !== projectRenderDetail.outputArtifactId ||
+    row.projectId !== projectRenderDetail.projectId ||
     row.workspaceId !== projectRenderDetail.workspaceId ||
     ![projectRenderDetail.projectId, projectRenderDetail.projectVersionId, projectRenderDetail.editPlanSnapshotId,
       projectRenderDetail.sourceArtifactId, projectRenderDetail.sourceManifestId, projectRenderDetail.outputArtifactId,
@@ -284,6 +287,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   if (isFinalExport && (
     !finalExportDetail || renderDetail || ingestDetail || projectRenderDetail || sourceCleanupDetail || longFormDetail ||
     row.targetId !== finalExportDetail.outputArtifactId ||
+    row.projectId !== finalExportDetail.projectId ||
     row.workspaceId !== finalExportDetail.workspaceId ||
     ![finalExportDetail.projectId, finalExportDetail.projectVersionId, finalExportDetail.editPlanSnapshotId,
       finalExportDetail.directorRunId, finalExportDetail.qualitySnapshotId,
@@ -308,6 +312,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     !sourceCleanupDetail || renderDetail || ingestDetail ||
     projectRenderDetail || finalExportDetail || longFormDetail ||
     row.targetId !== sourceCleanupDetail.outputArtifactId ||
+    row.projectId !== sourceCleanupDetail.projectId ||
     row.workspaceId !== sourceCleanupDetail.workspaceId ||
     row.clientId !== sourceCleanupDetail.createdByClientId ||
     sourceCleanupDetail.operationId !== row.id ||
@@ -341,6 +346,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     projectRenderDetail || finalExportDetail ||
     sourceCleanupDetail ||
     row.targetId !== longFormDetail.sourceArtifactId ||
+    row.projectId !== longFormDetail.projectId ||
     row.workspaceId !== longFormDetail.workspaceId ||
     row.clientId !== longFormDetail.createdByClientId ||
     longFormDetail.operationId !== row.id ||
@@ -446,6 +452,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       schemaVersion: 'public-operation/v1',
       id: row.id,
       workspaceId: row.workspaceId,
+      ...(row.projectId ? { projectId: row.projectId } : {}),
       clientId: row.clientId,
       type: row.type as PublicOperation['type'],
       status: row.status as PublicOperation['status'],
@@ -786,6 +793,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       !Number.isInteger(input.limit) ||
       input.limit < 1 ||
       input.limit > 101 ||
+      (input.projectId !== undefined && !ID_PATTERN.test(input.projectId)) ||
       (input.targetId !== undefined && !ID_PATTERN.test(input.targetId))
     ) {
       throw new DomainError('INVALID_PUBLIC_OPERATION', 'Operation list query is invalid')
@@ -798,6 +806,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     }
     const where: Prisma.V2PublicOperationWhereInput = {
       workspaceId: input.workspaceId,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.status ? { status: input.status } : {}),
       ...(input.type ? { type: input.type } : {}),
       ...(input.targetId ? { targetId: input.targetId } : {}),
@@ -893,14 +902,16 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
       ) || !SHA256_PATTERN.test(input.requestFingerprint) ||
       (input.traceId !== undefined && !/^[A-Za-z0-9_-]{8,100}$/.test(input.traceId)) ||
       (!renderContext && !ingestContext && !projectRenderContext && !projectReuseContext && !finalExportContext) ||
-      (renderContext && (!SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
+      (renderContext && (input.operation.projectId !== undefined || !SHA256_PATTERN.test(renderContext.inputHash) || !ID_PATTERN.test(renderContext.authorizationId))) ||
       (ingestContext && (
+        input.operation.projectId !== ingestContext.projectId ||
         !/^[0-9a-f-]{36}$/.test(ingestContext.uploadId) ||
         ![ingestContext.projectId, ingestContext.sourceArtifactId, ingestContext.sourceManifestId].every((value) => ID_PATTERN.test(value)) ||
         ingestContext.sourceArtifactId !== input.operation.target.id || ingestContext.sourceManifestId !== input.operation.target.manifestId ||
         ingestContext.originalFileName.trim().length < 1 || ingestContext.originalFileName.length > 240
       )) ||
       (projectRenderContext && (
+        input.operation.projectId !== projectRenderContext.projectId ||
         ![projectRenderContext.projectId, projectRenderContext.projectVersionId, projectRenderContext.editPlanSnapshotId,
           projectRenderContext.sourceArtifactId, projectRenderContext.sourceManifestId,
           projectRenderContext.outputArtifactId, projectRenderContext.outputManifestId].every((value) => ID_PATTERN.test(value)) ||
@@ -911,6 +922,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
       )) ||
       (projectReuseContext && (
+        input.operation.projectId !== projectReuseContext.projectId ||
         ![
           projectReuseContext.projectId, projectReuseContext.projectVersionId,
           projectReuseContext.editPlanSnapshotId, projectReuseContext.commandId,
@@ -926,6 +938,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         projectReuseContext.originalFileName.length > 240
       )) ||
       (finalExportContext && (
+        input.operation.projectId !== finalExportContext.projectId ||
         ![finalExportContext.projectId, finalExportContext.projectVersionId, finalExportContext.editPlanSnapshotId,
           finalExportContext.directorRunId, finalExportContext.qualitySnapshotId,
           finalExportContext.proxyReviewId, finalExportContext.proxyArtifactId,
@@ -1161,6 +1174,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           data: {
             id: input.operation.id,
             workspaceId: input.operation.workspaceId,
+            projectId: input.operation.projectId,
             clientId: input.operation.clientId,
             type: input.operation.type,
             status: input.operation.status,

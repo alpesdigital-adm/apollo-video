@@ -10,6 +10,7 @@ export function listDeadLetterOperationsService(dependencies: {
     limit?: number
     after?: string
     type?: string
+    projectId?: string
     targetId?: string
   }) {
     return list({

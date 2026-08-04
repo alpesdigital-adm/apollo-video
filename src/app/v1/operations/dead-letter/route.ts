@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'operations:read')
     const params = request.nextUrl.searchParams
-    const allowedParameters = new Set(['limit', 'after', 'type', 'targetId'])
+    const allowedParameters = new Set(['limit', 'after', 'type', 'projectId', 'targetId'])
     for (const name of params.keys()) {
       if (!allowedParameters.has(name)) {
         throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported filter`)
@@ -40,11 +40,13 @@ export async function GET(request: NextRequest) {
       ...(rawLimit !== null ? { limit: Number(rawLimit) } : {}),
       ...(params.has('after') ? { after: params.get('after') ?? '' } : {}),
       ...(params.has('type') ? { type: params.get('type') ?? '' } : {}),
+      ...(params.has('projectId') ? { projectId: params.get('projectId') ?? '' } : {}),
       ...(params.has('targetId') ? { targetId: params.get('targetId') ?? '' } : {}),
     })
     return NextResponse.json(
       presentSuccess({
-        operations: result.operations.map(presentPublicOperationV2),
+        operations: result.operations.map((operation) =>
+          presentPublicOperationV2(operation, { includeProjectId: true })),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       }),
       { status: 200, headers: publicApiHeaders(requestId) },

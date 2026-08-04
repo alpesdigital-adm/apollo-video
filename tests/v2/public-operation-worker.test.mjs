@@ -25,6 +25,7 @@ test('long-form index operation exposes its six durable phases', () => {
   const queued = createQueuedPublicOperation({
     id: 'operation-long-form-test',
     workspaceId: 'workspace-long-form-test',
+    projectId: 'project-long-form-test',
     clientId: 'client-long-form-test',
     type: 'long-form-index',
     target: {

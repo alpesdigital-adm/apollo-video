@@ -288,6 +288,10 @@ const queuedLongFormIndexOperationVisibleExample = {
     terminal: false,
   },
 }
+const queuedLongFormIndexOperationVisibleProjectExample = {
+  ...queuedLongFormIndexOperationVisibleExample,
+  projectId,
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -5485,6 +5489,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v7': [
       { data: { operation: queuedLongFormIndexOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v8': [
+      { data: { operation: queuedLongFormIndexOperationVisibleProjectExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -5520,6 +5527,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v7': [
       { data: { operations: [queuedLongFormIndexOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v8': [
+      { data: { operations: [queuedLongFormIndexOperationVisibleProjectExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/operation-telemetry-summary/v1': [
       {

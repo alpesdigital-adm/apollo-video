@@ -215,6 +215,7 @@ function createOperations() {
   let operation = createQueuedPublicOperation({
     id: 'operation-final-export-test',
     workspaceId,
+    projectId,
     clientId: 'client-final-export-test',
     type: 'project-final-export',
     target: { type: 'media-artifact', id: 'artifact-final-output', manifestId: 'manifest-final-output' },

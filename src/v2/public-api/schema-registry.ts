@@ -7446,6 +7446,14 @@ const publicOperationSchemaV7 = {
   },
 }
 
+const publicOperationSchemaV8 = {
+  ...publicOperationSchemaV7,
+  properties: {
+    ...publicOperationSchemaV7.properties,
+    projectId: idSchema,
+  },
+}
+
 const longFormStageNames = [
   'probe',
   'transcript',
@@ -12799,6 +12807,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV7 },
     }),
   ),
+  defineSchema('public-operation-detail', 8, 'Project-filterable public operation detail with an honest actionable visible-state projection',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV8 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -13244,6 +13260,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['operations'],
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV7 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 8, 'Project-filterable public operation list with honest actionable visible-state projections',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV8 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),

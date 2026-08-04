@@ -35,6 +35,7 @@ export function enqueueMediaIngestService(dependencies: {
     const operation = createQueuedPublicOperation({
       id: createId('operation'),
       workspaceId: upload.workspaceId,
+      projectId: upload.projectId!,
       clientId: upload.clientId,
       type: 'media-ingest',
       target: { type: 'media-artifact', id: sourceArtifactId, manifestId: sourceManifestId },

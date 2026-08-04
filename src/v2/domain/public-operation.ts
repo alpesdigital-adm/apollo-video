@@ -87,6 +87,7 @@ export interface PublicOperation {
   schemaVersion: 'public-operation/v1'
   id: string
   workspaceId: string
+  projectId?: string
   clientId: string
   type: PublicOperationType
   status: PublicOperationStatus
@@ -239,6 +240,20 @@ export function assertPublicOperation(operation: PublicOperation): void {
     'INVALID_PUBLIC_OPERATION',
     'PublicOperation type is invalid',
   )
+  if (operation.type === 'artifact-render') {
+    assertDomain(
+      operation.projectId === undefined,
+      'INVALID_PUBLIC_OPERATION',
+      'Artifact-global operations must not declare projectId',
+    )
+  } else {
+    assertDomain(
+      operation.projectId !== undefined,
+      'INVALID_PUBLIC_OPERATION',
+      'Project-bound operations must declare projectId',
+    )
+    validateId(operation.projectId, 'operation.projectId')
+  }
   assertDomain(
     PUBLIC_OPERATION_STATUSES.includes(operation.status),
     'INVALID_PUBLIC_OPERATION',
@@ -465,6 +480,7 @@ function transitionDate(operation: PublicOperation, value: string): string {
 export function createQueuedPublicOperation(input: {
   id: string
   workspaceId: string
+  projectId?: string
   clientId: string
   type: PublicOperationType
   target: PublicOperationTarget
@@ -476,6 +492,7 @@ export function createQueuedPublicOperation(input: {
     schemaVersion: 'public-operation/v1',
     id: validateId(input.id, 'id'),
     workspaceId: validateId(input.workspaceId, 'workspaceId'),
+    ...(input.projectId ? { projectId: validateId(input.projectId, 'projectId') } : {}),
     clientId: validateId(input.clientId, 'clientId'),
     type: input.type,
     status: 'queued',

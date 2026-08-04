@@ -261,7 +261,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       createdAt,
     } })
     await client.v2PublicOperation.create({ data: {
-      id: completedProxyOperationId, workspaceId, clientId: issued.client.id,
+      id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
@@ -755,7 +755,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       pipelineHash: calculateVersionHash({ selectionBaseOperationId, pipeline: true }),
     }])
     await client.v2PublicOperation.create({ data: {
-      id: selectionBaseOperationId, workspaceId, clientId: issued.client.id,
+      id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
@@ -891,7 +891,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     )
     const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
     await client.v2PublicOperation.create({ data: {
-      id: transcriptBaseProxyOperationId, workspaceId, clientId: issued.client.id,
+      id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
@@ -1015,7 +1015,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.deepEqual(directorContext.outputReferences, [])
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
     await client.v2PublicOperation.create({ data: {
-      id: directorBaseProxyOperationId, workspaceId, clientId: issued.client.id,
+      id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,

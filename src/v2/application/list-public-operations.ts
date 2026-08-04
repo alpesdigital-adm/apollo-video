@@ -26,6 +26,7 @@ export interface ListPublicOperationsRequest {
   after?: string
   status?: string
   type?: string
+  projectId?: string
   targetId?: string
   deadLettered?: boolean
 }
@@ -49,6 +50,7 @@ function filterHash(input: {
   workspaceId: string
   status?: PublicOperationStatus
   type?: PublicOperation['type']
+  projectId?: string
   targetId?: string
   deadLettered?: boolean
 }): string {
@@ -57,6 +59,7 @@ function filterHash(input: {
       workspaceId: input.workspaceId,
       status: input.status ?? null,
       type: input.type ?? null,
+      projectId: input.projectId ?? null,
       targetId: input.targetId ?? null,
       deadLettered: input.deadLettered ?? null,
     }))
@@ -128,6 +131,8 @@ export function listPublicOperationsService(dependencies: {
       'type is not supported',
     )
     const type = typeValue as PublicOperation['type'] | undefined
+    const projectIdValue = normalizeOptional(request.projectId)
+    const projectId = projectIdValue ? validateId(projectIdValue, 'projectId') : undefined
     const targetIdValue = normalizeOptional(request.targetId)
     const targetId = targetIdValue ? validateId(targetIdValue, 'targetId') : undefined
     assertDomain(
@@ -136,7 +141,7 @@ export function listPublicOperationsService(dependencies: {
       'deadLettered must be a boolean',
     )
     const deadLettered = request.deadLettered
-    const queryFilterHash = filterHash({ workspaceId, status, type, targetId, deadLettered })
+    const queryFilterHash = filterHash({ workspaceId, status, type, projectId, targetId, deadLettered })
     const afterValue = normalizeOptional(request.after)
     const after = afterValue ? decodeCursor(afterValue, queryFilterHash) : undefined
 
@@ -145,6 +150,7 @@ export function listPublicOperationsService(dependencies: {
       limit: limit + 1,
       status,
       type,
+      projectId,
       targetId,
       deadLettered,
       ...(after ? { after: { createdAt: after.createdAt, id: after.id } } : {}),

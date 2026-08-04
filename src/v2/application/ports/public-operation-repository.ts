@@ -147,6 +147,7 @@ export interface ClaimedPublicOperationRecord extends PublicOperationRecord {
 
 export interface PublicOperationListQuery {
   workspaceId: string
+  projectId?: string
   limit: number
   status?: PublicOperationStatus
   type?: PublicOperation['type']

@@ -3854,6 +3854,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       'limit=101',
       'status=unknown',
       'type=internal-render',
+      'projectId=x',
       'after=not-a-cursor',
       'status=queued&status=failed',
       'sql=status%3Dqueued',

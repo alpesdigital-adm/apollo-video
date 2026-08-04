@@ -90,6 +90,7 @@ function workerFixture(options = {}) {
   let operation = createQueuedPublicOperation({
     id: 'operation-long-form-worker',
     workspaceId: workflow.workspaceId,
+    projectId: workflow.projectId,
     clientId: workflow.createdByClientId,
     type: 'long-form-index',
     target: {

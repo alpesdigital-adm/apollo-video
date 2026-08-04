@@ -219,7 +219,8 @@ export function presentProjectWorkspaceV7(
           }),
         }
       : {}),
-    operations: Object.freeze(workspace.operations.map(presentPublicOperationV2)),
+    operations: Object.freeze(workspace.operations.map((operation) =>
+      presentPublicOperationV2(operation))),
   })
 }
 
@@ -229,10 +230,14 @@ export function presentMediaColorProbe(
   return Object.freeze({ probe })
 }
 
-export function presentPublicOperation(operation: PublicOperation) {
+export function presentPublicOperation(
+  operation: PublicOperation,
+  options: Readonly<{ includeProjectId?: boolean }> = {},
+) {
   return {
     schemaVersion: operation.schemaVersion,
     id: operation.id,
+    ...(options.includeProjectId && operation.projectId ? { projectId: operation.projectId } : {}),
     type: operation.type,
     status: operation.status,
     phase: operation.phase,
@@ -253,9 +258,12 @@ export function presentPublicOperation(operation: PublicOperation) {
   }
 }
 
-export function presentPublicOperationV2(operation: PublicOperation) {
+export function presentPublicOperationV2(
+  operation: PublicOperation,
+  options: Readonly<{ includeProjectId?: boolean }> = {},
+) {
   return Object.freeze({
-    ...presentPublicOperation(operation),
+    ...presentPublicOperation(operation, options),
     visibleState: presentPublicOperationVisibleState(operation),
   })
 }

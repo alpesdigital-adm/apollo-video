@@ -220,6 +220,7 @@ export function createSourceCleanupService(dependencies: {
       ? createQueuedPublicOperation({
           id: plan.operationId!,
           workspaceId,
+          projectId,
           clientId: actorClientId,
           type: 'source-cleanup',
           target: {

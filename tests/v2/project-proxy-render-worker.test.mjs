@@ -38,6 +38,7 @@ function createOperations(immutableSource = source()) {
   let operation = createQueuedPublicOperation({
     id: 'operation-project-proxy-test',
     workspaceId: 'workspace-project-proxy-test',
+    projectId: 'project-proxy-test',
     clientId: 'client-project-proxy-test',
     type: 'project-proxy-render',
     target: {
@@ -433,6 +434,7 @@ test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache
   let operation = createQueuedPublicOperation({
     id: 'operation-project-proxy-selection',
     workspaceId: 'workspace-project-proxy-test',
+    projectId: 'project-proxy-test',
     clientId: 'client-project-proxy-test',
     type: 'project-proxy-render',
     target: {

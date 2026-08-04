@@ -143,6 +143,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     const operation = createQueuedPublicOperation({
       id: operationId,
       workspaceId,
+      projectId,
       clientId,
       type: 'project-final-export',
       target: { type: 'media-artifact', id: outputArtifactId, manifestId: outputManifestId },

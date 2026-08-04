@@ -27,6 +27,7 @@ function queuedOperation() {
   return createQueuedPublicOperation({
     id: 'operation-telemetry-test',
     workspaceId: 'workspace-telemetry-test',
+    projectId: 'project-telemetry-test',
     clientId: 'client-telemetry-test',
     type: 'media-ingest',
     target: {

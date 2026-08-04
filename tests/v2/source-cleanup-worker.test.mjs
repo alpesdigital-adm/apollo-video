@@ -116,6 +116,7 @@ function operationStore(plan) {
   let operation = createQueuedPublicOperation({
     id: plan.operationId,
     workspaceId,
+    projectId: plan.projectId,
     clientId: plan.createdByClientId,
     type: 'source-cleanup',
     target: {

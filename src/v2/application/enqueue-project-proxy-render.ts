@@ -69,7 +69,7 @@ export function enqueueProjectProxyRenderService(dependencies: {
     const outputManifestId = source.unchangedReuse?.manifestId ?? dependencies.createId('manifest')
     const now = dependencies.clock().toISOString()
     let operation = createQueuedPublicOperation({
-      id: operationId, workspaceId, clientId, type: 'project-proxy-render',
+      id: operationId, workspaceId, projectId, clientId, type: 'project-proxy-render',
       target: { type: 'media-artifact', id: outputArtifactId, manifestId: outputManifestId }, createdAt: now,
     })
     if (source.unchangedReuse) {

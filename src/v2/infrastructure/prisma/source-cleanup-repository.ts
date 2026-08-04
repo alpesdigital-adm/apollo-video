@@ -111,6 +111,7 @@ function hydrateOperation(
     row.workspaceId !== plan.workspaceId ||
     row.clientId !== plan.createdByClientId ||
     row.type !== 'source-cleanup' ||
+    row.projectId !== plan.projectId ||
     row.targetType !== 'media-artifact' ||
     row.targetId !== plan.outputArtifactId
   ) {
@@ -127,6 +128,7 @@ function hydrateOperation(
     schemaVersion: 'public-operation/v1',
     id: row.id,
     workspaceId: row.workspaceId,
+    projectId: plan.projectId,
     clientId: row.clientId,
     type: 'source-cleanup',
     status: row.status as PublicOperation['status'],
@@ -320,6 +322,7 @@ function operationData(
   return {
     id: operation.id,
     workspaceId: operation.workspaceId,
+    projectId: operation.projectId,
     clientId: operation.clientId,
     type: operation.type,
     status: operation.status,
@@ -444,6 +447,7 @@ implements SourceCleanupRepository {
         operation.status !== 'queued' ||
         operation.id !== record.plan.operationId ||
         operation.workspaceId !== record.plan.workspaceId ||
+        operation.projectId !== record.plan.projectId ||
         operation.clientId !== record.plan.createdByClientId ||
         operation.target.id !== record.plan.outputArtifactId ||
         operation.target.manifestId !==

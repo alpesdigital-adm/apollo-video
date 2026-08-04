@@ -90,6 +90,8 @@ Atualização local de consumo UI em FR-236 — dashboard de projetos, sala de l
 | FR-248 | Preflight e lote externo | S4,S9 | D2,D3,D4,D10 | dry-run prevê impacto/custo e retry é parcial | e2e |
 | FR-249 | Governança da API | S7,S9 | D0,D6,D7,D10 | clients/scopes/quotas/webhooks/usage/audit administráveis | security/e2e |
 
+Atualização local de FR-243 — `PublicOperation.projectId` tornou-se a associação canônica e indexada para ingest, proxy, export, cleanup e long-form, com FK composta ao projeto do mesmo workspace e constraint que reserva ausência de projeto somente a `artifact-render` global. As capabilities de listagem, dead-letter, leitura, cancelamento e retry evoluíram para v8; lista e dead-letter aceitam `projectId`, vinculam-no ao hash do cursor e expõem a associação sem alterar os schemas agregados anteriores. Domínio, adapters e reidratação recusam tipo/contexto/projeto divergentes. Testes locais de domínio, repository controlado, contratos e a jornada PostgreSQL preparada cobrem filtragem, cursor e isolamento; execução PostgreSQL/HTTP hospedada, deploy e aceite permanecem pendentes, portanto F0.037 continua aberta.
+
 ## F1 — MVP Core
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |

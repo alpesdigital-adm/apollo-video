@@ -27,7 +27,7 @@ export async function GET(
     })
     const operation = await read({ workspaceId: actor.workspaceId, operationId })
     return NextResponse.json(
-      presentSuccess({ operation: presentPublicOperationV2(operation) }),
+      presentSuccess({ operation: presentPublicOperationV2(operation, { includeProjectId: true }) }),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

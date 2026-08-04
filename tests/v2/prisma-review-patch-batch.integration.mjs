@@ -180,7 +180,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     ] })
     const seedOperationId = `batch-review-seed-operation-${suffix}`
     await client.v2PublicOperation.create({ data: {
-      id: seedOperationId, workspaceId, clientId: issued.client.id, type: 'project-proxy-render',
+      id: seedOperationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render',
       status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
       cancelable: false, retryable: false, attempt: 1, resultJson: stableSerialize({ artifactId }),
       idempotencyKey: `batch-review-seed-${suffix}`, requestFingerprint: calculateVersionHash({ seedOperationId }),
