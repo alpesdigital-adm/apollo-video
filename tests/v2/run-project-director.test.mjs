@@ -10,7 +10,9 @@ import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import {
   advancePublicOperationPhase,
+  cancelPublicOperation,
   createQueuedPublicOperation,
+  retryOrFailPublicOperation,
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
@@ -431,4 +433,228 @@ test('Director worker fences the atomic commit and settles the allocated version
   assert.deepEqual(operation.result.resource, context.kind === 'project-director-run'
     ? { type: 'project-version', id: context.resultVersionId }
     : null)
+})
+
+function createResilientDirectorOperation() {
+  let operation = createQueuedPublicOperation({
+    id: 'operation-director-resilience-1',
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    clientId: 'client-1',
+    type: 'project-director-run',
+    target: { type: 'project-version', id: 'project-version-resilience-result-1' },
+    maxAttempts: 3,
+    createdAt: '2026-08-03T23:00:00.000Z',
+  })
+  const context = Object.freeze({
+    kind: 'project-director-run',
+    projectId: 'project-1',
+    baseVersionId: 'project-version-4',
+    baseHash,
+    resultVersionId: 'project-version-resilience-result-1',
+    reason: 'Exercise durable Director recovery.',
+  })
+  let lease
+  let reclaimExpired = false
+  const activeLease = (input) =>
+    lease?.owner === input.leaseOwner &&
+    lease?.attempt === input.attempt &&
+    Date.parse(lease.expiresAt) > Date.parse(input.now)
+  const record = () => ({ operation, context })
+  const repository = {
+    async claimNext(input) {
+      if (
+        !['queued', 'retrying'].includes(operation.status) &&
+        !(operation.status === 'running' && reclaimExpired)
+      ) return null
+      if (
+        operation.status === 'retrying' &&
+        Date.parse(operation.nextAttemptAt) > Date.parse(input.now)
+      ) return null
+      operation = startPublicOperationAttempt(operation, input.now)
+      reclaimExpired = false
+      lease = {
+        owner: input.leaseOwner,
+        attempt: operation.attempt,
+        expiresAt: input.leaseUntil,
+      }
+      return { ...record(), lease: { ...lease, heartbeatAt: input.now } }
+    },
+    async heartbeat(input) {
+      if (!activeLease(input)) return false
+      lease.expiresAt = input.leaseUntil
+      return true
+    },
+    async findById() { return record() },
+    async failOrRetry(input) {
+      if (!activeLease(input)) return null
+      operation = retryOrFailPublicOperation(
+        operation,
+        input.error,
+        input.now,
+        input.nextAttemptAt,
+      )
+      lease = undefined
+      return record()
+    },
+  }
+  return {
+    context,
+    repository,
+    get operation() { return operation },
+    activeLease,
+    expireForReclaim() { reclaimExpired = true },
+    cancel(at) {
+      operation = cancelPublicOperation(operation, at)
+      lease = undefined
+    },
+    async settle(bundle, commit) {
+      if (!activeLease(bundle.operationFence)) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation fence is stale')
+      }
+      const result = await commit(bundle)
+      operation = advancePublicOperationPhase(
+        operation,
+        'persisting',
+        bundle.operationFence.now,
+      )
+      operation = succeedPublicOperation(operation, bundle.operationFence.now)
+      lease = undefined
+      return result
+    },
+  }
+}
+
+function createDirectorResilienceClock() {
+  let current = Date.parse('2026-08-03T23:00:00.000Z')
+  return () => new Date((current += 100))
+}
+
+function resilientDirectorWorker(harness, directorRuns, clock) {
+  let counter = 0
+  return runNextProjectDirectorOperationService({
+    operations: harness.repository,
+    directorRuns,
+    clock,
+    createId: (kind) => `${kind}-resilience-${++counter}`,
+    createEventId: () =>
+      `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
+    leaseDurationMs: 10_000,
+    heartbeatIntervalMs: 1_000,
+    retryBaseDelayMs: 1,
+    retryMaxDelayMs: 8,
+  })
+}
+
+test('Director worker retries a transient persistence outage and commits once after restart', async () => {
+  const harness = createResilientDirectorOperation()
+  const directorRuns = new InMemoryDirectorRepository()
+  const originalRead = directorRuns.readContext.bind(directorRuns)
+  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  let contextReads = 0
+  let commits = 0
+  directorRuns.readContext = async (input) => {
+    contextReads += 1
+    if (contextReads === 1) {
+      throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'temporary database outage')
+    }
+    return originalRead(input)
+  }
+  directorRuns.commitOrReplay = async (bundle) => {
+    commits += 1
+    return harness.settle(bundle, originalCommit)
+  }
+  const runNext = resilientDirectorWorker(
+    harness,
+    directorRuns,
+    createDirectorResilienceClock(),
+  )
+  assert.equal((await runNext('director-worker-retry-1')).status, 'retrying')
+  assert.equal(harness.operation.status, 'retrying')
+  assert.equal(harness.operation.attempt, 1)
+  assert.equal((await runNext('director-worker-retry-2')).status, 'succeeded')
+  assert.equal(harness.operation.attempt, 2)
+  assert.equal(harness.operation.status, 'succeeded')
+  assert.equal(contextReads, 2)
+  assert.equal(commits, 1)
+  assert.equal(directorRuns.currentVersion.id, harness.context.resultVersionId)
+})
+
+test('Director worker reclaims an expired running attempt without accepting its stale result', async () => {
+  const harness = createResilientDirectorOperation()
+  const directorRuns = new InMemoryDirectorRepository()
+  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  const staleClaim = await harness.repository.claimNext({
+    type: 'project-director-run',
+    leaseOwner: 'director-worker-stale-1',
+    now: '2026-08-03T23:00:00.050Z',
+    leaseUntil: '2026-08-03T23:00:00.075Z',
+  })
+  harness.expireForReclaim()
+  directorRuns.commitOrReplay = (bundle) => harness.settle(bundle, originalCommit)
+  const runNext = resilientDirectorWorker(
+    harness,
+    directorRuns,
+    createDirectorResilienceClock(),
+  )
+  assert.equal((await runNext('director-worker-reclaim-2')).status, 'succeeded')
+  assert.equal(harness.operation.attempt, 2)
+  await assert.rejects(
+    () => harness.settle({ operationFence: {
+      operationId: staleClaim.operation.id,
+      leaseOwner: 'director-worker-stale-1',
+      attempt: 1,
+      now: '2026-08-03T23:00:00.200Z',
+    } }, async () => {
+      throw new Error('stale commit must never execute')
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.equal(directorRuns.currentVersion.id, harness.context.resultVersionId)
+})
+
+test('Director cancellation during planning revokes the fence and publishes no version', async () => {
+  const harness = createResilientDirectorOperation()
+  const directorRuns = new InMemoryDirectorRepository()
+  const originalVersionId = directorRuns.currentVersion.id
+  directorRuns.commitOrReplay = async (bundle) => {
+    harness.cancel('2026-08-03T23:00:00.450Z')
+    return harness.settle(bundle, async () => {
+      throw new Error('canceled Director must not commit')
+    })
+  }
+  const runNext = resilientDirectorWorker(
+    harness,
+    directorRuns,
+    createDirectorResilienceClock(),
+  )
+  const outcome = await runNext('director-worker-cancel-1')
+  assert.equal(outcome.status, 'lease-lost')
+  assert.equal(harness.operation.status, 'canceled')
+  assert.equal(directorRuns.currentVersion.id, originalVersionId)
+  assert.equal(directorRuns.records.size, 0)
+})
+
+test('Director transient retry is bounded and dead-letters without publishing a version', async () => {
+  const harness = createResilientDirectorOperation()
+  const directorRuns = new InMemoryDirectorRepository()
+  const originalVersionId = directorRuns.currentVersion.id
+  directorRuns.readContext = async () => {
+    throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'database remains unavailable')
+  }
+  const runNext = resilientDirectorWorker(
+    harness,
+    directorRuns,
+    createDirectorResilienceClock(),
+  )
+  assert.equal((await runNext('director-worker-exhaust-1')).status, 'retrying')
+  assert.equal((await runNext('director-worker-exhaust-2')).status, 'retrying')
+  assert.equal((await runNext('director-worker-exhaust-3')).status, 'failed')
+  assert.equal(harness.operation.attempt, 3)
+  assert.equal(harness.operation.status, 'failed')
+  assert.equal(harness.operation.retryable, false)
+  assert.equal(harness.operation.error.retryable, false)
+  assert.equal(harness.operation.deadLetteredAt, harness.operation.completedAt)
+  assert.equal(directorRuns.currentVersion.id, originalVersionId)
+  assert.equal(directorRuns.records.size, 0)
 })

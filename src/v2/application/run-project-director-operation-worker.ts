@@ -167,6 +167,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
         return Object.freeze({ operationId, status: 'lease-lost' as const })
       }
       const retryable = retryableDirectorError(error)
+      const canRetry = retryable && attempt < claimed.operation.maxAttempts
       const failedAt = clock()
       const delay = Math.min(
         retryMaxDelayMs,
@@ -183,7 +184,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
             : 'Director operation failed',
           retryable,
         },
-        ...(retryable
+        ...(canRetry
           ? { nextAttemptAt: new Date(failedAt.getTime() + delay).toISOString() }
           : {}),
       })

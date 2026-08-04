@@ -94,6 +94,8 @@ Atualização local de FR-243 — `PublicOperation.projectId` tornou-se a associ
 
 Atualização local de fase/progresso em FR-243 — artifact render não salta mais de `rendering` para `persisting`: o application boundary entra em `verifying` antes da segunda materialização/revalidação e só entra em `persisting` após direitos e inputs permanecerem idênticos. As quatro fases expõem progresso determinístico 0/4→4/4. Testes cobrem render novo, recuperação de output comprometido, perda de lease e cancelamento durante verification sem promoção stale. Métricas internas do encode e cobertura equivalente dos demais tipos continuam abertas.
 
+Atualização local de resiliência em FR-243 — o worker do Diretor cobre restart após indisponibilidade transitória, reclaim de lease expirada com incremento de attempt, rejeição do commit stale, cancelamento durante planejamento sem nova versão e esgotamento terminal em dead-letter. A prova de esgotamento corrigiu um defeito: a última tentativa não pode carregar `nextAttemptAt`. A jornada PostgreSQL permanece preparada, não executada neste slice; providers/sync/batch continuam pendentes.
+
 ## F1 — MVP Core
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |
