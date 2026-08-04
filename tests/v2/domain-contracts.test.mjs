@@ -1057,6 +1057,53 @@ test('project-bound PublicOperation exposes projectId only in the versioned oper
   )
 })
 
+test('Director PublicOperation is project-version scoped and follows its fenced phases', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-director-contract-1',
+    workspaceId: 'workspace-director-contract-1',
+    projectId: 'project-director-contract-1',
+    clientId: 'client-director-contract-1',
+    type: 'project-director-run',
+    target: { type: 'project-version', id: 'project-version-director-result-1' },
+    createdAt: '2026-08-03T22:30:00.000Z',
+  })
+  const running = startPublicOperationAttempt(queued, '2026-08-03T22:30:01.000Z')
+  assert.equal(running.phase, 'directing')
+  assert.deepEqual(running.progress, { completed: 0, total: 2, unit: 'stage' })
+  const persisting = advancePublicOperationPhase(
+    running,
+    'persisting',
+    '2026-08-03T22:30:02.000Z',
+  )
+  const succeeded = succeedPublicOperation(
+    persisting,
+    '2026-08-03T22:30:03.000Z',
+  )
+  assert.deepEqual(succeeded.result, {
+    resource: { type: 'project-version', id: 'project-version-director-result-1' },
+  })
+  expectDomainError(
+    () => createQueuedPublicOperation({
+      ...queued,
+      id: 'operation-director-media-target',
+      target: {
+        type: 'media-artifact',
+        id: 'artifact-director-invalid',
+        manifestId: 'manifest-director-invalid',
+      },
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => createQueuedPublicOperation({
+      ...queued,
+      id: 'operation-proxy-version-target',
+      type: 'project-proxy-render',
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+})
+
 test('PublicOperation cancellation is terminal, idempotent and clears retry scheduling', () => {
   const queued = createQueuedPublicOperation({
     id: 'operation-cancel-1',

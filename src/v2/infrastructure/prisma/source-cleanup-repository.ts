@@ -445,6 +445,7 @@ implements SourceCleanupRepository {
       if (
         operation.type !== 'source-cleanup' ||
         operation.status !== 'queued' ||
+        operation.target.type !== 'media-artifact' ||
         operation.id !== record.plan.operationId ||
         operation.workspaceId !== record.plan.workspaceId ||
         operation.projectId !== record.plan.projectId ||

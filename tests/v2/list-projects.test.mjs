@@ -5,6 +5,7 @@ import addFormats from 'ajv-formats'
 
 import { listProjectsService } from '../../src/v2/application/list-projects.ts'
 import { PROJECT_STATUSES } from '../../src/v2/domain/project.ts'
+import { createQueuedPublicOperation } from '../../src/v2/domain/public-operation.ts'
 import { presentProjectVisibleState } from '../../src/v2/domain/visible-state.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import {
@@ -197,6 +198,28 @@ test('T-FR-236 aligns both workspace capabilities on visible project and operati
   const versionMismatch = structuredClone(validBody)
   versionMismatch.data.version.visibleState.label = 'superseded'
   assert.equal(validate(versionMismatch), false)
+
+  const directorOperation = createQueuedPublicOperation({
+    id: 'operation-director-workspace-v7-1',
+    workspaceId: 'workspace-projects-1',
+    projectId: 'project-workspace-visible-1',
+    clientId: 'client-projects-1',
+    type: 'project-director-run',
+    target: { type: 'project-version', id: 'version-director-result-1' },
+    createdAt: '2026-08-03T22:50:00.000Z',
+  })
+  const compatibilityProjection = presentProjectWorkspaceV7({
+    ...publicWorkspace,
+    operationIds: [directorOperation.id],
+    operations: [directorOperation],
+  })
+  assert.deepEqual(compatibilityProjection.operationIds, [])
+  assert.deepEqual(compatibilityProjection.operations, [])
+  assert.equal(
+    validate({ data: compatibilityProjection, meta: { apiVersion: 'v1' } }),
+    true,
+    JSON.stringify(validate.errors),
+  )
 
   const currentVersion = presentProjectVersionV2(
     { id: 'version-visible-1', sequence: 2 },

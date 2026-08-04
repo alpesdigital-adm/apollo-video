@@ -272,6 +272,16 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
   }
 
   async commitOrReplay(bundle: DirectorRunCommit, serializationAttempt = 1): Promise<Readonly<DirectorRunResult>> {
+    const fenceNow = bundle.operationFence
+      ? new Date(bundle.operationFence.now)
+      : undefined
+    if (bundle.operationFence && (
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(bundle.operationFence.operationId) ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(bundle.operationFence.leaseOwner) ||
+      !Number.isSafeInteger(bundle.operationFence.attempt) ||
+      bundle.operationFence.attempt < 1 ||
+      !fenceNow || Number.isNaN(fenceNow.getTime())
+    )) throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation fence is invalid')
     try {
       return await this.client.$transaction(async (transaction) => {
         const key = {
@@ -288,7 +298,52 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
           if (!existing.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Director idempotency result is missing')
+          if (bundle.operationFence) {
+            const settled = await transaction.v2PublicOperation.findFirst({
+              where: {
+                id: bundle.operationFence.operationId,
+                workspaceId: bundle.command.workspaceId,
+                projectId: bundle.command.projectId,
+                type: 'project-director-run',
+                status: 'succeeded',
+                phase: 'completed',
+                targetType: 'project-version',
+                targetId: existing.directorRun.resultVersionId,
+              },
+              select: { id: true },
+            })
+            if (!settled || existing.directorRun.operationId !== settled.id) {
+              throw new DomainError('PERSISTENCE_CONFLICT', 'Director replay is not bound to the settled operation')
+            }
+          }
           return hydrateStoredRun(existing.directorRun, true)
+        }
+        if (bundle.operationFence) {
+          const enteredPersisting = await transaction.v2PublicOperation.updateMany({
+            where: {
+              id: bundle.operationFence.operationId,
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              type: 'project-director-run',
+              status: 'running',
+              phase: 'directing',
+              attempt: bundle.operationFence.attempt,
+              leaseOwner: bundle.operationFence.leaseOwner,
+              leaseExpiresAt: { gt: fenceNow! },
+              targetType: 'project-version',
+              targetId: bundle.version.id,
+            },
+            data: {
+              phase: 'persisting',
+              progressCompleted: 1,
+              progressTotal: 2,
+              progressUnit: 'stage',
+              updatedAt: fenceNow!,
+            },
+          })
+          if (enteredPersisting.count !== 1) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost before commit')
+          }
         }
         const [project, transcript, sourceMaster] = await Promise.all([
           transaction.v2Project.findFirst({ where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId }, include: { currentVersion: true } }),
@@ -393,6 +448,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           assumptionsJson: stableSerialize(bundle.run.assumptions),
           initiatedByType: bundle.run.initiatedBy.type,
           initiatedById: bundle.run.initiatedBy.id,
+          operationId: bundle.operationFence?.operationId,
           createdAt: new Date(bundle.run.createdAt),
         } })
         const invalidations = createDirectorRunInvalidations({ impact: bundle.command.payload.impact, createdAt: bundle.command.createdAt })
@@ -423,6 +479,46 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           resourceId: bundle.event.resource.id,
           dataJson: stableSerialize(bundle.event.data),
         } })
+        if (bundle.operationFence) {
+          const completedAt = new Date(bundle.operationFence.now)
+          const settled = await transaction.v2PublicOperation.updateMany({
+            where: {
+              id: bundle.operationFence.operationId,
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              type: 'project-director-run',
+              status: 'running',
+              phase: 'persisting',
+              attempt: bundle.operationFence.attempt,
+              leaseOwner: bundle.operationFence.leaseOwner,
+              leaseExpiresAt: { gt: completedAt },
+              targetType: 'project-version',
+              targetId: bundle.version.id,
+            },
+            data: {
+              status: 'succeeded',
+              phase: 'completed',
+              progressCompleted: 2,
+              progressTotal: 2,
+              progressUnit: 'stage',
+              cancelable: false,
+              retryable: false,
+              resultJson: stableSerialize({
+                resource: { type: 'project-version', id: bundle.version.id },
+              }),
+              updatedAt: completedAt,
+              completedAt,
+              leaseOwner: null,
+              leaseExpiresAt: null,
+              heartbeatAt: null,
+              nextAttemptAt: null,
+              deadLetteredAt: null,
+            },
+          })
+          if (settled.count !== 1) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director operation lease was lost during commit')
+          }
+        }
         const stored = await transaction.v2DirectorRun.findUniqueOrThrow({ where: { id: bundle.run.id }, include: directorRunInclude })
         return hydrateStoredRun(stored, false)
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

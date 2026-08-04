@@ -102,10 +102,14 @@ export function runNextPublicOperationService(dependencies: {
       type: 'artifact-render',
     })
     if (!claimed) return null
-    if (claimed.context.kind !== 'artifact-render') {
+    if (
+      claimed.context.kind !== 'artifact-render' ||
+      claimed.operation.target.type !== 'media-artifact'
+    ) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Render worker claimed a non-render operation')
     }
     const context = claimed.context
+    const target = claimed.operation.target
 
     const operationId = claimed.operation.id
     const attempt = claimed.lease.attempt
@@ -209,8 +213,8 @@ export function runNextPublicOperationService(dependencies: {
 
       if (
         receipt.authorizationId !== context.authorizationId ||
-        receipt.artifactId !== claimed.operation.target.id ||
-        receipt.manifestId !== claimed.operation.target.manifestId ||
+        receipt.artifactId !== target.id ||
+        receipt.manifestId !== target.manifestId ||
         receipt.inputHash !== context.inputHash
       ) {
         throw new DomainError(

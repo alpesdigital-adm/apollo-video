@@ -62,6 +62,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
+    await client.v2DirectorRun.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({
       where: { workspaceId, reusedFromOperationId: { not: null } },
     })
@@ -1119,6 +1120,53 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(lutSelectionReplayResponse.status, 200, JSON.stringify(lutSelectionReplay))
     assert.equal(lutSelectionReplay.data.replayed, true)
     assert.equal(lutSelectionReplay.data.operation.id, lutSelectionApplied.data.operation.id)
+
+    const asyncDirectorKey = `async-director-${suffix}`
+    const enqueueAsyncDirector = () => fetch(`${baseUrl}/v1/projects/${projectId}/director-runs`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json', 'idempotency-key': asyncDirectorKey },
+      body: JSON.stringify({
+        baseVersionId: lutSelectionApplied.data.version.id,
+        baseHash: lutSelectionApplied.data.version.baseHash,
+        reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
+      }),
+    })
+    const asyncDirectorResponse = await enqueueAsyncDirector()
+    const asyncDirectorEnqueued = await asyncDirectorResponse.json()
+    assert.equal(asyncDirectorResponse.status, 202, JSON.stringify(asyncDirectorEnqueued))
+    assert.equal(asyncDirectorEnqueued.data.replayed, false)
+    assert.equal(asyncDirectorEnqueued.data.operation.type, 'project-director-run')
+    assert.equal(asyncDirectorEnqueued.data.operation.target.type, 'project-version')
+    const allocatedResultVersionId = asyncDirectorEnqueued.data.operation.target.id
+
+    const { runNextProjectDirectorOperationService } = await import('../../src/v2/application/run-project-director-operation-worker.ts')
+    const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+    const runNextDirector = runNextProjectDirectorOperationService({
+      operations: new PrismaPublicOperationRepository(client),
+      directorRuns: new PrismaDirectorRunRepository(client),
+      createId: (kind) => `${kind}-async-${suffix}-${randomUUID()}`,
+      createEventId: randomUUID,
+    })
+    assert.deepEqual(await runNextDirector(`director-worker-${suffix}`), {
+      operationId: asyncDirectorEnqueued.data.operation.id,
+      status: 'succeeded',
+    })
+    const storedAsyncOperation = await client.v2PublicOperation.findUniqueOrThrow({
+      where: { id: asyncDirectorEnqueued.data.operation.id },
+      include: { projectDirectorRun: { include: { directorRun: true } } },
+    })
+    assert.equal(storedAsyncOperation.status, 'succeeded')
+    assert.equal(storedAsyncOperation.phase, 'completed')
+    assert.equal(storedAsyncOperation.targetId, allocatedResultVersionId)
+    assert.equal(storedAsyncOperation.projectDirectorRun.resultVersionId, allocatedResultVersionId)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.operationId, storedAsyncOperation.id)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.resultVersionId, allocatedResultVersionId)
+    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, allocatedResultVersionId)
+    const asyncDirectorReplayResponse = await enqueueAsyncDirector()
+    const asyncDirectorReplay = await asyncDirectorReplayResponse.json()
+    assert.equal(asyncDirectorReplayResponse.status, 202, JSON.stringify(asyncDirectorReplay))
+    assert.equal(asyncDirectorReplay.data.replayed, true)
+    assert.equal(asyncDirectorReplay.data.operation.id, storedAsyncOperation.id)
     await context.close()
     await browser.close()
     browser = undefined

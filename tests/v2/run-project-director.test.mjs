@@ -2,10 +2,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { enqueueProjectDirectorRunService } from '../../src/v2/application/enqueue-project-director-run.ts'
+import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
+import {
+  advancePublicOperationPhase,
+  createQueuedPublicOperation,
+  startPublicOperationAttempt,
+  succeedPublicOperation,
+} from '../../src/v2/domain/public-operation.ts'
 
 const baseHash = 'a'.repeat(64)
 
@@ -249,4 +257,178 @@ test('Director V2 still requests one full proxy without fabricating stale artifa
   assert.deepEqual(result.impact.affectedVariantIds, [])
   assert.deepEqual(result.impact.minimalRenders, [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }])
   assert.deepEqual(result.invalidations, [])
+})
+
+test('Director enqueue allocates one immutable result version and replays before reading mutable project state', async () => {
+  const directorRuns = new InMemoryDirectorRepository()
+  let contextReads = 0
+  const originalReadContext = directorRuns.readContext.bind(directorRuns)
+  directorRuns.readContext = async (input) => {
+    contextReads += 1
+    return originalReadContext(input)
+  }
+  let stored
+  const operations = {
+    async findReplay(input) {
+      if (!stored) return null
+      assert.equal(input.requestFingerprint, stored.requestFingerprint)
+      return { operation: stored.operation, context: stored.context, replayed: true }
+    },
+    async createOrReplay(input) {
+      stored = input
+      return { operation: input.operation, context: input.context, replayed: false }
+    },
+  }
+  let sequence = 0
+  const enqueue = enqueueProjectDirectorRunService({
+    directorRuns,
+    operations,
+    clock: () => new Date('2026-08-03T22:30:00.000Z'),
+    createId: (kind) => `${kind}-director-enqueue-${++sequence}`,
+  })
+  const input = {
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    baseVersionId: 'project-version-4',
+    baseHash,
+    actor: {
+      type: 'api-client',
+      id: 'client-1',
+      delegatedUserId: 'user-director-enqueue-1',
+    },
+    idempotencyKey: 'director-enqueue-key-1',
+    reason: 'Recompute the full editorial plan.',
+    traceId: 'trace-director-enqueue-1',
+  }
+  const first = await enqueue(input)
+  assert.equal(first.replayed, false)
+  assert.equal(first.operation.type, 'project-director-run')
+  assert.equal(first.operation.projectId, 'project-1')
+  assert.deepEqual(first.operation.target, {
+    type: 'project-version',
+    id: 'project-version-director-enqueue-1',
+  })
+  assert.deepEqual(first.context, {
+    kind: 'project-director-run',
+    projectId: 'project-1',
+    baseVersionId: 'project-version-4',
+    baseHash,
+    resultVersionId: 'project-version-director-enqueue-1',
+    delegatedUserId: 'user-director-enqueue-1',
+    reason: 'Recompute the full editorial plan.',
+  })
+  directorRuns.readContext = async () => {
+    throw new Error('replay must not read mutable state')
+  }
+  const replay = await enqueue(input)
+  assert.equal(replay.replayed, true)
+  assert.equal(replay.operation.id, first.operation.id)
+  assert.equal(contextReads, 1)
+})
+
+test('Director enqueue fails closed for a stale immutable base', async () => {
+  const directorRuns = new InMemoryDirectorRepository()
+  const enqueue = enqueueProjectDirectorRunService({
+    directorRuns,
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay() { throw new Error('stale requests must not persist') },
+    },
+    createId: (kind) => `${kind}-stale-director-1`,
+  })
+  await assert.rejects(
+    () => enqueue({
+      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      baseVersionId: 'project-version-stale-1',
+      baseHash,
+      actor: { type: 'api-client', id: 'client-1' },
+      idempotencyKey: 'director-stale-enqueue-1',
+    }),
+    (error) => error instanceof DomainError && error.code === 'VERSION_CONFLICT',
+  )
+})
+
+test('Director worker fences the atomic commit and settles the allocated version target', async () => {
+  const directorRuns = new InMemoryDirectorRepository()
+  let operation = createQueuedPublicOperation({
+    id: 'operation-director-worker-1',
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    clientId: 'client-1',
+    type: 'project-director-run',
+    target: { type: 'project-version', id: 'project-version-worker-result-1' },
+    createdAt: '2026-08-03T22:40:00.000Z',
+  })
+  const context = Object.freeze({
+    kind: 'project-director-run',
+    projectId: 'project-1',
+    baseVersionId: 'project-version-4',
+    baseHash,
+    resultVersionId: 'project-version-worker-result-1',
+    delegatedUserId: 'user-director-worker-1',
+    reason: 'Run through the durable worker.',
+  })
+  let lease
+  const activeLease = (input) =>
+    lease?.owner === input.leaseOwner &&
+    lease?.attempt === input.attempt &&
+    Date.parse(lease.expiresAt) > Date.parse(input.now)
+  const operations = {
+    async claimNext(input) {
+      assert.equal(input.type, 'project-director-run')
+      operation = startPublicOperationAttempt(operation, input.now)
+      lease = {
+        owner: input.leaseOwner,
+        attempt: operation.attempt,
+        expiresAt: input.leaseUntil,
+      }
+      return { operation, context, lease: { ...lease, heartbeatAt: input.now } }
+    },
+    async heartbeat(input) {
+      if (!activeLease(input)) return false
+      lease.expiresAt = input.leaseUntil
+      return true
+    },
+    async findById() { return { operation, context } },
+    async failOrRetry() { throw new Error('successful worker must not fail') },
+  }
+  const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
+  directorRuns.commitOrReplay = async (bundle) => {
+    assert.deepEqual(bundle.operationFence, {
+      operationId: operation.id,
+      leaseOwner: 'worker-director-1',
+      attempt: 1,
+      now: bundle.operationFence.now,
+    })
+    assert.equal(bundle.version.id, context.resultVersionId)
+    assert.equal(bundle.command.author.delegatedUserId, context.delegatedUserId)
+    if (!activeLease(bundle.operationFence)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'lease lost before commit')
+    }
+    const result = await originalCommit(bundle)
+    operation = advancePublicOperationPhase(operation, 'persisting', bundle.operationFence.now)
+    operation = succeedPublicOperation(operation, bundle.operationFence.now)
+    lease = undefined
+    return result
+  }
+  let counter = 0
+  const runNext = runNextProjectDirectorOperationService({
+    operations,
+    directorRuns,
+    clock: () => new Date('2026-08-03T22:40:01.000Z'),
+    createId: (kind) => `${kind}-worker-${++counter}`,
+    createEventId: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
+    leaseDurationMs: 30_000,
+    heartbeatIntervalMs: 10_000,
+  })
+  const outcome = await runNext('worker-director-1')
+  assert.deepEqual(outcome, {
+    operationId: 'operation-director-worker-1',
+    status: 'succeeded',
+  })
+  assert.equal(operation.status, 'succeeded')
+  assert.deepEqual(operation.result.resource, context.kind === 'project-director-run'
+    ? { type: 'project-version', id: context.resultVersionId }
+    : null)
 })

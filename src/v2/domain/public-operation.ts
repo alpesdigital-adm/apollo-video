@@ -19,6 +19,7 @@ export const PUBLIC_OPERATION_TYPES = [
   'project-final-export',
   'source-cleanup',
   'long-form-index',
+  'project-director-run',
 ] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
 
@@ -39,6 +40,10 @@ function isLongFormIndexOperation(
   return type === 'long-form-index'
 }
 
+function isDirectorOperation(type: PublicOperationType): boolean {
+  return type === 'project-director-run'
+}
+
 export const PUBLIC_OPERATION_PHASES = [
   'queued',
   'materializing',
@@ -50,6 +55,7 @@ export const PUBLIC_OPERATION_PHASES = [
   'diarizing',
   'chunking',
   'indexing',
+  'directing',
   'verifying',
   'persisting',
   'waiting',
@@ -67,11 +73,16 @@ export interface PublicOperationProgress {
   unit?: string
 }
 
-export interface PublicOperationTarget {
-  type: 'media-artifact'
-  id: string
-  manifestId: string
-}
+export type PublicOperationTarget =
+  | Readonly<{
+      type: 'media-artifact'
+      id: string
+      manifestId: string
+    }>
+  | Readonly<{
+      type: 'project-version'
+      id: string
+    }>
 
 export interface PublicOperationResult {
   resource: PublicOperationTarget
@@ -140,16 +151,23 @@ const LONG_FORM_INDEX_PHASE_ORDER = [
   'persisting',
 ] as const
 
+const DIRECTOR_PHASE_ORDER = [
+  'directing',
+  'persisting',
+] as const
+
 export type PublicOperationRunningPhase =
   | (typeof RENDER_PHASE_ORDER)[number]
   | (typeof INGEST_PHASE_ORDER)[number]
   | (typeof LONG_FORM_INDEX_PHASE_ORDER)[number]
+  | (typeof DIRECTOR_PHASE_ORDER)[number]
 
 function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
   if (isRenderOperation(type)) return RENDER_PHASE_ORDER
   if (isLongFormIndexOperation(type)) {
     return LONG_FORM_INDEX_PHASE_ORDER
   }
+  if (isDirectorOperation(type)) return DIRECTOR_PHASE_ORDER
   return INGEST_PHASE_ORDER
 }
 
@@ -226,6 +244,34 @@ function validateError(error: PublicOperationError): PublicOperationError {
   return { code, message, retryable: error.retryable }
 }
 
+function validateTarget(target: PublicOperationTarget, field: string): void {
+  assertDomain(
+    target.type === 'media-artifact' || target.type === 'project-version',
+    'INVALID_PUBLIC_OPERATION',
+    `${field}.type is invalid`,
+  )
+  validateId(target.id, `${field}.id`)
+  if (target.type === 'media-artifact') {
+    validateId(target.manifestId, `${field}.manifestId`)
+  } else {
+    assertDomain(
+      !('manifestId' in target),
+      'INVALID_PUBLIC_OPERATION',
+      `${field}.manifestId is not valid for a project version`,
+    )
+  }
+}
+
+function sameTarget(
+  left: PublicOperationTarget,
+  right: PublicOperationTarget,
+): boolean {
+  return left.type === right.type &&
+    left.id === right.id &&
+    (left.type !== 'media-artifact' ||
+      (right.type === 'media-artifact' && left.manifestId === right.manifestId))
+}
+
 export function assertPublicOperation(operation: PublicOperation): void {
   assertDomain(
     operation.schemaVersion === 'public-operation/v1',
@@ -264,13 +310,15 @@ export function assertPublicOperation(operation: PublicOperation): void {
     'INVALID_PUBLIC_OPERATION',
     'PublicOperation phase is invalid',
   )
+  validateTarget(operation.target, 'operation.target')
   assertDomain(
-    operation.target.type === 'media-artifact',
+    operation.type === 'project-director-run'
+      ? operation.target.type === 'project-version'
+      : operation.target.type === 'media-artifact',
     'INVALID_PUBLIC_OPERATION',
-    'PublicOperation target type is invalid',
+    'PublicOperation type and target are incompatible',
   )
-  validateId(operation.target.id, 'operation.target.id')
-  validateId(operation.target.manifestId, 'operation.target.manifestId')
+  if (operation.result) validateTarget(operation.result.resource, 'operation.result.resource')
   validateProgress(operation.progress)
   assertDomain(
     Number.isSafeInteger(operation.attempt) && operation.attempt >= 0,
@@ -410,9 +458,8 @@ export function assertPublicOperation(operation: PublicOperation): void {
       'Succeeded PublicOperation invariants are invalid',
     )
     assertDomain(
-      operation.result?.resource.type === operation.target.type &&
-        operation.result.resource.id === operation.target.id &&
-        operation.result.resource.manifestId === operation.target.manifestId,
+      operation.result !== undefined &&
+        sameTarget(operation.result.resource, operation.target),
       'INVALID_PUBLIC_OPERATION',
       'PublicOperation result must reference its exact target',
     )
@@ -500,11 +547,16 @@ export function createQueuedPublicOperation(input: {
     progress: { completed: 0, total: 1, unit: progressUnit(input.type) },
     cancelable: true,
     retryable: false,
-    target: {
-      type: input.target.type,
-      id: validateId(input.target.id, 'target.id'),
-      manifestId: validateId(input.target.manifestId, 'target.manifestId'),
-    },
+    target: input.target.type === 'media-artifact'
+      ? {
+          type: 'media-artifact',
+          id: validateId(input.target.id, 'target.id'),
+          manifestId: validateId(input.target.manifestId, 'target.manifestId'),
+        }
+      : {
+          type: 'project-version',
+          id: validateId(input.target.id, 'target.id'),
+        },
     attempt: 0,
     maxAttempts: input.maxAttempts ?? 3,
     createdAt,

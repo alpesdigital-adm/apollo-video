@@ -208,8 +208,20 @@ export function presentProjectWorkspaceV7(
     operations: readonly Readonly<PublicOperation>[]
   },
 ) {
+  // Workspace v7 predates project-version operation targets. Keep the
+  // published representation closed until the aggregate itself is versioned.
+  const compatibleOperations = workspace.operations.filter(
+    (operation) => operation.type !== 'project-director-run',
+  )
+  const compatibleOperationIds = new Set(
+    compatibleOperations.map((operation) => operation.id),
+  )
   return Object.freeze({
     ...workspace,
+    operationIds: Object.freeze(
+      workspace.operationIds.filter((operationId) =>
+        compatibleOperationIds.has(operationId)),
+    ),
     project: presentProjectV2(workspace.project),
     ...(workspace.version
       ? {
@@ -219,7 +231,7 @@ export function presentProjectWorkspaceV7(
           }),
         }
       : {}),
-    operations: Object.freeze(workspace.operations.map((operation) =>
+    operations: Object.freeze(compatibleOperations.map((operation) =>
       presentPublicOperationV2(operation))),
   })
 }

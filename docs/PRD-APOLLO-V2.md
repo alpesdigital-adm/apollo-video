@@ -1850,6 +1850,8 @@ Senha humana nunca é uma credencial de integração e não deve ser enviada a M
 
 ### FR-243 — Operações assíncronas e controle de jobs
 
+Atualização local de implementação: o Diretor possui enqueue público `202`, alvo reservado de `ProjectVersion`, contexto privado persistido e worker com lease/heartbeat/fencing. O commit serializável publica a nova versão, snapshots, Command, DirectorRun, invalidações, outbox e `PublicOperation.succeeded` como uma unidade; cancelamento ou perda da lease impede publicação parcial. A jornada PostgreSQL/API foi preparada, mas ainda não executada em ambiente isolado hospedado; FR-243 permanece aberta para os demais jobs, deploy e aceite.
+
 Ingestão, percepção, direção, geração, sincronização, lote, render e export devem responder com operation/job ID quando não forem imediatos. Clientes podem consultar status, progresso real, resultado, erro, custo, cancelabilidade, retry e resume.
 
 ### FR-244 — Webhooks e eventos

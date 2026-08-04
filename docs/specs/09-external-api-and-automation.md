@@ -369,6 +369,8 @@ Operation concluída referencia resources/artifacts permanentes; não embute mí
 
 ## 14. Recursos e endpoints mínimos
 
+Para `project-director-run`, alvo e resultado são `{ type: 'project-version', id }`; os outros tipos publicados atualmente usam `media-artifact`. `POST /v1/projects/{projectId}/director-runs` valida `baseVersionId`+`baseHash`, reserva o ID do resultado e responde 202. O worker executa `directing → persisting` sob lease e attempt; o fence participa da mesma transação serializável que cria snapshots, Command, DirectorRun, ProjectVersion, invalidações e outbox e conclui a operação. Uma lease perdida, cancelada ou substituída causa rollback integral.
+
 Padrão não prescreve implementação interna, mas fixa capacidades:
 
 ```text

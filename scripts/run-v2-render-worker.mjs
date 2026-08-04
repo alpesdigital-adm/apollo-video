@@ -10,6 +10,7 @@ const {
   createProjectProxyRenderWorker,
   createProjectFinalExportWorker,
   createSourceCleanupWorker,
+  createProjectDirectorWorker,
   createPublicOperationWorker,
 } = repositoryFactory
 
@@ -22,6 +23,7 @@ const workerId = `worker:${hostname().slice(0, 40)}:${process.pid}:${randomUUID(
 const runNextProjectProxy = createProjectProxyRenderWorker()
 const runNextProjectFinal = createProjectFinalExportWorker()
 const runNextSourceCleanup = createSourceCleanupWorker()
+const runNextProjectDirector = createProjectDirectorWorker()
 const runNext = process.env.APOLLO_V2_RENDER_OUTPUT_ROOT?.trim()
   ? createPublicOperationWorker()
   : async () => null
@@ -33,6 +35,7 @@ process.once('SIGTERM', () => { stopping = true })
 while (!stopping) {
   try {
     const outcome =
+      await runNextProjectDirector(workerId) ??
       await runNextProjectFinal(workerId) ??
       await runNextProjectProxy(workerId) ??
       await runNextSourceCleanup(workerId) ??

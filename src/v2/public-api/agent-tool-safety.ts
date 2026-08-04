@@ -331,6 +331,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version against an exact base version and edit-plan hash.',
     },
+    'apollo.projects.director-runs.enqueue': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues one lease-fenced Director run against an exact immutable base and allocates only its result version identity.',
+    },
     'apollo.projects.manual-edits.apply': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible immutable project version from an exact revision and queues its exact proxy render.',

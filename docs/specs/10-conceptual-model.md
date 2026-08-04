@@ -70,6 +70,10 @@ flowchart LR
 | V2AssetRightsSnapshot | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Cascade |
 | V2PublicOperation | workspace | workspaceId | V2Workspace | id | Restrict |
 | V2PublicOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict; opcional apenas para artifact-render global |
+| V2ProjectDirectorOperation | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade |
+| V2ProjectDirectorOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
+| V2ProjectDirectorOperation | baseVersion | baseVersionId,projectId,workspaceId | V2ProjectVersion | id,projectId,workspaceId | Restrict |
+| V2DirectorRun | operation | operationId,workspaceId | V2ProjectDirectorOperation | operationId,workspaceId | Restrict; opcional para execuções síncronas anteriores |
 | V2MediaIngestOperation | project | projectId,workspaceId | V2Project | id,workspaceId | Restrict |
 | V2ArtifactRenderOperation | operation | operationId,workspaceId | V2PublicOperation | id,workspaceId | Cascade |
 | V2ArtifactRenderOperation | artifact | artifactId,workspaceId | V2MediaArtifact | id,workspaceId | Restrict |

@@ -22,8 +22,8 @@ import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
-const PLANNER_VERSION = 'apollo-director-policy/v1'
-const CRITIC_VERSION = 'apollo-director-critic/v1'
+export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v1'
+export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v1'
 const SUBTITLE_MAX_CHARACTERS = 32
 
 export interface RunProjectDirectorRequest {
@@ -31,9 +31,35 @@ export interface RunProjectDirectorRequest {
   projectId: string
   baseVersionId: string
   baseHash: string
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: Readonly<{ type: 'api-client'; id: string; delegatedUserId?: string }>
   idempotency: Readonly<{ key: string }>
+  allocatedResultVersionId?: string
+  operationFence?: Readonly<{
+    operationId: string
+    leaseOwner: string
+    attempt: number
+    now: string
+  }>
   reason?: string
+}
+
+export function projectDirectorRequestFingerprint(input: {
+  workspaceId: string
+  projectId: string
+  baseVersionId: string
+  baseHash: string
+  reason?: string
+}): string {
+  return calculateVersionHash({
+    type: 'run-director',
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    baseVersionId: input.baseVersionId,
+    baseHash: input.baseHash,
+    plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
+    criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+    reason: input.reason?.trim() || null,
+  })
 }
 
 export interface RunProjectDirectorDependencies {
@@ -293,7 +319,7 @@ function buildQualityReport(input: {
     score: blocked ? 0 : 0.9,
     hardChecks,
     issues,
-    criticVersion: CRITIC_VERSION,
+    criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
     evaluatedAt: input.evaluatedAt,
   })
 }
@@ -328,13 +354,17 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const idempotencyKey = request.idempotency.key.trim()
     assertDomain(/^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_COMMAND', 'baseHash is invalid')
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_COMMAND', 'Idempotency-Key is invalid')
-    const requestFingerprint = calculateVersionHash({
-      type: 'run-director', workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
-      plannerVersion: PLANNER_VERSION, criticVersion: CRITIC_VERSION, reason: request.reason?.trim() || null,
+    const requestFingerprint = projectDirectorRequestFingerprint({
+      workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
+      reason: request.reason,
     })
     const existing = await dependencies.repository.findIdempotentResult({ workspaceId, projectId, idempotencyKey })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
+      if (
+        request.allocatedResultVersionId !== undefined &&
+        existing.result.version.id !== request.allocatedResultVersionId
+      ) throw new DomainError('PERSISTENCE_CONFLICT', 'Director replay result does not match the allocated operation target')
       return Object.freeze({ ...existing.result, replayed: true })
     }
     const context = await dependencies.repository.readContext({ workspaceId, projectId })
@@ -351,7 +381,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const createdAt = dependencies.clock().toISOString()
     const directorRunId = dependencies.createId('director-run')
     const commandId = dependencies.createId('edit-command')
-    const versionId = dependencies.createId('project-version')
+    const versionId = request.allocatedResultVersionId
+      ? normalizedIdentifier(request.allocatedResultVersionId, 'allocatedResultVersionId')
+      : dependencies.createId('project-version')
     const perceptionId = `perception-${directorRunId}`
     const treatmentPlanId = `treatment-${directorRunId}`
     const storyPlanId = `story-${directorRunId}`
@@ -429,7 +461,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         faceSafeFallback: Object.freeze([0.14, 0.08, 0.72, 0.56] as const),
         subtitleSafeRegion: Object.freeze([0.08, 0.7, 0.84, 0.24] as const),
       }),
-      director: Object.freeze({ plannerVersion: PLANNER_VERSION, decisions, assumptions }),
+      director: Object.freeze({ plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, decisions, assumptions }),
       movementPolicy: Object.freeze({ automaticZoom: false as const, protectedOpeningFrames: Math.max(context.editPlan.movementPolicy.protectedOpeningFrames, Math.round(context.editPlan.fps * 4)) }),
       subtitlePolicy: Object.freeze({ faceProtection: true as const, anchor: 'bottom' as const, maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS }),
       createdAt,
@@ -462,8 +494,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       resultVersionId: versionId,
       sourceTranscriptId: context.transcript.id,
       sourceTranscriptHash: context.transcript.transcriptHash,
-      plannerVersion: PLANNER_VERSION,
-      criticVersion: CRITIC_VERSION,
+      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
+      criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
       affectedEndFrame: Math.max(context.currentDurationFrames, editPlan.durationFrames),
       renderEndFrame: editPlan.durationFrames,
       proxyVariantId: context.proxyVariantId,
@@ -472,8 +504,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const commandPayload: RunDirectorCommandPayload = Object.freeze({
       schemaVersion: 2 as const,
       directorRunId,
-      plannerVersion: PLANNER_VERSION,
-      criticVersion: CRITIC_VERSION,
+      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
+      criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
       sourceTranscriptId: context.transcript.id,
       sourceArtifactId: context.transcript.sourceArtifactId,
       snapshotRefs,
@@ -481,7 +513,12 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     })
     const command = createEditCommand<RunDirectorCommandPayload>({
       id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
-      author: { type: 'api-client', id: clientId }, type: 'run-director', scope: { project: true }, payload: commandPayload,
+      author: {
+        type: 'api-client', id: clientId,
+        ...(request.actor.delegatedUserId
+          ? { delegatedUserId: normalizedIdentifier(request.actor.delegatedUserId, 'actor.delegatedUserId') }
+          : {}),
+      }, type: 'run-director', scope: { project: true }, payload: commandPayload,
       reason: request.reason?.trim() || 'Generate the first complete V2 editorial direction and reviewable proxy.',
       idempotencyKey, createdAt,
     })
@@ -505,7 +542,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const run: DirectorRun = Object.freeze({
       schemaVersion: 1 as const, id: directorRunId, workspaceId, projectId, commandId,
       baseVersionId, resultVersionId: versionId, status: 'planned' as const,
-      plannerVersion: PLANNER_VERSION, criticVersion: CRITIC_VERSION,
+      plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
       perception, treatmentPlan, storyPlan, editPlan, qualityReport, decisions, assumptions,
       initiatedBy: Object.freeze({ type: 'api-client' as const, id: clientId }), createdAt,
     })
@@ -528,6 +565,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         transcriptHash: context.transcript.transcriptHash,
         sourceArtifactId: context.transcript.sourceArtifactId,
       },
+      ...(request.operationFence ? { operationFence: request.operationFence } : {}),
     })
   }
 }

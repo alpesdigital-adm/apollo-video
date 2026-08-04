@@ -737,6 +737,7 @@ implements LongFormIndexWorkflowRepository {
     if (
       input.operation.type !== 'long-form-index' ||
       input.operation.status !== 'queued' ||
+      input.operation.target.type !== 'media-artifact' ||
       input.workflow.workspaceId !== input.operation.workspaceId ||
       input.workflow.projectId !== input.operation.projectId ||
       input.workflow.createdByClientId !==

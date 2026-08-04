@@ -110,6 +110,16 @@ export interface LongFormIndexOperationContext {
   sourceManifestId: string
 }
 
+export interface ProjectDirectorRunOperationContext {
+  kind: 'project-director-run'
+  projectId: string
+  baseVersionId: string
+  baseHash: string
+  resultVersionId: string
+  delegatedUserId?: string
+  reason?: string
+}
+
 export type PublicOperationContext =
   | ArtifactRenderOperationContext
   | MediaIngestOperationContext
@@ -118,6 +128,7 @@ export type PublicOperationContext =
   | ProjectFinalExportOperationContext
   | SourceCleanupOperationContext
   | LongFormIndexOperationContext
+  | ProjectDirectorRunOperationContext
 
 export type PublicOperationCreationContext = Exclude<
   PublicOperationContext,

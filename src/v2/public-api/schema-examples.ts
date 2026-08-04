@@ -292,6 +292,31 @@ const queuedLongFormIndexOperationVisibleProjectExample = {
   ...queuedLongFormIndexOperationVisibleExample,
   projectId,
 }
+const queuedProjectDirectorOperationVisibleExample = {
+  schemaVersion: 'public-operation/v1',
+  id: 'operation-project-director-example-1',
+  projectId,
+  type: 'project-director-run',
+  status: 'queued',
+  phase: 'queued',
+  progress: { completed: 0, total: 1, unit: 'director-run' },
+  cancelable: true,
+  retryable: false,
+  target: { type: 'project-version', id: 'project-version-director-example-1' },
+  attempt: 0,
+  maxAttempts: 3,
+  createdAt,
+  updatedAt: createdAt,
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'not-started', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -5492,6 +5517,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v8': [
       { data: { operation: queuedLongFormIndexOperationVisibleProjectExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v9': [
+      { data: { operation: queuedProjectDirectorOperationVisibleExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -5530,6 +5558,22 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v8': [
       { data: { operations: [queuedLongFormIndexOperationVisibleProjectExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v9': [
+      { data: { operations: [queuedProjectDirectorOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/enqueue-project-director-run-request/v1': [
+      {
+        baseVersionId: 'project-version-base-example-1',
+        baseHash: 'b'.repeat(64),
+        reason: 'Recompute the persisted editorial plan after transcript review.',
+      },
+    ],
+    'apollo://schemas/project-director-operation-enqueued/v1': [
+      {
+        data: { operation: queuedProjectDirectorOperationVisibleExample, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
     ],
     'apollo://schemas/operation-telemetry-summary/v1': [
       {

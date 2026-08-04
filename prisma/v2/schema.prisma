@@ -360,6 +360,7 @@ model V2Project {
   mediaTranscripts                       V2MediaTranscript[]
   mediaIngestOperations                  V2MediaIngestOperation[]
   publicOperations                      V2PublicOperation[]
+  directorOperations                    V2ProjectDirectorOperation[]
   proxyRenderOperations                  V2ProjectProxyRenderOperation[]
   finalExportOperations                  V2ProjectFinalExportOperation[]
   editCommands                           V2EditCommand[]
@@ -508,6 +509,7 @@ model V2ProjectVersion {
   proxyRenderOperations         V2ProjectProxyRenderOperation[]
   finalExportOperations         V2ProjectFinalExportOperation[]
   directorRunsAsBase            V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
+  directorOperationsAsBase      V2ProjectDirectorOperation[]
   directorRunAsResult           V2DirectorRun?                  @relation("DirectorRunResultVersion")
   reviewAnnotations             V2ReviewAnnotation[]
   renderElementMaps             V2RenderElementMap[]
@@ -819,6 +821,7 @@ model V2DirectorRun {
   initiatedById        String   @db.VarChar(128)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
   updatedAt            DateTime @updatedAt @db.Timestamptz(3)
+  operationId          String?  @db.VarChar(128)
 
   workspace             V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project               V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -831,14 +834,38 @@ model V2DirectorRun {
   editPlanSnapshot      V2ProjectSnapshot               @relation("DirectorRunEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   qualitySnapshot       V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   finalExportOperations V2ProjectFinalExportOperation[]
+  operation             V2ProjectDirectorOperation?     @relation("DirectorOperationRun", fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
 
   @@unique([id, workspaceId])
   @@unique([id, projectId, workspaceId])
   @@unique([commandId, workspaceId])
   @@unique([resultVersionId, projectId, workspaceId])
+  @@unique([operationId, workspaceId])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("director_runs")
+}
+
+model V2ProjectDirectorOperation {
+  operationId     String   @id @db.VarChar(128)
+  workspaceId     String   @db.VarChar(128)
+  projectId       String   @db.VarChar(128)
+  baseVersionId   String   @db.VarChar(128)
+  baseHash        String   @db.Char(64)
+  resultVersionId String   @db.VarChar(128)
+  delegatedUserId String?  @db.VarChar(128)
+  reason           String?  @db.VarChar(1000)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  operation   V2PublicOperation @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  project     V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion V2ProjectVersion  @relation(fields: [baseVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  directorRun V2DirectorRun?    @relation("DirectorOperationRun")
+
+  @@unique([operationId, workspaceId])
+  @@unique([workspaceId, projectId, resultVersionId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@map("project_director_operations")
 }
 
 model V2IdempotencyRecord {
@@ -1627,6 +1654,7 @@ model V2PublicOperation {
   projectFinalExport              V2ProjectFinalExportOperation?
   sourceCleanupPlan               V2SourceCleanupPlan?
   longFormIndexWorkflow           V2LongFormIndexWorkflow?
+  projectDirectorRun              V2ProjectDirectorOperation?
   reviewPatchProposal             V2ReviewPatchProposal?
   reviewPatchBatch                V2ReviewPatchBatch?
   artifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]

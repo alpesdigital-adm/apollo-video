@@ -6656,6 +6656,21 @@ const publicOperationTargetSchema = {
   },
 }
 
+const publicOperationTargetSchemaV2 = {
+  oneOf: [
+    publicOperationTargetSchema,
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: {
+        type: { const: 'project-version' },
+        id: idSchema,
+      },
+    },
+  ],
+}
+
 const apiClientV2Schema = {
   ...apiClientSchema,
   required: [
@@ -7451,6 +7466,39 @@ const publicOperationSchemaV8 = {
   properties: {
     ...publicOperationSchemaV7.properties,
     projectId: idSchema,
+  },
+}
+
+const publicOperationSchemaV9 = {
+  ...publicOperationSchemaV8,
+  properties: {
+    ...publicOperationSchemaV8.properties,
+    type: {
+      enum: [
+        'artifact-render',
+        'media-ingest',
+        'project-proxy-render',
+        'project-final-export',
+        'source-cleanup',
+        'long-form-index',
+        'project-director-run',
+      ],
+    },
+    phase: {
+      enum: [
+        'queued', 'assembling', 'probing', 'normalizing', 'transcribing',
+        'diarizing', 'chunking', 'indexing', 'directing', 'materializing',
+        'rendering', 'verifying', 'persisting', 'waiting', 'retrying',
+        'completed', 'failed', 'canceled',
+      ],
+    },
+    target: publicOperationTargetSchemaV2,
+    result: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['resource'],
+      properties: { resource: publicOperationTargetSchemaV2 },
+    },
   },
 }
 
@@ -12815,6 +12863,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV8 },
     }),
   ),
+  defineSchema('public-operation-detail', 9, 'Public operation detail with project-version targets for durable Director execution',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV9 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -13271,6 +13327,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['operations'],
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV8 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 9, 'Public operation list including durable project Director execution',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV9 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
@@ -18408,6 +18475,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         },
       ],
+    }),
+  ),
+  defineSchema('enqueue-project-director-run-request', 1, 'Enqueue one fenced Director run against an immutable project version', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['baseVersionId', 'baseHash'],
+    properties: {
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('project-director-operation-enqueued', 1, 'Durable Director operation accepted for asynchronous execution',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation', 'replayed'],
+      properties: {
+        operation: publicOperationSchemaV9,
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('project-manual-timeline', 1, 'Current manual editing timeline and immutable history',

@@ -24,6 +24,7 @@ import { runNextProjectProxyRenderOperationService } from '../application/run-pr
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
+import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
   produceContiguousEvaluationsService,
@@ -1359,6 +1360,37 @@ export function createProjectProxyRenderWorker(
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
     ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0 ? { retryMaxDelayMs: configuredRetryMax } : {}),
+  })
+}
+
+export function createProjectDirectorWorker(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const configuredLease = Number(environment.APOLLO_V2_WORKER_LEASE_MS)
+  const configuredHeartbeat = Number(environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
+  const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
+  const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
+  return runNextProjectDirectorOperationService({
+    operations: createPublicOperationRepository(
+      createConfiguredOperationTelemetry(environment),
+    ),
+    directorRuns: createDirectorRunRepository(),
+    clock,
+    createId: (kind) => `${kind}-${randomUUID()}`,
+    createEventId: randomUUID,
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
+      ? { leaseDurationMs: configuredLease }
+      : {}),
+    ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0
+      ? { heartbeatIntervalMs: configuredHeartbeat }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0
+      ? { retryBaseDelayMs: configuredRetryBase }
+      : {}),
+    ...(Number.isSafeInteger(configuredRetryMax) && configuredRetryMax > 0
+      ? { retryMaxDelayMs: configuredRetryMax }
+      : {}),
   })
 }
 

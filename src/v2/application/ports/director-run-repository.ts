@@ -44,6 +44,12 @@ export interface DirectorRunCommit {
     transcriptHash: string
     sourceArtifactId: string
   }>
+  operationFence?: Readonly<{
+    operationId: string
+    leaseOwner: string
+    attempt: number
+    now: string
+  }>
 }
 
 export interface DirectorRunResult {

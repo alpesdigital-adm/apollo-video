@@ -21,7 +21,7 @@ O primeiro modelo associava somente `artifact-render` a um `media-artifact` e n�
 - Filtros permitidos são somente os documentados: `status`, `type`, `projectId` e `targetId`. Parâmetros desconhecidos, repetidos ou valores fora da allowlist são rejeitados.
 - O repository busca `limit + 1`; `nextCursor` só é devolvido quando existe outra página.
 - Cada item usa o presenter público existente e continua omitindo client, authorization, RenderInput, leases, schedules e storage.
-- `PublicOperation.projectId` é canônico e possui FK composta para o projeto do mesmo workspace. É obrigatório para ingest, proxy, export, cleanup e long-form; `artifact-render` é global e deve mantê-lo ausente. Domínio, constraint e reidratação falham fechados para outra combinação.
+- `PublicOperation.projectId` é canônico e possui FK composta para o projeto do mesmo workspace. É obrigatório para ingest, proxy, export, cleanup, long-form e Director; `artifact-render` é global e deve mantê-lo ausente. `project-director-run` usa alvo/result `project-version`; os demais tipos atuais usam `media-artifact`. Domínio, constraint e reidratação falham fechados para outra combinação.
 - Índices compostos por workspace/criação/ID e workspace/projeto/criação/ID sustentam a fronteira do cursor no PostgreSQL.
 
 ## Consequências

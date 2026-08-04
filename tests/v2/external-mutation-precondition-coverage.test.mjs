@@ -227,6 +227,9 @@ const coverage = Object.freeze({
   'apollo.projects.commands.apply': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before transactional mutation',
   },
+  'apollo.projects.director-runs.enqueue': {
+    mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before allocating a durable fenced Director operation',
+  },
   'apollo.projects.manual-edits.apply': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId, baseHash and expectedRevision before the serializable manual-edit transaction',
   },
@@ -508,7 +511,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 7,
-    'base-version-bound-action': 4,
+    'base-version-bound-action': 5,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
