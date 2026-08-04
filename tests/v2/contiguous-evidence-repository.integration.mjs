@@ -5,6 +5,7 @@ const [
   { produceContiguousEvidenceService },
   { PrismaContiguousEvidenceRepository },
   { calculateCanonicalHash, stableSerialize },
+  { createApiAccessAuditContext },
   { createLongFormMomentTranscriptEvidence },
   {
     TranscriptBoundaryContiguousEvidenceAnalyzer,
@@ -16,6 +17,7 @@ const [
     '../../src/v2/infrastructure/prisma/contiguous-evidence-repository.ts'
   ),
   import('../../src/v2/domain/canonical-hash.ts'),
+  import('../../src/v2/domain/api-access-control.ts'),
   import('../../src/v2/domain/long-form-transcript-evidence.ts'),
   import(
     '../../src/v2/infrastructure/analysis/transcript-contiguous-evidence-analyzers.ts'
@@ -232,10 +234,13 @@ const request = {
   workspaceId: 'workspace-contiguous-evidence-repository',
   projectId: 'project-contiguous-evidence-repository',
   indexRunId: 'index-contiguous-evidence-repository',
-  actor: {
-    type: 'api-client',
-    id: 'client-contiguous-evidence-repository',
-  },
+  authenticationAudit: createApiAccessAuditContext({
+    clientId: 'client-contiguous-evidence-repository',
+    credentialId: 'credential-contiguous-evidence-repository',
+    workspaceId: 'workspace-contiguous-evidence-repository',
+    environment: 'sandbox',
+    authenticationKind: 'bearer',
+  }),
   idempotencyKey: 'contiguous-evidence-repository-key',
 }
 
@@ -251,6 +256,7 @@ const fence = {
   operationAttempt: 1,
   now: '2026-07-31T01:30:00.000Z',
 }
+request.fence = fence
 
 test('T-FR-134 Prisma evidence adapter revalidates and persists one analyzer run atomically', async () => {
   const value = fixture()
@@ -262,17 +268,41 @@ test('T-FR-134 Prisma evidence adapter revalidates and persists one analyzer run
   assert.equal(value.storedEvidence()[0].runId, created.run.id)
   assert.equal(value.storedEvidence()[0].indexRunHash, sha('a'))
   assert.equal(value.deactivated(), true)
+  assert.equal(
+    value.storedRun().actorCredentialId,
+    request.authenticationAudit.credentialId,
+  )
+  assert.equal(
+    value.storedRun().actorContextHash,
+    request.authenticationAudit.contextHash,
+  )
+  assert.equal(value.storedRun().executionKind, 'long-form-stage')
+  assert.equal(value.storedRun().originOperationId, fence.operationId)
+  assert.equal(value.storedRun().originWorkflowId, fence.workflowId)
+  assert.equal(value.storedRun().originStage, 'moments')
   assert.deepEqual(
     await value.repository.findIdempotent({
       workspaceId: request.workspaceId,
       projectId: request.projectId,
       sourceIndexRunId: request.indexRunId,
-      createdByClientId: request.actor.id,
+      createdByClientId: request.authenticationAudit.clientId,
+      actorContextHash: request.authenticationAudit.contextHash,
       idempotencyKey: request.idempotencyKey,
     }),
     created.run,
   )
   assert.equal(value.analyzerCalls(), 1)
+  await assert.rejects(
+    value.repository.findIdempotent({
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      sourceIndexRunId: request.indexRunId,
+      createdByClientId: request.authenticationAudit.clientId,
+      actorContextHash: sha('9'),
+      idempotencyKey: request.idempotencyKey,
+    }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
 })
 
 test('T-FR-134 Prisma evidence adapter rejects source drift inside the serializable transaction', async () => {
@@ -291,14 +321,14 @@ test('T-FR-134 Prisma evidence adapter rejects source drift inside the serializa
 
 test('T-FR-134 Prisma evidence adapter fences worker persistence and rejects a lost moments lease', async () => {
   const active = fixture()
-  const created = await active.produce({ ...request, fence })
+  const created = await active.produce(request)
   assert.equal(created.replayed, false)
   assert.equal(active.fenceChecks(), 2)
   assert.equal(active.storedEvidence().length, 1)
 
   const lost = fixture({ leaseAvailable: false })
   await assert.rejects(
-    lost.produce({ ...request, fence }),
+    lost.produce(request),
     (error) => error.code === 'VERSION_CONFLICT',
   )
   assert.equal(lost.fenceChecks(), 2)

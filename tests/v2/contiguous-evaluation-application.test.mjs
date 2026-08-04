@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   produceContiguousEvaluationsService,
 } from '../../src/v2/application/contiguous-evaluation.ts'
+import { authenticationAudit } from './helpers/authentication-audit.mjs'
 
 const sha = (value) => value.repeat(64).slice(0, 64)
 const dimensionEvidence = {
@@ -131,7 +132,7 @@ function fixture(options = {}) {
         ? stored
         : null
     },
-    async persist(run) {
+    async persistWithLongFormLease({ run }) {
       stored = run
       return { run, replayed: false }
     },
@@ -169,9 +170,22 @@ const request = {
   workspaceId: 'workspace-contiguous-evaluation',
   projectId: 'project-contiguous-evaluation',
   indexRunId: 'index-contiguous-evaluation',
-  actor: {
-    type: 'api-client',
-    id: 'client-contiguous-evaluation',
+  authenticationAudit: authenticationAudit({
+    clientId: 'client-contiguous-evaluation',
+    credentialId: 'credential-contiguous-evaluation',
+    workspaceId: 'workspace-contiguous-evaluation',
+  }),
+  fence: {
+    workspaceId: 'workspace-contiguous-evaluation',
+    projectId: 'project-contiguous-evaluation',
+    workflowId: 'workflow-contiguous-evaluation',
+    operationId: 'operation-contiguous-evaluation',
+    stage: 'moments',
+    expectedStageInputHash: sha('e'),
+    expectedStageIdempotencyKey: 'moments-contiguous-evaluation',
+    leaseOwner: 'worker-contiguous-evaluation',
+    operationAttempt: 1,
+    now: '2026-07-30T23:55:00.000Z',
   },
   idempotencyKey: 'contiguous-evaluation-key-1',
 }
@@ -191,6 +205,19 @@ test('T-FR-134 internal producer binds every evaluated dimension to trusted evid
     created.run.producer.outputHash,
   )
   assert.equal(created.run.runHash, value.stored().runHash)
+  assert.deepEqual(
+    created.run.authenticationAudit,
+    request.authenticationAudit,
+  )
+  assert.deepEqual(created.run.provenance, {
+    kind: 'long-form-stage',
+    workflowId: request.fence.workflowId,
+    operationId: request.fence.operationId,
+    stage: 'moments',
+    stageInputHash: request.fence.expectedStageInputHash,
+    stageIdempotencyKey:
+      request.fence.expectedStageIdempotencyKey,
+  })
   assert.equal(value.providerCalls(), 1)
 })
 
@@ -215,6 +242,32 @@ test('T-FR-134 internal producer replays before provider execution and rejects s
   }))
   await assert.rejects(
     value.produce(request),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(value.providerCalls(), 1)
+})
+
+test('T-FR-242 evaluation producer rejects fence and credential drift before duplicate work', async () => {
+  const value = fixture()
+  await assert.rejects(
+    value.produce({
+      ...request,
+      fence: { ...request.fence, workspaceId: 'workspace-other' },
+    }),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(value.providerCalls(), 0)
+
+  await value.produce(request)
+  await assert.rejects(
+    value.produce({
+      ...request,
+      authenticationAudit: authenticationAudit({
+        clientId: request.authenticationAudit.clientId,
+        credentialId: 'credential-contiguous-evaluation-other',
+        workspaceId: request.workspaceId,
+      }),
+    }),
     (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
   )
   assert.equal(value.providerCalls(), 1)

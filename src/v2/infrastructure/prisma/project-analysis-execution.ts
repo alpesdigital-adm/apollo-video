@@ -1,6 +1,7 @@
 import type {
   ProjectAnalysisExecutionContext,
   ProjectAnalysisExecutionProvenance,
+  ProjectAnalysisStage,
 } from '../../application/ports/long-form-stage-persistence.ts'
 import {
   createProjectAnalysisExecutionContext,
@@ -47,7 +48,7 @@ function storedProvenance(
     kind: 'long-form-stage' as const,
     operationId: row.originOperationId,
     workflowId: row.originWorkflowId,
-    stage: row.originStage as 'chunks' | 'moments',
+    stage: row.originStage as ProjectAnalysisStage,
     stageInputHash: row.originStageInputHash,
     stageIdempotencyKey: row.originStageIdempotencyKey,
   })
@@ -56,7 +57,7 @@ function storedProvenance(
 export function hydrateProjectAnalysisExecution(
   row: Readonly<StoredProjectAnalysisExecution>,
   actorClientId: string,
-  expectedStage: 'chunks' | 'moments',
+  expectedStage: ProjectAnalysisStage,
 ): Readonly<ProjectAnalysisExecutionContext> {
   try {
     return createProjectAnalysisExecutionContext({
@@ -81,7 +82,7 @@ export function projectAnalysisExecutionData(
   context: Readonly<ProjectAnalysisExecutionContext>,
   workspaceId: string,
   actorClientId: string,
-  expectedStage: 'chunks' | 'moments',
+  expectedStage: ProjectAnalysisStage,
 ) {
   const canonical = createProjectAnalysisExecutionContext({
     workspaceId,

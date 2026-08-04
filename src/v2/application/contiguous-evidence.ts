@@ -15,9 +15,14 @@ import {
   createLongFormMomentTranscriptEvidence,
 } from '../domain/long-form-transcript-evidence.ts'
 import { DomainError } from '../domain/errors.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import type {
   LongFormStagePersistenceFence,
 } from './ports/long-form-stage-persistence.ts'
+import {
+  createProjectAnalysisExecutionContext,
+  projectAnalysisProvenanceFromFence,
+} from './project-analysis-execution.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -186,25 +191,38 @@ export function produceContiguousEvidenceService(
     workspaceId: string
     projectId: string
     indexRunId: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     signal?: AbortSignal
-    fence?: Readonly<LongFormStagePersistenceFence>
+    fence: Readonly<LongFormStagePersistenceFence>
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
     const indexRunId = identity(request.indexRunId, 'indexRunId')
-    const actorId = identity(request.actor?.id, 'actor.id')
+    if (
+      request.fence.workspaceId !== workspaceId ||
+      request.fence.projectId !== projectId ||
+      request.fence.stage !== 'moments'
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Contiguous evidence fence does not match the moments request',
+      )
+    }
+    const execution = createProjectAnalysisExecutionContext({
+      workspaceId,
+      authenticationAudit: request.authenticationAudit,
+      provenance: projectAnalysisProvenanceFromFence(request.fence),
+      expectedStage: 'moments',
+    })
+    const actorId = identity(
+      execution.authenticationAudit.clientId,
+      'authenticationAudit.clientId',
+    )
     const idempotencyKey = identity(
       request.idempotencyKey,
       'idempotencyKey',
     )
-    if (request.actor?.type !== 'api-client') {
-      throw new DomainError(
-        'INVALID_ARGUMENT',
-        'actor.type must be api-client',
-      )
-    }
     const createdAt = clock().toISOString()
     const source = await dependencies.repository.readSource({
       workspaceId,
@@ -225,20 +243,22 @@ export function produceContiguousEvidenceService(
       source: portableContiguousEvidenceSource(source),
     })
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'produce-contiguous-evidence-request/v1',
+      schemaVersion: 'produce-contiguous-evidence-request/v2',
       workspaceId,
       projectId,
       indexRunId,
       sourceIndexRunHash: source.indexRunHash,
       analyzer,
       analyzerInputHash,
-      actorId,
+      actorContextHash: execution.authenticationAudit.contextHash,
+      provenance: execution.provenance,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       sourceIndexRunId: indexRunId,
       createdByClientId: actorId,
+      actorContextHash: execution.authenticationAudit.contextHash,
       idempotencyKey,
     })
     if (replay) {
@@ -339,6 +359,8 @@ export function produceContiguousEvidenceService(
         type: 'api-client' as const,
         id: actorId,
       }),
+      authenticationAudit: execution.authenticationAudit,
+      provenance: execution.provenance,
       createdAt,
     }
     const run: Readonly<PersistedContiguousEvidenceRun> =
@@ -346,30 +368,17 @@ export function produceContiguousEvidenceService(
         ...runBody,
         runHash: calculateCanonicalHash(runBody),
       })
-    if (request.fence) {
-      if (
-        request.fence.workspaceId !== workspaceId ||
-        request.fence.projectId !== projectId ||
-        request.fence.stage !== 'moments'
-      ) {
-        throw new DomainError(
-          'VERSION_CONFLICT',
-          'Contiguous evidence fence does not match the moments request',
-        )
-      }
-      const persisted =
-        await dependencies.repository.persistWithLongFormLease({
-          run,
-          fence: request.fence,
-        })
-      if (!persisted) {
-        throw new DomainError(
-          'VERSION_CONFLICT',
-          'Contiguous evidence lease was lost during persistence',
-        )
-      }
-      return persisted
+    const persisted =
+      await dependencies.repository.persistWithLongFormLease({
+        run,
+        fence: request.fence,
+      })
+    if (!persisted) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Contiguous evidence lease was lost during persistence',
+      )
     }
-    return dependencies.repository.persist(run)
+    return persisted
   }
 }

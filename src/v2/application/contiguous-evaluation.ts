@@ -15,9 +15,14 @@ import {
   type ContiguousQualityDimension,
 } from '../domain/contiguous-extraction.ts'
 import { DomainError } from '../domain/errors.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import type {
   LongFormStagePersistenceFence,
 } from './ports/long-form-stage-persistence.ts'
+import {
+  createProjectAnalysisExecutionContext,
+  projectAnalysisProvenanceFromFence,
+} from './project-analysis-execution.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -385,25 +390,38 @@ export function produceContiguousEvaluationsService(
     workspaceId: string
     projectId: string
     indexRunId: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     signal?: AbortSignal
-    fence?: Readonly<LongFormStagePersistenceFence>
+    fence: Readonly<LongFormStagePersistenceFence>
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
     const indexRunId = identity(request.indexRunId, 'indexRunId')
-    const actorId = identity(request.actor?.id, 'actor.id')
+    if (
+      request.fence.workspaceId !== workspaceId ||
+      request.fence.projectId !== projectId ||
+      request.fence.stage !== 'moments'
+    ) {
+      throw new DomainError(
+        'VERSION_CONFLICT',
+        'Contiguous evaluation fence does not match the moments request',
+      )
+    }
+    const execution = createProjectAnalysisExecutionContext({
+      workspaceId,
+      authenticationAudit: request.authenticationAudit,
+      provenance: projectAnalysisProvenanceFromFence(request.fence),
+      expectedStage: 'moments',
+    })
+    const actorId = identity(
+      execution.authenticationAudit.clientId,
+      'authenticationAudit.clientId',
+    )
     const idempotencyKey = identity(
       request.idempotencyKey,
       'idempotencyKey',
     )
-    if (request.actor?.type !== 'api-client') {
-      throw new DomainError(
-        'INVALID_ARGUMENT',
-        'actor.type must be api-client',
-      )
-    }
     const createdAt = clock().toISOString()
     const source = await dependencies.repository.readSource({
       workspaceId,
@@ -424,19 +442,21 @@ export function produceContiguousEvaluationsService(
       source,
     })
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'produce-contiguous-evaluations-request/v1',
+      schemaVersion: 'produce-contiguous-evaluations-request/v2',
       workspaceId,
       projectId,
       indexRunId,
       sourceIndexRunHash: source.indexRunHash,
       producerInputHash,
-      actorId,
+      actorContextHash: execution.authenticationAudit.contextHash,
+      provenance: execution.provenance,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       sourceIndexRunId: indexRunId,
       createdByClientId: actorId,
+      actorContextHash: execution.authenticationAudit.contextHash,
       idempotencyKey,
     })
     if (replay) {
@@ -527,6 +547,8 @@ export function produceContiguousEvaluationsService(
         type: 'api-client' as const,
         id: actorId,
       }),
+      authenticationAudit: execution.authenticationAudit,
+      provenance: execution.provenance,
       createdAt,
     }
     const run: Readonly<PersistedContiguousEvaluationRun> =
@@ -534,9 +556,6 @@ export function produceContiguousEvaluationsService(
         ...runBody,
         runHash: calculateCanonicalHash(runBody),
       })
-    if (!request.fence) {
-      return dependencies.repository.persist(run)
-    }
     const persisted =
       await dependencies.repository.persistWithLongFormLease({
         run,

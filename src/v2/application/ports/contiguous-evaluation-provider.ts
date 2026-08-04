@@ -9,6 +9,7 @@ import type {
 } from '../../domain/contiguous-evaluation-evidence.ts'
 import type {
   LongFormStagePersistenceFence,
+  ProjectAnalysisExecutionContext,
 } from './long-form-stage-persistence.ts'
 
 export type {
@@ -82,7 +83,8 @@ export interface ContiguousEvaluationProvider {
   ): Promise<readonly Readonly<ContiguousEvaluationDecision>[]>
 }
 
-export interface PersistedContiguousEvaluationRun {
+export interface PersistedContiguousEvaluationRun
+extends ProjectAnalysisExecutionContext {
   id: string
   workspaceId: string
   projectId: string
@@ -113,14 +115,9 @@ export interface ContiguousEvaluationRepository {
     projectId: string
     sourceIndexRunId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<PersistedContiguousEvaluationRun> | null>
-  persist(
-    run: Readonly<PersistedContiguousEvaluationRun>,
-  ): Promise<Readonly<{
-    run: Readonly<PersistedContiguousEvaluationRun>
-    replayed: boolean
-  }>>
   persistWithLongFormLease(input: {
     run: Readonly<PersistedContiguousEvaluationRun>
     fence: Readonly<LongFormStagePersistenceFence>

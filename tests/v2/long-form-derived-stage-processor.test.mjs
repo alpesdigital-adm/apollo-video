@@ -713,6 +713,22 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
     fixture.contiguousEvaluationRequests[0].fence.stage,
     'moments',
   )
+  for (const derivedRequest of [
+    ...fixture.contiguousEvidenceRequests,
+    ...fixture.contiguousEvaluationRequests,
+  ]) {
+    assert.deepEqual(
+      derivedRequest.authenticationAudit,
+      processInput(workflow).authenticationAudit,
+    )
+    assert.equal('actor' in derivedRequest, false)
+    assert.equal(derivedRequest.fence.workflowId, identities.workflowId)
+    assert.equal(derivedRequest.fence.operationId, identities.operationId)
+    assert.equal(
+      derivedRequest.fence.expectedStageInputHash,
+      processInput(workflow).checkpoint.inputHash,
+    )
+  }
   assert.ok(stored.moments.length >= 1)
   const knownSpeakerIds = new Set(
     diarization.segments.map((segment) => segment.speakerKey),

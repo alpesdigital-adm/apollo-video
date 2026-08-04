@@ -20,6 +20,13 @@ import {
   createLongFormMomentTranscriptEvidence,
 } from '../../domain/long-form-transcript-evidence.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  assertProjectAnalysisFenceBinding,
+} from '../../application/project-analysis-execution.ts'
+import {
+  hydrateProjectAnalysisExecution,
+  projectAnalysisExecutionData,
+} from './project-analysis-execution.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 type DatabaseClient = PrismaClient | Prisma.TransactionClient
@@ -167,6 +174,11 @@ function hydrate(row: RunRow): Readonly<PersistedContiguousEvidenceRun> {
     `contiguous evidence run ${row.id}`,
   )
   const { runHash: _runHash, ...runBody } = run
+  const execution = hydrateProjectAnalysisExecution(
+    row,
+    row.createdByClientId,
+    'moments',
+  )
   const evidence = row.evidence
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((item) => createContiguousEvaluationEvidence({
@@ -210,6 +222,10 @@ function hydrate(row: RunRow): Readonly<PersistedContiguousEvidenceRun> {
     row.createdAt.toISOString() !== run.createdAt ||
     row.runHash !== run.runHash ||
     calculateCanonicalHash(runBody) !== run.runHash ||
+    stableSerialize(run.authenticationAudit) !==
+      stableSerialize(execution.authenticationAudit) ||
+    stableSerialize(run.provenance) !==
+      stableSerialize(execution.provenance) ||
     stableSerialize([...evidence].sort((left, right) =>
       left.id.localeCompare(right.id))) !==
       stableSerialize([...run.evidence].sort((left, right) =>
@@ -220,7 +236,7 @@ function hydrate(row: RunRow): Readonly<PersistedContiguousEvidenceRun> {
       'Stored contiguous evidence run failed integrity validation',
     )
   }
-  return run
+  return Object.freeze({ ...run, ...execution })
 }
 
 function assertRunBinding(
@@ -233,14 +249,15 @@ function assertRunBinding(
     source: portableContiguousEvidenceSource(source),
   })
   const requestFingerprint = calculateCanonicalHash({
-    schemaVersion: 'produce-contiguous-evidence-request/v1',
+    schemaVersion: 'produce-contiguous-evidence-request/v2',
     workspaceId: run.workspaceId,
     projectId: run.projectId,
     indexRunId: run.sourceIndexRunId,
     sourceIndexRunHash: source.indexRunHash,
     analyzer: run.analyzer,
     analyzerInputHash,
-    actorId: run.createdBy.id,
+    actorContextHash: run.authenticationAudit.contextHash,
+    provenance: run.provenance,
   })
   if (
     run.sourceIndexRunHash !== source.indexRunHash ||
@@ -300,34 +317,31 @@ implements ContiguousEvidenceRepository {
     projectId: string
     sourceIndexRunId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }) {
     const row = await this.client.v2ContiguousEvidenceRun.findUnique({
       where: {
         workspaceId_projectId_sourceIndexRunId_createdByClientId_idempotencyKey:
-          input,
+          {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            sourceIndexRunId: input.sourceIndexRunId,
+            createdByClientId: input.createdByClientId,
+            idempotencyKey: input.idempotencyKey,
+          },
       },
       include: { evidence: true },
     })
-    return row ? hydrate(row) : null
-  }
-
-  async persist(
-    run: Readonly<PersistedContiguousEvidenceRun>,
-    attempt = 1,
-  ): ReturnType<ContiguousEvidenceRepository['persist']> {
-    const persisted = await this.persistInternal(
-      run,
-      undefined,
-      attempt,
-    )
-    if (!persisted) {
+    if (!row) return null
+    const run = hydrate(row)
+    if (run.authenticationAudit.contextHash !== input.actorContextHash) {
       throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'Unfenced contiguous evidence persistence unexpectedly lost a lease',
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Contiguous evidence key belongs to another authentication context',
       )
     }
-    return persisted
+    return run
   }
 
   async persistWithLongFormLease(
@@ -347,20 +361,21 @@ implements ContiguousEvidenceRepository {
         'Contiguous evidence fence does not match its run',
       )
     }
+    assertProjectAnalysisFenceBinding(input.run, input.fence)
     return this.persistInternal(input.run, input.fence)
   }
 
   private async persistInternal(
     run: Readonly<PersistedContiguousEvidenceRun>,
-    fence?: Parameters<
+    fence: Parameters<
       ContiguousEvidenceRepository['persistWithLongFormLease']
     >[0]['fence'],
     attempt = 1,
   ): ReturnType<
     ContiguousEvidenceRepository['persistWithLongFormLease']
   > {
-    const fenceNow = fence ? new Date(fence.now) : undefined
-    if (fenceNow && Number.isNaN(fenceNow.getTime())) {
+    const fenceNow = new Date(fence.now)
+    if (Number.isNaN(fenceNow.getTime())) {
       throw new DomainError(
         'INVALID_ARGUMENT',
         'Contiguous evidence fence instant is invalid',
@@ -391,7 +406,7 @@ implements ContiguousEvidenceRepository {
               'Contiguous evidence source or actor is unavailable',
             )
           }
-          if (fence) {
+          {
             const [operation, stage] = await Promise.all([
               transaction.v2PublicOperation.findFirst({
                 where: {
@@ -401,7 +416,9 @@ implements ContiguousEvidenceRepository {
                   status: 'running',
                   leaseOwner: fence.leaseOwner,
                   attempt: fence.operationAttempt,
-                  leaseExpiresAt: { gt: fenceNow! },
+                  leaseExpiresAt: { gt: fenceNow },
+                  clientId: run.authenticationAudit.clientId,
+                  actorContextHash: run.authenticationAudit.contextHash,
                 },
                 select: { id: true },
               }),
@@ -449,6 +466,12 @@ implements ContiguousEvidenceRepository {
               requestFingerprint: run.requestFingerprint,
               idempotencyKey: run.idempotencyKey,
               createdByClientId: run.createdBy.id,
+              ...projectAnalysisExecutionData(
+                run,
+                run.workspaceId,
+                run.createdBy.id,
+                'moments',
+              ),
               createdAt: new Date(run.createdAt),
               runJson: stableSerialize(run),
               runHash: run.runHash,
@@ -501,6 +524,7 @@ implements ContiguousEvidenceRepository {
           projectId: run.projectId,
           sourceIndexRunId: run.sourceIndexRunId,
           createdByClientId: run.createdBy.id,
+          actorContextHash: run.authenticationAudit.contextHash,
           idempotencyKey: run.idempotencyKey,
         })
         if (replay) {

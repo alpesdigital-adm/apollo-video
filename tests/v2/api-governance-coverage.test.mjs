@@ -308,6 +308,64 @@ test('T-FR-242 project analysis preserves initiating audit across direct API and
     assert.match(source, /projectAnalysisExecutionData/)
     assert.match(source, /assertProjectAnalysisFenceBinding/)
   }
+
+  for (const relative of [
+    'contiguous-evidence.ts',
+    'contiguous-evaluation.ts',
+    'speaker-diarization.ts',
+  ]) {
+    const source = readFileSync(join(
+      root,
+      'src/v2/application',
+      relative,
+    ), 'utf8')
+    assert.match(source, /authenticationAudit/)
+    assert.match(source, /provenance/)
+    assert.match(source, /actorContextHash/)
+    assert.doesNotMatch(source, /actor:\s*\{\s*type:\s*'api-client'/)
+  }
+  for (const relative of [
+    'contiguous-evidence-repository.ts',
+    'contiguous-evaluation-repository.ts',
+    'speaker-diarization-repository.ts',
+  ]) {
+    const source = readFileSync(join(
+      root,
+      'src/v2/infrastructure/prisma',
+      relative,
+    ), 'utf8')
+    assert.match(source, /hydrateProjectAnalysisExecution/)
+    assert.match(source, /projectAnalysisExecutionData/)
+    assert.match(source, /actorContextHash/)
+  }
+  const diarizationRepository = readFileSync(join(
+    root,
+    'src/v2/infrastructure/prisma/speaker-diarization-repository.ts',
+  ), 'utf8')
+  assert.match(
+    diarizationRepository,
+    /calculateSpeakerDiarizationRequestFingerprint/,
+  )
+  for (const relative of [
+    'contiguous-evidence-repository.ts',
+    'contiguous-evaluation-repository.ts',
+  ]) {
+    const source = readFileSync(join(
+      root,
+      'src/v2/infrastructure/prisma',
+      relative,
+    ), 'utf8')
+    assert.doesNotMatch(
+      source,
+      /createdByClientId_idempotencyKey:\s*input/,
+      'actorContextHash must not leak into the Prisma compound unique input',
+    )
+    assert.doesNotMatch(
+      source,
+      /async persist\s*\(/,
+      'derived persistence must remain fenced',
+    )
+  }
 })
 
 test('T-FR-242 collaborative review creation binds private audit without leaking it publicly', () => {

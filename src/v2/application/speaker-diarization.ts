@@ -2,10 +2,19 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import {
   createSpeakerDiarizationRun,
+  type SpeakerDiarizationRun,
+  type SpeakerDiarizationSegment,
 } from '../domain/speaker-diarization.ts'
 import type {
+  PersistedSpeakerDiarizationRun,
   SpeakerDiarizationRepository,
 } from './ports/speaker-diarization-repository.ts'
+import {
+  createProjectAnalysisExecutionContext,
+} from './project-analysis-execution.ts'
+import type {
+  ProjectAnalysisExecutionProvenance,
+} from './ports/long-form-stage-persistence.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -25,6 +34,41 @@ function hash(value: unknown, field: string): string {
     )
   }
   return value
+}
+
+export function calculateSpeakerDiarizationRequestFingerprint(input: {
+  workspaceId: string
+  projectId: string
+  workflowId: string
+  sourceArtifactId: string
+  sourceArtifactSha256: string
+  sourceManifestId: string
+  sourceManifestHash: string
+  sourceTranscriptId: string
+  sourceTranscriptHash: string
+  durationMs: number
+  providerInput: SpeakerDiarizationRun['providerInput']
+  expectedStageInputHash: string
+  provider: SpeakerDiarizationRun['provider']
+  segments: readonly Readonly<Pick<
+    SpeakerDiarizationSegment,
+    | 'providerSegmentId'
+    | 'providerLabel'
+    | 'startMs'
+    | 'endMs'
+    | 'text'
+  >>[]
+  usageSeconds: number
+  costMinorUnits: number
+  elapsedMs: number
+  createdByClientId: string
+  actorContextHash: string
+  provenance: Readonly<ProjectAnalysisExecutionProvenance>
+}): string {
+  return calculateCanonicalHash({
+    schemaVersion: 'persist-speaker-diarization-request/v2',
+    ...input,
+  })
 }
 
 export function persistSpeakerDiarizationService(dependencies: {
@@ -96,30 +140,46 @@ export function persistSpeakerDiarizationService(dependencies: {
         'Diarization source changed before persistence',
       )
     }
-    const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'persist-speaker-diarization-request/v1',
+    const execution = createProjectAnalysisExecutionContext({
       workspaceId,
-      projectId,
-      workflowId,
-      sourceArtifactId: context.sourceArtifactId,
-      sourceArtifactSha256: context.sourceArtifactSha256,
-      sourceManifestId: context.sourceManifestId,
-      sourceManifestHash: context.sourceManifestHash,
-      sourceTranscriptId: context.sourceTranscriptId,
-      sourceTranscriptHash: context.sourceTranscriptHash,
-      durationMs: context.durationMs,
-      providerInput: request.providerInput,
-      expectedStageInputHash,
-      provider: request.provider,
-      segments: request.segments,
-      usageSeconds: request.usageSeconds,
-      costMinorUnits: request.costMinorUnits,
-      elapsedMs: request.elapsedMs,
-      createdByClientId: context.createdByClientId,
+      authenticationAudit: context.authenticationAudit,
+      provenance: Object.freeze({
+        kind: 'long-form-stage' as const,
+        workflowId,
+        operationId: context.operationId,
+        stage: 'diarization' as const,
+        stageInputHash: context.stageInputHash,
+        stageIdempotencyKey: context.stageIdempotencyKey,
+      }),
+      expectedStage: 'diarization',
     })
+    const requestFingerprint =
+      calculateSpeakerDiarizationRequestFingerprint({
+        workspaceId,
+        projectId,
+        workflowId,
+        sourceArtifactId: context.sourceArtifactId,
+        sourceArtifactSha256: context.sourceArtifactSha256,
+        sourceManifestId: context.sourceManifestId,
+        sourceManifestHash: context.sourceManifestHash,
+        sourceTranscriptId: context.sourceTranscriptId,
+        sourceTranscriptHash: context.sourceTranscriptHash,
+        durationMs: context.durationMs,
+        providerInput: request.providerInput,
+        expectedStageInputHash,
+        provider: request.provider,
+        segments: request.segments,
+        usageSeconds: request.usageSeconds,
+        costMinorUnits: request.costMinorUnits,
+        elapsedMs: request.elapsedMs,
+        createdByClientId: context.createdByClientId,
+        actorContextHash: execution.authenticationAudit.contextHash,
+        provenance: execution.provenance,
+      })
     const replay = await dependencies.repository.findReplay({
       workspaceId,
       workflowId,
+      actorContextHash: execution.authenticationAudit.contextHash,
       idempotencyKey: context.stageIdempotencyKey,
     })
     if (replay) {
@@ -132,29 +192,33 @@ export function persistSpeakerDiarizationService(dependencies: {
       return Object.freeze({ run: replay, replayed: true })
     }
     const createdAt = dependencies.clock().toISOString()
-    const run = createSpeakerDiarizationRun({
-      id: identity(dependencies.createRunId(), 'created run ID'),
-      workspaceId,
-      projectId,
-      workflowId,
-      sourceArtifactId: context.sourceArtifactId,
-      sourceArtifactSha256: context.sourceArtifactSha256,
-      sourceManifestId: context.sourceManifestId,
-      sourceManifestHash: context.sourceManifestHash,
-      sourceTranscriptId: context.sourceTranscriptId,
-      sourceTranscriptHash: context.sourceTranscriptHash,
-      durationMs: context.durationMs,
-      providerInput: request.providerInput,
-      provider: request.provider,
-      segments: request.segments,
-      usageSeconds: request.usageSeconds,
-      costMinorUnits: request.costMinorUnits,
-      elapsedMs: request.elapsedMs,
-      requestFingerprint,
-      idempotencyKey: context.stageIdempotencyKey,
-      createdByClientId: context.createdByClientId,
-      createdAt,
-    })
+    const run = Object.freeze({
+      ...createSpeakerDiarizationRun({
+        id: identity(dependencies.createRunId(), 'created run ID'),
+        workspaceId,
+        projectId,
+        workflowId,
+        sourceArtifactId: context.sourceArtifactId,
+        sourceArtifactSha256: context.sourceArtifactSha256,
+        sourceManifestId: context.sourceManifestId,
+        sourceManifestHash: context.sourceManifestHash,
+        sourceTranscriptId: context.sourceTranscriptId,
+        sourceTranscriptHash: context.sourceTranscriptHash,
+        durationMs: context.durationMs,
+        providerInput: request.providerInput,
+        provider: request.provider,
+        segments: request.segments,
+        usageSeconds: request.usageSeconds,
+        costMinorUnits: request.costMinorUnits,
+        elapsedMs: request.elapsedMs,
+        requestFingerprint,
+        idempotencyKey: context.stageIdempotencyKey,
+        createdByClientId: context.createdByClientId,
+        createdAt,
+      }),
+      authenticationAudit: execution.authenticationAudit,
+      provenance: execution.provenance,
+    }) as Readonly<PersistedSpeakerDiarizationRun>
     const persisted = await dependencies.repository.persistWithLease({
       run,
       operationId: identity(

@@ -606,6 +606,51 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       }),
       1,
     )
+    const storedDiarizationAudit =
+      await prisma.v2SpeakerDiarizationRun.findFirstOrThrow({
+        where: { workspaceId, projectId, workflowId },
+        select: {
+          actorCredentialId: true,
+          actorContextHash: true,
+          executionKind: true,
+          originOperationId: true,
+          originWorkflowId: true,
+          originStage: true,
+          originStageInputHash: true,
+          originStageIdempotencyKey: true,
+        },
+      })
+    const interruptedStored =
+      await interruptedRuntime.workflows.read({
+        workspaceId,
+        projectId,
+        workflowId,
+      })
+    assert.ok(interruptedStored)
+    const diarizationCheckpoint = interruptedStored.workflow.stages.find(
+      (stage) => stage.stage === 'diarization',
+    )
+    assert.ok(diarizationCheckpoint)
+    assert.equal(
+      storedDiarizationAudit.actorCredentialId,
+      issued.credential.id,
+    )
+    assert.equal(
+      storedDiarizationAudit.actorContextHash,
+      storedWorkflowAudit.actorContextHash,
+    )
+    assert.equal(storedDiarizationAudit.executionKind, 'long-form-stage')
+    assert.equal(storedDiarizationAudit.originOperationId, operationId)
+    assert.equal(storedDiarizationAudit.originWorkflowId, workflowId)
+    assert.equal(storedDiarizationAudit.originStage, 'diarization')
+    assert.equal(
+      storedDiarizationAudit.originStageInputHash,
+      diarizationCheckpoint.inputHash,
+    )
+    assert.equal(
+      storedDiarizationAudit.originStageIdempotencyKey,
+      diarizationCheckpoint.idempotencyKey,
+    )
     assert.equal(
       await prisma.v2HierarchicalProcessingRun.count({
         where: { workspaceId },
@@ -717,6 +762,60 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       }),
       momentCount,
     )
+    const momentsCheckpoint = stored.workflow.stages.find(
+      (stage) => stage.stage === 'moments',
+    )
+    assert.ok(momentsCheckpoint)
+    const [storedEvidenceAudits, storedEvaluationAudits] =
+      await Promise.all([
+        prisma.v2ContiguousEvidenceRun.findMany({
+          where: { workspaceId, projectId },
+          select: {
+            actorCredentialId: true,
+            actorContextHash: true,
+            executionKind: true,
+            originOperationId: true,
+            originWorkflowId: true,
+            originStage: true,
+            originStageInputHash: true,
+            originStageIdempotencyKey: true,
+          },
+        }),
+        prisma.v2ContiguousEvaluationRun.findMany({
+          where: { workspaceId, projectId },
+          select: {
+            actorCredentialId: true,
+            actorContextHash: true,
+            executionKind: true,
+            originOperationId: true,
+            originWorkflowId: true,
+            originStage: true,
+            originStageInputHash: true,
+            originStageIdempotencyKey: true,
+          },
+        }),
+      ])
+    assert.equal(storedEvidenceAudits.length, 5)
+    assert.equal(storedEvaluationAudits.length, 1)
+    for (const audit of [
+      ...storedEvidenceAudits,
+      ...storedEvaluationAudits,
+    ]) {
+      assert.equal(audit.actorCredentialId, issued.credential.id)
+      assert.equal(
+        audit.actorContextHash,
+        storedWorkflowAudit.actorContextHash,
+      )
+      assert.equal(audit.executionKind, 'long-form-stage')
+      assert.equal(audit.originOperationId, operationId)
+      assert.equal(audit.originWorkflowId, workflowId)
+      assert.equal(audit.originStage, 'moments')
+      assert.equal(audit.originStageInputHash, momentsCheckpoint.inputHash)
+      assert.equal(
+        audit.originStageIdempotencyKey,
+        momentsCheckpoint.idempotencyKey,
+      )
+    }
     const evaluated =
       await prisma.v2ContiguousMomentEvaluation.findFirst({
         where: {

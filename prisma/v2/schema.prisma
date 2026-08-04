@@ -1978,6 +1978,9 @@ model V2PublicOperation {
   projectDirectorRun              V2ProjectDirectorOperation?
   longFormIndexRunsAsOrigin       V2LongFormIndexRun[]                @relation("LongFormIndexRunOriginOperation")
   hierarchicalRunsAsOrigin        V2HierarchicalProcessingRun[]       @relation("HierarchicalRunOriginOperation")
+  speakerDiarizationRunsAsOrigin  V2SpeakerDiarizationRun[]           @relation("SpeakerDiarizationRunOriginOperation")
+  contiguousEvidenceRunsAsOrigin  V2ContiguousEvidenceRun[]           @relation("ContiguousEvidenceRunOriginOperation")
+  contiguousEvaluationRunsAsOrigin V2ContiguousEvaluationRun[]        @relation("ContiguousEvaluationRunOriginOperation")
   reviewPatchProposal             V2ReviewPatchProposal?
   reviewPatchBatch                V2ReviewPatchBatch?
   controlCommands                 V2PublicOperationControlCommand[]
@@ -2725,6 +2728,9 @@ model V2LongFormIndexWorkflow {
   diarizationRuns  V2SpeakerDiarizationRun[]
   longFormIndexRuns V2LongFormIndexRun[]            @relation("LongFormIndexRunOriginWorkflow")
   hierarchicalRuns V2HierarchicalProcessingRun[]    @relation("HierarchicalRunOriginWorkflow")
+  speakerDiarizationRunsAsOrigin V2SpeakerDiarizationRun[] @relation("SpeakerDiarizationRunOriginWorkflow")
+  contiguousEvidenceRunsAsOrigin V2ContiguousEvidenceRun[] @relation("ContiguousEvidenceRunOriginWorkflow")
+  contiguousEvaluationRunsAsOrigin V2ContiguousEvaluationRun[] @relation("ContiguousEvaluationRunOriginWorkflow")
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -2807,6 +2813,19 @@ model V2SpeakerDiarizationRun {
   requestFingerprint   String   @db.Char(64)
   idempotencyKey       String   @db.VarChar(128)
   createdByClientId    String   @db.VarChar(80)
+  actorCredentialId    String?  @db.VarChar(128)
+  actorEnvironment     String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash     String?  @db.Char(64)
+  delegatedUserId      String?  @db.VarChar(128)
+  delegatedIdentityId  String?  @db.VarChar(128)
+  workspaceRole        String?  @db.VarChar(32)
+  executionKind        String?  @db.VarChar(32)
+  originOperationId    String?  @db.VarChar(128)
+  originWorkflowId     String?  @db.VarChar(128)
+  originStage          String?  @db.VarChar(32)
+  originStageInputHash String?  @db.Char(64)
+  originStageIdempotencyKey String? @db.VarChar(256)
   createdAt            DateTime @db.Timestamptz(3)
   runJson              String   @db.Text
   runHash              String   @db.Char(64)
@@ -2818,6 +2837,8 @@ model V2SpeakerDiarizationRun {
   sourceManifest   V2MediaArtifactManifest       @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   sourceTranscript V2MediaTranscript             @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy        V2ApiClient                   @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originOperation  V2PublicOperation?            @relation("SpeakerDiarizationRunOriginOperation", fields: [originOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "speaker_diarization_runs_origin_operation_fkey")
+  originWorkflow   V2LongFormIndexWorkflow?      @relation("SpeakerDiarizationRunOriginWorkflow", fields: [originWorkflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "speaker_diarization_runs_origin_workflow_fkey")
   segments         V2SpeakerDiarizationSegment[]
 
   @@unique([id, workspaceId])
@@ -2825,6 +2846,7 @@ model V2SpeakerDiarizationRun {
   @@unique([workspaceId, workflowId, idempotencyKey])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "speaker_diarization_runs_actor_context_idx")
   @@map("speaker_diarization_runs")
 }
 
@@ -3070,6 +3092,19 @@ model V2ContiguousEvaluationRun {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   createdByClientId  String   @db.VarChar(80)
+  actorCredentialId  String?  @db.VarChar(128)
+  actorEnvironment   String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?  @db.Char(64)
+  delegatedUserId    String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole      String?  @db.VarChar(32)
+  executionKind      String?  @db.VarChar(32)
+  originOperationId  String?  @db.VarChar(128)
+  originWorkflowId   String?  @db.VarChar(128)
+  originStage        String?  @db.VarChar(32)
+  originStageInputHash String? @db.Char(64)
+  originStageIdempotencyKey String? @db.VarChar(256)
   createdAt          DateTime @db.Timestamptz(3)
   runJson            String   @db.Text
   runHash            String   @db.Char(64)
@@ -3078,6 +3113,8 @@ model V2ContiguousEvaluationRun {
   project        V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceIndexRun V2LongFormIndexRun             @relation("ContiguousEvaluationRunIndex", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy      V2ApiClient                    @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originOperation V2PublicOperation?            @relation("ContiguousEvaluationRunOriginOperation", fields: [originOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contiguous_evaluation_runs_origin_operation_fkey")
+  originWorkflow V2LongFormIndexWorkflow?       @relation("ContiguousEvaluationRunOriginWorkflow", fields: [originWorkflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "contiguous_evaluation_runs_origin_workflow_fkey")
   evaluations    V2ContiguousMomentEvaluation[]
 
   @@unique([id, workspaceId])
@@ -3086,6 +3123,7 @@ model V2ContiguousEvaluationRun {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceIndexRunId, createdAt(sort: Desc)])
   @@index([workspaceId, producerProvider, producerModel, producerVersion, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "contiguous_evaluation_runs_actor_context_idx")
   @@map("contiguous_evaluation_runs")
 }
 
@@ -3103,6 +3141,19 @@ model V2ContiguousEvidenceRun {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   createdByClientId  String   @db.VarChar(80)
+  actorCredentialId  String?  @db.VarChar(128)
+  actorEnvironment   String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?  @db.Char(64)
+  delegatedUserId    String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole      String?  @db.VarChar(32)
+  executionKind      String?  @db.VarChar(32)
+  originOperationId  String?  @db.VarChar(128)
+  originWorkflowId   String?  @db.VarChar(128)
+  originStage        String?  @db.VarChar(32)
+  originStageInputHash String? @db.Char(64)
+  originStageIdempotencyKey String? @db.VarChar(256)
   createdAt          DateTime @db.Timestamptz(3)
   runJson            String   @db.Text
   runHash            String   @db.Char(64)
@@ -3111,6 +3162,8 @@ model V2ContiguousEvidenceRun {
   project        V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   sourceIndexRun V2LongFormIndexRun               @relation("ContiguousEvidenceRunIndex", fields: [sourceIndexRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy      V2ApiClient                      @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originOperation V2PublicOperation?              @relation("ContiguousEvidenceRunOriginOperation", fields: [originOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "contiguous_evidence_runs_origin_operation_fkey")
+  originWorkflow V2LongFormIndexWorkflow?         @relation("ContiguousEvidenceRunOriginWorkflow", fields: [originWorkflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "contiguous_evidence_runs_origin_workflow_fkey")
   evidence       V2ContiguousEvaluationEvidence[]
 
   @@unique([id, workspaceId])
@@ -3118,6 +3171,7 @@ model V2ContiguousEvidenceRun {
   @@unique([workspaceId, runHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceIndexRunId, analyzerKind, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "contiguous_evidence_runs_actor_context_idx")
   @@map("contiguous_evidence_runs")
 }
 

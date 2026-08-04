@@ -8,6 +8,7 @@ import {
 } from '../../../../generated/prisma-v2/index.js'
 
 import type {
+  PersistedSpeakerDiarizationRun,
   SpeakerDiarizationRepository,
   SpeakerDiarizationSourceContext,
 } from '../../application/ports/speaker-diarization-repository.ts'
@@ -25,6 +26,17 @@ import {
 } from '../../domain/speaker-diarization.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { hydrateExternalActorAudit } from './external-actor-audit.ts'
+import {
+  hydrateProjectAnalysisExecution,
+  projectAnalysisExecutionData,
+} from './project-analysis-execution.ts'
+import {
+  createProjectAnalysisExecutionContext,
+} from '../../application/project-analysis-execution.ts'
+import {
+  calculateSpeakerDiarizationRequestFingerprint,
+} from '../../application/speaker-diarization.ts'
 
 type RunWithSegments = V2SpeakerDiarizationRun & {
   segments: V2SpeakerDiarizationSegment[]
@@ -32,6 +44,17 @@ type RunWithSegments = V2SpeakerDiarizationRun & {
 
 type WorkflowWithStages = V2LongFormIndexWorkflow & {
   stages: V2LongFormIndexStageCheckpoint[]
+}
+
+function domainRun(
+  run: Readonly<PersistedSpeakerDiarizationRun>,
+): Readonly<SpeakerDiarizationRun> {
+  const {
+    authenticationAudit: _authenticationAudit,
+    provenance: _provenance,
+    ...domain
+  } = run
+  return hydrateSpeakerDiarizationRun(domain)
 }
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -205,10 +228,53 @@ function hydrateTranscript(row: {
 
 function hydrateRun(
   row: RunWithSegments,
-): Readonly<SpeakerDiarizationRun> {
+): Readonly<PersistedSpeakerDiarizationRun> {
   const run = hydrateSpeakerDiarizationRun(
     parseJson(row.runJson, `speaker diarization ${row.id}`),
   )
+  const execution = hydrateProjectAnalysisExecution(
+    row,
+    row.createdByClientId,
+    'diarization',
+  )
+  if (
+    execution.provenance.kind !== 'long-form-stage' ||
+    execution.provenance.workflowId !== run.workflowId ||
+    run.requestFingerprint !==
+      calculateSpeakerDiarizationRequestFingerprint({
+        workspaceId: run.workspaceId,
+        projectId: run.projectId,
+        workflowId: run.workflowId,
+        sourceArtifactId: run.sourceArtifactId,
+        sourceArtifactSha256: run.sourceArtifactSha256,
+        sourceManifestId: run.sourceManifestId,
+        sourceManifestHash: run.sourceManifestHash,
+        sourceTranscriptId: run.sourceTranscriptId,
+        sourceTranscriptHash: run.sourceTranscriptHash,
+        durationMs: run.durationMs,
+        providerInput: run.providerInput,
+        expectedStageInputHash: execution.provenance.stageInputHash,
+        provider: run.provider,
+        segments: run.segments.map((segment) => ({
+          providerSegmentId: segment.providerSegmentId,
+          providerLabel: segment.providerLabel,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+          text: segment.text,
+        })),
+        usageSeconds: run.usageSeconds,
+        costMinorUnits: run.costMinorUnits,
+        elapsedMs: run.elapsedMs,
+        createdByClientId: run.createdByClientId,
+        actorContextHash: execution.authenticationAudit.contextHash,
+        provenance: execution.provenance,
+      })
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored diarization execution does not match its workflow',
+    )
+  }
   const segments = [...row.segments].sort(
     (left, right) => left.ordinal - right.ordinal,
   )
@@ -277,10 +343,11 @@ function hydrateRun(
       )
     }
   }
-  return run
+  return Object.freeze({ ...run, ...execution })
 }
 
-function runData(run: Readonly<SpeakerDiarizationRun>) {
+function runData(run: Readonly<PersistedSpeakerDiarizationRun>) {
+  const persistedDomainRun = domainRun(run)
   return {
     id: run.id,
     workspaceId: run.workspaceId,
@@ -310,8 +377,14 @@ function runData(run: Readonly<SpeakerDiarizationRun>) {
     requestFingerprint: run.requestFingerprint,
     idempotencyKey: run.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...projectAnalysisExecutionData(
+      run,
+      run.workspaceId,
+      run.createdByClientId,
+      'diarization',
+    ),
     createdAt: new Date(run.createdAt),
-    runJson: stableSerialize(run),
+    runJson: stableSerialize(persistedDomainRun),
     runHash: run.runHash,
   }
 }
@@ -430,6 +503,10 @@ async function readSourceContext(
   return Object.freeze({
     operationId: row.operationId,
     createdByClientId: workflow.createdByClientId,
+    authenticationAudit: hydrateExternalActorAudit(
+      row,
+      workflow.createdByClientId,
+    ),
     sourceArtifactId: workflow.sourceArtifactId,
     sourceArtifactKey: sourceArtifact.artifactKey,
     sourceArtifactByteSize: sourceArtifact.byteSize,
@@ -498,14 +575,23 @@ implements SpeakerDiarizationRepository {
   async findReplay(input: {
     workspaceId: string
     workflowId: string
+    actorContextHash: string
     idempotencyKey: string
   }) {
     const row = await readRun(this.prisma, input)
-    return row ? hydrateRun(row) : null
+    if (!row) return null
+    const run = hydrateRun(row)
+    if (run.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Diarization stage key belongs to another authentication context',
+      )
+    }
+    return run
   }
 
   async persistWithLease(input: {
-    run: Readonly<SpeakerDiarizationRun>
+    run: Readonly<PersistedSpeakerDiarizationRun>
     operationId: string
     leaseOwner: string
     operationAttempt: number
@@ -514,7 +600,15 @@ implements SpeakerDiarizationRepository {
   }, attempt = 1): ReturnType<
     SpeakerDiarizationRepository['persistWithLease']
   > {
-    const run = hydrateSpeakerDiarizationRun(input.run)
+    const run = Object.freeze({
+      ...domainRun(input.run),
+      ...createProjectAnalysisExecutionContext({
+        workspaceId: input.run.workspaceId,
+        authenticationAudit: input.run.authenticationAudit,
+        provenance: input.run.provenance,
+        expectedStage: 'diarization',
+      }),
+    }) as Readonly<PersistedSpeakerDiarizationRun>
     const now = new Date(input.now)
     if (Number.isNaN(now.getTime())) {
       throw new DomainError(
@@ -533,7 +627,9 @@ implements SpeakerDiarizationRepository {
           if (replay) {
             const hydrated = hydrateRun(replay)
             if (
-              hydrated.requestFingerprint !== run.requestFingerprint
+              hydrated.requestFingerprint !== run.requestFingerprint ||
+              hydrated.authenticationAudit.contextHash !==
+                run.authenticationAudit.contextHash
             ) {
               throw new DomainError(
                 'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -557,6 +653,8 @@ implements SpeakerDiarizationRepository {
                 leaseOwner: input.leaseOwner,
                 attempt: input.operationAttempt,
                 leaseExpiresAt: { gt: now },
+                clientId: run.authenticationAudit.clientId,
+                actorContextHash: run.authenticationAudit.contextHash,
               },
               select: { id: true },
             }),
@@ -585,6 +683,15 @@ implements SpeakerDiarizationRepository {
               run.sourceTranscriptHash ||
             context.durationMs !== run.durationMs ||
             context.createdByClientId !== run.createdByClientId ||
+            context.authenticationAudit.contextHash !==
+              run.authenticationAudit.contextHash ||
+            run.provenance.kind !== 'long-form-stage' ||
+            run.provenance.operationId !== input.operationId ||
+            run.provenance.workflowId !== run.workflowId ||
+            run.provenance.stage !== 'diarization' ||
+            run.provenance.stageInputHash !==
+              input.expectedStageInputHash ||
+            run.provenance.stageIdempotencyKey !== run.idempotencyKey ||
             context.stageStatus !== 'running'
           ) {
             return 'lease-lost' as const
@@ -697,6 +804,7 @@ implements SpeakerDiarizationRepository {
         const replay = await this.findReplay({
           workspaceId: run.workspaceId,
           workflowId: run.workflowId,
+          actorContextHash: run.authenticationAudit.contextHash,
           idempotencyKey: run.idempotencyKey,
         })
         if (

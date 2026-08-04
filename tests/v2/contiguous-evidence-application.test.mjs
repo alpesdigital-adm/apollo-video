@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   produceContiguousEvidenceService,
 } from '../../src/v2/application/contiguous-evidence.ts'
+import { authenticationAudit } from './helpers/authentication-audit.mjs'
 
 const sha = (value) => value.repeat(64).slice(0, 64)
 
@@ -44,7 +45,7 @@ function fixture(overrides = {}) {
     async findIdempotent() {
       return stored
     },
-    async persist(run) {
+    async persistWithLongFormLease({ run }) {
       stored = run
       return { run, replayed: false }
     },
@@ -89,7 +90,23 @@ const request = {
   workspaceId: 'workspace-contiguous-evidence',
   projectId: 'project-contiguous-evidence',
   indexRunId: 'index-contiguous-evidence',
-  actor: { type: 'api-client', id: 'client-contiguous-evidence' },
+  authenticationAudit: authenticationAudit({
+    clientId: 'client-contiguous-evidence',
+    credentialId: 'credential-contiguous-evidence',
+    workspaceId: 'workspace-contiguous-evidence',
+  }),
+  fence: {
+    workspaceId: 'workspace-contiguous-evidence',
+    projectId: 'project-contiguous-evidence',
+    workflowId: 'workflow-contiguous-evidence',
+    operationId: 'operation-contiguous-evidence',
+    stage: 'moments',
+    expectedStageInputHash: sha('e'),
+    expectedStageIdempotencyKey: 'moments-contiguous-evidence',
+    leaseOwner: 'worker-contiguous-evidence',
+    operationAttempt: 1,
+    now: '2026-07-31T01:00:00.000Z',
+  },
   idempotencyKey: 'contiguous-evidence-request-1',
 }
 
@@ -105,6 +122,19 @@ test('T-FR-134 evidence producer covers every moment and binds analyzer lineage'
     'selfContained',
     'integrity',
   ])
+  assert.deepEqual(
+    created.run.authenticationAudit,
+    request.authenticationAudit,
+  )
+  assert.deepEqual(created.run.provenance, {
+    kind: 'long-form-stage',
+    workflowId: request.fence.workflowId,
+    operationId: request.fence.operationId,
+    stage: 'moments',
+    stageInputHash: request.fence.expectedStageInputHash,
+    stageIdempotencyKey:
+      request.fence.expectedStageIdempotencyKey,
+  })
   assert.equal(value.calls(), 1)
 })
 
@@ -127,6 +157,32 @@ test('T-FR-134 evidence producer replays before analyzer and rejects source drif
   value.setSource(source({ indexRunHash: sha('9') }))
   await assert.rejects(
     value.produce(request),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(value.calls(), 1)
+})
+
+test('T-FR-242 evidence producer rejects fence and credential drift before duplicate work', async () => {
+  const value = fixture()
+  await assert.rejects(
+    value.produce({
+      ...request,
+      fence: { ...request.fence, projectId: 'project-other' },
+    }),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(value.calls(), 0)
+
+  await value.produce(request)
+  await assert.rejects(
+    value.produce({
+      ...request,
+      authenticationAudit: authenticationAudit({
+        clientId: request.authenticationAudit.clientId,
+        credentialId: 'credential-contiguous-evidence-other',
+        workspaceId: request.workspaceId,
+      }),
+    }),
     (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
   )
   assert.equal(value.calls(), 1)

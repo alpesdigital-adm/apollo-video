@@ -7,6 +7,7 @@ import type {
   LongFormStagePersistenceFence,
   ProjectAnalysisExecutionContext,
   ProjectAnalysisExecutionProvenance,
+  ProjectAnalysisStage,
 } from './ports/long-form-stage-persistence.ts'
 import {
   materializeActorAuditContext,
@@ -59,7 +60,7 @@ export function canonicalProjectMutationAudit(
 
 function normalizedProvenance(
   provenance: Readonly<ProjectAnalysisExecutionProvenance>,
-  expectedStage: 'chunks' | 'moments',
+  expectedStage: ProjectAnalysisStage,
 ): Readonly<ProjectAnalysisExecutionProvenance> {
   if (provenance.kind === 'external-request') {
     return Object.freeze({ kind: 'external-request' as const })
@@ -92,7 +93,7 @@ export function createProjectAnalysisExecutionContext(input: {
   workspaceId: string
   authenticationAudit: Readonly<ApiAccessAuditContext>
   provenance: Readonly<ProjectAnalysisExecutionProvenance>
-  expectedStage: 'chunks' | 'moments'
+  expectedStage: ProjectAnalysisStage
 }): Readonly<ProjectAnalysisExecutionContext> {
   return Object.freeze({
     authenticationAudit: canonicalProjectMutationAudit(
@@ -111,7 +112,7 @@ export function resolveProjectAnalysisExecutionContext(input: {
   actor?: Readonly<AuthenticatedExternalActor>
   authenticationAudit?: Readonly<ApiAccessAuditContext>
   provenance: Readonly<ProjectAnalysisExecutionProvenance>
-  expectedStage: 'chunks' | 'moments'
+  expectedStage: ProjectAnalysisStage
 }): Readonly<ProjectAnalysisExecutionContext> {
   let authenticationAudit: Readonly<ApiAccessAuditContext>
   if (input.provenance.kind === 'external-request') {

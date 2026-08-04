@@ -7,6 +7,7 @@ import type {
 } from '../../domain/contiguous-extraction.ts'
 import type {
   LongFormStagePersistenceFence,
+  ProjectAnalysisExecutionContext,
 } from './long-form-stage-persistence.ts'
 import type {
   LongFormMomentTranscriptEvidence,
@@ -72,7 +73,8 @@ export interface ContiguousEvidenceAnalyzer {
   ): Promise<readonly Readonly<ContiguousEvidenceObservation>[]>
 }
 
-export interface PersistedContiguousEvidenceRun {
+export interface PersistedContiguousEvidenceRun
+extends ProjectAnalysisExecutionContext {
   id: string
   workspaceId: string
   projectId: string
@@ -102,14 +104,9 @@ export interface ContiguousEvidenceRepository {
     projectId: string
     sourceIndexRunId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<PersistedContiguousEvidenceRun> | null>
-  persist(
-    run: Readonly<PersistedContiguousEvidenceRun>,
-  ): Promise<Readonly<{
-    run: Readonly<PersistedContiguousEvidenceRun>
-    replayed: boolean
-  }>>
   persistWithLongFormLease(input: {
     run: Readonly<PersistedContiguousEvidenceRun>
     fence: Readonly<LongFormStagePersistenceFence>

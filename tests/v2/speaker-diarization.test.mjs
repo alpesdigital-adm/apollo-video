@@ -15,6 +15,7 @@ import {
   startLongFormIndexStage,
 } from '../../src/v2/domain/long-form-index-workflow.ts'
 import {
+  calculateSpeakerDiarizationRequestFingerprint,
   persistSpeakerDiarizationService,
   readSpeakerDiarizationService,
 } from '../../src/v2/application/speaker-diarization.ts'
@@ -24,6 +25,7 @@ import {
 import {
   createSpeakerDiarizationStageProcessor,
 } from '../../src/v2/application/speaker-diarization-stage-processor.ts'
+import { authenticationAudit } from './helpers/authentication-audit.mjs'
 
 const sha = (value) =>
   createHash('sha256').update(value).digest('hex')
@@ -140,6 +142,11 @@ test('T-FR-133 diarization rejects unordered, duplicate and tampered provider ev
 
 function repositoryFixture(options = {}) {
   let stored
+  const audit = authenticationAudit({
+    clientId: 'client-diarization',
+    credentialId: 'credential-diarization',
+    workspaceId: 'workspace-diarization',
+  })
   const context = Object.freeze({
     operationId: 'operation-diarization',
     createdByClientId: 'client-diarization',
@@ -157,6 +164,7 @@ function repositoryFixture(options = {}) {
     stageInputHash: sha('stage-input'),
     stageIdempotencyKey:
       'workflow-diarization:diarization:11111111111111111111111111111111',
+    authenticationAudit: audit,
     ...options.context,
   })
   return {
@@ -168,7 +176,8 @@ function repositoryFixture(options = {}) {
         return stored?.id === input.runId ? stored : null
       },
       async findReplay(input) {
-        return stored?.idempotencyKey === input.idempotencyKey
+        return stored?.idempotencyKey === input.idempotencyKey &&
+          stored?.authenticationAudit.contextHash === input.actorContextHash
           ? stored
           : null
       },
@@ -215,6 +224,60 @@ test('T-FR-133 application binds diarization to the exact workflow stage and rep
   assert.equal(first.replayed, false)
   assert.equal(first.run.id, 'diarization-run-test-2')
   assert.equal(first.run.idempotencyKey, fixture.context.stageIdempotencyKey)
+  assert.deepEqual(
+    first.run.authenticationAudit,
+    fixture.context.authenticationAudit,
+  )
+  assert.deepEqual(first.run.provenance, {
+    kind: 'long-form-stage',
+    workflowId: first.run.workflowId,
+    operationId: fixture.context.operationId,
+    stage: 'diarization',
+    stageInputHash: fixture.context.stageInputHash,
+    stageIdempotencyKey: fixture.context.stageIdempotencyKey,
+  })
+  const fingerprintInput = {
+    workspaceId: first.run.workspaceId,
+    projectId: first.run.projectId,
+    workflowId: first.run.workflowId,
+    sourceArtifactId: first.run.sourceArtifactId,
+    sourceArtifactSha256: first.run.sourceArtifactSha256,
+    sourceManifestId: first.run.sourceManifestId,
+    sourceManifestHash: first.run.sourceManifestHash,
+    sourceTranscriptId: first.run.sourceTranscriptId,
+    sourceTranscriptHash: first.run.sourceTranscriptHash,
+    durationMs: first.run.durationMs,
+    providerInput: first.run.providerInput,
+    expectedStageInputHash: first.run.provenance.stageInputHash,
+    provider: first.run.provider,
+    segments: first.run.segments.map((segment) => ({
+      providerSegmentId: segment.providerSegmentId,
+      providerLabel: segment.providerLabel,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      text: segment.text,
+    })),
+    usageSeconds: first.run.usageSeconds,
+    costMinorUnits: first.run.costMinorUnits,
+    elapsedMs: first.run.elapsedMs,
+    createdByClientId: first.run.createdByClientId,
+    actorContextHash: first.run.authenticationAudit.contextHash,
+    provenance: first.run.provenance,
+  }
+  assert.equal(
+    calculateSpeakerDiarizationRequestFingerprint(fingerprintInput),
+    first.run.requestFingerprint,
+  )
+  assert.notEqual(
+    calculateSpeakerDiarizationRequestFingerprint({
+      ...fingerprintInput,
+      provenance: {
+        ...fingerprintInput.provenance,
+        operationId: 'operation-diarization-tampered',
+      },
+    }),
+    first.run.requestFingerprint,
+  )
   const replay = await persist(serviceRequest(fixture.context))
   assert.equal(replay.replayed, true)
   assert.equal(replay.run.runHash, first.run.runHash)

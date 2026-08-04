@@ -4,11 +4,13 @@ import test from 'node:test'
 const [
   { produceContiguousEvaluationsService },
   { PrismaContiguousEvaluationRepository },
+  { createApiAccessAuditContext },
 ] = await Promise.all([
   import('../../src/v2/application/contiguous-evaluation.ts'),
   import(
     '../../src/v2/infrastructure/prisma/contiguous-evaluation-repository.ts'
   ),
+  import('../../src/v2/domain/api-access-control.ts'),
 ])
 
 const sha = (value) => value.repeat(64).slice(0, 64)
@@ -211,10 +213,13 @@ const request = {
   workspaceId: 'workspace-contiguous-evaluation-repository',
   projectId: 'project-contiguous-evaluation-repository',
   indexRunId: 'index-contiguous-evaluation-repository',
-  actor: {
-    type: 'api-client',
-    id: 'client-contiguous-evaluation-repository',
-  },
+  authenticationAudit: createApiAccessAuditContext({
+    clientId: 'client-contiguous-evaluation-repository',
+    credentialId: 'credential-contiguous-evaluation-repository',
+    workspaceId: 'workspace-contiguous-evaluation-repository',
+    environment: 'sandbox',
+    authenticationKind: 'bearer',
+  }),
   idempotencyKey: 'contiguous-evaluation-repository-key',
 }
 
@@ -230,6 +235,7 @@ const fence = {
   operationAttempt: 1,
   now: '2026-07-31T00:20:00.000Z',
 }
+request.fence = fence
 
 test('T-FR-134 Prisma evaluation adapter revalidates and persists one canonical run atomically', async () => {
   const value = fixture()
@@ -244,17 +250,41 @@ test('T-FR-134 Prisma evaluation adapter revalidates and persists one canonical 
     created.run.id,
   )
   assert.equal(value.deactivated(), true)
+  assert.equal(
+    value.storedRun().actorCredentialId,
+    request.authenticationAudit.credentialId,
+  )
+  assert.equal(
+    value.storedRun().actorContextHash,
+    request.authenticationAudit.contextHash,
+  )
+  assert.equal(value.storedRun().executionKind, 'long-form-stage')
+  assert.equal(value.storedRun().originOperationId, fence.operationId)
+  assert.equal(value.storedRun().originWorkflowId, fence.workflowId)
+  assert.equal(value.storedRun().originStage, 'moments')
   assert.deepEqual(
     await value.repository.findIdempotent({
       workspaceId: request.workspaceId,
       projectId: request.projectId,
       sourceIndexRunId: request.indexRunId,
-      createdByClientId: request.actor.id,
+      createdByClientId: request.authenticationAudit.clientId,
+      actorContextHash: request.authenticationAudit.contextHash,
       idempotencyKey: request.idempotencyKey,
     }),
     created.run,
   )
   assert.equal(value.providerCalls(), 1)
+  await assert.rejects(
+    value.repository.findIdempotent({
+      workspaceId: request.workspaceId,
+      projectId: request.projectId,
+      sourceIndexRunId: request.indexRunId,
+      createdByClientId: request.authenticationAudit.clientId,
+      actorContextHash: sha('9'),
+      idempotencyKey: request.idempotencyKey,
+    }),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
 })
 
 test('T-FR-134 Prisma evaluation adapter rejects source drift inside the serializable transaction', async () => {
@@ -273,14 +303,14 @@ test('T-FR-134 Prisma evaluation adapter rejects source drift inside the seriali
 
 test('T-FR-134 Prisma evaluation adapter persists behind the moments lease and rejects lease loss', async () => {
   const active = fixture()
-  const created = await active.produce({ ...request, fence })
+  const created = await active.produce(request)
   assert.equal(created.replayed, false)
   assert.equal(active.fenceChecks(), 2)
   assert.equal(active.storedEvaluations().length, 1)
 
   const lost = fixture({ leaseAvailable: false })
   await assert.rejects(
-    lost.produce({ ...request, fence }),
+    lost.produce(request),
     (error) => error.code === 'VERSION_CONFLICT',
   )
   assert.equal(lost.fenceChecks(), 2)

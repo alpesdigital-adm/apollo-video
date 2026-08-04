@@ -48,6 +48,9 @@ import type {
   LongFormStagePersistenceFence,
 } from './ports/long-form-stage-persistence.ts'
 import type {
+  ApiAccessAuditContext,
+} from '../domain/api-access-control.ts'
+import type {
   SpeakerDiarizationRepository,
 } from './ports/speaker-diarization-repository.ts'
 
@@ -129,7 +132,7 @@ export interface LongFormContiguousEvidenceProducer {
     workspaceId: string
     projectId: string
     indexRunId: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     signal: AbortSignal
     fence: Readonly<LongFormStagePersistenceFence>
@@ -141,7 +144,7 @@ export interface LongFormContiguousEvaluationProducer {
     workspaceId: string
     projectId: string
     indexRunId: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     signal: AbortSignal
     fence: Readonly<LongFormStagePersistenceFence>
@@ -1021,10 +1024,7 @@ export function createLongFormDerivedStageProcessor(
         workspaceId: workflow.workspaceId,
         projectId: workflow.projectId,
         indexRunId: persistedRun.id,
-        actor: Object.freeze({
-          type: 'api-client',
-          id: workflow.createdByClientId,
-        }),
+        authenticationAudit: persistedRun.authenticationAudit,
         idempotencyKey: `${producer.kind}-${calculateCanonicalHash({
           stageIdempotencyKey: input.checkpoint.idempotencyKey,
           indexRunId: persistedRun.id,
@@ -1049,10 +1049,7 @@ export function createLongFormDerivedStageProcessor(
       workspaceId: workflow.workspaceId,
       projectId: workflow.projectId,
       indexRunId: persistedRun.id,
-      actor: Object.freeze({
-        type: 'api-client',
-        id: workflow.createdByClientId,
-      }),
+      authenticationAudit: persistedRun.authenticationAudit,
       idempotencyKey: `quality-evaluation-${calculateCanonicalHash({
         stageIdempotencyKey: input.checkpoint.idempotencyKey,
         indexRunId: persistedRun.id,

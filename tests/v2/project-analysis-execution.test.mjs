@@ -175,3 +175,60 @@ test('T-FR-242 project analysis migration cannot admit partial tuples through SQ
     )
   }
 })
+
+test('T-FR-242 derived long-form migration binds three complete durable audit tuples', () => {
+  const migration = readFileSync(new URL(
+    '../../prisma/v2/migrations/20260805070000_long_form_derived_execution_audit/migration.sql',
+    import.meta.url,
+  ), 'utf8')
+  for (const field of [
+    'actorCredentialId',
+    'actorEnvironment',
+    'actorAuthenticationKind',
+    'actorContextHash',
+    'originOperationId',
+    'originWorkflowId',
+    'originStageInputHash',
+    'originStageIdempotencyKey',
+  ]) {
+    assert.equal(
+      migration.split(`"${field}" IS NOT NULL`).length - 1,
+      3,
+      `${field} must be explicitly non-null in all derived-run tuples`,
+    )
+  }
+  assert.equal(
+    migration.split('"executionKind" = \'long-form-stage\'').length - 1,
+    3,
+  )
+  assert.equal(
+    migration.split('"originStage" = \'diarization\'').length - 1,
+    1,
+  )
+  assert.equal(
+    migration.split('"originStage" = \'moments\'').length - 1,
+    2,
+  )
+  assert.equal(
+    migration.split('"originWorkflowId" = "workflowId"').length - 1,
+    1,
+  )
+  for (const table of [
+    'speaker_diarization_runs',
+    'contiguous_evidence_runs',
+    'contiguous_evaluation_runs',
+  ]) {
+    assert.match(
+      migration,
+      new RegExp(`${table}_origin_operation_fkey`),
+    )
+    assert.match(
+      migration,
+      new RegExp(`${table}_origin_workflow_fkey`),
+    )
+    assert.match(
+      migration,
+      new RegExp(`${table}_actor_context_idx`),
+    )
+  }
+})

@@ -19,6 +19,13 @@ import {
   type ContiguousQualityDimension,
 } from '../../domain/contiguous-extraction.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  assertProjectAnalysisFenceBinding,
+} from '../../application/project-analysis-execution.ts'
+import {
+  hydrateProjectAnalysisExecution,
+  projectAnalysisExecutionData,
+} from './project-analysis-execution.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 type DatabaseClient = PrismaClient | Prisma.TransactionClient
@@ -308,6 +315,11 @@ function hydrate(
     `contiguous evaluation run ${row.id}`,
   )
   const { runHash: _storedHash, ...body } = run
+  const execution = hydrateProjectAnalysisExecution(
+    row,
+    row.createdByClientId,
+    'moments',
+  )
   if (
     stableSerialize(run.decisions) !== row.decisionsJson ||
     calculateCanonicalHash(body) !== run.runHash ||
@@ -328,7 +340,11 @@ function hydrate(
     run.requestFingerprint !== row.requestFingerprint ||
     run.idempotencyKey !== row.idempotencyKey ||
     run.createdBy.id !== row.createdByClientId ||
-    run.createdAt !== row.createdAt.toISOString()
+    run.createdAt !== row.createdAt.toISOString() ||
+    stableSerialize(run.authenticationAudit) !==
+      stableSerialize(execution.authenticationAudit) ||
+    stableSerialize(run.provenance) !==
+      stableSerialize(execution.provenance)
   ) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
@@ -336,7 +352,7 @@ function hydrate(
     )
   }
   assertEvaluationRows(run, row.evaluations)
-  return run
+  return Object.freeze({ ...run, ...execution })
 }
 
 function assertDecisionEvidence(
@@ -395,13 +411,14 @@ function assertRunBinding(
     decisions: run.decisions,
   })
   const requestFingerprint = calculateCanonicalHash({
-    schemaVersion: 'produce-contiguous-evaluations-request/v1',
+    schemaVersion: 'produce-contiguous-evaluations-request/v2',
     workspaceId: run.workspaceId,
     projectId: run.projectId,
     indexRunId: run.sourceIndexRunId,
     sourceIndexRunHash: source.indexRunHash,
     producerInputHash: inputHash,
-    actorId: run.createdBy.id,
+    actorContextHash: run.authenticationAudit.contextHash,
+    provenance: run.provenance,
   })
   if (
     run.sourceIndexRunHash !== source.indexRunHash ||
@@ -481,35 +498,32 @@ implements ContiguousEvaluationRepository {
     projectId: string
     sourceIndexRunId: string
     createdByClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }) {
     const row =
       await this.client.v2ContiguousEvaluationRun.findUnique({
         where: {
           workspaceId_projectId_sourceIndexRunId_createdByClientId_idempotencyKey:
-            input,
+            {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              sourceIndexRunId: input.sourceIndexRunId,
+              createdByClientId: input.createdByClientId,
+              idempotencyKey: input.idempotencyKey,
+            },
         },
         include: { evaluations: true },
       })
-    return row ? hydrate(row) : null
-  }
-
-  async persist(
-    run: Readonly<PersistedContiguousEvaluationRun>,
-    attempt = 1,
-  ): ReturnType<ContiguousEvaluationRepository['persist']> {
-    const persisted = await this.persistInternal(
-      run,
-      undefined,
-      attempt,
-    )
-    if (!persisted) {
+    if (!row) return null
+    const run = hydrate(row)
+    if (run.authenticationAudit.contextHash !== input.actorContextHash) {
       throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'Unfenced contiguous evaluation persistence unexpectedly lost a lease',
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Contiguous evaluation key belongs to another authentication context',
       )
     }
-    return persisted
+    return run
   }
 
   async persistWithLongFormLease(
@@ -529,20 +543,21 @@ implements ContiguousEvaluationRepository {
         'Contiguous evaluation fence does not match its run',
       )
     }
+    assertProjectAnalysisFenceBinding(input.run, input.fence)
     return this.persistInternal(input.run, input.fence)
   }
 
   private async persistInternal(
     run: Readonly<PersistedContiguousEvaluationRun>,
-    fence?: Parameters<
+    fence: Parameters<
       ContiguousEvaluationRepository['persistWithLongFormLease']
     >[0]['fence'],
     attempt = 1,
   ): ReturnType<
     ContiguousEvaluationRepository['persistWithLongFormLease']
   > {
-    const fenceNow = fence ? new Date(fence.now) : undefined
-    if (fenceNow && Number.isNaN(fenceNow.getTime())) {
+    const fenceNow = new Date(fence.now)
+    if (Number.isNaN(fenceNow.getTime())) {
       throw new DomainError(
         'INVALID_ARGUMENT',
         'Contiguous evaluation fence instant is invalid',
@@ -573,7 +588,7 @@ implements ContiguousEvaluationRepository {
               'Contiguous evaluation source or actor is unavailable',
             )
           }
-          if (fence) {
+          {
             const [operation, stage] = await Promise.all([
               transaction.v2PublicOperation.findFirst({
                 where: {
@@ -583,7 +598,9 @@ implements ContiguousEvaluationRepository {
                   status: 'running',
                   leaseOwner: fence.leaseOwner,
                   attempt: fence.operationAttempt,
-                  leaseExpiresAt: { gt: fenceNow! },
+                  leaseExpiresAt: { gt: fenceNow },
+                  clientId: run.authenticationAudit.clientId,
+                  actorContextHash: run.authenticationAudit.contextHash,
                 },
                 select: { id: true },
               }),
@@ -640,6 +657,12 @@ implements ContiguousEvaluationRepository {
                 requestFingerprint: run.requestFingerprint,
                 idempotencyKey: run.idempotencyKey,
                 createdByClientId: run.createdBy.id,
+                ...projectAnalysisExecutionData(
+                  run,
+                  run.workspaceId,
+                  run.createdBy.id,
+                  'moments',
+                ),
                 createdAt: new Date(run.createdAt),
                 runJson: stableSerialize(run),
                 runHash: run.runHash,
@@ -715,6 +738,7 @@ implements ContiguousEvaluationRepository {
           projectId: run.projectId,
           sourceIndexRunId: run.sourceIndexRunId,
           createdByClientId: run.createdBy.id,
+          actorContextHash: run.authenticationAudit.contextHash,
           idempotencyKey: run.idempotencyKey,
         })
         if (replay) {

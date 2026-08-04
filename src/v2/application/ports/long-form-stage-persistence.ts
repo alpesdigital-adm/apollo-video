@@ -7,13 +7,15 @@ export interface LongFormStagePersistenceFence {
   projectId: string
   workflowId: string
   operationId: string
-  stage: 'chunks' | 'moments'
+  stage: ProjectAnalysisStage
   expectedStageInputHash: string
   expectedStageIdempotencyKey: string
   leaseOwner: string
   operationAttempt: number
   now: string
 }
+
+export type ProjectAnalysisStage = 'diarization' | 'chunks' | 'moments'
 
 export type ProjectAnalysisExecutionProvenance =
   | Readonly<{
@@ -23,7 +25,7 @@ export type ProjectAnalysisExecutionProvenance =
       kind: 'long-form-stage'
       workflowId: string
       operationId: string
-      stage: 'chunks' | 'moments'
+      stage: ProjectAnalysisStage
       stageInputHash: string
       stageIdempotencyKey: string
     }>

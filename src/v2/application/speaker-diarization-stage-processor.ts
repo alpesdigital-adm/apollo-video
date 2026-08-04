@@ -145,6 +145,7 @@ export function createSpeakerDiarizationStageProcessor(
       const existing = await dependencies.repository.findReplay({
         workspaceId: workflow.workspaceId,
         workflowId: workflow.id,
+        actorContextHash: context.authenticationAudit.contextHash,
         idempotencyKey: checkpoint.idempotencyKey,
       })
       if (existing) {
@@ -157,6 +158,8 @@ export function createSpeakerDiarizationStageProcessor(
           existing.provider.id !== checkpoint.version.provider ||
           existing.provider.model !== checkpoint.version.model ||
           existing.provider.version !== checkpoint.version.version
+          || existing.authenticationAudit.contextHash !==
+            context.authenticationAudit.contextHash
         ) {
           throw new DomainError(
             'PERSISTENCE_CONFLICT',
