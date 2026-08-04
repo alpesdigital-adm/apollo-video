@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient, type V2WebhookDelivery } from '../../../../generated/prisma-v2/index.js'
+import { Prisma, type PrismaClient, type V2IdempotencyRecord, type V2WebhookDelivery } from '../../../../generated/prisma-v2/index.js'
 
 import type {
   WebhookEventReplayItem,
@@ -17,6 +17,7 @@ import {
   replayWebhookDelivery,
   type WebhookDelivery,
 } from '../../domain/webhook.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -56,9 +57,12 @@ function hydrateDelivery(row: V2WebhookDelivery): Readonly<WebhookDelivery> {
   })
 }
 
-function parseStoredResult(responseJson: string | null, workspaceId: string, eventId: string) {
+function parseStoredResult(
+  parsed: Readonly<Record<string, unknown>>,
+  workspaceId: string,
+  eventId: string,
+) {
   try {
-    const parsed = JSON.parse(responseJson ?? '') as Record<string, unknown>
     if (parsed.eventId !== eventId || !Array.isArray(parsed.items)) {
       persistenceConflict('Stored webhook event replay response is invalid')
     }
@@ -160,20 +164,14 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
         key: command.idempotencyKey,
       },
     }
-    const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: {
-      requestFingerprint: string
-      status: string
-      responseJson: string | null
-    }) => {
-      if (record.requestFingerprint !== command.requestFingerprint) {
-        throw new DomainError(
-          'IDEMPOTENCY_PAYLOAD_MISMATCH',
-          'Idempotency key was already used with a different request',
-        )
-      }
-      if (record.status !== 'completed') {
-        persistenceConflict('Webhook event replay idempotency record is incomplete')
-      }
+    const readReplay = async (
+      transaction: Prisma.TransactionClient | PrismaClient,
+      record: V2IdempotencyRecord,
+    ) => {
+      const response = readCompletedIdempotencyResponse(
+        record,
+        command.requestFingerprint,
+      )
       const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
         where: {
           workspaceId: command.workspaceId,
@@ -183,7 +181,11 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
         },
       })
       assertWebhookAdministrationReplay(auditCommand, administration)
-      const stored = parseStoredResult(record.responseJson, command.workspaceId, command.eventId)
+      const stored = parseStoredResult(
+        response,
+        command.workspaceId,
+        command.eventId,
+      )
       return Object.freeze({ ...stored, replayed: true })
     }
 

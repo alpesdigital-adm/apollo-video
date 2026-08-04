@@ -23,6 +23,7 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredEndpointCreationResponse {
   endpointId: string
@@ -33,15 +34,19 @@ function prismaError(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
-function storedResponse(record: V2IdempotencyRecord): StoredEndpointCreationResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent webhook endpoint creation is incomplete')
-  }
+function storedResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredEndpointCreationResponse {
   try {
-    const value = JSON.parse(record.responseJson) as Partial<StoredEndpointCreationResponse>
+    const value = readCompletedIdempotencyResponse(
+      record,
+      requestFingerprint,
+    ) as Partial<StoredEndpointCreationResponse>
     if (!value.endpointId || !value.secretId) throw new Error('invalid')
     return { endpointId: value.endpointId, secretId: value.secretId }
-  } catch {
+  } catch (error) {
+    if (error instanceof DomainError) throw error
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored endpoint creation response is invalid')
   }
 }
@@ -132,7 +137,10 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
           if (existing.requestFingerprint !== idempotency.requestFingerprint) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
           }
-          const stored = storedResponse(existing)
+          const stored = storedResponse(
+            existing,
+            idempotency.requestFingerprint,
+          )
           const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
             where: {
               workspaceId: candidate.workspaceId,
@@ -248,7 +256,10 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
           if (existing.requestFingerprint !== idempotency.requestFingerprint) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
           }
-          const stored = storedResponse(existing)
+          const stored = storedResponse(
+            existing,
+            idempotency.requestFingerprint,
+          )
           const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
             where: {
               workspaceId: candidate.workspaceId,

@@ -25,6 +25,7 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredProvisioningResponse {
   endpointId: string
@@ -39,15 +40,19 @@ function waitForConcurrentCommit(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-function storedResponse(record: V2IdempotencyRecord): StoredProvisioningResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent webhook secret provisioning is incomplete')
-  }
+function storedResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredProvisioningResponse {
   try {
-    const value = JSON.parse(record.responseJson) as Partial<StoredProvisioningResponse>
+    const value = readCompletedIdempotencyResponse(
+      record,
+      requestFingerprint,
+    ) as Partial<StoredProvisioningResponse>
     if (!value.endpointId || !value.secretId) throw new Error('invalid')
     return { endpointId: value.endpointId, secretId: value.secretId }
-  } catch {
+  } catch (error) {
+    if (error instanceof DomainError) throw error
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored webhook secret provisioning response is invalid')
   }
 }
@@ -147,13 +152,10 @@ export class PrismaWebhookSigningSecretProvisioningRepository
       transaction: Prisma.TransactionClient | PrismaClient,
       record: V2IdempotencyRecord,
     ) => {
-      if (record.requestFingerprint !== command.idempotency.requestFingerprint) {
-        throw new DomainError(
-          'IDEMPOTENCY_PAYLOAD_MISMATCH',
-          'Idempotency key was already used with a different request',
-        )
-      }
-      const stored = storedResponse(record)
+      const stored = storedResponse(
+        record,
+        command.idempotency.requestFingerprint,
+      )
       const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
         where: {
           workspaceId: command.workspaceId,

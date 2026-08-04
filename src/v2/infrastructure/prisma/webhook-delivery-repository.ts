@@ -1,6 +1,7 @@
 import {
   Prisma,
   type PrismaClient,
+  type V2IdempotencyRecord,
   type V2WebhookDelivery,
   type V2WebhookDeliveryAttempt,
 } from '../../../../generated/prisma-v2/index.js'
@@ -26,6 +27,7 @@ import type {
   WebhookDeliveryReplayResult,
 } from '../../application/ports/webhook-delivery-replay-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import {
@@ -122,12 +124,11 @@ function persistenceConflict(message: string): never {
 }
 
 function parseReplayDiagnostic(
-  responseJson: string | null,
+  parsed: Readonly<Record<string, unknown>>,
   workspaceId: string,
   deliveryId: string,
 ) {
   try {
-    const parsed = JSON.parse(responseJson ?? '') as Record<string, unknown>
     const rawDelivery = parsed.delivery as Record<string, unknown>
     const rawAttempts = parsed.attempts as Record<string, unknown>[]
     const endpointId = parsed.endpointId
@@ -457,20 +458,14 @@ export class PrismaWebhookDeliveryRepository
         key: command.idempotencyKey,
       },
     }
-    const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: {
-      requestFingerprint: string
-      status: string
-      responseJson: string | null
-    }) => {
-      if (record.requestFingerprint !== command.requestFingerprint) {
-        throw new DomainError(
-          'IDEMPOTENCY_PAYLOAD_MISMATCH',
-          'Idempotency key was already used with a different request',
-        )
-      }
-      if (record.status !== 'completed') {
-        persistenceConflict('Webhook replay idempotency record is incomplete')
-      }
+    const readReplay = async (
+      transaction: Prisma.TransactionClient | PrismaClient,
+      record: V2IdempotencyRecord,
+    ) => {
+      const response = readCompletedIdempotencyResponse(
+        record,
+        command.requestFingerprint,
+      )
       const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
         where: {
           workspaceId: command.workspaceId,
@@ -482,7 +477,7 @@ export class PrismaWebhookDeliveryRepository
       assertWebhookAdministrationReplay(auditCommand, administration)
       return Object.freeze({
         diagnostic: parseReplayDiagnostic(
-          record.responseJson,
+          response,
           command.workspaceId,
           command.deliveryId,
         ),

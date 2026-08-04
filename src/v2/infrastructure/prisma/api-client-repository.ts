@@ -39,6 +39,7 @@ import {
 } from '../../domain/api-administration-command.ts'
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredAdministrationResponse {
   operation: 'api-client.create' | 'api-credential.rotate'
@@ -85,16 +86,13 @@ function hydrateCredential(row: V2ApiCredential) {
 
 function parseAdministrationResponse(
   record: V2IdempotencyRecord,
+  requestFingerprint: string,
   expectedOperation: StoredAdministrationResponse['operation'],
 ): StoredAdministrationResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Idempotent API administration is still processing or incomplete',
-      { idempotencyRecordId: record.id, status: record.status },
-    )
-  }
-  const response = JSON.parse(record.responseJson) as Partial<StoredAdministrationResponse>
+  const response = readCompletedIdempotencyResponse(
+    record,
+    requestFingerprint,
+  ) as Partial<StoredAdministrationResponse>
   if (
     response.operation !== expectedOperation ||
     !response.clientId ||
@@ -105,19 +103,6 @@ function parseAdministrationResponse(
     })
   }
   return response as StoredAdministrationResponse
-}
-
-function assertIdempotencyFingerprint(
-  record: V2IdempotencyRecord,
-  requestFingerprint: string,
-): void {
-  if (record.requestFingerprint !== requestFingerprint) {
-    throw new DomainError(
-      'IDEMPOTENCY_PAYLOAD_MISMATCH',
-      'Idempotency key was already used with a different request',
-      { idempotencyRecordId: record.id },
-    )
-  }
 }
 
 function hydrateAdministrationCommand(row: V2ApiAdministrationCommand): Readonly<ApiAdministrationCommand> {
@@ -389,8 +374,11 @@ export class PrismaApiClientRepository
       }
       const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
       if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
-        assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
-        const stored = parseAdministrationResponse(existing, 'api-client.create')
+        const stored = parseAdministrationResponse(
+          existing,
+          bundle.idempotency.requestFingerprint,
+          'api-client.create',
+        )
         const [clientRow, credentialRow, commandRow] = await Promise.all([
           transaction.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
           transaction.v2ApiCredential.findUnique({
@@ -521,8 +509,11 @@ export class PrismaApiClientRepository
       }
       const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
       if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
-        assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
-        const stored = parseAdministrationResponse(existing, 'api-credential.rotate')
+        const stored = parseAdministrationResponse(
+          existing,
+          bundle.idempotency.requestFingerprint,
+          'api-credential.rotate',
+        )
         const [clientRow, credentialRow, commandRow] = await Promise.all([
           transaction.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
           transaction.v2ApiCredential.findUnique({

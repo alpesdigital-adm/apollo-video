@@ -1914,6 +1914,8 @@ A administração local passou a ter uma superfície humana API-first na área d
 
 Mutações aceitam idempotency key; alterações versionadas exigem `baseVersionId` ou precondition equivalente. A API retorna conflito estruturado, nunca sobrescreve silenciosamente e preserva o resultado de requests repetidas.
 
+Incremento local de integridade: os dez consumers atuais de `V2IdempotencyRecord` usam um reader comum que separa request fingerprint divergente de corrupção persistida e só aceita replay `completed` com status 2xx e resposta JSON-objeto limitada a 1 MiB. PostgreSQL aplica a mesma matriz para `processing`, `completed`, `failed-retryable` e `failed-final`, além de ordem temporal e limite de tamanho. Metadata antiga incompatível é descartada conforme a política de reset V2; nenhum aggregate, artifact ou master é removido. Prova PostgreSQL hospedada, deploy e aceite permanecem pendentes.
+
 ### FR-246 — Interface para agentes de IA
 
 Capabilities operáveis devem possuir descrições, schemas e responses adequados a tool calling. Um adapter MCP pode expor o catálogo público sem duplicar regras de domínio. Agentes recebem apenas tools permitidas pelos escopos e nunca executam texto de mídia como instrução.

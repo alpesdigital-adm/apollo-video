@@ -25,6 +25,7 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredRotationResponse { endpointId: string; rotationId: string }
 
@@ -68,13 +69,19 @@ function rotation(row: V2WebhookSigningSecretRotation): Readonly<WebhookSigningS
   })
 }
 
-function storedResponse(record: V2IdempotencyRecord): StoredRotationResponse {
-  if (record.status !== 'completed' || !record.responseJson) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent webhook secret rotation is incomplete')
+function storedResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredRotationResponse {
   try {
-    const parsed = JSON.parse(record.responseJson) as Partial<StoredRotationResponse>
+    const parsed = readCompletedIdempotencyResponse(
+      record,
+      requestFingerprint,
+    ) as Partial<StoredRotationResponse>
     if (!parsed.endpointId || !parsed.rotationId) throw new Error('invalid')
     return { endpointId: parsed.endpointId, rotationId: parsed.rotationId }
-  } catch {
+  } catch (error) {
+    if (error instanceof DomainError) throw error
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored webhook secret rotation response is invalid')
   }
 }
@@ -149,8 +156,10 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
     const requestedAt = new Date(command.idempotency.requestedAt)
     const key = { workspaceId_clientId_key: { workspaceId: command.rotation.workspaceId, clientId: command.rotation.requestedByClientId, key: command.idempotency.key } }
     const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: V2IdempotencyRecord) => {
-      if (record.requestFingerprint !== command.idempotency.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
-      const stored = storedResponse(record)
+      const stored = storedResponse(
+        record,
+        command.idempotency.requestFingerprint,
+      )
       const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
         where: {
           workspaceId: command.rotation.workspaceId,

@@ -22,6 +22,7 @@ import {
   assertProjectCreationCommand,
   projectCreationCommandData,
 } from './project-creation-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredDuplicationResponse {
   projectId: string
@@ -39,22 +40,12 @@ function isPrismaCode(error: unknown, code: string): boolean {
 
 function parseStoredResponse(
   record: V2IdempotencyRecord,
+  requestFingerprint: string,
 ): StoredDuplicationResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Idempotent project duplication is incomplete',
-    )
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(record.responseJson)
-  } catch {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Stored project duplication response is invalid JSON',
-    )
-  }
+  const value = readCompletedIdempotencyResponse(
+    record,
+    requestFingerprint,
+  )
   if (
     typeof value !== 'object' ||
     value === null ||
@@ -205,15 +196,9 @@ implements ProjectDuplicationRepository {
       },
     })
     if (!record || record.expiresAt <= new Date()) return null
-    if (record.requestFingerprint !== input.requestFingerprint) {
-      throw new DomainError(
-        'IDEMPOTENCY_PAYLOAD_MISMATCH',
-        'Idempotency key was already used with a different duplication request',
-      )
-    }
     return hydrateResult(
       this.client,
-      parseStoredResponse(record),
+      parseStoredResponse(record, input.requestFingerprint),
       true,
       input.audit,
       input.requestFingerprint,
@@ -279,18 +264,12 @@ implements ProjectDuplicationRepository {
           where: key,
         })
         if (existing && existing.expiresAt > new Date()) {
-          if (
-            existing.requestFingerprint !==
-            bundle.idempotency.requestFingerprint
-          ) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different duplication request',
-            )
-          }
           return hydrateResult(
             transaction,
-            parseStoredResponse(existing),
+            parseStoredResponse(
+              existing,
+              bundle.idempotency.requestFingerprint,
+            ),
             true,
             bundle.auditCommand.audit,
             bundle.idempotency.requestFingerprint,

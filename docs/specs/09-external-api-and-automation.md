@@ -341,6 +341,8 @@ Algoritmo:
 
 TTL varia por operação, nunca é menor que a janela máxima de retry documentada.
 
+O boundary Prisma possui um reader canônico para todo consumer de `V2IdempotencyRecord`. Replay de sucesso exige fingerprint idêntico, `status=completed`, HTTP 2xx e um objeto JSON de no máximo 1 MiB. `processing` não pode carregar resposta; estados terminais carregam status e objeto compatíveis. As mesmas relações, `createdAt <= updatedAt < expiresAt` e o limite de tamanho são constraints PostgreSQL. Corrupção persistida nunca é tratada como request diferente ou como resposta válida.
+
 ## 12. Concorrência e versões
 
 Mutações de projeto recebem `baseVersionId`. O command handler:

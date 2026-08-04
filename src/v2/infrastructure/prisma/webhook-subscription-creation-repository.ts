@@ -13,6 +13,7 @@ import {
   assertWebhookAdministrationReplay,
   webhookAdministrationCommandData,
 } from './webhook-administration-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredWebhookSubscriptionCreationResponse {
   subscriptionId: string
@@ -22,22 +23,14 @@ function isPrismaError(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
-function parseStoredResponse(record: V2IdempotencyRecord): StoredWebhookSubscriptionCreationResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Idempotent webhook subscription creation is still processing or incomplete',
-      { idempotencyRecordId: record.id, status: record.status },
-    )
-  }
-  let response: Partial<StoredWebhookSubscriptionCreationResponse>
-  try {
-    response = JSON.parse(record.responseJson) as Partial<StoredWebhookSubscriptionCreationResponse>
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored idempotency response is invalid', {
-      idempotencyRecordId: record.id,
-    })
-  }
+function parseStoredResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredWebhookSubscriptionCreationResponse {
+  const response = readCompletedIdempotencyResponse(
+    record,
+    requestFingerprint,
+  ) as Partial<StoredWebhookSubscriptionCreationResponse>
   if (!response.subscriptionId) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored idempotency response is invalid', {
       idempotencyRecordId: record.id,
@@ -115,14 +108,10 @@ export class PrismaWebhookSubscriptionCreationRepository
         }
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
         if (existing && existing.expiresAt > new Date(idempotency.requestedAt)) {
-          if (existing.requestFingerprint !== idempotency.requestFingerprint) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different request',
-              { idempotencyRecordId: existing.id },
-            )
-          }
-          const stored = parseStoredResponse(existing)
+          const stored = parseStoredResponse(
+            existing,
+            idempotency.requestFingerprint,
+          )
           const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
             where: {
               workspaceId: subscription.workspaceId,
@@ -255,7 +244,10 @@ export class PrismaWebhookSubscriptionCreationRepository
               'Idempotency key was already used with a different request',
             )
           }
-          const stored = parseStoredResponse(existing)
+          const stored = parseStoredResponse(
+            existing,
+            idempotency.requestFingerprint,
+          )
           const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
             where: {
               workspaceId: subscription.workspaceId,

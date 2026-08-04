@@ -21,6 +21,7 @@ import {
   assertProjectCreationCommand,
   projectCreationCommandData,
 } from './project-creation-command-persistence.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredProjectCreationResponse {
   projectId: string
@@ -40,16 +41,14 @@ function isSerializationConflict(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }
 
-function parseStoredResponse(record: V2IdempotencyRecord): StoredProjectCreationResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Idempotent project creation is still processing or incomplete',
-      { idempotencyRecordId: record.id, status: record.status },
-    )
-  }
-
-  const response = JSON.parse(record.responseJson) as Partial<StoredProjectCreationResponse>
+function parseStoredResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredProjectCreationResponse {
+  const response = readCompletedIdempotencyResponse(
+    record,
+    requestFingerprint,
+  ) as Partial<StoredProjectCreationResponse>
   if (!response.projectId || !response.versionId) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored idempotency response is invalid', {
       idempotencyRecordId: record.id,
@@ -143,14 +142,10 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
 
         if (existing && existing.expiresAt > new Date()) {
-          if (existing.requestFingerprint !== bundle.idempotency.requestFingerprint) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different request',
-              { idempotencyRecordId: existing.id },
-            )
-          }
-          const stored = parseStoredResponse(existing)
+          const stored = parseStoredResponse(
+            existing,
+            bundle.idempotency.requestFingerprint,
+          )
           const [projectRow, versionRow] = await Promise.all([
             transaction.v2Project.findUnique({ where: { id: stored.projectId } }),
             transaction.v2ProjectVersion.findUnique({ where: { id: stored.versionId } }),
@@ -303,13 +298,10 @@ export class PrismaProjectCreationRepository implements ProjectCreationRepositor
           },
         })
         if (existing) {
-          if (existing.requestFingerprint !== bundle.idempotency.requestFingerprint) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different request',
-            )
-          }
-          const stored = parseStoredResponse(existing)
+          const stored = parseStoredResponse(
+            existing,
+            bundle.idempotency.requestFingerprint,
+          )
           const [projectRow, versionRow, command] = await Promise.all([
             this.client.v2Project.findUnique({ where: { id: stored.projectId } }),
             this.client.v2ProjectVersion.findUnique({ where: { id: stored.versionId } }),

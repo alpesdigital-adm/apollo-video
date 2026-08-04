@@ -853,7 +853,9 @@ test('webhook signing secret provisioning recovers a concurrent committed winner
     v2IdempotencyRecord: {
       async findUnique() {
         return {
+          id: 'idempotency-provision-winner-1',
           status: 'completed', requestFingerprint,
+          responseStatus: 201,
           responseJson: JSON.stringify({ endpointId, secretId }),
           expiresAt: new Date('2026-07-17T21:00:00.000Z'),
         }
@@ -2310,8 +2312,10 @@ test('webhook delivery replay recovers a concurrent committed winner after seria
     v2IdempotencyRecord: {
       async findUnique() {
         return {
+          id: '00000000-0000-4000-8000-00000000084d',
           requestFingerprint,
           status: 'completed',
+          responseStatus: 202,
           responseJson,
           expiresAt: new Date('2026-07-17T08:02:00.000Z'),
         }

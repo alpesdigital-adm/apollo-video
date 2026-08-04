@@ -24,6 +24,7 @@ import { persistPublicEvents } from './public-event-outbox.ts'
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ApiEnvironment } from '../../domain/api-client.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { readCompletedIdempotencyResponse } from './idempotency-record-persistence.ts'
 
 interface StoredResponse {
   transitionId: string
@@ -37,27 +38,21 @@ function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002'
 }
 
-function parseStoredResponse(record: V2IdempotencyRecord): StoredResponse {
-  if (record.status !== 'completed' || !record.responseJson) {
-    throw new DomainError(
-      'PERSISTENCE_CONFLICT',
-      'Artifact lifecycle idempotency record is incomplete',
-      { idempotencyRecordId: record.id, status: record.status },
-    )
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(record.responseJson)
-  } catch {
-    throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact lifecycle idempotency response is invalid')
-  }
+function parseStoredResponse(
+  record: V2IdempotencyRecord,
+  requestFingerprint: string,
+): StoredResponse {
+  const parsed = readCompletedIdempotencyResponse(
+    record,
+    requestFingerprint,
+  )
   if (
-    typeof parsed !== 'object' || parsed === null || Array.isArray(parsed) ||
-    Object.keys(parsed).length !== 1 || typeof (parsed as StoredResponse).transitionId !== 'string'
+    Object.keys(parsed).length !== 1 ||
+    typeof parsed.transitionId !== 'string'
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Artifact lifecycle idempotency response is invalid')
   }
-  return { transitionId: (parsed as StoredResponse).transitionId }
+  return { transitionId: parsed.transitionId }
 }
 
 function hydrateTransition(
@@ -176,13 +171,10 @@ implements MediaArtifactLifecycleRepository {
         // The application clock owns command time. Using the host wall clock here
         // makes replay semantics nondeterministic in tests and during clock skew.
         if (existing && existing.expiresAt > new Date(bundle.createdAt)) {
-          if (existing.requestFingerprint !== bundle.requestFingerprint) {
-            throw new DomainError(
-              'IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'Idempotency key was already used with a different artifact lifecycle request',
-            )
-          }
-          const stored = parseStoredResponse(existing)
+          const stored = parseStoredResponse(
+            existing,
+            bundle.requestFingerprint,
+          )
           const transition = await transaction.v2MediaArtifactLifecycleTransition.findUnique({
             where: { id: stored.transitionId },
           })
