@@ -556,6 +556,8 @@ Para `PublicOperation`, somente mudança persistida de `status` publica evento. 
 
 Writers adicionais seguem a mesma regra de commit: annotation criada/aplicada produz `annotation.created`/`annotation.resolved`; lifecycle realmente alterado para `available`/`quarantined` produz `artifact.ready`/`artifact.rejected`; ação `suspend` que altera um API client produz `client.suspended`. No-op, replay e rollback produzem zero linhas. Texto, screenshot, reason administrativo, credenciais e detalhes de storage são proibidos nesses payloads. `budget.threshold.reached` só pode nascer de um futuro ledger canônico que comprove cruzamento de limiar; preflight ou estimativa isolada não autorizam o evento.
 
+A superfície humana de administração pertence à UI de configurações, mas não possui backend próprio. Ela consulta em paralelo catálogo, endpoints, subscriptions e deliveries pelas rotas públicas, e toda mutação volta ao mesmo handler/Application service da capability externa. Lifecycle usa `baseRevision`; criação e replay usam idempotency key; signing secret de criação/rotação nunca entra em storage do browser e exige descarte explícito. A timeline diagnóstica apresenta os attempts persistidos em ordem. Revogação terminal e higiene ampla permanecem deliberadamente fora dessa primeira superfície reversível e continuam disponíveis apenas pelos gates mais fortes da API.
+
 ## 20. Capability discovery e tool calling
 
 `GET /v1/capabilities` filtra por client/scopes/environment e retorna schemas, custo, confirmação e documentação.

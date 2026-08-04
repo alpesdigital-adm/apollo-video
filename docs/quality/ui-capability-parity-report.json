@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 73,
-    "capabilities": 66,
-    "endpoints": 66,
-    "registeredCapabilities": 193,
-    "operableCapabilities": 193,
-    "publicContractCapabilities": 193,
+    "uiActions": 88,
+    "capabilities": 81,
+    "endpoints": 81,
+    "registeredCapabilities": 194,
+    "operableCapabilities": 194,
+    "publicContractCapabilities": 194,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1202,7 +1202,260 @@
       ]
     },
     {
-      "uiAction": "src/components/WorkspaceCapabilityHub.tsx:65",
+      "uiAction": "src/components/WebhookControlRoom.tsx:148",
+      "capabilityId": "apollo.webhooks.endpoints.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/webhooks/endpoints",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "listWebhookEndpointsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:149",
+      "capabilityId": "apollo.webhooks.subscriptions.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/webhooks/subscriptions",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "listWebhookSubscriptionsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:150",
+      "capabilityId": "apollo.webhooks.deliveries.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/webhooks/deliveries",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "listWebhookDeliveriesService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:151",
+      "capabilityId": "apollo.events.catalog.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/events/catalog",
+      "applicationServices": [
+        "readPublicEventCatalogService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:173",
+      "capabilityId": "apollo.webhooks.endpoints.signing-secrets.rotations.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "listWebhookSigningSecretRotationsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:187",
+      "capabilityId": "apollo.webhooks.deliveries.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/webhooks/deliveries/{deliveryId}",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "readWebhookDeliveryService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:231",
+      "capabilityId": "apollo.webhooks.endpoints.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/endpoints",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createWebhookEndpointService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:246",
+      "capabilityId": "apollo.webhooks.subscriptions.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/subscriptions",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createWebhookSubscriptionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:259",
+      "capabilityId": "apollo.webhooks.subscriptions.status.set",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "PUT /v1/webhooks/subscriptions/{subscriptionId}/status",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "requireScope",
+        "setWebhookSubscriptionStatusService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:271",
+      "capabilityId": "apollo.webhooks.endpoints.challenge",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/challenge",
+      "applicationServices": [
+        "activateWebhookEndpointConvergentlyService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "readWebhookEndpointService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:279",
+      "capabilityId": "apollo.webhooks.endpoints.status.set",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "PUT /v1/webhooks/endpoints/{endpointId}/status",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "requireScope",
+        "setWebhookEndpointStatusService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:291",
+      "capabilityId": "apollo.webhooks.endpoints.signing-secrets.rotations.stage",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "requireScope",
+        "stageWebhookSigningSecretRotationService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:303",
+      "capabilityId": "apollo.webhooks.endpoints.signing-secrets.rotations.activate",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate",
+      "applicationServices": [
+        "activateWebhookSigningSecretRotationService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:315",
+      "capabilityId": "apollo.webhooks.endpoints.signing-secrets.rotations.cancel",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/cancel",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "cancelWebhookSigningSecretRotationService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WebhookControlRoom.tsx:327",
+      "capabilityId": "apollo.webhooks.deliveries.replay",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/webhooks/deliveries/{deliveryId}/replay",
+      "applicationServices": [
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "replayWebhookDeliveryService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceCapabilityHub.tsx:66",
       "capabilityId": "apollo.capabilities.list",
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/capabilities",
@@ -1662,7 +1915,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v8",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1673,7 +1926,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/dead-letter",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-list/v8",
+      "outputSchemaRef": "apollo://schemas/public-operation-list/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1684,7 +1937,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1706,7 +1959,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/cancel",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1717,7 +1970,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/retry",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v8",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v10",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -2113,7 +2366,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/long-form-index-workflows",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-page/v2",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-page/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -2124,7 +2377,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/long-form-index-workflows",
       "inputSchemaRef": "apollo://schemas/create-long-form-index-workflow-request/v1",
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-mutated/v2",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-mutated/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -2135,7 +2388,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/long-form-index-workflows/{workflowId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-read/v2",
+      "outputSchemaRef": "apollo://schemas/long-form-index-workflow-read/v3",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -2873,6 +3126,17 @@
       "endpoint": "POST /v1/batches/{batchId}/items/{itemId}/actions",
       "inputSchemaRef": "apollo://schemas/production-batch-item-action-request/v1",
       "outputSchemaRef": "apollo://schemas/production-batch-mutated/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-runs.enqueue",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/director-runs",
+      "inputSchemaRef": "apollo://schemas/enqueue-project-director-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-director-operation-enqueued/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -1864,6 +1864,8 @@ Atualização local de implementação: transições canônicas de status de `Pu
 
 Outro incremento local conecta o mesmo outbox às transições existentes de review, lifecycle e governança: criação/aplicação de annotation publica `annotation.created`/`annotation.resolved`; retorno de quarantine e entrada em quarantine publicam `artifact.ready`/`artifact.rejected`; suspensão explícita de um API client publica `client.suspended`. Replay, no-op e rollback não publicam. Payloads omitem texto/screenshot de review, reason administrativo e detalhes internos. Assim, treze dos quatorze tipos do catálogo possuem ao menos um producer real; `budget.threshold.reached` continua sem producer até existir uma fonte canônica de consumo e limiar.
 
+A administração local passou a ter uma superfície humana API-first na área de configurações. Ela carrega endpoints, subscriptions, deliveries e catálogo em paralelo; mostra status e attempts; opera somente transitions revisionadas e idempotentes; e mantém o novo signing secret exclusivamente em memória até descarte explícito. Todas as 15 ações de rede são vinculadas pelo gate gerado a uma capability pública e ao mesmo Application service usado por clientes externos. Esta evidência é estrutural/local: jornada HTTP/PostgreSQL em browser, ações terminais destrutivas, deploy e aceite continuam pendentes.
+
 ### FR-245 — Idempotência e concorrência externa
 
 Mutações aceitam idempotency key; alterações versionadas exigem `baseVersionId` ou precondition equivalente. A API retorna conflito estruturado, nunca sobrescreve silenciosamente e preserva o resultado de requests repetidas.

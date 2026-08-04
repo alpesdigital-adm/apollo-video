@@ -89,6 +89,7 @@ import {
 import { enqueueAuthorizedRenderService } from '../../src/v2/application/enqueue-authorized-render.ts'
 import { listDeadLetterOperationsService } from '../../src/v2/application/list-dead-letter-operations.ts'
 import { listPublicOperationsService } from '../../src/v2/application/list-public-operations.ts'
+import { readPublicEventCatalogService } from '../../src/v2/application/read-public-event-catalog.ts'
 import { presentPublicOperation, presentPublicOperationV2 } from '../../src/v2/public-api/presenters.ts'
 import {
   PUBLIC_EVENT_CATALOG,
@@ -211,6 +212,15 @@ test('public event envelope is versioned, bounded and tied to the initial catalo
       'INVALID_PUBLIC_EVENT',
     )
   }
+})
+
+test('T-FR-244 public event catalog crosses the shared application boundary without drift', () => {
+  const catalog = readPublicEventCatalogService()()
+  assert.equal(catalog.envelopeSchemaRef, 'apollo://schemas/public-event/v1')
+  assert.deepEqual(catalog.events, PUBLIC_EVENT_CATALOG)
+  assert.ok(Object.isFrozen(catalog))
+  assert.ok(Object.isFrozen(catalog.events))
+  assert.ok(catalog.events.every(Object.isFrozen))
 })
 
 test('portable RenderInput hashes exact renderer, plan, output, assets and canonical props', async () => {

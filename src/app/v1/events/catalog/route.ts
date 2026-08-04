@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { PUBLIC_EVENT_CATALOG } from '@/v2/domain/public-event'
+import { readPublicEventCatalogService } from '@/v2/application/read-public-event-catalog'
 import {
   publicApiHeaders,
   resolveRequestId,
@@ -13,11 +13,9 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const requestId = resolveRequestId(request)
   try {
+    const readCatalog = readPublicEventCatalogService()
     return NextResponse.json(
-      presentSuccess({
-        envelopeSchemaRef: 'apollo://schemas/public-event/v1',
-        events: PUBLIC_EVENT_CATALOG.map((descriptor) => ({ ...descriptor })),
-      }),
+      presentSuccess(readCatalog()),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {
