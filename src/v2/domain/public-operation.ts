@@ -189,6 +189,27 @@ function progressUnit(type: PublicOperationType): string {
   return isRenderOperation(type) ? 'render' : 'stage'
 }
 
+function canonicalProgressFor(
+  operation: Pick<PublicOperation, 'type' | 'status' | 'phase' | 'progress'>,
+): boolean {
+  const phases = runningPhasesFor(operation.type)
+  const progress = operation.progress
+  if (
+    !progress ||
+    progress.total !== phases.length ||
+    progress.unit !== progressUnit(operation.type)
+  ) return false
+
+  if (operation.status === 'queued') return progress.completed === 0
+  if (operation.status === 'succeeded') return progress.completed === phases.length
+  if (operation.status === 'running') {
+    return progress.completed === phases.indexOf(
+      operation.phase as PublicOperationRunningPhase,
+    )
+  }
+  return progress.completed >= 0 && progress.completed < phases.length
+}
+
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
   assertDomain(
@@ -369,6 +390,11 @@ export function assertPublicOperation(operation: PublicOperation): void {
   )
   if (operation.result) validateTarget(operation.result.resource, 'operation.result.resource')
   validateProgress(operation.progress)
+  assertDomain(
+    canonicalProgressFor(operation),
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation progress must match its type, status and phase',
+  )
   if (operation.estimatedCost) {
     validateEstimatedCost(operation.estimatedCost)
     assertDomain(
@@ -620,7 +646,11 @@ export function createQueuedPublicOperation(input: {
     type: input.type,
     status: 'queued',
     phase: 'queued',
-    progress: { completed: 0, total: 1, unit: progressUnit(input.type) },
+    progress: {
+      completed: 0,
+      total: runningPhasesFor(input.type).length,
+      unit: progressUnit(input.type),
+    },
     cancelable: true,
     retryable: false,
     target: input.target.type === 'media-artifact'

@@ -1896,6 +1896,8 @@ Atualização local de implementação: o Diretor possui enqueue público `202`,
 
 Atualização local de custo de FR-243: os contratos de operação v10 expõem custo apenas quando existe fonte persistida. `long-form-index` publica a soma estimada dos budgets de estágio e o teto do workflow; a medição real aparece somente após término e é derivada dos checkpoints persistidos. Outros tipos omitem custo até possuírem reserva/medição próprias. A prova local não substitui execução PostgreSQL/API hospedada, deploy ou aceite.
 
+Atualização local de integridade de progresso de FR-243: os sete tipos de `PublicOperation` atualmente executáveis derivam total e unidade exclusivamente de sua sequência fechada de fases. A fila já conhece o denominador real; durante execução, fase e contador precisam apontar para o mesmo estágio; espera, retry, falha e cancelamento só preservam checkpoint dentro da sequência; sucesso exige o total. Domínio, hidratação e constraint PostgreSQL compartilham essa matriz e recusam progresso ausente ou adulterado. A migration converte apenas o antigo `queued 0/1` produzido canonicamente; não reconstrói estado ambíguo. O teste PostgreSQL foi ampliado, mas ainda precisa de execução isolada/hospedada, e jobs de provider/sync/batch continuam fora da matriz atual.
+
 Ingestão, percepção, direção, geração, sincronização, lote, render e export devem responder com operation/job ID quando não forem imediatos. Clientes podem consultar status, progresso real, resultado, erro, custo, cancelabilidade, retry e resume.
 
 ### FR-244 — Webhooks e eventos

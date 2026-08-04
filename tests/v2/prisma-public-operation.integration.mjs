@@ -193,6 +193,11 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     assert.equal(created.traceId, input.traceId)
     assert.equal(replayed.traceId, input.traceId)
     assert.deepEqual(replayed.context, { kind: 'artifact-render', ...input.context })
+    assert.deepEqual(created.operation.progress, {
+      completed: 0,
+      total: 4,
+      unit: 'render',
+    })
     assert.equal(await client.v2PublicOperation.count({ where: { workspaceId } }), 1)
     assert.equal(await client.v2ArtifactRenderOperation.count({ where: { workspaceId } }), 1)
     const queuedEvents = await client.v2PublicEventOutbox.findMany({
@@ -209,6 +214,20 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     })
     assert.equal(await repository.findById('another-workspace', operationId), null)
     assert.deepEqual(created.authenticationAudit, authenticationAudit)
+
+    for (const data of [
+      { progressCompleted: 1 },
+      { progressTotal: 5 },
+      { progressUnit: 'stage' },
+    ]) {
+      await assert.rejects(
+        client.v2PublicOperation.update({ where: { id: operationId }, data }),
+      )
+    }
+    assert.deepEqual(
+      (await repository.findById(workspaceId, operationId)).operation.progress,
+      created.operation.progress,
+    )
 
     await assert.rejects(
       repository.findReplay({

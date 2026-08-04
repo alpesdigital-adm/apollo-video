@@ -542,13 +542,17 @@ test('PublicOperation status events are transition-bound, terminal-specific and 
     queued,
     '2026-08-04T02:00:01.000Z',
   )
-  const succeeded = succeedPublicOperation(
-    advancePublicOperationPhase(
-      running,
-      'persisting',
-      '2026-08-04T02:00:02.000Z',
+  const persisted = ['rendering', 'verifying', 'persisting'].reduce(
+    (operation, phase, index) => advancePublicOperationPhase(
+      operation,
+      phase,
+      `2026-08-04T02:00:0${index + 2}.000Z`,
     ),
-    '2026-08-04T02:00:03.000Z',
+    running,
+  )
+  const succeeded = succeedPublicOperation(
+    persisted,
+    '2026-08-04T02:00:05.000Z',
   )
   const successEvents = createPublicOperationStatusEvents({
     previousStatus: 'running',
@@ -1130,12 +1134,15 @@ test('PublicOperation exposes only persisted long-form estimates and terminal ac
     'INVALID_PUBLIC_OPERATION',
   )
   const terminal = succeedPublicOperation(
-    advancePublicOperationPhase(
+    ['transcribing', 'diarizing', 'chunking', 'indexing', 'persisting'].reduce(
+      (operation, phase, index) => advancePublicOperationPhase(
+        operation,
+        phase,
+        `2026-08-03T23:00:0${index + 2}.000Z`,
+      ),
       running,
-      'persisting',
-      '2026-08-03T23:00:02.000Z',
     ),
-    '2026-08-03T23:00:03.000Z',
+    '2026-08-03T23:00:07.000Z',
   )
   const measured = rehydratePublicOperation({
     ...terminal,
@@ -1181,6 +1188,84 @@ test('PublicOperation exposes only persisted long-form estimates and terminal ac
       actualCost: { currency: 'USD', minorUnits: 301 },
     }),
     'INVALID_PUBLIC_OPERATION',
+  )
+})
+
+test('T-FR-243 PublicOperation progress is canonical for every executable type and phase', () => {
+  const cases = [
+    ['artifact-render', 4, 'render'],
+    ['media-ingest', 6, 'stage'],
+    ['project-proxy-render', 4, 'render'],
+    ['project-final-export', 4, 'render'],
+    ['source-cleanup', 4, 'render'],
+    ['long-form-index', 6, 'stage'],
+    ['project-director-run', 2, 'stage'],
+  ]
+  for (const [type, total, unit] of cases) {
+    const operation = createQueuedPublicOperation({
+      id: `operation-progress-${type}`,
+      workspaceId: 'workspace-progress-1',
+      ...(type === 'artifact-render' ? {} : { projectId: 'project-progress-1' }),
+      clientId: 'client-progress-1',
+      type,
+      target: type === 'project-director-run'
+        ? { type: 'project-version', id: 'version-progress-1' }
+        : {
+            type: 'media-artifact',
+            id: `artifact-progress-${type}`,
+            manifestId: `manifest-progress-${type}`,
+          },
+      createdAt: '2026-08-05T08:00:00.000Z',
+    })
+    assert.deepEqual(operation.progress, { completed: 0, total, unit })
+    for (const progress of [
+      undefined,
+      { completed: 0, total: total + 1, unit },
+      { completed: 0, total, unit: unit === 'render' ? 'stage' : 'render' },
+      { completed: 1, total, unit },
+    ]) {
+      expectDomainError(
+        () => rehydratePublicOperation({ ...operation, progress }),
+        'INVALID_PUBLIC_OPERATION',
+      )
+    }
+  }
+
+  const running = startPublicOperationAttempt(
+    createQueuedPublicOperation({
+      id: 'operation-progress-sequence-1',
+      workspaceId: 'workspace-progress-1',
+      clientId: 'client-progress-1',
+      type: 'artifact-render',
+      target: {
+        type: 'media-artifact',
+        id: 'artifact-progress-sequence-1',
+        manifestId: 'manifest-progress-sequence-1',
+      },
+      createdAt: '2026-08-05T08:00:00.000Z',
+    }),
+    '2026-08-05T08:00:01.000Z',
+  )
+  expectDomainError(
+    () => rehydratePublicOperation({
+      ...running,
+      phase: 'rendering',
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  const rendering = advancePublicOperationPhase(
+    running,
+    'rendering',
+    '2026-08-05T08:00:02.000Z',
+  )
+  assert.deepEqual(rendering.progress, { completed: 1, total: 4, unit: 'render' })
+  assert.deepEqual(
+    advancePublicOperationPhase(
+      rendering,
+      'rendering',
+      '2026-08-05T08:00:03.000Z',
+    ).progress,
+    rendering.progress,
   )
 })
 
@@ -1430,14 +1515,18 @@ test('manual retry reopens only failed or canceled operations and preserves atte
   )
   const persisted = advancePublicOperationPhase(
     advancePublicOperationPhase(
-      secondAttempt,
-      'rendering',
-      '2026-07-14T12:00:04.000Z',
+      advancePublicOperationPhase(
+        secondAttempt,
+        'rendering',
+        '2026-07-14T12:00:04.000Z',
+      ),
+      'verifying',
+      '2026-07-14T12:00:05.000Z',
     ),
     'persisting',
-    '2026-07-14T12:00:05.000Z',
+    '2026-07-14T12:00:06.000Z',
   )
-  const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:06.000Z')
+  const succeeded = succeedPublicOperation(persisted, '2026-07-14T12:00:07.000Z')
   expectDomainError(
     () => retryPublicOperation(
       succeeded,

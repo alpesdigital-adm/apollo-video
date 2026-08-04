@@ -162,3 +162,21 @@ test('T-FR-236 waiting releases its lease and resumes atomically without a new a
     (error) => error.code === 'PERSISTENCE_CONFLICT',
   )
 })
+
+test('T-FR-243 persistence rejects phase and progress drift before exposing an operation', async () => {
+  const mutations = [
+    { progressCompleted: 1 },
+    { progressTotal: 5 },
+    { progressUnit: 'render' },
+    { phase: 'probing' },
+  ]
+  for (const mutation of mutations) {
+    const { client, state } = createMemoryPrisma()
+    Object.assign(state.row, mutation)
+    const repository = new PrismaPublicOperationRepository(client)
+    await assert.rejects(
+      repository.findById(state.row.workspaceId, state.row.id),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+    )
+  }
+})
