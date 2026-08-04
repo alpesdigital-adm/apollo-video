@@ -207,6 +207,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 
 `ApiScope` não é uma string aberta. A matriz server-side contém apenas os pares usados por capabilities operáveis e é a fonte comum de criação/hidratação de clients, autenticação, guards e registry. Um par novo precisa entrar deliberadamente na matriz junto de uma capability; regex válida isoladamente não concede autoridade. O gate estrutural resolve cada endpoint Bearer até sua rota e Application services e exige o mesmo `requireScope`, de modo que declaração pública e enforcement não possam divergir silenciosamente.
 
+O actor autenticado e seu audit context formam um único vínculo. Client, credential, workspace e environment devem coincidir; delegação é ausente ou contém simultaneamente member, login identity e workspace role persistidos, e a projeção de actor repete somente client e member. O guard de scope valida esse vínculo antes da grant. O conjunto de scopes entregue ao runtime implementa apenas a interface read-only e não expõe `add`, `delete` ou `clear`, mesmo em JavaScript.
+
 ## 9. Convenções HTTP/JSON
 
 A fonte executável destas convenções é `src/v2/public-api/conventions.ts`; `PUBLIC_API_VERSION`, presenters e os schemas comuns não mantêm constantes paralelas. O registry declara a allowlist de query por capability. Requisições autenticadas validam nome, duplicidade e obrigatoriedade depois da autenticação e antes do Application service; endpoints com token assinado executam a mesma validação localmente. A resolução de pathname segue a precedência do App Router: entre templates compatíveis, vence o de maior número de segmentos literais; empate continua erro de paridade.

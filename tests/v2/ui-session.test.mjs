@@ -99,6 +99,9 @@ test('UI session resolves the active Postgres API actor and its scopes', async (
     actor: { type: 'api-client', id: 'apollo-ui-client', delegatedUserId: 'member-1' },
   })
   assert.equal(actor.scopes.has('projects:write'), true)
+  assert.equal(actor.scopes.add, undefined)
+  assert.equal(Object.isFrozen(actor.scopes), true)
+  assert.deepEqual([...actor.scopes], ['projects:read', 'projects:write'])
   await assert.rejects(
     () => authenticateUiSessionService({ repository, sessions, environment: 'sandbox' })('a'.repeat(43), 'a'.repeat(64)),
     (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',

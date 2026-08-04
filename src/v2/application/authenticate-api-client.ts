@@ -1,4 +1,10 @@
-import { isApiScope, type ApiEnvironment, type ApiScope } from '../domain/api-client.ts'
+import {
+  API_ENVIRONMENTS,
+  createApiScopeSet,
+  isApiScope,
+  type ApiEnvironment,
+  type ApiScope,
+} from '../domain/api-client.ts'
 import type { ApiAccessStatus } from '../domain/api-access-control.ts'
 import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -10,7 +16,7 @@ export interface AuthenticatedExternalActor {
   credentialId: string
   workspaceId: string
   environment: ApiEnvironment
-  scopes: ReadonlySet<string>
+  scopes: ReadonlySet<ApiScope>
   delegatedUserId?: string
   delegatedIdentityId?: string
   workspaceRole?: string
@@ -52,6 +58,9 @@ export function createExternalAuditContext(input: {
   delegatedIdentityId?: string
   workspaceRole?: string
 }): Readonly<ExternalAuditContext> {
+  if (!API_ENVIRONMENTS.includes(input.environment)) {
+    throw new DomainError('AUTH_INVALID', 'Authenticated environment is invalid')
+  }
   assertAuditIdentifier(input.clientId, 'client identity')
   assertAuditIdentifier(input.credentialId, 'credential identity')
   assertAuditIdentifier(input.workspaceId, 'workspace identity')
@@ -72,6 +81,20 @@ export function createExternalAuditContext(input: {
     ...(input.delegatedUserId ? { delegatedUserId: input.delegatedUserId } : {}),
   })
   return Object.freeze({ ...input, actor })
+}
+
+export function assertExternalAuditContextBinding(actor: AuthenticatedExternalActor): void {
+  const audit = actor.auditContext
+  if (
+    !audit || audit.clientId !== actor.clientId || audit.credentialId !== actor.credentialId ||
+    audit.workspaceId !== actor.workspaceId || audit.environment !== actor.environment ||
+    audit.delegatedUserId !== actor.delegatedUserId ||
+    audit.delegatedIdentityId !== actor.delegatedIdentityId ||
+    audit.workspaceRole !== actor.workspaceRole || audit.actor.type !== 'api-client' ||
+    audit.actor.id !== actor.clientId || audit.actor.delegatedUserId !== actor.delegatedUserId
+  ) {
+    throw new DomainError('AUTH_INVALID', 'Authenticated audit context does not match the request actor')
+  }
 }
 
 export interface AuthenticateApiClientDependencies {
@@ -127,7 +150,7 @@ export function authenticateApiClientService(
     })
     return Object.freeze({
       ...auditContext,
-      scopes: new Set(stored.client.scopeGrants),
+      scopes: createApiScopeSet(stored.client.scopeGrants),
       authenticationKind: 'bearer' as const,
       clientKillSwitchEngaged: stored.clientKillSwitchEngaged,
       workspaceKillSwitchEngaged: stored.workspaceKillSwitchEngaged,
@@ -139,6 +162,7 @@ export function authenticateApiClientService(
 }
 
 export function requireScope(actor: AuthenticatedExternalActor, scope: ApiScope): void {
+  assertExternalAuditContextBinding(actor)
   if (!isApiScope(scope) || !actor.scopes.has(scope)) {
     throw new DomainError('AUTH_SCOPE_REQUIRED', 'API client lacks the required scope', {
       requiredScope: scope,

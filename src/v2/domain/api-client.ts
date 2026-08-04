@@ -33,6 +33,40 @@ export function isApiScope(value: unknown): value is ApiScope {
   return typeof value === 'string' && API_SCOPE_SET.has(value)
 }
 
+class ImmutableApiScopeSet implements ReadonlySet<ApiScope> {
+  readonly #values: Set<ApiScope>
+
+  constructor(values: readonly ApiScope[]) {
+    this.#values = new Set(values)
+    Object.freeze(this)
+  }
+
+  get size(): number { return this.#values.size }
+  has(value: ApiScope): boolean { return this.#values.has(value) }
+  entries(): SetIterator<[ApiScope, ApiScope]> { return this.#values.entries() }
+  keys(): SetIterator<ApiScope> { return this.#values.keys() }
+  values(): SetIterator<ApiScope> { return this.#values.values() }
+  [Symbol.iterator](): SetIterator<ApiScope> { return this.#values[Symbol.iterator]() }
+  union<Other>(other: ReadonlySetLike<Other>): Set<ApiScope | Other> { return this.#values.union(other) }
+  intersection<Other>(other: ReadonlySetLike<Other>): Set<ApiScope & Other> { return this.#values.intersection(other) }
+  difference<Other>(other: ReadonlySetLike<Other>): Set<ApiScope> { return this.#values.difference(other) }
+  symmetricDifference<Other>(other: ReadonlySetLike<Other>): Set<ApiScope | Other> { return this.#values.symmetricDifference(other) }
+  isSubsetOf(other: ReadonlySetLike<unknown>): boolean { return this.#values.isSubsetOf(other) }
+  isSupersetOf(other: ReadonlySetLike<unknown>): boolean { return this.#values.isSupersetOf(other) }
+  isDisjointFrom(other: ReadonlySetLike<unknown>): boolean { return this.#values.isDisjointFrom(other) }
+  forEach(
+    callback: (value: ApiScope, value2: ApiScope, set: ReadonlySet<ApiScope>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.#values.forEach((value) => callback.call(thisArg, value, value, this))
+  }
+}
+
+export function createApiScopeSet(values: readonly string[]): ReadonlySet<ApiScope> {
+  assertDomain(values.every(isApiScope), 'INVALID_API_CLIENT', 'Authenticated scopes are outside the server authorization matrix')
+  return new ImmutableApiScopeSet(values as ApiScope[])
+}
+
 export type ApiClientStatus = (typeof API_CLIENT_STATUSES)[number]
 export type ApiEnvironment = (typeof API_ENVIRONMENTS)[number]
 export type ApiClientType = (typeof API_CLIENT_TYPES)[number]

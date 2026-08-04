@@ -333,6 +333,8 @@ Evidência concluída F0.036/FR-242 (one-shot, referência, rotação e revogaç
 
 Evidência local F0.036/FR-242 (matriz deny-by-default) — `API_SCOPE_MATRIX` fecha os 13 grants operáveis e é reutilizada por criação/hidratação de client, autenticação, `requireScope` e validação do registry. T-FR-242 prova igualdade matriz↔capabilities, recusa `projects:delete` apesar do formato válido e resolve cada endpoint até a rota/Application service que aplica seu guard. A prova ainda não atravessou PostgreSQL/HTTP hospedado nem deploy/aceite, portanto a microtarefa permanece aberta no status auditado.
 
+Evidência local F0.036/FR-242 (audit binding) — os dois autenticadores derivam `ExternalAuditContext` da identidade persistida e `requireScope` falha antes da autorização se client, credential, workspace, environment ou delegação divergir do actor. A sessão humana vincula member/identity/role como um conjunto completo; Bearer não recebe esses campos. O conjunto de grants autenticados é uma view imutável sem métodos de mutação. Testes provam binding, falsificação cross-workspace, delegação parcial e ausência de `add`; ledger PostgreSQL completo, execução hospedada, deploy e aceite permanecem pendentes.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

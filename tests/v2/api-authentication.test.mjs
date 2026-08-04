@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   authenticateApiClientService,
+  assertExternalAuditContextBinding,
   createExternalAuditContext,
   requireScope,
 } from '../../src/v2/application/authenticate-api-client.ts'
@@ -166,6 +167,10 @@ test('authentication returns workspace-scoped actor and updates last use', async
   assert.equal(actor.clientId, issued.client.id)
   assert.equal(actor.workspaceId, 'workspace-1')
   assert.equal(actor.scopes.has('projects:write'), true)
+  assert.equal(actor.scopes.add, undefined)
+  assert.equal(Object.isFrozen(actor.scopes), true)
+  assert.deepEqual([...actor.scopes], ['projects:read', 'projects:write'])
+  assert.doesNotThrow(() => assertExternalAuditContextBinding(actor))
   assert.equal(actor.authenticationKind, 'bearer')
   assert.equal(actor.clientKillSwitchEngaged, false)
   assert.equal(actor.workspaceKillSwitchEngaged, false)
@@ -255,6 +260,10 @@ test('invalid token, wrong environment and missing scope are denied', async () =
   assert.throws(
     () => requireScope(actor, 'projects:approve'),
     (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
+  )
+  assert.throws(
+    () => requireScope({ ...actor, workspaceId: 'workspace-forged' }, 'projects:read'),
+    (error) => error instanceof DomainError && error.code === 'AUTH_INVALID',
   )
 
   const key = `${issued.client.id}:${issued.credential.id}`

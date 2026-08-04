@@ -4,7 +4,7 @@ import type {
   ApiCredentialMutationResult,
 } from './ports/api-client-administration-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
-import { createServiceAccount, type ApiEnvironment } from '../domain/api-client.ts'
+import { createServiceAccount, isApiScope, type ApiEnvironment } from '../domain/api-client.ts'
 import { createApiCredential } from '../domain/api-credential.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { calculateVersionHash } from './version-hash.ts'
@@ -74,7 +74,7 @@ export function createApiClientAdministrationService(
       'ApiClient environment must match the administrative request environment',
     )
     const unauthorizedScopes = request.scopes.filter(
-      (scope) => !request.actor.scopes.has(scope),
+      (scope) => !isApiScope(scope) || !request.actor.scopes.has(scope),
     )
     assertDomain(
       unauthorizedScopes.length === 0,

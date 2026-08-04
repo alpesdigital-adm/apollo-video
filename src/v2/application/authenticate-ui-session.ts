@@ -1,4 +1,4 @@
-import type { ApiEnvironment } from '../domain/api-client.ts'
+import { createApiScopeSet, type ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { UiSessionSecurityRepository } from './ports/ui-session-security-repository.ts'
@@ -67,7 +67,7 @@ export function authenticateUiSessionService(dependencies: {
     })
     return Object.freeze({
       ...auditContext,
-      scopes: new Set(client.scopeGrants),
+      scopes: createApiScopeSet(client.scopeGrants),
       authenticationKind: 'ui-session' as const,
       clientKillSwitchEngaged: access.clientKillSwitchEngaged,
       workspaceKillSwitchEngaged: access.workspaceKillSwitchEngaged,

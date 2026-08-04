@@ -6,6 +6,7 @@ import {
   revokeApiCredentialService,
   rotateApiCredentialService,
 } from '../../src/v2/application/administer-api-clients.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
@@ -63,12 +64,16 @@ class InMemoryAdministrationRepository {
 }
 
 function actor(scopes = ['clients:admin', 'projects:read']) {
+  const auditContext = createExternalAuditContext({
+    clientId: 'admin-client', credentialId: 'admin-credential',
+    workspaceId: 'workspace-1', environment: 'sandbox',
+  })
   return {
-    clientId: 'admin-client',
-    credentialId: 'admin-credential',
-    workspaceId: 'workspace-1',
-    environment: 'sandbox',
+    ...auditContext,
     scopes: new Set(scopes),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active', auditContext,
   }
 }
 

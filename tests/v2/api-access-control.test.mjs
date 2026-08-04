@@ -5,6 +5,7 @@ import {
   changeApiAccessControlService,
   readApiAccessControlService,
 } from '../../src/v2/application/administer-api-access.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   createApiAccessControl,
   transitionApiAccessControl,
@@ -24,12 +25,18 @@ function access(overrides = {}) {
 }
 
 function actor(overrides = {}) {
-  return {
+  const identity = {
     clientId: 'client-admin', credentialId: 'credential-admin', workspaceId: 'workspace-1',
-    environment: 'sandbox', scopes: new Set(['clients:admin']), delegatedUserId: 'member-admin',
+    environment: 'sandbox', delegatedUserId: 'member-admin',
+    delegatedIdentityId: 'identity-admin', workspaceRole: 'administrator',
+    ...overrides,
+  }
+  const auditContext = createExternalAuditContext(identity)
+  return {
+    ...identity, scopes: new Set(['clients:admin']),
     authenticationKind: 'ui-session', clientAccessStatus: 'active', workspaceAccessStatus: 'active',
     clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
-    ...overrides,
+    auditContext, ...overrides,
   }
 }
 
