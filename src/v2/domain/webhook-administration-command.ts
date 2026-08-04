@@ -9,11 +9,17 @@ export const WEBHOOK_ADMINISTRATION_ACTIONS = [
   'webhook-endpoint.status.set',
   'webhook-subscription.create',
   'webhook-subscription.status.set',
+  'webhook-signing-secret.provision',
+  'webhook-signing-secret-rotation.stage',
+  'webhook-signing-secret-rotation.activate',
+  'webhook-signing-secret-rotation.cancel',
 ] as const
 
 export const WEBHOOK_ADMINISTRATION_TARGET_TYPES = [
   'webhook-endpoint',
   'webhook-subscription',
+  'webhook-signing-secret',
+  'webhook-signing-secret-rotation',
 ] as const
 
 export type WebhookAdministrationAction =
@@ -28,6 +34,7 @@ export interface WebhookAdministrationCommand {
   readonly action: WebhookAdministrationAction
   readonly targetType: WebhookAdministrationTargetType
   readonly targetId: string
+  readonly endpointId?: string
   readonly targetStatus?: string
   readonly audit: Readonly<ApiAccessAuditContext>
   readonly idempotencyKey?: string
@@ -46,7 +53,11 @@ function actionTargetType(
 ): WebhookAdministrationTargetType {
   return action.startsWith('webhook-endpoint.')
     ? 'webhook-endpoint'
-    : 'webhook-subscription'
+    : action.startsWith('webhook-subscription.')
+      ? 'webhook-subscription'
+      : action.startsWith('webhook-signing-secret-rotation.')
+        ? 'webhook-signing-secret-rotation'
+        : 'webhook-signing-secret'
 }
 
 export function createWebhookAdministrationCommand(
@@ -71,11 +82,21 @@ export function createWebhookAdministrationCommand(
     delegatedUserId: input.audit.delegatedUserId,
   }, input.audit)
 
-  const isCreation = input.action.endsWith('.create')
+  const isSigningAction = input.action.startsWith('webhook-signing-secret')
   assertDomain(
-    isCreation
-      ? Boolean(input.idempotencyKey) && input.baseRevision === undefined
-      : input.idempotencyKey === undefined && Boolean(input.baseRevision),
+    isSigningAction
+      ? input.endpointId !== undefined && UUID_V4_PATTERN.test(input.endpointId)
+      : input.endpointId === undefined,
+    'INVALID_ARGUMENT',
+    'Webhook administration endpoint binding is invalid',
+  )
+
+  const isCreation = input.action.endsWith('.create')
+  const isIdempotent = isCreation || input.action.endsWith('.provision') || input.action.endsWith('.stage')
+  const requiresBaseRevision = !isCreation
+  assertDomain(
+    (isIdempotent ? Boolean(input.idempotencyKey) : input.idempotencyKey === undefined) &&
+      (requiresBaseRevision ? Boolean(input.baseRevision) : input.baseRevision === undefined),
     'INVALID_ARGUMENT',
     'Webhook administration replay semantics are invalid',
   )
@@ -85,7 +106,7 @@ export function createWebhookAdministrationCommand(
       ? ['active', 'paused', 'revoked']
       : []
   assertDomain(
-    isCreation
+    isCreation || isSigningAction
       ? input.targetStatus === undefined
       : typeof input.targetStatus === 'string' && allowedTargetStatuses.includes(input.targetStatus),
     'INVALID_ARGUMENT',

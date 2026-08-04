@@ -287,6 +287,7 @@ model V2WebhookAdministrationCommand {
   action                  String   @db.VarChar(48)
   targetType              String   @db.VarChar(32)
   targetId                String   @db.Uuid
+  endpointId              String?  @db.Uuid
   targetStatus            String?  @db.VarChar(32)
   actorClientId           String   @db.VarChar(80)
   actorCredentialId       String   @db.VarChar(128)

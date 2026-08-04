@@ -20,6 +20,11 @@ import type {
 import { DomainError } from '../../domain/errors.ts'
 import { createWebhookEndpoint, createWebhookSigningSecret, webhookEndpointRevision, type WebhookEndpoint, type WebhookSigningSecret } from '../../domain/webhook.ts'
 import { createWebhookSigningSecretRotation, type WebhookSigningSecretRotation } from '../../domain/webhook-signing-secret-rotation.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 interface StoredRotationResponse { endpointId: string; rotationId: string }
 
@@ -127,11 +132,34 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
   }
 
   async stageOrReplay(command: Readonly<StageWebhookSigningSecretRotationCommand>) {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-signing-secret-rotation.stage',
+      targetType: 'webhook-signing-secret-rotation',
+      targetId: command.rotation.id,
+      endpointId: command.rotation.endpointId,
+      workspaceId: command.rotation.workspaceId,
+      requestFingerprint: command.idempotency.requestFingerprint,
+      idempotencyKey: command.idempotency.key,
+      baseRevision: command.rotation.baseRevision,
+    })
+    if (administration.audit.clientId !== command.rotation.requestedByClientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook rotation audit actor does not match its mutation')
+    }
     const requestedAt = new Date(command.idempotency.requestedAt)
     const key = { workspaceId_clientId_key: { workspaceId: command.rotation.workspaceId, clientId: command.rotation.requestedByClientId, key: command.idempotency.key } }
     const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: V2IdempotencyRecord) => {
       if (record.requestFingerprint !== command.idempotency.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
       const stored = storedResponse(record)
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.rotation.workspaceId,
+          targetType: 'webhook-signing-secret-rotation',
+          targetId: stored.rotationId,
+          action: 'webhook-signing-secret-rotation.stage',
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       const [endpointRow, rotationRow] = await Promise.all([
         transaction.v2WebhookEndpoint.findFirst({ where: { id: stored.endpointId, workspaceId: command.rotation.workspaceId } }),
         transaction.v2WebhookSigningSecretRotation.findFirst({ where: { id: stored.rotationId, workspaceId: command.rotation.workspaceId } }),
@@ -194,6 +222,9 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
           payloadAuthTag: command.candidatePayload.authTag, baseRevision: command.rotation.baseRevision,
           createdAt: new Date(command.rotation.createdAt), expiresAt: new Date(command.rotation.expiresAt),
         } })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         await transaction.v2IdempotencyRecord.update({ where: { id: command.idempotency.id }, data: { status: 'completed', responseStatus: 201, responseJson: JSON.stringify({ endpointId: command.rotation.endpointId, rotationId: rotationRow.id }) } })
         return result(endpointRow, rotationRow, false)
       }, { isolationLevel: 'Serializable' })
@@ -208,6 +239,19 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
   }
 
   async activateOrReplay(command: Readonly<ActivateWebhookSigningSecretRotationCommand>) {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-signing-secret-rotation.activate',
+      targetType: 'webhook-signing-secret-rotation',
+      targetId: command.rotationId,
+      endpointId: command.endpointId,
+      workspaceId: command.workspaceId,
+      requestFingerprint: administration.requestFingerprint,
+      baseRevision: command.baseRevision,
+    })
+    if (administration.audit.clientId !== command.actorClientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook activation audit actor does not match its mutation')
+    }
     const activatedAt = new Date(command.activatedAt)
     const readActivated = async (transaction: Prisma.TransactionClient | PrismaClient) => {
       const rotationRow = await transaction.v2WebhookSigningSecretRotation.findFirst({
@@ -217,6 +261,16 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       if (rotationRow.baseRevision !== command.baseRevision) {
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint revision does not match activated rotation')
       }
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-signing-secret-rotation',
+          targetId: command.rotationId,
+          action: 'webhook-signing-secret-rotation.activate',
+          baseRevision: command.baseRevision,
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       const [endpointRow, previousSecretRow, activatedSecretRow] = await Promise.all([
         transaction.v2WebhookEndpoint.findFirst({ where: { id: command.endpointId, workspaceId: command.workspaceId } }),
         transaction.v2WebhookSigningSecret.findFirst({ where: { id: rotationRow.previousSecretId, endpointId: command.endpointId, workspaceId: command.workspaceId } }),
@@ -289,6 +343,9 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
             payloadCiphertext: null, payloadAuthTag: null,
           },
         })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         const previousSecretRow = await transaction.v2WebhookSigningSecret.findUniqueOrThrow({ where: { id: rotationRow.previousSecretId } })
         const persistedEndpoint = await transaction.v2WebhookEndpoint.findUniqueOrThrow({ where: { id: command.endpointId } })
         return activationResult(persistedEndpoint, activatedRotationRow, previousSecretRow, activatedSecretRow, false)
@@ -304,6 +361,19 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
   }
 
   async cancelOrReplay(command: Readonly<CancelWebhookSigningSecretRotationCommand>) {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-signing-secret-rotation.cancel',
+      targetType: 'webhook-signing-secret-rotation',
+      targetId: command.rotationId,
+      endpointId: command.endpointId,
+      workspaceId: command.workspaceId,
+      requestFingerprint: administration.requestFingerprint,
+      baseRevision: command.baseRevision,
+    })
+    if (administration.audit.clientId !== command.actorClientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook cancellation audit actor does not match its mutation')
+    }
     const cancelledAt = new Date(command.cancelledAt)
     const readTerminal = async (transaction: Prisma.TransactionClient | PrismaClient) => {
       const row = await transaction.v2WebhookSigningSecretRotation.findFirst({
@@ -313,6 +383,16 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
       if (row.baseRevision !== command.baseRevision) {
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook endpoint revision does not match terminal rotation')
       }
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-signing-secret-rotation',
+          targetId: command.rotationId,
+          action: 'webhook-signing-secret-rotation.cancel',
+          baseRevision: command.baseRevision,
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       if (row.payloadAlgorithm || row.payloadKeyId || row.payloadNonce || row.payloadCiphertext || row.payloadAuthTag) {
         const scrubbed = await transaction.v2WebhookSigningSecretRotation.update({
           where: { id: row.id },
@@ -360,11 +440,14 @@ export class PrismaWebhookSigningSecretRotationRepository implements WebhookSign
           if (terminal) return terminal
           throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook signing secret rotation changed concurrently')
         }
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         const persisted = await transaction.v2WebhookSigningSecretRotation.findUniqueOrThrow({ where: { id: rotationRow.id } })
         return cancellationResult(persisted, false)
       }, { isolationLevel: 'Serializable' })
     } catch (error) {
-      if (isPrismaError(error, 'P2034')) {
+      if (isPrismaError(error, 'P2034') || isPrismaError(error, 'P2002')) {
         const terminal = await readTerminal(this.client)
         if (terminal) return terminal
         throw new DomainError('WEBHOOK_ENDPOINT_REVISION_MISMATCH', 'Webhook signing secret rotation changed concurrently')

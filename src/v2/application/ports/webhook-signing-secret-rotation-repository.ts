@@ -1,6 +1,7 @@
 import type { WebhookEndpoint, WebhookSigningSecret } from '../../domain/webhook.ts'
 import type { WebhookSigningSecretPayload } from '../../domain/webhook-signing-secret-payload.ts'
 import type { WebhookSigningSecretRotation } from '../../domain/webhook-signing-secret-rotation.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface WebhookSigningSecretRotationTarget {
   endpoint: Readonly<WebhookEndpoint>
@@ -9,6 +10,7 @@ export interface WebhookSigningSecretRotationTarget {
 }
 
 export interface StageWebhookSigningSecretRotationCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   rotation: Readonly<WebhookSigningSecretRotation>
   candidatePayload: Readonly<WebhookSigningSecretPayload>
   idempotency: Readonly<{
@@ -27,6 +29,7 @@ export interface StageWebhookSigningSecretRotationResult {
 }
 
 export interface ActivateWebhookSigningSecretRotationCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   workspaceId: string
   endpointId: string
   rotationId: string
@@ -44,6 +47,7 @@ export interface ActivateWebhookSigningSecretRotationResult {
 }
 
 export interface CancelWebhookSigningSecretRotationCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   workspaceId: string
   endpointId: string
   rotationId: string

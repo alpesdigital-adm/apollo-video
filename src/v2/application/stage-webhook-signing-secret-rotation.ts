@@ -4,13 +4,23 @@ import { createWebhookSigningSecretRotation } from '../domain/webhook-signing-se
 import type { WebhookSigningSecretProtector } from './ports/webhook-signing-secret-protector.ts'
 import type { WebhookSigningSecretRotationRepository } from './ports/webhook-signing-secret-rotation-repository.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { createWebhookAdministrationCommand } from '../domain/webhook-administration-command.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const VISIBLE_ASCII = /^[\x21-\x7e]+$/
 
-export type WebhookSecretRotationEntityKind = 'webhook-secret-rotation' | 'webhook-secret' | 'idempotency-record'
+export type WebhookSecretRotationEntityKind =
+  | 'webhook-secret-rotation'
+  | 'webhook-secret'
+  | 'webhook-administration-command'
+  | 'idempotency-record'
 
 export function stageWebhookSigningSecretRotationService(dependencies: {
   repository: WebhookSigningSecretRotationRepository
@@ -21,7 +31,7 @@ export function stageWebhookSigningSecretRotationService(dependencies: {
   return async function execute(request: {
     workspaceId: string
     endpointId: string
-    actorClientId: string
+    actor: AuthenticatedExternalActor
     baseRevision: string
     overlapSeconds: number
     idempotencyKey: string
@@ -29,7 +39,11 @@ export function stageWebhookSigningSecretRotationService(dependencies: {
   }) {
     const workspaceId = request.workspaceId.trim()
     const endpointId = request.endpointId.trim().toLowerCase()
-    const actorClientId = request.actorClientId.trim()
+    requireScope(request.actor, 'webhooks:admin')
+    if (request.actor.workspaceId !== workspaceId) {
+      throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook endpoint was not found')
+    }
+    const actorClientId = request.actor.clientId
     const baseRevision = request.baseRevision.trim().toLowerCase()
     const idempotencyKey = request.idempotencyKey.trim()
     const stageTtlSeconds = request.stageTtlSeconds ?? 24 * 60 * 60
@@ -39,6 +53,7 @@ export function stageWebhookSigningSecretRotationService(dependencies: {
     assertDomain(Number.isInteger(request.overlapSeconds) && request.overlapSeconds >= 60 && request.overlapSeconds <= 86_400, 'INVALID_ARGUMENT', 'overlapSeconds must be between 60 and 86400')
     assertDomain(Number.isInteger(stageTtlSeconds) && stageTtlSeconds >= 300 && stageTtlSeconds <= 7 * 24 * 60 * 60, 'INVALID_ARGUMENT', 'stageTtlSeconds must be between 300 seconds and 7 days')
 
+    const audit = materializeActorAuditContext(request.actor)
     const target = await dependencies.repository.getTarget(workspaceId, endpointId)
     if (!target) throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook endpoint was not found')
     if (target.endpoint.status !== 'active') {
@@ -82,13 +97,33 @@ export function stageWebhookSigningSecretRotationService(dependencies: {
       createdAt,
       expiresAt: new Date(now.getTime() + stageTtlSeconds * 1_000).toISOString(),
     })
+    const requestFingerprint = calculateVersionHash({
+      action: 'webhook-signing-secret-rotation-stage/v1',
+      actorContextHash: audit.contextHash,
+      endpointId,
+      baseRevision,
+      overlapSeconds: request.overlapSeconds,
+    })
     const result = await dependencies.repository.stageOrReplay({
+      administration: createWebhookAdministrationCommand({
+        id: dependencies.createId('webhook-administration-command'),
+        workspaceId,
+        action: 'webhook-signing-secret-rotation.stage',
+        targetType: 'webhook-signing-secret-rotation',
+        targetId: rotation.id,
+        endpointId,
+        audit,
+        idempotencyKey,
+        baseRevision,
+        requestFingerprint,
+        occurredAt: createdAt,
+      }),
       rotation,
       candidatePayload: protectedSecret.payload,
       idempotency: {
         id: dependencies.createId('idempotency-record'),
         key: idempotencyKey,
-        requestFingerprint: calculateVersionHash({ action: 'webhook-signing-secret-rotation-stage/v1', endpointId, baseRevision, overlapSeconds: request.overlapSeconds }),
+        requestFingerprint,
         requestedAt: createdAt,
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1_000).toISOString(),
       },

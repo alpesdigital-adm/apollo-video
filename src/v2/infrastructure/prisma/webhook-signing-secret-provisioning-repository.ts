@@ -20,6 +20,11 @@ import {
   type WebhookEndpoint,
   type WebhookSigningSecret,
 } from '../../domain/webhook.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 interface StoredProvisioningResponse {
   endpointId: string
@@ -115,6 +120,20 @@ export class PrismaWebhookSigningSecretProvisioningRepository
   }
 
   async provisionOrReplay(command: Readonly<WebhookSigningSecretProvisioningCommand>) {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-signing-secret.provision',
+      targetType: 'webhook-signing-secret',
+      targetId: command.secret.id,
+      endpointId: command.endpointId,
+      workspaceId: command.workspaceId,
+      requestFingerprint: command.idempotency.requestFingerprint,
+      idempotencyKey: command.idempotency.key,
+      baseRevision: command.baseRevision,
+    })
+    if (administration.audit.clientId !== command.actorClientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook secret audit actor does not match its mutation')
+    }
     const requestedAt = new Date(command.idempotency.requestedAt)
     const key = {
       workspaceId_clientId_key: {
@@ -135,6 +154,15 @@ export class PrismaWebhookSigningSecretProvisioningRepository
         )
       }
       const stored = storedResponse(record)
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-signing-secret',
+          targetId: stored.secretId,
+          action: 'webhook-signing-secret.provision',
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       const [endpointRow, secretRow] = await Promise.all([
         transaction.v2WebhookEndpoint.findFirst({
           where: { id: stored.endpointId, workspaceId: command.workspaceId },
@@ -294,6 +322,9 @@ export class PrismaWebhookSigningSecretProvisioningRepository
             authTag: command.secretPayload.authTag,
             createdAt: changedAt,
           },
+        })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
         })
         await transaction.v2IdempotencyRecord.update({
           where: { id: command.idempotency.id },

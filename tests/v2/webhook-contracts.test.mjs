@@ -351,7 +351,7 @@ test('pending endpoint provisions a signing secret once and redacts idempotent r
   const request = {
     workspaceId: 'workspace-1',
     endpointId: endpoint.id,
-    actorClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: webhookEndpointRevision(endpoint),
     idempotencyKey: 'provision-secret-1',
   }
@@ -369,6 +369,10 @@ test('pending endpoint provisions a signing secret once and redacts idempotent r
   assert.equal('secretBase64url' in replay, false)
   assert.equal(replay.secret.id, first.secret.id)
   assert.equal(writes, 2)
+  assert.equal(persisted.administration.action, 'webhook-signing-secret.provision')
+  assert.equal(persisted.administration.targetId, first.secret.id)
+  assert.equal(persisted.administration.endpointId, endpoint.id)
+  assert.equal(persisted.administration.audit.credentialId, 'credential-1')
 })
 
 test('signing secret provisioning rejects invalid revision before secret generation', async () => {
@@ -389,7 +393,7 @@ test('signing secret provisioning rejects invalid revision before secret generat
     () => provision({
       workspaceId: 'workspace-1',
       endpointId: '00000000-0000-4000-8000-000000000130',
-      actorClientId: 'client-1',
+      actor: WEBHOOK_ADMINISTRATOR,
       baseRevision: 'invalid',
       idempotencyKey: 'provision-secret-1',
     }),
@@ -429,7 +433,7 @@ test('active endpoint stages a signing secret rotation without changing the acti
     createId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
   })
   const request = {
-    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
     idempotencyKey: 'rotate-secret-1',
   }
@@ -448,6 +452,9 @@ test('active endpoint stages a signing secret rotation without changing the acti
   assert.equal('secretBase64url' in replay, false)
   assert.equal(replay.rotation.id, first.rotation.id)
   assert.equal(activeSecret.status, 'active')
+  assert.equal(persisted.administration.action, 'webhook-signing-secret-rotation.stage')
+  assert.equal(persisted.administration.targetId, first.rotation.id)
+  assert.equal(persisted.administration.audit.contextHash, materializeActorAuditContext(WEBHOOK_ADMINISTRATOR).contextHash)
 })
 
 test('signing secret rotation validates overlap before reading or generating material', async () => {
@@ -460,7 +467,7 @@ test('signing secret rotation validates overlap before reading or generating mat
   })
   await assert.rejects(() => stage({
     workspaceId: 'workspace-1', endpointId: '00000000-0000-4000-8000-000000000140',
-    actorClientId: 'client-1', baseRevision: 'b'.repeat(64), overlapSeconds: 0,
+    actor: WEBHOOK_ADMINISTRATOR, baseRevision: 'b'.repeat(64), overlapSeconds: 0,
     idempotencyKey: 'rotate-secret-1',
   }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
   assert.equal(effects, 0)
@@ -492,7 +499,7 @@ test('signing secret rotation rejects inactive endpoint before generating materi
     createId: () => '00000000-0000-4000-8000-000000000152',
   })
   await assert.rejects(() => stage({
-    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
     idempotencyKey: 'rotate-secret-inactive',
   }), (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_TRANSITION_REJECTED')
@@ -526,7 +533,7 @@ test('signing secret rotation rejects a candidate equal to the active key', asyn
     createId: () => '00000000-0000-4000-8000-000000000172',
   })
   await assert.rejects(() => stage({
-    workspaceId: 'workspace-1', endpointId: endpoint.id, actorClientId: 'client-1',
+    workspaceId: 'workspace-1', endpointId: endpoint.id, actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: webhookEndpointRevision(endpoint), overlapSeconds: 300,
     idempotencyKey: 'rotate-duplicate-secret',
   }), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
@@ -543,12 +550,13 @@ test('signing secret rotation activation validates identity before persistence',
       async activateOrReplay() { effects += 1 },
     },
     clock: () => new Date('2026-07-15T22:10:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000153',
   })
   await assert.rejects(() => activate({
     workspaceId: 'workspace-1',
     endpointId: '00000000-0000-4000-8000-000000000150',
     rotationId: 'invalid',
-    actorClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: 'a'.repeat(64),
   }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
   assert.equal(effects, 0)
@@ -564,12 +572,13 @@ test('signing secret rotation cancellation validates revision before persistence
       async cancelOrReplay() { effects += 1 },
     },
     clock: () => new Date('2026-07-15T22:11:00.000Z'),
+    createId: () => '00000000-0000-4000-8000-000000000154',
   })
   await assert.rejects(() => cancel({
     workspaceId: 'workspace-1',
     endpointId: '00000000-0000-4000-8000-000000000150',
     rotationId: '00000000-0000-4000-8000-000000000152',
-    actorClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     baseRevision: 'invalid',
   }), (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT')
   assert.equal(effects, 0)
@@ -741,6 +750,23 @@ test('webhook subscription creation retries serialization conflicts before faili
 })
 
 test('webhook signing secret provisioning retries serialization conflicts', async () => {
+  const endpointId = '00000000-0000-4000-8000-000000000130'
+  const secretId = '00000000-0000-4000-8000-000000000133'
+  const baseRevision = 'd'.repeat(64)
+  const requestFingerprint = 'a'.repeat(64)
+  const administration = createWebhookAdministrationCommand({
+    id: '00000000-0000-4000-8000-000000000134',
+    workspaceId: 'workspace-1',
+    action: 'webhook-signing-secret.provision',
+    targetType: 'webhook-signing-secret',
+    targetId: secretId,
+    endpointId,
+    audit: materializeActorAuditContext(WEBHOOK_ADMINISTRATOR),
+    idempotencyKey: 'provision-retry-1',
+    baseRevision,
+    requestFingerprint,
+    occurredAt: '2026-07-16T21:00:00.000Z',
+  })
   let attempts = 0
   const repository = new PrismaWebhookSigningSecretProvisioningRepository({
     v2IdempotencyRecord: { async findUnique() { return null } },
@@ -753,12 +779,15 @@ test('webhook signing secret provisioning retries serialization conflicts', asyn
   })
   await assert.rejects(
     () => repository.provisionOrReplay({
+      administration,
       workspaceId: 'workspace-1',
-      endpointId: '00000000-0000-4000-8000-000000000130',
-      actorClientId: 'client-1',
+      endpointId,
+      actorClientId: WEBHOOK_ADMINISTRATOR.clientId,
+      baseRevision,
+      secret: { id: secretId },
       idempotency: {
         id: 'idempotency-provision-retry-1', key: 'provision-retry-1',
-        requestFingerprint: 'a'.repeat(64), requestedAt: '2026-07-16T21:00:00.000Z',
+        requestFingerprint, requestedAt: '2026-07-16T21:00:00.000Z',
         expiresAt: '2026-07-17T21:00:00.000Z',
       },
     }),
@@ -772,6 +801,20 @@ test('webhook signing secret provisioning recovers a concurrent committed winner
   const endpointId = '00000000-0000-4000-8000-000000000131'
   const secretId = '00000000-0000-4000-8000-000000000132'
   const requestFingerprint = 'b'.repeat(64)
+  const baseRevision = 'e'.repeat(64)
+  const administration = createWebhookAdministrationCommand({
+    id: '00000000-0000-4000-8000-000000000135',
+    workspaceId: 'workspace-1',
+    action: 'webhook-signing-secret.provision',
+    targetType: 'webhook-signing-secret',
+    targetId: secretId,
+    endpointId,
+    audit: materializeActorAuditContext(WEBHOOK_ADMINISTRATOR),
+    idempotencyKey: 'provision-winner-1',
+    baseRevision,
+    requestFingerprint,
+    occurredAt: '2026-07-16T21:00:00.000Z',
+  })
   let attempts = 0
   const repository = new PrismaWebhookSigningSecretProvisioningRepository({
     v2IdempotencyRecord: {
@@ -804,6 +847,9 @@ test('webhook signing secret provisioning recovers a concurrent committed winner
         }
       },
     },
+    v2WebhookAdministrationCommand: {
+      async findFirst() { return webhookAdministrationCommandData(administration) },
+    },
     async $transaction() {
       attempts += 1
       const error = new Error('serialization conflict')
@@ -812,7 +858,10 @@ test('webhook signing secret provisioning recovers a concurrent committed winner
     },
   })
   const result = await repository.provisionOrReplay({
+    administration,
     workspaceId: 'workspace-1', endpointId, actorClientId: 'client-1',
+    baseRevision,
+    secret: { id: secretId },
     idempotency: {
       id: 'idempotency-provision-winner-1', key: 'provision-winner-1',
       requestFingerprint, requestedAt: '2026-07-16T21:00:00.000Z',

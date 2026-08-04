@@ -13,6 +13,7 @@ export interface StoredWebhookAdministrationCommand {
   action: string
   targetType: string
   targetId: string
+  endpointId: string | null
   targetStatus: string | null
   actorClientId: string
   actorCredentialId: string
@@ -49,6 +50,7 @@ export function hydrateWebhookAdministrationCommand(
       action: row.action as WebhookAdministrationCommand['action'],
       targetType: row.targetType as WebhookAdministrationCommand['targetType'],
       targetId: row.targetId,
+      ...(row.endpointId ? { endpointId: row.endpointId } : {}),
       ...(row.targetStatus ? { targetStatus: row.targetStatus } : {}),
       audit,
       ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
@@ -74,6 +76,7 @@ export function webhookAdministrationCommandData(
     action: command.action,
     targetType: command.targetType,
     targetId: command.targetId,
+    endpointId: command.endpointId,
     targetStatus: command.targetStatus,
     actorClientId: command.audit.clientId,
     actorCredentialId: command.audit.credentialId,
@@ -96,6 +99,7 @@ export function assertWebhookAdministrationCommandTarget(
     action: WebhookAdministrationCommand['action']
     targetType: WebhookAdministrationCommand['targetType']
     targetId: string
+    endpointId?: string
     targetStatus?: string
     workspaceId: string
     requestFingerprint: string
@@ -106,6 +110,7 @@ export function assertWebhookAdministrationCommandTarget(
   if (
     command.action !== expected.action || command.targetType !== expected.targetType ||
     command.targetId !== expected.targetId || command.workspaceId !== expected.workspaceId ||
+    command.endpointId !== expected.endpointId ||
     command.targetStatus !== expected.targetStatus ||
     command.requestFingerprint !== expected.requestFingerprint ||
     command.idempotencyKey !== expected.idempotencyKey ||
@@ -132,6 +137,7 @@ export function assertWebhookAdministrationReplay(
   if (
     stored.action !== requested.action || stored.targetType !== requested.targetType ||
     (stored.idempotencyKey === undefined && stored.targetId !== requested.targetId) ||
+    stored.endpointId !== requested.endpointId ||
     stored.targetStatus !== requested.targetStatus ||
     stored.audit.contextHash !== requested.audit.contextHash ||
     stored.idempotencyKey !== requested.idempotencyKey ||

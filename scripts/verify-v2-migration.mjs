@@ -81,13 +81,18 @@ for (const field of [
   assert.match(apiAdministrationCommandModel, new RegExp(`\\b${field}\\b`), `ApiAdministrationCommand must persist ${field}`)
 }
 for (const field of [
-  'action', 'targetType', 'targetId', 'targetStatus', 'actorClientId',
+  'action', 'targetType', 'targetId', 'targetStatus', 'endpointId', 'actorClientId',
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
   'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
   'idempotencyKey', 'baseRevision', 'requestFingerprint', 'occurredAt',
 ]) {
   assert.match(webhookAdministrationCommandModel, new RegExp(`\\b${field}\\b`), `WebhookAdministrationCommand must persist ${field}`)
 }
+assert.match(
+  committed,
+  /ADD COLUMN "endpointId" UUID[\s\S]*'webhook-signing-secret\.provision'[\s\S]*'webhook-signing-secret-rotation\.cancel'/,
+  'webhook signing-secret administration must be bound to its endpoint and constrained in SQL',
+)
 assert.match(
   committed,
   /DELETE FROM "idempotency_records"[\s\S]*'api-client\.create'[\s\S]*'api-credential\.rotate'/,

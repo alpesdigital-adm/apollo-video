@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
     const result = await stage({
       workspaceId: actor.workspaceId,
       endpointId,
-      actorClientId: actor.clientId,
+      actor,
       baseRevision: body.baseRevision,
       overlapSeconds: body.overlapSeconds,
       idempotencyKey: request.headers.get('idempotency-key') ?? '',

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { activateWebhookSigningSecretRotationService } from '@/v2/application/activate-webhook-signing-secret-rotation'
@@ -30,12 +31,13 @@ export async function POST(
     const activate = activateWebhookSigningSecretRotationService({
       repository: createWebhookSigningSecretRotationRepository(),
       clock: () => new Date(),
+      createId: randomUUID,
     })
     const result = await activate({
       workspaceId: actor.workspaceId,
       endpointId,
       rotationId,
-      actorClientId: actor.clientId,
+      actor,
       baseRevision: body.baseRevision,
     })
     return NextResponse.json(presentSuccess({

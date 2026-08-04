@@ -346,7 +346,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const provisioningRequest = {
       workspaceId,
       endpointId: createdEndpoint.endpoint.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: webhookEndpointRevision(createdEndpoint.endpoint),
       idempotencyKey: 'provision-webhook-secret-1',
     }
@@ -796,7 +796,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const rotationRequest = {
       workspaceId,
       endpointId: endpoint.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: webhookEndpointRevision(activeRotationEndpoint),
       overlapSeconds: 300,
       idempotencyKey: 'stage-webhook-secret-rotation-1',
@@ -832,12 +832,13 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activateRotation = activateWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
       clock: () => rotationActivationAt,
+      createId: () => '00000000-0000-4000-8000-000000000708',
     })
     const activationRequest = {
       workspaceId,
       endpointId: endpoint.id,
       rotationId: stagedRotation.rotation.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: rotationRequest.baseRevision,
     }
     const activatedRotation = await activateRotation(activationRequest)
@@ -886,7 +887,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const secondRotationRequest = {
       workspaceId,
       endpointId: endpoint.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: webhookEndpointRevision(activatedRotation.endpoint),
       overlapSeconds: 600,
       idempotencyKey: 'stage-webhook-secret-rotation-2',
@@ -896,12 +897,13 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const cancelRotation = cancelWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
       clock: () => new Date(rotationActivationAt.getTime() + 1_100),
+      createId: () => '00000000-0000-4000-8000-000000000718',
     })
     const cancellationRequest = {
       workspaceId,
       endpointId: endpoint.id,
       rotationId: secondStagedRotation.rotation.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: secondRotationRequest.baseRevision,
     }
     const cancelledRotation = await cancelRotation(cancellationRequest)
@@ -965,11 +967,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activateThirdRotation = activateWebhookSigningSecretRotationService({
       repository: new PrismaWebhookSigningSecretRotationRepository(client),
       clock: () => new Date(rotationActivationAt.getTime() + 2_100),
+      createId: () => '00000000-0000-4000-8000-000000000728',
     })
     const thirdActivatedRotation = await activateThirdRotation({
       workspaceId, endpointId: endpoint.id,
       rotationId: thirdStagedRotation.rotation.id,
-      actorClientId: clientId,
+      actor: webhookActor,
       baseRevision: secondRotationRequest.baseRevision,
     })
     assert.equal(thirdActivatedRotation.rotation.status, 'activated')
@@ -1054,19 +1057,21 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         : `00000000-0000-4000-8000-${String(raceId++).padStart(12, '0')}`,
     })
     const stagedRace = await stageRace({
-      workspaceId, endpointId: raceEndpointId, actorClientId: clientId,
+      workspaceId, endpointId: raceEndpointId, actor: webhookActor,
       baseRevision: webhookEndpointRevision(raceEndpoint), overlapSeconds: 300,
       idempotencyKey: 'stage-webhook-secret-rotation-race',
     })
     const raceCommand = {
       workspaceId, endpointId: raceEndpointId, rotationId: stagedRace.rotation.id,
-      actorClientId: clientId, baseRevision: webhookEndpointRevision(raceEndpoint),
+      actor: webhookActor, baseRevision: webhookEndpointRevision(raceEndpoint),
     }
     const activateRace = activateWebhookSigningSecretRotationService({
       repository: raceRepository, clock: () => new Date(raceAt.getTime() + 200),
+      createId: () => '00000000-0000-4000-8000-000000000748',
     })
     const cancelRace = cancelWebhookSigningSecretRotationService({
       repository: raceRepository, clock: () => new Date(raceAt.getTime() + 200),
+      createId: () => '00000000-0000-4000-8000-000000000749',
     })
     const raceResults = await Promise.allSettled([
       activateRace(raceCommand),

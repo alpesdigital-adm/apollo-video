@@ -1,5 +1,6 @@
 import type { WebhookEndpoint, WebhookSigningSecret } from '../../domain/webhook.ts'
 import type { WebhookSigningSecretPayload } from '../../domain/webhook-signing-secret-payload.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface WebhookSigningSecretProvisioningTarget {
   endpoint: Readonly<WebhookEndpoint>
@@ -7,6 +8,7 @@ export interface WebhookSigningSecretProvisioningTarget {
 }
 
 export interface WebhookSigningSecretProvisioningCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   workspaceId: string
   endpointId: string
   actorClientId: string

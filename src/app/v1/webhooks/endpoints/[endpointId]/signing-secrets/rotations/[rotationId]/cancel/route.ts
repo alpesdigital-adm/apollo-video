@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
@@ -29,12 +30,13 @@ export async function POST(
     const cancel = cancelWebhookSigningSecretRotationService({
       repository: createWebhookSigningSecretRotationRepository(),
       clock: () => new Date(),
+      createId: randomUUID,
     })
     const result = await cancel({
       workspaceId: actor.workspaceId,
       endpointId,
       rotationId,
-      actorClientId: actor.clientId,
+      actor,
       baseRevision: body.baseRevision,
     })
     return NextResponse.json(presentSuccess({

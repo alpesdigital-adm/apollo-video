@@ -3,6 +3,12 @@ import { createWebhookSigningSecret } from '../domain/webhook.ts'
 import type { WebhookSigningSecretProtector } from './ports/webhook-signing-secret-protector.ts'
 import type { WebhookSigningSecretProvisioningRepository } from './ports/webhook-signing-secret-provisioning-repository.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { createWebhookAdministrationCommand } from '../domain/webhook-administration-command.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -10,7 +16,10 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const VISIBLE_ASCII = /^[\x21-\x7e]+$/
 const DEFAULT_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
-export type WebhookSecretProvisioningEntityKind = 'webhook-secret' | 'idempotency-record'
+export type WebhookSecretProvisioningEntityKind =
+  | 'webhook-secret'
+  | 'webhook-administration-command'
+  | 'idempotency-record'
 
 export function provisionWebhookSigningSecretService(dependencies: {
   repository: WebhookSigningSecretProvisioningRepository
@@ -21,14 +30,18 @@ export function provisionWebhookSigningSecretService(dependencies: {
   return async function execute(request: {
     workspaceId: string
     endpointId: string
-    actorClientId: string
+    actor: AuthenticatedExternalActor
     baseRevision: string
     idempotencyKey: string
     idempotencyTtlSeconds?: number
   }) {
     const workspaceId = request.workspaceId.trim()
     const endpointId = request.endpointId.trim().toLowerCase()
-    const actorClientId = request.actorClientId.trim()
+    requireScope(request.actor, 'webhooks:admin')
+    if (request.actor.workspaceId !== workspaceId) {
+      throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook endpoint was not found')
+    }
+    const actorClientId = request.actor.clientId
     const baseRevision = request.baseRevision.trim().toLowerCase()
     const idempotencyKey = request.idempotencyKey.trim()
     const ttlSeconds = request.idempotencyTtlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
@@ -57,6 +70,7 @@ export function provisionWebhookSigningSecretService(dependencies: {
       'idempotency ttlSeconds must be between 60 seconds and 7 days',
     )
 
+    const audit = materializeActorAuditContext(request.actor)
     const target = await dependencies.repository.getTarget(workspaceId, endpointId)
     if (!target) throw new DomainError('WEBHOOK_ENDPOINT_NOT_FOUND', 'Webhook endpoint was not found')
     const now = dependencies.clock()
@@ -90,10 +104,24 @@ export function provisionWebhookSigningSecretService(dependencies: {
     })
     const requestFingerprint = calculateVersionHash({
       action: 'webhook-signing-secret-provision/v1',
+      actorContextHash: audit.contextHash,
       endpointId,
       baseRevision,
     })
     const result = await dependencies.repository.provisionOrReplay({
+      administration: createWebhookAdministrationCommand({
+        id: dependencies.createId('webhook-administration-command'),
+        workspaceId,
+        action: 'webhook-signing-secret.provision',
+        targetType: 'webhook-signing-secret',
+        targetId: secret.id,
+        endpointId,
+        audit,
+        idempotencyKey,
+        baseRevision,
+        requestFingerprint,
+        occurredAt: createdAt,
+      }),
       workspaceId,
       endpointId,
       actorClientId,

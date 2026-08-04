@@ -53,7 +53,7 @@ export async function POST(
     const result = await provision({
       workspaceId: actor.workspaceId,
       endpointId,
-      actorClientId: actor.clientId,
+      actor,
       baseRevision: body.baseRevision,
       idempotencyKey: request.headers.get('idempotency-key') ?? '',
     })

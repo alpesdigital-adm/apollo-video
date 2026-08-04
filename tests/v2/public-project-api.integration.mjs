@@ -2231,6 +2231,41 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(cancelRotationReplayResponse.status, 200)
     assert.equal(cancelRotationReplay.data.replayed, true)
     assert.equal(cancelRotationReplay.data.rotation.id, cancelledRotation.data.rotation.id)
+    const provisionAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        endpointId: createdEndpoint.data.endpoint.id,
+        action: 'webhook-signing-secret.provision',
+      },
+    })
+    assert.equal(provisionAudit.length, 1)
+    assert.equal(provisionAudit[0].targetId, persistedProvisionedSecret.id)
+    assert.equal(provisionAudit[0].idempotencyKey, 'public-secret-provision-1')
+    const rotationAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        endpointId: webhookEndpointId,
+        action: { in: [
+          'webhook-signing-secret-rotation.stage',
+          'webhook-signing-secret-rotation.activate',
+          'webhook-signing-secret-rotation.cancel',
+        ] },
+      },
+      orderBy: { occurredAt: 'asc' },
+    })
+    assert.equal(rotationAudit.filter((command) =>
+      command.action === 'webhook-signing-secret-rotation.stage').length, 2)
+    assert.equal(rotationAudit.filter((command) =>
+      command.action === 'webhook-signing-secret-rotation.activate').length, 1)
+    assert.equal(rotationAudit.filter((command) =>
+      command.action === 'webhook-signing-secret-rotation.cancel').length, 1)
+    for (const command of [...provisionAudit, ...rotationAudit]) {
+      assert.equal(command.actorClientId, apiClientId)
+      assert.equal(command.actorCredentialId, issued.credential.id)
+      assert.match(command.actorContextHash, /^[a-f0-9]{64}$/)
+      assert.equal(JSON.stringify(command).includes('secretBase64url'), false)
+      assert.equal(JSON.stringify(command).includes('ciphertext'), false)
+    }
     const rotationListResponse = await fetch(`${stageRotationUrl}?limit=1&status=cancelled`, {
       headers: { authorization },
     })
