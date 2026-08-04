@@ -292,6 +292,14 @@ const queuedLongFormIndexOperationVisibleProjectExample = {
   ...queuedLongFormIndexOperationVisibleExample,
   projectId,
 }
+const queuedLongFormIndexCostOperationExample = {
+  ...queuedLongFormIndexOperationVisibleProjectExample,
+  estimatedCost: {
+    currency: 'USD',
+    estimatedMinorUnits: 30,
+    maximumMinorUnits: 200,
+  },
+}
 const queuedProjectDirectorOperationVisibleExample = {
   schemaVersion: 'public-operation/v1',
   id: 'operation-project-director-example-1',
@@ -5520,6 +5528,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/public-operation-detail/v9': [
       { data: { operation: queuedProjectDirectorOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/public-operation-detail/v10': [
+      { data: { operation: queuedLongFormIndexCostOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/public-operation-list/v1': [
       {
         data: { operations: [] },
@@ -5561,6 +5572,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-list/v9': [
       { data: { operations: [queuedProjectDirectorOperationVisibleExample] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-list/v10': [
+      { data: { operations: [queuedLongFormIndexCostOperationExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/enqueue-project-director-run-request/v1': [
       {
@@ -9642,6 +9656,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/long-form-index-workflow-mutated/v3': [
+      {
+        data: {
+          workflow: longFormIndexWorkflowExample,
+          operation: queuedLongFormIndexCostOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/long-form-index-workflow-read/v1': [
       {
         data: {
@@ -9656,6 +9680,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           workflow: longFormIndexWorkflowExample,
           operation: queuedLongFormIndexOperationExample,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-read/v3': [
+      {
+        data: {
+          workflow: longFormIndexWorkflowExample,
+          operation: queuedLongFormIndexCostOperationExample,
         },
         meta: { apiVersion: 'v1' },
       },
@@ -9677,6 +9710,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           workflows: [{
             workflow: longFormIndexWorkflowExample,
             operation: queuedLongFormIndexOperationExample,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/long-form-index-workflow-page/v3': [
+      {
+        data: {
+          workflows: [{
+            workflow: longFormIndexWorkflowExample,
+            operation: queuedLongFormIndexCostOperationExample,
           }],
         },
         meta: { apiVersion: 'v1' },

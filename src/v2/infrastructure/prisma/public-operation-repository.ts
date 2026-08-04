@@ -12,6 +12,10 @@ import type {
 } from '../../application/ports/public-operation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
+import {
+  hydrateLongFormIndexWorkflow,
+  type LongFormIndexWorkflow,
+} from '../../domain/long-form-index-workflow.ts'
 import { parseCommandImpact } from '../../domain/command-impact.ts'
 import type { RenderColorPipelineBinding } from '../../application/resolve-render-color-pipelines.ts'
 import {
@@ -203,6 +207,36 @@ function parseResult(value: string | null): PublicOperationResult | undefined {
   }
 }
 
+function hydrateLongFormCostSource(
+  detail: NonNullable<StoredOperation['longFormIndexWorkflow']>,
+): Readonly<LongFormIndexWorkflow> {
+  try {
+    const workflow = hydrateLongFormIndexWorkflow(
+      JSON.parse(detail.workflowJson) as unknown,
+    )
+    if (
+      stableSerialize(workflow) !== detail.workflowJson ||
+      workflow.id !== detail.id ||
+      workflow.workspaceId !== detail.workspaceId ||
+      workflow.projectId !== detail.projectId ||
+      workflow.runHash !== detail.runHash ||
+      workflow.budget.currency !== detail.budgetCurrency ||
+      workflow.budget.maximumCostMinorUnits !==
+        detail.maximumCostMinorUnits ||
+      workflow.summary.costMinorUnits !== detail.costMinorUnits
+    ) {
+      throw new Error('long-form cost source mismatch')
+    }
+    return workflow
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored long-form operation cost source is invalid',
+      { operationId: detail.operationId },
+    )
+  }
+}
+
 function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const renderDetail = row.artifactRender
   const ingestDetail = row.mediaIngest
@@ -210,6 +244,9 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
   const finalExportDetail = row.projectFinalExport
   const sourceCleanupDetail = row.sourceCleanupPlan
   const longFormDetail = row.longFormIndexWorkflow
+  const longFormWorkflow = longFormDetail
+    ? hydrateLongFormCostSource(longFormDetail)
+    : undefined
   const directorDetail = row.projectDirectorRun
   const isRender = row.type === 'artifact-render'
   const isIngest = row.type === 'media-ingest'
@@ -542,6 +579,28 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
               message: row.errorMessage as string,
               retryable: row.errorRetryable as boolean,
             },
+          }
+        : {}),
+      ...(longFormWorkflow
+        ? {
+            estimatedCost: {
+              currency: longFormWorkflow.budget.currency,
+              estimatedMinorUnits: longFormWorkflow.stages.reduce(
+                (total, stage) =>
+                  total + stage.budget.estimatedCostMinorUnits,
+                0,
+              ),
+              maximumMinorUnits:
+                longFormWorkflow.budget.maximumCostMinorUnits,
+            },
+            ...(['succeeded', 'failed', 'canceled'].includes(row.status)
+              ? {
+                  actualCost: {
+                    currency: longFormWorkflow.budget.currency,
+                    minorUnits: longFormWorkflow.summary.costMinorUnits,
+                  },
+                }
+              : {}),
           }
         : {}),
       attempt: row.attempt,

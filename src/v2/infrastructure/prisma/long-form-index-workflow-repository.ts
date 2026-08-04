@@ -734,6 +734,10 @@ implements LongFormIndexWorkflowRepository {
     },
     attempt = 1,
   ): ReturnType<LongFormIndexWorkflowRepository['create']> {
+    const estimatedCostMinorUnits = input.workflow.stages.reduce(
+      (total, stage) => total + stage.budget.estimatedCostMinorUnits,
+      0,
+    )
     if (
       input.operation.type !== 'long-form-index' ||
       input.operation.status !== 'queued' ||
@@ -745,7 +749,14 @@ implements LongFormIndexWorkflowRepository {
       input.workflow.sourceArtifactId !==
         input.operation.target.id ||
       input.workflow.sourceManifestId !==
-        input.operation.target.manifestId
+        input.operation.target.manifestId ||
+      input.operation.estimatedCost?.currency !==
+        input.workflow.budget.currency ||
+      input.operation.estimatedCost.estimatedMinorUnits !==
+        estimatedCostMinorUnits ||
+      input.operation.estimatedCost.maximumMinorUnits !==
+        input.workflow.budget.maximumCostMinorUnits ||
+      input.operation.actualCost !== undefined
     ) {
       throw new DomainError(
         'INVALID_PUBLIC_OPERATION',

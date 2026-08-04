@@ -958,6 +958,98 @@ test('PublicOperation attempt transitions reject stale order and exhaust retries
   assert.deepEqual(succeeded.result.resource, succeeded.target)
 })
 
+test('PublicOperation exposes only persisted long-form estimates and terminal actual cost', () => {
+  const queued = createQueuedPublicOperation({
+    id: 'operation-long-form-cost-1',
+    workspaceId: 'workspace-long-form-cost-1',
+    projectId: 'project-long-form-cost-1',
+    clientId: 'client-long-form-cost-1',
+    type: 'long-form-index',
+    target: {
+      type: 'media-artifact',
+      id: 'artifact-long-form-cost-1',
+      manifestId: 'manifest-long-form-cost-1',
+    },
+    estimatedCost: {
+      currency: 'USD',
+      estimatedMinorUnits: 125,
+      maximumMinorUnits: 300,
+    },
+    createdAt: '2026-08-03T23:00:00.000Z',
+  })
+  assert.deepEqual(presentPublicOperationV2(queued).estimatedCost, {
+    currency: 'USD',
+    estimatedMinorUnits: 125,
+    maximumMinorUnits: 300,
+  })
+  assert.equal(presentPublicOperationV2(queued).actualCost, undefined)
+
+  const running = startPublicOperationAttempt(
+    queued,
+    '2026-08-03T23:00:01.000Z',
+  )
+  expectDomainError(
+    () => rehydratePublicOperation({
+      ...running,
+      actualCost: { currency: 'USD', minorUnits: 50 },
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  const terminal = succeedPublicOperation(
+    advancePublicOperationPhase(
+      running,
+      'persisting',
+      '2026-08-03T23:00:02.000Z',
+    ),
+    '2026-08-03T23:00:03.000Z',
+  )
+  const measured = rehydratePublicOperation({
+    ...terminal,
+    actualCost: { currency: 'USD', minorUnits: 175 },
+  })
+  assert.deepEqual(presentPublicOperationV2(measured).actualCost, {
+    currency: 'USD',
+    minorUnits: 175,
+  })
+  const retried = retryPublicOperation(
+    cancelPublicOperation(
+      running,
+      '2026-08-03T23:00:03.000Z',
+    ),
+    '2026-08-03T23:00:04.000Z',
+    '2026-08-03T23:00:05.000Z',
+  )
+  assert.equal(retried.actualCost, undefined)
+
+  expectDomainError(
+    () => createQueuedPublicOperation({
+      id: 'operation-render-invented-cost-1',
+      workspaceId: 'workspace-long-form-cost-1',
+      clientId: 'client-long-form-cost-1',
+      type: 'artifact-render',
+      target: {
+        type: 'media-artifact',
+        id: 'artifact-render-invented-cost-1',
+        manifestId: 'manifest-render-invented-cost-1',
+      },
+      estimatedCost: {
+        currency: 'USD',
+        estimatedMinorUnits: 0,
+        maximumMinorUnits: 0,
+      },
+      createdAt: '2026-08-03T23:00:00.000Z',
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+  expectDomainError(
+    () => rehydratePublicOperation({
+      ...terminal,
+      actualCost: { currency: 'USD', minorUnits: 301 },
+    }),
+    'INVALID_PUBLIC_OPERATION',
+  )
+})
+
 test('T-FR-236 real PublicOperation waiting transitions and visible states are honest and fail closed', () => {
   const queued = createQueuedPublicOperation({
     id: 'operation-visible-state-1', workspaceId: 'workspace-visible-state-1',

@@ -94,6 +94,17 @@ export interface PublicOperationError {
   retryable: boolean
 }
 
+export interface PublicOperationEstimatedCost {
+  currency: 'USD'
+  estimatedMinorUnits: number
+  maximumMinorUnits: number
+}
+
+export interface PublicOperationActualCost {
+  currency: 'USD'
+  minorUnits: number
+}
+
 export interface PublicOperation {
   schemaVersion: 'public-operation/v1'
   id: string
@@ -109,6 +120,8 @@ export interface PublicOperation {
   target: PublicOperationTarget
   result?: PublicOperationResult
   error?: PublicOperationError
+  estimatedCost?: PublicOperationEstimatedCost
+  actualCost?: PublicOperationActualCost
   attempt: number
   maxAttempts: number
   createdAt: string
@@ -126,6 +139,7 @@ const TERMINAL_STATUSES = new Set<PublicOperationStatus>([
   'failed',
   'canceled',
 ])
+const MAX_COST_MINOR_UNITS = 10_000_000
 const RENDER_PHASE_ORDER = [
   'materializing',
   'rendering',
@@ -272,6 +286,41 @@ function sameTarget(
       (right.type === 'media-artifact' && left.manifestId === right.manifestId))
 }
 
+function validateEstimatedCost(
+  value: PublicOperationEstimatedCost,
+): PublicOperationEstimatedCost {
+  assertDomain(
+    value.currency === 'USD' &&
+      Number.isSafeInteger(value.estimatedMinorUnits) &&
+      value.estimatedMinorUnits >= 0 &&
+      value.estimatedMinorUnits <= MAX_COST_MINOR_UNITS &&
+      Number.isSafeInteger(value.maximumMinorUnits) &&
+      value.maximumMinorUnits >= value.estimatedMinorUnits &&
+      value.maximumMinorUnits <= MAX_COST_MINOR_UNITS,
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation estimated cost is invalid',
+  )
+  return {
+    currency: 'USD',
+    estimatedMinorUnits: value.estimatedMinorUnits,
+    maximumMinorUnits: value.maximumMinorUnits,
+  }
+}
+
+function validateActualCost(
+  value: PublicOperationActualCost,
+): PublicOperationActualCost {
+  assertDomain(
+    value.currency === 'USD' &&
+      Number.isSafeInteger(value.minorUnits) &&
+      value.minorUnits >= 0 &&
+      value.minorUnits <= MAX_COST_MINOR_UNITS,
+    'INVALID_PUBLIC_OPERATION',
+    'PublicOperation actual cost is invalid',
+  )
+  return { currency: 'USD', minorUnits: value.minorUnits }
+}
+
 export function assertPublicOperation(operation: PublicOperation): void {
   assertDomain(
     operation.schemaVersion === 'public-operation/v1',
@@ -320,6 +369,26 @@ export function assertPublicOperation(operation: PublicOperation): void {
   )
   if (operation.result) validateTarget(operation.result.resource, 'operation.result.resource')
   validateProgress(operation.progress)
+  if (operation.estimatedCost) {
+    validateEstimatedCost(operation.estimatedCost)
+    assertDomain(
+      operation.type === 'long-form-index',
+      'INVALID_PUBLIC_OPERATION',
+      'PublicOperation estimated cost requires a persisted cost source',
+    )
+  }
+  if (operation.actualCost) {
+    validateActualCost(operation.actualCost)
+    assertDomain(
+      operation.type === 'long-form-index' &&
+        Boolean(operation.estimatedCost) &&
+        TERMINAL_STATUSES.has(operation.status) &&
+        operation.actualCost.minorUnits <=
+          (operation.estimatedCost?.maximumMinorUnits ?? -1),
+      'INVALID_PUBLIC_OPERATION',
+      'PublicOperation actual cost requires a terminal persisted measurement',
+    )
+  }
   assertDomain(
     Number.isSafeInteger(operation.attempt) && operation.attempt >= 0,
     'INVALID_PUBLIC_OPERATION',
@@ -511,6 +580,12 @@ function freezeOperation(operation: PublicOperation): Readonly<PublicOperation> 
         }
       : {}),
     ...(operation.error ? { error: Object.freeze({ ...operation.error }) } : {}),
+    ...(operation.estimatedCost
+      ? { estimatedCost: Object.freeze({ ...operation.estimatedCost }) }
+      : {}),
+    ...(operation.actualCost
+      ? { actualCost: Object.freeze({ ...operation.actualCost }) }
+      : {}),
   })
 }
 
@@ -532,6 +607,7 @@ export function createQueuedPublicOperation(input: {
   type: PublicOperationType
   target: PublicOperationTarget
   maxAttempts?: number
+  estimatedCost?: PublicOperationEstimatedCost
   createdAt: string
 }): Readonly<PublicOperation> {
   const createdAt = validateDate(input.createdAt, 'createdAt')
@@ -557,6 +633,9 @@ export function createQueuedPublicOperation(input: {
           type: 'project-version',
           id: validateId(input.target.id, 'target.id'),
         },
+    ...(input.estimatedCost
+      ? { estimatedCost: validateEstimatedCost(input.estimatedCost) }
+      : {}),
     attempt: 0,
     maxAttempts: input.maxAttempts ?? 3,
     createdAt,
@@ -573,6 +652,12 @@ export function rehydratePublicOperation(operation: PublicOperation): Readonly<P
       ? { resource: { ...operation.result.resource } }
       : undefined,
     error: operation.error ? validateError(operation.error) : undefined,
+    estimatedCost: operation.estimatedCost
+      ? validateEstimatedCost(operation.estimatedCost)
+      : undefined,
+    actualCost: operation.actualCost
+      ? validateActualCost(operation.actualCost)
+      : undefined,
     createdAt: validateDate(operation.createdAt, 'createdAt'),
     updatedAt: validateDate(operation.updatedAt, 'updatedAt'),
     ...(operation.startedAt
@@ -764,6 +849,7 @@ export function retryOrFailPublicOperation(
       completedAt: undefined,
       nextAttemptAt,
       deadLetteredAt: undefined,
+      actualCost: undefined,
     })
   }
   assertDomain(
@@ -815,6 +901,7 @@ export function cancelPublicOperation(
     completedAt,
     nextAttemptAt: undefined,
     deadLetteredAt: undefined,
+    actualCost: undefined,
   })
 }
 
@@ -851,6 +938,7 @@ export function retryPublicOperation(
       completedAt: undefined,
       nextAttemptAt: undefined,
       deadLetteredAt: undefined,
+      actualCost: undefined,
     })
   }
   const nextAttemptAt = validateDate(nextAttemptAtValue, 'nextAttemptAt')
@@ -872,6 +960,7 @@ export function retryPublicOperation(
     completedAt: undefined,
     nextAttemptAt,
     deadLetteredAt: undefined,
+    actualCost: undefined,
   })
 }
 

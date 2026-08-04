@@ -552,6 +552,12 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     const partial = await partialResponse.json()
     assert.equal(partialResponse.status, 200, JSON.stringify(partial))
     assert.equal(partial.data.operation.status, 'retrying')
+    assert.deepEqual(partial.data.operation.estimatedCost, {
+      currency: 'USD',
+      estimatedMinorUnits: 148,
+      maximumMinorUnits: 300,
+    })
+    assert.equal(partial.data.operation.actualCost, undefined)
     assert.equal(partial.data.workflow.summary.searchableStageCount, 1)
     assert.deepEqual(
       partial.data.workflow.stages.map((stage) => ({
@@ -607,6 +613,10 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     assert.equal(stored.workflow.status, 'succeeded')
     assert.equal(stored.operation.status, 'succeeded')
     assert.equal(stored.operation.phase, 'completed')
+    assert.deepEqual(stored.operation.actualCost, {
+      currency: 'USD',
+      minorUnits: stored.workflow.summary.costMinorUnits,
+    })
     assert.equal(stored.workflow.sourceTranscriptId, undefined)
     assert.equal(stored.workflow.durationMs, 7_200_000)
     assert.equal(stored.workflow.summary.completedStageCount, 5)

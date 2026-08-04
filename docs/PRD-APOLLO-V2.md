@@ -1852,6 +1852,8 @@ Senha humana nunca é uma credencial de integração e não deve ser enviada a M
 
 Atualização local de implementação: o Diretor possui enqueue público `202`, alvo reservado de `ProjectVersion`, contexto privado persistido e worker com lease/heartbeat/fencing. O commit serializável publica a nova versão, snapshots, Command, DirectorRun, invalidações, outbox e `PublicOperation.succeeded` como uma unidade; cancelamento ou perda da lease impede publicação parcial. A jornada PostgreSQL/API foi preparada, mas ainda não executada em ambiente isolado hospedado; FR-243 permanece aberta para os demais jobs, deploy e aceite.
 
+Atualização local de custo de FR-243: os contratos de operação v10 expõem custo apenas quando existe fonte persistida. `long-form-index` publica a soma estimada dos budgets de estágio e o teto do workflow; a medição real aparece somente após término e é derivada dos checkpoints persistidos. Outros tipos omitem custo até possuírem reserva/medição próprias. A prova local não substitui execução PostgreSQL/API hospedada, deploy ou aceite.
+
 Ingestão, percepção, direção, geração, sincronização, lote, render e export devem responder com operation/job ID quando não forem imediatos. Clientes podem consultar status, progresso real, resultado, erro, custo, cancelabilidade, retry e resume.
 
 ### FR-244 — Webhooks e eventos

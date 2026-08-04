@@ -358,6 +358,8 @@ As fases reais do artifact render são `materializing → rendering → verifyin
 
 Uma operação de reconstrução só chega a `succeeded` depois de persistir o checkpoint técnico do output. O checkpoint prova que os bytes comprometidos correspondem ao SHA-256, tamanho, container e probe do artifact/manifest alvo. Se o processo cair depois do commit físico, a key determinística é inspecionada e validada; o encode não é repetido quando a identidade coincide. Storage key, stage ID e receipt técnico são internos e nunca ampliam o `PublicOperation` exposto.
 
+`estimatedCost` e `actualCost` são projeções opcionais e não autorizam estimativas inventadas. Para `long-form-index`, `estimatedCost` deriva exclusivamente da soma dos budgets de estágio persistidos e do teto do workflow. `actualCost` só aparece depois de um estado terminal e deriva da soma medida persistida nos checkpoints. Operações sem reserva ou medição canônica omitem os campos; telemetria agregada e classes genéricas de custo não são fonte contábil da operação.
+
 Endpoints:
 
 - `GET /v1/operations/{id}`;

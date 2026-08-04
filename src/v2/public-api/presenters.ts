@@ -261,6 +261,12 @@ export function presentPublicOperation(
       ? { result: { resource: { ...operation.result.resource } } }
       : {}),
     ...(operation.error ? { error: { ...operation.error } } : {}),
+    ...(operation.estimatedCost
+      ? { estimatedCost: { ...operation.estimatedCost } }
+      : {}),
+    ...(operation.actualCost
+      ? { actualCost: { ...operation.actualCost } }
+      : {}),
     attempt: operation.attempt,
     maxAttempts: operation.maxAttempts,
     createdAt: operation.createdAt,

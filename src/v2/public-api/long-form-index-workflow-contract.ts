@@ -9,7 +9,7 @@ import {
   type LongFormIndexStageBudget,
   type LongFormIndexStageVersion,
 } from '../domain/long-form-index-workflow.ts'
-import { presentPublicOperation } from './presenters.ts'
+import { presentPublicOperationV2 } from './presenters.ts'
 
 function record(
   value: unknown,
@@ -297,7 +297,9 @@ export function presentLongFormIndexWorkflow(
 ) {
   return Object.freeze({
     workflow: value.workflow,
-    operation: presentPublicOperation(value.operation),
+    operation: presentPublicOperationV2(value.operation, {
+      includeProjectId: true,
+    }),
   })
 }
 

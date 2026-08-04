@@ -7502,6 +7502,63 @@ const publicOperationSchemaV9 = {
   },
 }
 
+const publicOperationEstimatedCostSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['currency', 'estimatedMinorUnits', 'maximumMinorUnits'],
+  properties: {
+    currency: { const: 'USD' },
+    estimatedMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 10000000,
+    },
+    maximumMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 10000000,
+    },
+  },
+}
+
+const publicOperationActualCostSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['currency', 'minorUnits'],
+  properties: {
+    currency: { const: 'USD' },
+    minorUnits: { type: 'integer', minimum: 0, maximum: 10000000 },
+  },
+}
+
+const publicOperationSchemaV10 = {
+  ...publicOperationSchemaV9,
+  properties: {
+    ...publicOperationSchemaV9.properties,
+    estimatedCost: publicOperationEstimatedCostSchema,
+    actualCost: publicOperationActualCostSchema,
+  },
+  allOf: [
+    {
+      if: {
+        properties: { estimatedCost: {} },
+        required: ['estimatedCost'],
+      },
+      then: { properties: { type: { const: 'long-form-index' } } },
+    },
+    {
+      if: {
+        properties: { actualCost: {} },
+        required: ['actualCost'],
+      },
+      then: {
+        required: ['estimatedCost'],
+        properties: {
+          estimatedCost: publicOperationEstimatedCostSchema,
+          type: { const: 'long-form-index' },
+          status: { enum: ['succeeded', 'failed', 'canceled'] },
+        },
+      },
+    },
+  ],
+}
+
 const longFormStageNames = [
   'probe',
   'transcript',
@@ -8274,6 +8331,15 @@ const credentialMutationDataSchema = {
       else: { properties: { token: false } },
     },
   ],
+}
+const longFormIndexWorkflowRecordSchemaV3 = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['workflow', 'operation'],
+  properties: {
+    workflow: longFormIndexWorkflowSchemaV2,
+    operation: publicOperationSchemaV10,
+  },
 }
 
 const credentialMutationDataV2Schema = {
@@ -12871,6 +12937,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { operation: publicOperationSchemaV9 },
     }),
   ),
+  defineSchema('public-operation-detail', 10, 'Public operation detail with persisted cost estimates and terminal actual cost where a trustworthy source exists',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV10 },
+    }),
+  ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',
     successSchema({
       type: 'object',
@@ -13338,6 +13412,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['operations'],
       properties: {
         operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV9 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
+      },
+    }),
+  ),
+  defineSchema('public-operation-list', 10, 'Public operation list with persisted cost estimates and terminal actual cost where a trustworthy source exists',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operations'],
+      properties: {
+        operations: { type: 'array', maxItems: 100, items: publicOperationSchemaV10 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024, pattern: '^[A-Za-z0-9_-]+$' },
       },
     }),
@@ -19025,11 +19110,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('long-form-index-workflow-mutated', 3, 'Accepted or replayed long-form workflow with typed outputs and persisted public cost projection',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflow', 'operation', 'replayed'],
+      properties: {
+        ...longFormIndexWorkflowRecordSchemaV3.properties,
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('long-form-index-workflow-read', 1, 'One durable long-form indexing workflow and its public operation',
     successSchema(longFormIndexWorkflowRecordSchemaV1),
   ),
   defineSchema('long-form-index-workflow-read', 2, 'One durable long-form indexing workflow with typed stage outputs and its public operation',
     successSchema(longFormIndexWorkflowRecordSchemaV2),
+  ),
+  defineSchema('long-form-index-workflow-read', 3, 'One durable long-form workflow with typed outputs and persisted public cost projection',
+    successSchema(longFormIndexWorkflowRecordSchemaV3),
   ),
   defineSchema('long-form-index-workflow-page', 1, 'Cursor page of durable long-form indexing workflows',
     successSchema({
@@ -19060,6 +19159,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array',
           maxItems: 100,
           items: longFormIndexWorkflowRecordSchemaV2,
+        },
+        nextCursor: {
+          type: 'string',
+          minLength: 3,
+          maxLength: 128,
+        },
+      },
+    }),
+  ),
+  defineSchema('long-form-index-workflow-page', 3, 'Cursor page of durable long-form workflows with typed outputs and persisted public cost projections',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['workflows'],
+      properties: {
+        workflows: {
+          type: 'array',
+          maxItems: 100,
+          items: longFormIndexWorkflowRecordSchemaV3,
         },
         nextCursor: {
           type: 'string',

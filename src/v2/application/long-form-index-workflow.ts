@@ -340,6 +340,14 @@ export function createLongFormIndexWorkflowService(dependencies: {
         id: sourceArtifactId,
         manifestId: sourceManifestId,
       },
+      estimatedCost: {
+        currency: workflow.budget.currency,
+        estimatedMinorUnits: workflow.stages.reduce(
+          (total, stage) => total + stage.budget.estimatedCostMinorUnits,
+          0,
+        ),
+        maximumMinorUnits: workflow.budget.maximumCostMinorUnits,
+      },
       createdAt,
     })
     return dependencies.repository.create({

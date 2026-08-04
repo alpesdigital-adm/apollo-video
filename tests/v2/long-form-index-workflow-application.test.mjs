@@ -152,6 +152,11 @@ test('F2.022 creates one API-first durable workflow and reuses exact probe and t
     'request_trace_long_form_001',
   )
   assert.equal(created.record.operation.type, 'long-form-index')
+  assert.deepEqual(created.record.operation.estimatedCost, {
+    currency: 'USD',
+    estimatedMinorUnits: 30,
+    maximumMinorUnits: 200,
+  })
   assert.deepEqual(created.record.operation.target, {
     type: 'media-artifact',
     id: 'artifact-long-form',
@@ -250,6 +255,14 @@ test('F2.022 read and list expose the same workflow and operation model', async 
     Object.keys(presentLongFormIndexWorkflow(read)).sort(),
     ['operation', 'workflow'],
   )
+  const presented = presentLongFormIndexWorkflow(read).operation
+  assert.equal(presented.projectId, request().projectId)
+  assert.equal(presented.visibleState.label, 'queued')
+  assert.deepEqual(presented.estimatedCost, {
+    currency: 'USD',
+    estimatedMinorUnits: 30,
+    maximumMinorUnits: 200,
+  })
 })
 
 test('F2.022 public parser requires exact five-stage budgets and rejects prompt-injected fields', () => {

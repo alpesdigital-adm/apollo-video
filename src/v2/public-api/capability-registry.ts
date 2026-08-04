@@ -1511,14 +1511,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.list',
-    version: '9.0.0',
+    version: '10.0.0',
     title: 'List public operations',
     description: 'Returns one stable cursor page of safe workspace operation metadata with allowlisted filters and an honest visible-state projection.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-list/v9',
+    outputSchemaRef: 'apollo://schemas/public-operation-list/v10',
     endpoint: { method: 'GET', path: '/v1/operations' },
     toolName: 'apollo.operations.list',
     supportsDryRun: false,
@@ -1570,14 +1570,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.dead-letter.list',
-    version: '9.0.0',
+    version: '10.0.0',
     title: 'List dead-letter operations',
     description: 'Returns failed workspace operations whose automatic retry capacity was exhausted and that may be considered for manual retry.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-list/v9',
+    outputSchemaRef: 'apollo://schemas/public-operation-list/v10',
     endpoint: { method: 'GET', path: '/v1/operations/dead-letter' },
     toolName: 'apollo.operations.dead-letter.list',
     supportsDryRun: false,
@@ -1620,14 +1620,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.read',
-    version: '9.0.0',
+    version: '10.0.0',
     title: 'Read public operation',
     description: 'Returns safe status, progress, target, terminal result and an honest actionable visible-state projection for one workspace operation.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['operations:read'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v9',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v10',
     endpoint: { method: 'GET', path: '/v1/operations/{operationId}' },
     toolName: 'apollo.operations.read',
     supportsDryRun: false,
@@ -1656,14 +1656,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.cancel',
-    version: '9.0.0',
+    version: '10.0.0',
     title: 'Cancel public operation',
     description: 'Idempotently cancels a queued, waiting, retrying or running workspace operation and invalidates any active worker lease.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
     requiredScopes: ['operations:cancel'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v9',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v10',
     endpoint: { method: 'POST', path: '/v1/operations/{operationId}/cancel' },
     toolName: 'apollo.operations.cancel',
     supportsDryRun: false,
@@ -1674,14 +1674,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.operations.retry',
-    version: '9.0.0',
+    version: '10.0.0',
     title: 'Retry public operation',
     description: 'Requeues a failed or canceled workspace operation while preserving its protected context and attempt history.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
     requiredScopes: ['operations:retry'],
-    outputSchemaRef: 'apollo://schemas/public-operation-detail/v9',
+    outputSchemaRef: 'apollo://schemas/public-operation-detail/v10',
     endpoint: { method: 'POST', path: '/v1/operations/{operationId}/retry' },
     toolName: 'apollo.operations.retry',
     supportsDryRun: false,
@@ -2352,7 +2352,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.list',
-    version: '1.1.0',
+    version: '1.2.0',
     title: 'List long-form index workflows',
     description: 'Lists durable five-stage indexing workflows, partial-search availability, budgets and their public operations.',
     exposure: 'public',
@@ -2360,7 +2360,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:read'],
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-page/v2',
+      'apollo://schemas/long-form-index-workflow-page/v3',
     endpoint: {
       method: 'GET',
       path:
@@ -2416,7 +2416,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.create',
-    version: '1.1.0',
+    version: '1.2.0',
     title: 'Create long-form index workflow',
     description: 'Creates a durable, resumable and budget-bounded probe, transcript, diarization, chunk and moment indexing workflow for an immutable video master.',
     exposure: 'public',
@@ -2426,7 +2426,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-long-form-index-workflow-request/v1',
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-mutated/v2',
+      'apollo://schemas/long-form-index-workflow-mutated/v3',
     endpoint: {
       method: 'POST',
       path:
@@ -2443,7 +2443,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.long-form-index-workflows.read',
-    version: '1.1.0',
+    version: '1.2.0',
     title: 'Read long-form index workflow',
     description: 'Reads one durable workflow with immutable checkpoints, partial-search status, cost and operation progress.',
     exposure: 'public',
@@ -2451,7 +2451,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     authMode: 'required',
     requiredScopes: ['projects:read'],
     outputSchemaRef:
-      'apollo://schemas/long-form-index-workflow-read/v2',
+      'apollo://schemas/long-form-index-workflow-read/v3',
     endpoint: {
       method: 'GET',
       path:
