@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { applyEditorialCutCommandService } from '@/v2/application/apply-editorial-cut-command'
-import { requireScope } from '@/v2/application/authenticate-api-client'
+import {
+  requireScope,
+} from '@/v2/application/authenticate-api-client'
 import { enqueueProjectProxyRenderService } from '@/v2/application/enqueue-project-proxy-render'
 import { replaceSourceTranscriptService } from '@/v2/application/replace-source-transcript'
 import { runProjectDirectorService } from '@/v2/application/run-project-director'
@@ -106,7 +108,7 @@ export async function POST(
         projectId,
         baseVersionId: body.baseVersionId,
         baseHash: body.baseHash,
-        actor: actor.auditContext.actor,
+        actor,
         idempotency: { key: idempotencyKey },
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       })

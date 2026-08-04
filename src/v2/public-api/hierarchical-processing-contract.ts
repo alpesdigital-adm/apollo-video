@@ -221,6 +221,8 @@ export function presentHierarchicalProcessingRun(
   const {
     requestFingerprint: _requestFingerprint,
     idempotencyKey: _idempotencyKey,
+    authenticationAudit: _authenticationAudit,
+    provenance: _provenance,
     evidenceSpans,
     ...publicRun
   } = run

@@ -12,6 +12,14 @@ import {
   processHierarchicalLanguage,
   processHierarchicalVision,
 } from '../../src/v2/domain/hierarchical-processing.ts'
+import {
+  executeHierarchicalProcessingService,
+} from '../../src/v2/application/hierarchical-processing.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
+import {
+  authenticatedActor,
+  authenticationAudit,
+} from './helpers/authentication-audit.mjs'
 
 const versions = (vision = '1.0.0') =>
   normalizeHierarchicalTierVersions({
@@ -216,4 +224,103 @@ test('T-FR-053 measures bounded 30-minute and two-hour fixtures', () => {
     assert.ok(measurement.elapsedMs > 0)
     assert.match(measurement.measurementHash, /^[a-f0-9]{64}$/)
   }
+})
+
+test('T-FR-053 direct hierarchical execution binds replay to credential audit and explicit provenance', async () => {
+  let stored
+  const actorAudit = authenticationAudit({
+    clientId: 'client-hierarchical-direct',
+    credentialId: 'credential-hierarchical-direct',
+    workspaceId: 'workspace-hierarchical-direct',
+  })
+  const actor = authenticatedActor({
+    clientId: actorAudit.clientId,
+    credentialId: actorAudit.credentialId,
+    workspaceId: actorAudit.workspaceId,
+  })
+  const repository = {
+    async findIdempotent() { return stored ?? null },
+    async readSourceContext() {
+      return {
+        sourceArtifactId: 'artifact-hierarchical-direct',
+        sourceArtifactSha256: 'a'.repeat(64),
+        sourceManifestId: 'manifest-hierarchical-direct',
+        sourceManifestHash: 'b'.repeat(64),
+        sourceTranscriptId: 'transcript-hierarchical-direct',
+        sourceTranscriptHash: 'c'.repeat(64),
+        durationMs: 120_000,
+        probe: { width: 1920, height: 1080, fps: 30 },
+        transcriptSegments: [
+          { id: 1, startMs: 0, endMs: 50_000, text: 'Primeiro argumento completo.' },
+          { id: 2, startMs: 60_000, endMs: 115_000, text: 'Segundo argumento completo.' },
+        ],
+        catalogedVisualObservationCount: 2,
+        rights: {
+          id: 'rights-hierarchical-direct',
+          status: 'approved',
+          consentStatus: 'not-required',
+        },
+      }
+    },
+    async persist(run) {
+      stored = run
+      return { run, replayed: false }
+    },
+    async findRun() { return stored ?? null },
+    async persistWithLongFormLease() {
+      throw new Error('direct execution must not use a workflow fence')
+    },
+  }
+  let monotonic = 0
+  const execute = executeHierarchicalProcessingService({
+    repository,
+    clock: () => new Date('2026-08-05T09:00:00.000Z'),
+    monotonicMs: () => monotonic++,
+    createId: () => 'hierarchical-processing-run-direct',
+  })
+  const request = {
+    workspaceId: 'workspace-hierarchical-direct',
+    projectId: 'project-hierarchical-direct',
+    sourceArtifactId: 'artifact-hierarchical-direct',
+    expectedArtifactSha256: 'a'.repeat(64),
+    sourceManifestId: 'manifest-hierarchical-direct',
+    expectedManifestHash: 'b'.repeat(64),
+    sourceTranscriptId: 'transcript-hierarchical-direct',
+    expectedTranscriptHash: 'c'.repeat(64),
+    processingPolicyVersion: 'hierarchical-processing/v1',
+    chunking: {
+      policyVersion: 'overlapping-time-chunks/v1',
+      chunkDurationMs: 60_000,
+      overlapMs: 5_000,
+    },
+    tierVersions: versions(),
+    budget: {
+      currency: 'USD',
+      maxCostMinorUnits: 10_000,
+      maxWorkingSetBytes: 64 * 1024 * 1024,
+      maxElapsedMs: 60_000,
+    },
+    actor,
+    provenance: { kind: 'external-request' },
+    idempotencyKey: 'hierarchical-direct-key',
+  }
+  const first = await execute(request)
+  assert.equal(first.replayed, false)
+  assert.deepEqual(first.run.authenticationAudit, actorAudit)
+  assert.deepEqual(first.run.provenance, { kind: 'external-request' })
+  const replay = await execute(request)
+  assert.equal(replay.replayed, true)
+  await assert.rejects(
+    () => execute({
+      ...request,
+      actor: authenticatedActor({
+        clientId: actorAudit.clientId,
+        credentialId: 'credential-hierarchical-other',
+        workspaceId: actorAudit.workspaceId,
+      }),
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
 })

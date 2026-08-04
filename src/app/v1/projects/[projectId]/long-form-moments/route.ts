@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
+import {
+  requireScope,
+} from '@/v2/application/authenticate-api-client'
 import {
   catalogLongFormMomentsService,
   searchLongFormMomentsService,
@@ -259,6 +261,8 @@ function presentRun(
   const {
     requestFingerprint: _requestFingerprint,
     idempotencyKey: _idempotencyKey,
+    authenticationAudit: _authenticationAudit,
+    provenance: _provenance,
     ...publicRun
   } = run
   return publicRun
@@ -293,7 +297,8 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
+      provenance: Object.freeze({ kind: 'external-request' as const }),
       idempotencyKey,
     })
     return NextResponse.json(

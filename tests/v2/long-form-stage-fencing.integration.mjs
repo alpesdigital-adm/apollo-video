@@ -14,6 +14,32 @@ const baseFence = Object.freeze({
   now: '2026-07-30T13:00:00.000Z',
 })
 
+function execution(stage) {
+  return {
+    createdBy: {
+      type: 'api-client',
+      id: 'client-fencing',
+    },
+    authenticationAudit: Object.freeze({
+      clientId: 'client-fencing',
+      credentialId: 'credential-fencing',
+      workspaceId: baseFence.workspaceId,
+      environment: 'sandbox',
+      authenticationKind: 'bearer',
+      contextHash:
+        '96bc71273e02f454a5299b35966ae7c5462941237a3edf10d702c7e857161f02',
+    }),
+    provenance: {
+      kind: 'long-form-stage',
+      workflowId: baseFence.workflowId,
+      operationId: baseFence.operationId,
+      stage,
+      stageInputHash: baseFence.expectedStageInputHash,
+      stageIdempotencyKey: baseFence.expectedStageIdempotencyKey,
+    },
+  }
+}
+
 function clientWithoutLease(runModel) {
   let transactionCount = 0
   const transaction = {
@@ -56,6 +82,7 @@ test('T-FR-133 hierarchical repository fences tenant and missing operation lease
   const repository =
     new PrismaHierarchicalProcessingRepository(fixture.client)
   const run = {
+    ...execution('chunks'),
     workspaceId: baseFence.workspaceId,
     projectId: baseFence.projectId,
     idempotencyKey:
@@ -69,6 +96,20 @@ test('T-FR-133 hierarchical repository fences tenant and missing operation lease
         workspaceId: 'workspace-fencing-other',
         stage: 'chunks',
       },
+    }),
+    (error) => error.code === 'VERSION_CONFLICT',
+  )
+  assert.equal(fixture.transactions(), 0)
+  await assert.rejects(
+    repository.persistWithLongFormLease({
+      run: {
+        ...run,
+        provenance: {
+          ...run.provenance,
+          operationId: 'operation-fencing-tampered',
+        },
+      },
+      fence: { ...baseFence, stage: 'chunks' },
     }),
     (error) => error.code === 'VERSION_CONFLICT',
   )
@@ -113,6 +154,7 @@ test('T-FR-133 hierarchical fence binds chunks to the persisted transcript check
     },
   })
   const run = {
+    ...execution('chunks'),
     workspaceId: baseFence.workspaceId,
     projectId: baseFence.projectId,
     sourceArtifactId: 'artifact-fencing',
@@ -163,6 +205,7 @@ test('T-FR-133 long-form repository fences tenant and missing operation lease be
   const repository =
     new PrismaLongFormIndexRepository(fixture.client)
   const run = {
+    ...execution('moments'),
     workspaceId: baseFence.workspaceId,
     projectId: baseFence.projectId,
     idempotencyKey:
@@ -222,6 +265,7 @@ test('T-FR-134 long-form repository revalidates transcript sidecar against the h
     spanHash: calculateCanonicalHash(spanContent),
   }
   const run = {
+    ...execution('moments'),
     id: 'index-fencing-transcript',
     workspaceId: baseFence.workspaceId,
     projectId: baseFence.projectId,
@@ -270,12 +314,25 @@ test('T-FR-134 long-form repository revalidates transcript sidecar against the h
         },
         v2PublicOperation: {
           async findFirst() {
-            return { id: baseFence.operationId }
+            return {
+              id: baseFence.operationId,
+              clientId: run.authenticationAudit.clientId,
+              actorContextHash:
+                run.authenticationAudit.contextHash,
+            }
           },
         },
         v2LongFormIndexStageCheckpoint: {
           async findFirst() {
-            return { id: 'stage-fencing-transcript' }
+            return {
+              id: 'stage-fencing-transcript',
+              workflow: {
+                createdByClientId:
+                  run.authenticationAudit.clientId,
+                actorContextHash:
+                  run.authenticationAudit.contextHash,
+              },
+            }
           },
         },
         v2HierarchicalProcessingRun: {

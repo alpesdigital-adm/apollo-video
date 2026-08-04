@@ -63,7 +63,12 @@ export function runNextProjectDirectorOperationService(dependencies: {
       claimed.context.kind !== 'project-director-run' ||
       claimed.operation.target.type !== 'project-version' ||
       claimed.operation.projectId !== claimed.context.projectId ||
-      claimed.operation.target.id !== claimed.context.resultVersionId
+      claimed.operation.target.id !== claimed.context.resultVersionId ||
+      claimed.authenticationAudit.clientId !== claimed.operation.clientId ||
+      claimed.authenticationAudit.workspaceId !==
+        claimed.operation.workspaceId ||
+      claimed.authenticationAudit.delegatedUserId !==
+        claimed.context.delegatedUserId
     ) throw new DomainError(
       'PERSISTENCE_CONFLICT',
       'Director worker claimed an invalid operation context',
@@ -134,13 +139,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
         projectId: context.projectId,
         baseVersionId: context.baseVersionId,
         baseHash: context.baseHash,
-        actor: {
-          type: 'api-client',
-          id: claimed.operation.clientId,
-          ...(context.delegatedUserId
-            ? { delegatedUserId: context.delegatedUserId }
-            : {}),
-        },
+        authenticationAudit: claimed.authenticationAudit,
         idempotency: {
           key: calculateVersionHash({
             kind: 'project-director-operation',

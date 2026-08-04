@@ -6,6 +6,7 @@ import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { DirectorRunImpactV1 } from '../../domain/director-run-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -34,6 +35,7 @@ export interface DirectorRunContext {
 
 export interface DirectorRunCommit {
   command: Readonly<EditCommand<RunDirectorCommandPayload>>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   snapshots: readonly Readonly<ProjectSnapshot>[]
   version: Readonly<ProjectVersion>
@@ -66,6 +68,7 @@ export interface DirectorRunRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{ requestFingerprint: string; result: DirectorRunResult }> | null>
   readContext(input: {
     workspaceId: string

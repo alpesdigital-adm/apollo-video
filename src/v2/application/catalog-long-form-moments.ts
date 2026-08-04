@@ -14,6 +14,18 @@ import type {
   LongFormMomentSearchQuery,
   PersistedLongFormIndexRun,
 } from './ports/long-form-index-repository.ts'
+import type {
+  ApiAccessAuditContext,
+} from '../domain/api-access-control.ts'
+import type {
+  ProjectAnalysisExecutionProvenance,
+} from './ports/long-form-stage-persistence.ts'
+import {
+  resolveProjectAnalysisExecutionContext,
+} from './project-analysis-execution.ts'
+import type {
+  AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
@@ -107,7 +119,10 @@ function validNow(value: Date, field: string): string {
 }
 
 export function calculateLongFormIndexRecordHash(
-  run: Omit<PersistedLongFormIndexRun, 'recordHash' | 'active'>,
+  run: Omit<
+    PersistedLongFormIndexRun,
+    'recordHash' | 'active' | 'authenticationAudit' | 'provenance'
+  >,
 ): string {
   return calculateCanonicalHash(run)
 }
@@ -131,7 +146,9 @@ export function catalogLongFormMomentsService(dependencies: {
     producer: LongFormProducer
     chapters: readonly LongFormChapterInput[]
     moments: readonly LongFormMomentInput[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor?: Readonly<AuthenticatedExternalActor>
+    authenticationAudit?: Readonly<ApiAccessAuditContext>
+    provenance: Readonly<ProjectAnalysisExecutionProvenance>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -157,12 +174,19 @@ export function catalogLongFormMomentsService(dependencies: {
       'INVALID_ARGUMENT',
       `indexPolicyVersion must be ${LONG_FORM_INDEX_POLICY_VERSION}`,
     )
-    assertDomain(
-      request.actor?.type === 'api-client',
-      'AUTH_INVALID',
-      'Long-form indexing requires an authenticated API client',
+    const execution = resolveProjectAnalysisExecutionContext({
+      workspaceId,
+      ...(request.actor ? { actor: request.actor } : {}),
+      ...(request.authenticationAudit
+        ? { authenticationAudit: request.authenticationAudit }
+        : {}),
+      provenance: request.provenance,
+      expectedStage: 'moments',
+    })
+    const actorId = identity(
+      execution.authenticationAudit.clientId,
+      'actor.id',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const producer = normalizeLongFormProducer(request.producer)
     const requestFingerprint = calculateCanonicalHash({
@@ -177,12 +201,14 @@ export function catalogLongFormMomentsService(dependencies: {
       producer,
       chapters: request.chapters,
       moments: request.moments,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: execution.authenticationAudit.contextHash,
+      provenance: execution.provenance,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: execution.authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -272,6 +298,7 @@ export function catalogLongFormMomentsService(dependencies: {
       ...content,
       recordHash: calculateLongFormIndexRecordHash(content),
       active: true,
+      ...execution,
     })
     return dependencies.repository.persist(run)
   }

@@ -2,6 +2,9 @@ import type {
   LongFormIndexStageCheckpoint,
   LongFormIndexWorkflow,
 } from '../../domain/long-form-index-workflow.ts'
+import type {
+  ApiAccessAuditContext,
+} from '../../domain/api-access-control.ts'
 
 export interface LongFormIndexStageResult {
   outputHash: string
@@ -14,6 +17,7 @@ export interface LongFormIndexStageResult {
 export interface LongFormIndexStageProcessor {
   process(input: {
     workflow: Readonly<LongFormIndexWorkflow>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     checkpoint: Readonly<LongFormIndexStageCheckpoint>
     lease: Readonly<{
       operationId: string

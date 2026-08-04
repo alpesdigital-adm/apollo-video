@@ -28,6 +28,18 @@ import type {
   HierarchicalTierExecution,
   PersistedHierarchicalProcessingRun,
 } from './ports/hierarchical-processing-repository.ts'
+import type {
+  ApiAccessAuditContext,
+} from '../domain/api-access-control.ts'
+import type {
+  ProjectAnalysisExecutionProvenance,
+} from './ports/long-form-stage-persistence.ts'
+import {
+  resolveProjectAnalysisExecutionContext,
+} from './project-analysis-execution.ts'
+import type {
+  AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 export {
   aggregateHierarchicalMoments,
@@ -152,7 +164,10 @@ function outputHash(
 }
 
 function calculateRunHash(
-  run: Omit<PersistedHierarchicalProcessingRun, 'runHash' | 'active'>,
+  run: Omit<
+    PersistedHierarchicalProcessingRun,
+    'runHash' | 'active' | 'authenticationAudit' | 'provenance'
+  >,
 ): string {
   return calculateCanonicalHash(run)
 }
@@ -232,7 +247,9 @@ export function executeHierarchicalProcessingService(dependencies: {
       expectedRunHash: string
     }>
     budget: Readonly<HierarchicalProcessingBudget>
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor?: Readonly<AuthenticatedExternalActor>
+    authenticationAudit?: Readonly<ApiAccessAuditContext>
+    provenance: Readonly<ProjectAnalysisExecutionProvenance>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -296,12 +313,19 @@ export function executeHierarchicalProcessingService(dependencies: {
       request.tierVersions,
     )
     const budget = normalizedBudget(request.budget)
-    assertDomain(
-      request.actor?.type === 'api-client',
-      'AUTH_INVALID',
-      'Hierarchical processing requires an authenticated API client',
+    const execution = resolveProjectAnalysisExecutionContext({
+      workspaceId,
+      ...(request.actor ? { actor: request.actor } : {}),
+      ...(request.authenticationAudit
+        ? { authenticationAudit: request.authenticationAudit }
+        : {}),
+      provenance: request.provenance,
+      expectedStage: 'chunks',
+    })
+    const actorId = identity(
+      execution.authenticationAudit.clientId,
+      'actor.id',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const previousRun = request.previousRun
       ? Object.freeze({
@@ -327,12 +351,14 @@ export function executeHierarchicalProcessingService(dependencies: {
       tierVersions,
       previousRun,
       budget,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: execution.authenticationAudit.contextHash,
+      provenance: execution.provenance,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: execution.authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -750,6 +776,7 @@ export function executeHierarchicalProcessingService(dependencies: {
       ...content,
       runHash: calculateRunHash(content),
       active: true,
+      ...execution,
     })
     return dependencies.repository.persist(run)
   }

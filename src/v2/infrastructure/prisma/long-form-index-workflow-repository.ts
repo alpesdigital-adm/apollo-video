@@ -776,6 +776,7 @@ implements LongFormIndexWorkflowRepository {
     return Object.freeze({
       workflow: hydrateWorkflow(row),
       operation: operation.operation,
+      authenticationAudit: operation.authenticationAudit,
       requestFingerprint: row.requestFingerprint,
       idempotencyKey: row.idempotencyKey,
     })

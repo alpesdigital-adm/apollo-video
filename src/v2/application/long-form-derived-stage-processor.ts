@@ -737,9 +737,14 @@ export function createLongFormDerivedStageProcessor(
           configuration.chunks.maximumWorkingSetBytes,
         maxElapsedMs: budget.maximumElapsedMs,
       }),
-      actor: Object.freeze({
-        type: 'api-client',
-        id: workflow.createdByClientId,
+      authenticationAudit: input.authenticationAudit,
+      provenance: Object.freeze({
+        kind: 'long-form-stage' as const,
+        workflowId: workflow.id,
+        operationId: input.lease.operationId,
+        stage: 'chunks' as const,
+        stageInputHash: input.checkpoint.inputHash,
+        stageIdempotencyKey: input.checkpoint.idempotencyKey,
       }),
       idempotencyKey: input.checkpoint.idempotencyKey,
     })
@@ -934,9 +939,14 @@ export function createLongFormDerivedStageProcessor(
       }),
       chapters: hierarchy.chapters,
       moments: hierarchy.moments,
-      actor: Object.freeze({
-        type: 'api-client',
-        id: workflow.createdByClientId,
+      authenticationAudit: input.authenticationAudit,
+      provenance: Object.freeze({
+        kind: 'long-form-stage' as const,
+        workflowId: workflow.id,
+        operationId: input.lease.operationId,
+        stage: 'moments' as const,
+        stageInputHash: input.checkpoint.inputHash,
+        stageIdempotencyKey: input.checkpoint.idempotencyKey,
       }),
       idempotencyKey: input.checkpoint.idempotencyKey,
     })

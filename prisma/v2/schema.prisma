@@ -1943,6 +1943,8 @@ model V2PublicOperation {
   sourceCleanupPlan               V2SourceCleanupPlan?
   longFormIndexWorkflow           V2LongFormIndexWorkflow?
   projectDirectorRun              V2ProjectDirectorOperation?
+  longFormIndexRunsAsOrigin       V2LongFormIndexRun[]                @relation("LongFormIndexRunOriginOperation")
+  hierarchicalRunsAsOrigin        V2HierarchicalProcessingRun[]       @relation("HierarchicalRunOriginOperation")
   reviewPatchProposal             V2ReviewPatchProposal?
   reviewPatchBatch                V2ReviewPatchBatch?
   controlCommands                 V2PublicOperationControlCommand[]
@@ -2688,6 +2690,8 @@ model V2LongFormIndexWorkflow {
   createdBy        V2ApiClient                      @relation(fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   stages           V2LongFormIndexStageCheckpoint[]
   diarizationRuns  V2SpeakerDiarizationRun[]
+  longFormIndexRuns V2LongFormIndexRun[]            @relation("LongFormIndexRunOriginWorkflow")
+  hierarchicalRuns V2HierarchicalProcessingRun[]    @relation("HierarchicalRunOriginWorkflow")
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -2841,6 +2845,19 @@ model V2LongFormIndexRun {
   active               Boolean  @default(true)
   createdByType        String   @db.VarChar(32)
   createdById          String   @db.VarChar(80)
+  actorCredentialId    String?  @db.VarChar(128)
+  actorEnvironment     String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash     String?  @db.Char(64)
+  delegatedUserId      String?  @db.VarChar(128)
+  delegatedIdentityId  String?  @db.VarChar(128)
+  workspaceRole        String?  @db.VarChar(32)
+  executionKind        String?  @db.VarChar(32)
+  originOperationId    String?  @db.VarChar(128)
+  originWorkflowId     String?  @db.VarChar(128)
+  originStage          String?  @db.VarChar(32)
+  originStageInputHash String?  @db.Char(64)
+  originStageIdempotencyKey String? @db.VarChar(256)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
 
   workspace                    V2Workspace                          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -2849,6 +2866,8 @@ model V2LongFormIndexRun {
   sourceManifest               V2MediaArtifactManifest              @relation(fields: [sourceManifestId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   rightsSnapshot               V2AssetRightsSnapshot                @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy                    V2ApiClient                          @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originOperation              V2PublicOperation?                   @relation("LongFormIndexRunOriginOperation", fields: [originOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "long_form_index_runs_origin_operation_fkey")
+  originWorkflow               V2LongFormIndexWorkflow?            @relation("LongFormIndexRunOriginWorkflow", fields: [originWorkflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "long_form_index_runs_origin_workflow_fkey")
   chapters                     V2LongFormChapter[]
   moments                      V2LongFormMoment[]
   transcriptEvidence           V2LongFormMomentTranscriptEvidence[]
@@ -2863,6 +2882,9 @@ model V2LongFormIndexRun {
   @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, active, createdAt(sort: Desc)])
   @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "long_form_index_runs_actor_context_idx")
+  @@index([workspaceId, originOperationId], map: "long_form_index_runs_origin_operation_idx")
+  @@index([workspaceId, originWorkflowId, originStage], map: "long_form_index_runs_origin_workflow_stage_idx")
   @@map("long_form_index_runs")
 }
 
@@ -3912,6 +3934,19 @@ model V2HierarchicalProcessingRun {
   idempotencyKey          String   @db.VarChar(128)
   createdByType           String   @db.VarChar(32)
   createdById             String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  executionKind           String?  @db.VarChar(32)
+  originOperationId       String?  @db.VarChar(128)
+  originWorkflowId        String?  @db.VarChar(128)
+  originStage             String?  @db.VarChar(32)
+  originStageInputHash    String?  @db.Char(64)
+  originStageIdempotencyKey String? @db.VarChar(256)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
   runHash                 String   @db.Char(64)
   active                  Boolean  @default(true)
@@ -3923,6 +3958,8 @@ model V2HierarchicalProcessingRun {
   sourceTranscript                 V2MediaTranscript                    @relation(fields: [sourceTranscriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   rightsSnapshot                   V2AssetRightsSnapshot                @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy                        V2ApiClient                          @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  originOperation                  V2PublicOperation?                   @relation("HierarchicalRunOriginOperation", fields: [originOperationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "hierarchical_processing_runs_origin_operation_fkey")
+  originWorkflow                   V2LongFormIndexWorkflow?            @relation("HierarchicalRunOriginWorkflow", fields: [originWorkflowId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, map: "hierarchical_processing_runs_origin_workflow_fkey")
   previousRun                      V2HierarchicalProcessingRun?         @relation("HierarchicalPreviousRun", fields: [previousRunId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   successorRuns                    V2HierarchicalProcessingRun[]        @relation("HierarchicalPreviousRun")
   chunks                           V2HierarchicalProcessingChunk[]
@@ -3937,6 +3974,9 @@ model V2HierarchicalProcessingRun {
   @@index([workspaceId, sourceTranscriptId, active, createdAt(sort: Desc)])
   @@index([workspaceId, previousRunId])
   @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "hierarchical_processing_runs_actor_context_idx")
+  @@index([workspaceId, originOperationId], map: "hierarchical_processing_runs_origin_operation_idx")
+  @@index([workspaceId, originWorkflowId, originStage], map: "hierarchical_processing_runs_origin_workflow_stage_idx")
   @@map("hierarchical_processing_runs")
 }
 

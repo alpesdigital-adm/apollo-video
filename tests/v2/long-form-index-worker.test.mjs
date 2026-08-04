@@ -17,6 +17,7 @@ import {
 import {
   runNextLongFormIndexOperationService,
 } from '../../src/v2/application/run-long-form-index-worker.ts'
+import { authenticationAudit } from './helpers/authentication-audit.mjs'
 
 const sha = (value) =>
   createHash('sha256').update(value).digest('hex')
@@ -87,6 +88,11 @@ function initialWorkflow() {
 
 function workerFixture(options = {}) {
   let workflow = initialWorkflow()
+  const actorAudit = authenticationAudit({
+    clientId: workflow.createdByClientId,
+    credentialId: 'credential-long-form-worker',
+    workspaceId: workflow.workspaceId,
+  })
   let operation = createQueuedPublicOperation({
     id: 'operation-long-form-worker',
     workspaceId: workflow.workspaceId,
@@ -109,7 +115,11 @@ function workerFixture(options = {}) {
     sourceArtifactId: workflow.sourceArtifactId,
     sourceManifestId: workflow.sourceManifestId,
   })
-  const record = () => Object.freeze({ operation, context })
+  const record = () => Object.freeze({
+    operation,
+    context,
+    authenticationAudit: actorAudit,
+  })
   const operations = {
     async claimNext(input) {
       if (
@@ -168,6 +178,7 @@ function workerFixture(options = {}) {
       return Object.freeze({
         workflow,
         operation,
+        authenticationAudit: actorAudit,
         requestFingerprint: sha('request'),
         idempotencyKey: 'long-form-worker-request',
       })
@@ -186,6 +197,7 @@ function workerFixture(options = {}) {
     operations,
     workflows,
     transitions,
+    actorAudit,
     getWorkflow: () => workflow,
     getOperation: () => operation,
   }
@@ -214,6 +226,7 @@ test('F2.022 worker skips exact reuse, runs remaining stages and settles one dur
           input.checkpoint.concurrency,
         ])
         assert.equal(input.signal.aborted, false)
+        assert.deepEqual(input.authenticationAudit, fixture.actorAudit)
         return {
           outputHash: sha(`output-${input.checkpoint.stage}`),
           outputEntityId:

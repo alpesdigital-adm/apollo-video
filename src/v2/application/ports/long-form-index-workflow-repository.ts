@@ -29,6 +29,7 @@ export interface LongFormIndexWorkflowSourceContext {
 export interface PersistedLongFormIndexWorkflow {
   workflow: Readonly<LongFormIndexWorkflow>
   operation: Readonly<PublicOperation>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   idempotencyKey: string
 }

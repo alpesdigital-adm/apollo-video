@@ -145,7 +145,7 @@ test('T-FR-242 project intelligence mutations bind one authenticated actor throu
   }
 })
 
-test('T-FR-242 external editorial Commands bind credential audit while Director stays internally attributable', () => {
+test('T-FR-242 external editorial Commands and durable Director runs bind credential audit', () => {
   const applicationFiles = [
     'apply-editorial-cut-command.ts',
     'replace-source-transcript.ts',
@@ -200,10 +200,27 @@ test('T-FR-242 external editorial Commands bind credential audit while Director 
   )
   assert.equal(
     commandsRoute.match(/actor:\s*actor\.auditContext\.actor/g)?.length ?? 0,
-    1,
-    'only the durable internal Director command may use the projected Command actor',
+    0,
+    'no external command may persist a projected actor without credential audit',
   )
-  assert.match(commandsRoute, /runProjectDirectorService[\s\S]*actor:\s*actor\.auditContext\.actor/)
+  assert.match(
+    commandsRoute,
+    /runProjectDirectorService[\s\S]*\n\s*actor,\n/,
+  )
+  const directorApplication = readFileSync(
+    join(root, 'src/v2/application/run-project-director.ts'),
+    'utf8',
+  )
+  assert.match(directorApplication, /canonicalProjectMutationAudit/)
+  assert.match(directorApplication, /requireScope\(request\.actor, 'projects:write'\)/)
+  assert.match(directorApplication, /materializeActorAuditContext\(request\.actor\)/)
+  assert.match(directorApplication, /actorContextHash:\s*authenticationAudit\.contextHash/)
+  const directorRepository = readFileSync(
+    join(root, 'src/v2/infrastructure/prisma/director-run-repository.ts'),
+    'utf8',
+  )
+  assert.match(directorRepository, /editCommandExternalActorAuditData/)
+  assert.match(directorRepository, /hydrateEditCommandExternalActorAudit/)
 })
 
 test('T-FR-242 project evaluation mutations bind credential audit across API, Application and Prisma', () => {
@@ -249,6 +266,43 @@ test('T-FR-242 project evaluation mutations bind credential audit across API, Ap
     const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
     assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
     assert.match(source, /actor[:,]/)
+  }
+})
+
+test('T-FR-242 project analysis preserves initiating audit across direct API and durable stages', () => {
+  for (const relative of [
+    'projects/[projectId]/long-form-moments/route.ts',
+    'projects/[projectId]/hierarchical-processing/runs/route.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    assert.match(source, /requireScope\(actor, 'projects:write'\)/)
+    assert.match(source, /\n\s*actor,\n/)
+    assert.match(source, /provenance:\s*Object\.freeze\(\{ kind: 'external-request'/)
+    assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
+  }
+  for (const relative of [
+    'catalog-long-form-moments.ts',
+    'hierarchical-processing.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /resolveProjectAnalysisExecutionContext/)
+    assert.match(source, /actorContextHash:\s*execution\.authenticationAudit\.contextHash/)
+    assert.match(source, /provenance:\s*execution\.provenance/)
+  }
+  const worker = readFileSync(
+    join(root, 'src/v2/application/long-form-derived-stage-processor.ts'),
+    'utf8',
+  )
+  assert.match(worker, /authenticationAudit:\s*input\.authenticationAudit/g)
+  assert.match(worker, /kind:\s*'long-form-stage'/g)
+  for (const relative of [
+    'long-form-index-repository.ts',
+    'hierarchical-processing-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /hydrateProjectAnalysisExecution/)
+    assert.match(source, /projectAnalysisExecutionData/)
+    assert.match(source, /assertProjectAnalysisFenceBinding/)
   }
 })
 

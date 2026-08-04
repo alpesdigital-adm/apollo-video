@@ -29,6 +29,11 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../domain/director-run-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { persistOperationStatusEvents } from './public-operation-repository.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
+import { hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -63,6 +68,7 @@ function parseArray(value: string, field: string): unknown[] {
 }
 
 function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<DirectorRunResult> {
+  hydrateEditCommandExternalActorAudit(row.command)
   const payload = parseRecord(row.command.payloadJson, 'Director command payload') as unknown as RunDirectorCommandPayload
   const impact = parseDirectorRunImpact(payload.impact)
   const scope = parseRecord(row.command.scopeJson, 'Director command scope') as EditScope
@@ -174,13 +180,30 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     this.client = client
   }
 
-  async findIdempotentResult(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
+  async findIdempotentResult(input: {
+    workspaceId: string
+    projectId: string
+    idempotencyKey: string
+    actorContextHash: string
+  }) {
+    const key = {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    }
     const command = await this.client.v2EditCommand.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: { workspaceId_projectId_idempotencyKey: key },
       include: { directorRun: { include: directorRunInclude } },
     })
     if (!command) return null
     if (!command.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotency key belongs to a different command type')
+    if (
+      hydrateEditCommandExternalActorAudit(command).contextHash !==
+      input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Director idempotency key belongs to another authentication context',
+    )
     return Object.freeze({ requestFingerprint: command.requestFingerprint, result: hydrateStoredRun(command.directorRun, true) })
   }
 
@@ -300,6 +323,10 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
+          if (
+            hydrateEditCommandExternalActorAudit(existing).contextHash !==
+            bundle.authenticationAudit.contextHash
+          ) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Director replay belongs to another authentication context')
           if (!existing.directorRun) throw new DomainError('PERSISTENCE_CONFLICT', 'Director idempotency result is missing')
           if (bundle.operationFence) {
             const settled = await transaction.v2PublicOperation.findFirst({
@@ -322,6 +349,29 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           return hydrateStoredRun(existing.directorRun, true)
         }
         if (bundle.operationFence) {
+          const origin = await transaction.v2PublicOperation.findFirst({
+            where: {
+              id: bundle.operationFence.operationId,
+              workspaceId: bundle.command.workspaceId,
+              projectId: bundle.command.projectId,
+              type: 'project-director-run',
+              status: 'running',
+              phase: 'directing',
+              attempt: bundle.operationFence.attempt,
+              leaseOwner: bundle.operationFence.leaseOwner,
+              leaseExpiresAt: { gt: fenceNow! },
+              targetType: 'project-version',
+              targetId: bundle.version.id,
+            },
+          })
+          if (
+            !origin ||
+            hydrateExternalActorAudit(origin, origin.clientId).contextHash !==
+              bundle.authenticationAudit.contextHash
+          ) throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Director worker provenance does not match its originating operation',
+          )
           const enteredPersisting = await transaction.v2PublicOperation.updateMany({
             where: {
               id: bundle.operationFence.operationId,
@@ -402,6 +452,11 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
             actorType: bundle.command.author.type,
             actorId: bundle.command.author.id,
             delegatedUserId: bundle.command.author.delegatedUserId,
+            ...editCommandExternalActorAuditData(
+              bundle.authenticationAudit,
+              bundle.command.workspaceId,
+              bundle.command.author,
+            ),
             idempotencyKey: bundle.command.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             createdAt: new Date(bundle.command.createdAt),
@@ -558,6 +613,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
           idempotencyKey: bundle.command.idempotencyKey,
+          actorContextHash: bundle.authenticationAudit.contextHash,
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')

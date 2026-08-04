@@ -10,7 +10,9 @@ import { promisify } from 'node:util'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
-import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import {
+  createExternalAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
 import { createColorPipelineCompilationService } from '../../src/v2/application/color-pipeline-compilations.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
@@ -284,7 +286,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       sourceManifestId: staticSource.sourceManifestId,
       outputMetadata: sourceMetadata,
       stages: identityColorStages(sourceMetadata),
-      actor: { type: 'api-client', id: clientId },
+      actor: proxyActor,
       idempotencyKey: 'vertical-smoke-color-source-v1',
     })
     assert.equal(compiledColor.replayed, false)
@@ -303,7 +305,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       projectId: seed.project.id,
       baseVersionId: baseVersion.id,
       baseHash: baseVersion.baseHash,
-      actor: { type: 'api-client', id: clientId },
+      actor: proxyActor,
       idempotency: { key: 'vertical-smoke-director-v1' },
       reason: 'Compile the deterministic vertical smoke plan.',
     })
@@ -322,7 +324,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       baseVersionId: directed.version.id,
       baseHash: directed.version.baseHash,
       selection: { mode: 'none' },
-      actor: { type: 'api-client', id: clientId },
+      actor: proxyActor,
       idempotencyKey: 'vertical-smoke-lut-none-v1',
       reason: 'Keep the controlled vertical smoke colorimetrically neutral.',
     })

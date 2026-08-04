@@ -10,6 +10,7 @@ import type {
 } from '../../domain/hierarchical-processing.ts'
 import type {
   LongFormStagePersistenceFence,
+  ProjectAnalysisExecutionContext,
 } from './long-form-stage-persistence.ts'
 
 export interface HierarchicalProcessingSourceContext {
@@ -86,7 +87,8 @@ export interface HierarchicalProcessingMeasurement {
   measurementHash: string
 }
 
-export interface PersistedHierarchicalProcessingRun {
+export interface PersistedHierarchicalProcessingRun
+extends ProjectAnalysisExecutionContext {
   schemaVersion: 'hierarchical-processing-run/v1'
   id: string
   workspaceId: string
@@ -141,6 +143,7 @@ export interface HierarchicalProcessingRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedHierarchicalProcessingRun> | null>
   findRun(input: {
     workspaceId: string

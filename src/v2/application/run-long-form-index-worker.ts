@@ -302,6 +302,7 @@ export function runNextLongFormIndexOperationService(
         )!
         const processStage = () => dependencies.processor.process({
           workflow: processingWorkflow,
+          authenticationAudit: claimed.authenticationAudit,
           checkpoint,
           lease: Object.freeze({
             operationId,

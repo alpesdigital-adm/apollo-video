@@ -14,6 +14,7 @@ import {
 import {
   createSpeakerDiarizationRun,
 } from '../../src/v2/domain/speaker-diarization.ts'
+import { authenticationAudit } from './helpers/authentication-audit.mjs'
 
 const sha = (value) =>
   createHash('sha256').update(value).digest('hex')
@@ -487,6 +488,11 @@ function processorFixture(options = {}) {
 function processInput(workflow, options = {}) {
   return Object.freeze({
     workflow,
+    authenticationAudit: authenticationAudit({
+      clientId: identities.clientId,
+      credentialId: 'credential-derived-stages',
+      workspaceId: identities.workspaceId,
+    }),
     checkpoint: workflow.stages.find(
       (stage) => stage.status === 'running',
     ),
@@ -512,6 +518,22 @@ test('T-FR-133 chunks persist exactly once behind the workflow lease and replay 
   assert.equal(first.resultCount, 2)
   assert.equal(first.costMinorUnits, 12)
   assert.equal(fixture.getHierarchicalPersistCount(), 1)
+  assert.equal(
+    fixture.getHierarchical().authenticationAudit.contextHash,
+    processInput(setup.workflow).authenticationAudit.contextHash,
+  )
+  assert.deepEqual(fixture.getHierarchical().provenance, {
+    kind: 'long-form-stage',
+    workflowId: identities.workflowId,
+    operationId: identities.operationId,
+    stage: 'chunks',
+    stageInputHash: setup.workflow.stages.find(
+      (stage) => stage.stage === 'chunks',
+    ).inputHash,
+    stageIdempotencyKey: setup.workflow.stages.find(
+      (stage) => stage.stage === 'chunks',
+    ).idempotencyKey,
+  })
   assert.equal(
     fixture.hierarchicalFences[0].workspaceId,
     identities.workspaceId,
@@ -647,6 +669,14 @@ test('T-FR-133 moments derive anonymous speakers only from temporal overlap and 
   )
   const stored = fixture.getLongForm()
   assert.equal(result.resultCount, stored.momentCount)
+  assert.equal(
+    stored.authenticationAudit.contextHash,
+    processInput(workflow).authenticationAudit.contextHash,
+  )
+  assert.equal(stored.provenance.kind, 'long-form-stage')
+  assert.equal(stored.provenance.workflowId, identities.workflowId)
+  assert.equal(stored.provenance.operationId, identities.operationId)
+  assert.equal(stored.provenance.stage, 'moments')
   assert.equal(fixture.contiguousEvidenceRequests.length, 5)
   assert.equal(fixture.contiguousEvaluationRequests.length, 1)
   assert.deepEqual(

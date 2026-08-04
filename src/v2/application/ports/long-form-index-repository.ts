@@ -6,6 +6,7 @@ import type {
 } from '../../domain/long-form-moment.ts'
 import type {
   LongFormStagePersistenceFence,
+  ProjectAnalysisExecutionContext,
 } from './long-form-stage-persistence.ts'
 import type {
   LongFormMomentTranscriptEvidence,
@@ -28,7 +29,8 @@ export interface LongFormIndexCreationContext {
   rights: Readonly<LongFormRightsSnapshot>
 }
 
-export interface PersistedLongFormIndexRun {
+export interface PersistedLongFormIndexRun
+extends ProjectAnalysisExecutionContext {
   schemaVersion: 'long-form-index-run/v1'
   id: string
   workspaceId: string
@@ -103,6 +105,7 @@ export interface LongFormIndexRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedLongFormIndexRun> | null>
   persist(
     run: Readonly<PersistedLongFormIndexRun>,

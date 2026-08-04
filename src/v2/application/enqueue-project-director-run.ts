@@ -78,6 +78,7 @@ export function enqueueProjectDirectorRunService(dependencies: {
         projectId,
         baseVersionId,
         baseHash: request.baseHash,
+        actorContextHash: audit.contextHash,
         ...(reason ? { reason } : {}),
       }),
       actorContextHash: audit.contextHash,

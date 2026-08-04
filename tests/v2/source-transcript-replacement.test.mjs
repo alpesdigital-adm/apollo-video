@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
-import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import {
+  createExternalAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash, stableSerialize } from '../../src/v2/application/version-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
@@ -532,7 +534,7 @@ test('T-FR-233 replaced transcript with retimed frames survives the snapshot and
   const run = await runDirector({
     workspaceId: 'workspace-transcript', projectId: 'project-transcript',
     baseVersionId: 'version-next', baseHash: 'c'.repeat(64),
-    actor: { type: 'api-client', id: 'client-transcript' },
+    actor: transcriptActor(),
     idempotency: { key: 'director-after-transcript-replacement' },
     reason: 'Replanejar a composição com a transcrição corrigida.',
   })

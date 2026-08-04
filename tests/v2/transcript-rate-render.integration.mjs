@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
+import {
+  createExternalAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
@@ -433,7 +435,7 @@ async function directRetimedPlan(options) {
   const directed = await runDirector({
     workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,
     baseVersionId: replacement.version.id, baseHash: replacement.version.baseHash,
-    actor: { type: 'api-client', id: 'client-transcript-rate' },
+    actor: proxyActor(),
     idempotency: { key: `director-after-transcript-rate-replacement-${options.suffix}` },
     reason: 'Dirigir a composicao com a transcricao corrigida e retimada.',
   })

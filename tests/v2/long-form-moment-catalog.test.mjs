@@ -9,6 +9,10 @@ import {
   buildLongFormMomentPreview,
   catalogLongFormHierarchy,
 } from '../../src/v2/domain/long-form-moment.ts'
+import {
+  authenticatedActor,
+  authenticationAudit,
+} from './helpers/authentication-audit.mjs'
 
 const createdAt = '2026-07-27T14:00:00.000Z'
 const artifactHash = 'a'.repeat(64)
@@ -209,7 +213,7 @@ test('T-FR-045 catalogs and searches a two-topic live through the application bo
       }
     },
     async findIdempotent() {
-      return null
+      return persisted ?? null
     },
     async persist(run) {
       persisted = run
@@ -247,7 +251,17 @@ test('T-FR-045 catalogs and searches a two-topic live through the application bo
     createId: (kind, sourceId) =>
       sourceId ? `${kind}-${sourceId}` : `${kind}-1`,
   })
-  const result = await catalog({
+  const actorAudit = authenticationAudit({
+    clientId: 'client-long-form',
+    credentialId: 'credential-long-form',
+    workspaceId: 'workspace-long-form',
+  })
+  const actor = authenticatedActor({
+    clientId: actorAudit.clientId,
+    credentialId: actorAudit.credentialId,
+    workspaceId: actorAudit.workspaceId,
+  })
+  const catalogRequest = {
     workspaceId: 'workspace-long-form',
     projectId: 'project-long-form',
     sourceArtifactId: 'artifact-long-form',
@@ -258,12 +272,29 @@ test('T-FR-045 catalogs and searches a two-topic live through the application bo
     producer,
     chapters,
     moments,
-    actor: { type: 'api-client', id: 'client-long-form' },
+    actor,
+    provenance: { kind: 'external-request' },
     idempotencyKey: 'long-form-catalog-key',
-  })
+  }
+  const result = await catalog(catalogRequest)
   assert.equal(result.run.chapterCount, 2)
   assert.equal(result.run.momentCount, 2)
   assert.equal('summary' in result.run, false)
+  assert.deepEqual(result.run.authenticationAudit, actorAudit)
+  assert.deepEqual(result.run.provenance, { kind: 'external-request' })
+  assert.equal((await catalog(catalogRequest)).replayed, true)
+  await assert.rejects(
+    () => catalog({
+      ...catalogRequest,
+      actor: authenticatedActor({
+        clientId: actorAudit.clientId,
+        credentialId: 'credential-long-form-other',
+        workspaceId: actorAudit.workspaceId,
+      }),
+    }),
+    (error) =>
+      error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
 
   const search = searchLongFormMomentsService({
     repository,

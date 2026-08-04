@@ -10,6 +10,9 @@ import {
 import {
   calculateLongFormIndexRecordHash,
 } from '../../application/catalog-long-form-moments.ts'
+import {
+  assertProjectAnalysisFenceBinding,
+} from '../../application/project-analysis-execution.ts'
 import type {
   LongFormIndexCreationContext,
   LongFormIndexRepository,
@@ -45,6 +48,10 @@ import type {
 } from '../../domain/hierarchical-processing.ts'
 import { normalizeSpeechText } from '../../domain/speech-segment-catalog.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  hydrateProjectAnalysisExecution,
+  projectAnalysisExecutionData,
+} from './project-analysis-execution.ts'
 
 type RunWithHierarchy = V2LongFormIndexRun & {
   chapters: V2LongFormChapter[]
@@ -352,6 +359,11 @@ function hydrateChapter(
 function hydrateRun(
   row: RunWithHierarchy,
 ): Readonly<PersistedLongFormIndexRun> {
+  const execution = hydrateProjectAnalysisExecution(
+    row,
+    row.createdById,
+    'moments',
+  )
   const orderedMomentRows = [...row.moments].sort(
     (left, right) => left.ordinal - right.ordinal,
   )
@@ -417,6 +429,7 @@ function hydrateRun(
     ...content,
     recordHash: row.recordHash,
     active: row.active,
+    ...execution,
   })
 }
 
@@ -514,6 +527,12 @@ function runData(run: Readonly<PersistedLongFormIndexRun>) {
     active: run.active,
     createdByType: run.createdBy.type,
     createdById: run.createdBy.id,
+    ...projectAnalysisExecutionData(
+      run,
+      run.workspaceId,
+      run.createdBy.id,
+      'moments',
+    ),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -755,19 +774,39 @@ implements LongFormIndexRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
+    const key = {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    }
     const row = await this.client.v2LongFormIndexRun.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: key,
       },
       include: includeHierarchy(),
     })
-    return row ? hydrateRun(row) : null
+    if (!row) return null
+    const run = hydrateRun(row)
+    if (
+      run.authenticationAudit.contextHash !== input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Long-form idempotency key belongs to another authentication context',
+    )
+    return run
   }
 
   async persist(
     run: Readonly<PersistedLongFormIndexRun>,
   ): ReturnType<LongFormIndexRepository['persist']> {
+    if (run.provenance.kind !== 'external-request') {
+      throw new DomainError(
+        'AUTH_INVALID',
+        'Unfenced long-form persistence requires external request provenance',
+      )
+    }
     const persisted = await this.persistInternal(run, [])
     if (!persisted) {
       throw new DomainError(
@@ -800,6 +839,7 @@ implements LongFormIndexRepository {
         'Long-form index fence belongs to another tenant or project',
       )
     }
+    assertProjectAnalysisFenceBinding(input.run, input.fence)
     return this.persistInternal(
       input.run,
       input.transcriptEvidence,
@@ -861,7 +901,11 @@ implements LongFormIndexRepository {
                 attempt: fence.operationAttempt,
                 leaseExpiresAt: { gt: fenceNow! },
               },
-              select: { id: true },
+              select: {
+                id: true,
+                clientId: true,
+                actorContextHash: true,
+              },
             }),
             transaction.v2LongFormIndexStageCheckpoint.findFirst({
               where: {
@@ -882,12 +926,26 @@ implements LongFormIndexRepository {
                   sourceManifestHash: run.sourceManifestHash,
                 },
               },
-              select: { id: true },
+              select: {
+                id: true,
+                workflow: {
+                  select: {
+                    createdByClientId: true,
+                    actorContextHash: true,
+                  },
+                },
+              },
             }),
           ])
           if (
             !operation ||
             !stage ||
+            operation.clientId !== run.createdBy.id ||
+            operation.actorContextHash !==
+              run.authenticationAudit.contextHash ||
+            stage.workflow.createdByClientId !== run.createdBy.id ||
+            stage.workflow.actorContextHash !==
+              run.authenticationAudit.contextHash ||
             run.idempotencyKey !==
               fence.expectedStageIdempotencyKey
           ) {
@@ -1073,6 +1131,7 @@ implements LongFormIndexRepository {
           workspaceId: run.workspaceId,
           projectId: run.projectId,
           idempotencyKey: run.idempotencyKey,
+          actorContextHash: run.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {

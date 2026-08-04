@@ -9,6 +9,9 @@ import {
 import {
   calculateHierarchicalProcessingRunHash,
 } from '../../application/hierarchical-processing.ts'
+import {
+  assertProjectAnalysisFenceBinding,
+} from '../../application/project-analysis-execution.ts'
 import type {
   HierarchicalProcessingRepository,
   HierarchicalProcessingSourceContext,
@@ -36,6 +39,10 @@ import {
 } from '../../domain/media-artifact.ts'
 import { createMediaTranscript } from '../../domain/media-transcript.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  hydrateProjectAnalysisExecution,
+  projectAnalysisExecutionData,
+} from './project-analysis-execution.ts'
 
 type RunRow = V2HierarchicalProcessingRun & {
   chunks: V2HierarchicalProcessingChunk[]
@@ -184,6 +191,11 @@ function hydrateTier(
 function hydrateRun(
   row: RunRow,
 ): Readonly<PersistedHierarchicalProcessingRun> {
+  const execution = hydrateProjectAnalysisExecution(
+    row,
+    row.createdById,
+    'chunks',
+  )
   const tierVersionsRaw = canonicalJson<Record<string, unknown>>(
     row.tierVersionsJson,
     'hierarchical tier versions',
@@ -295,6 +307,7 @@ function hydrateRun(
     ...content,
     runHash: row.runHash,
     active: row.active,
+    ...execution,
   })
 }
 
@@ -409,6 +422,12 @@ function runData(run: Readonly<PersistedHierarchicalProcessingRun>) {
     idempotencyKey: run.idempotencyKey,
     createdByType: run.createdBy.type,
     createdById: run.createdBy.id,
+    ...projectAnalysisExecutionData(
+      run,
+      run.workspaceId,
+      run.createdBy.id,
+      'chunks',
+    ),
     createdAt: new Date(run.createdAt),
     runHash: run.runHash,
     active: run.active,
@@ -589,15 +608,29 @@ implements HierarchicalProcessingRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
+    const key = {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+    }
     const row =
       await this.client.v2HierarchicalProcessingRun.findUnique({
         where: {
-          workspaceId_projectId_idempotencyKey: input,
+          workspaceId_projectId_idempotencyKey: key,
         },
         include: runInclude,
       })
-    return row ? hydrateRun(row) : null
+    if (!row) return null
+    const run = hydrateRun(row)
+    if (
+      run.authenticationAudit.contextHash !== input.actorContextHash
+    ) throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Hierarchical idempotency key belongs to another authentication context',
+    )
+    return run
   }
 
   async findRun(input: {
@@ -620,6 +653,12 @@ implements HierarchicalProcessingRepository {
   async persist(
     run: Readonly<PersistedHierarchicalProcessingRun>,
   ): ReturnType<HierarchicalProcessingRepository['persist']> {
+    if (run.provenance.kind !== 'external-request') {
+      throw new DomainError(
+        'AUTH_INVALID',
+        'Unfenced hierarchical persistence requires external request provenance',
+      )
+    }
     const persisted = await this.persistInternal(run)
     if (!persisted) {
       throw new DomainError(
@@ -656,6 +695,7 @@ implements HierarchicalProcessingRepository {
         'Hierarchical output fence belongs to another tenant or project',
       )
     }
+    assertProjectAnalysisFenceBinding(input.run, input.fence)
     return this.persistInternal(input.run, input.fence)
   }
 
@@ -716,7 +756,11 @@ implements HierarchicalProcessingRepository {
                 attempt: fence.operationAttempt,
                 leaseExpiresAt: { gt: fenceNow! },
               },
-              select: { id: true },
+              select: {
+                id: true,
+                clientId: true,
+                actorContextHash: true,
+              },
             }),
             transaction.v2LongFormIndexStageCheckpoint.findFirst({
               where: {
@@ -746,12 +790,26 @@ implements HierarchicalProcessingRepository {
                   },
                 },
               },
-              select: { id: true },
+              select: {
+                id: true,
+                workflow: {
+                  select: {
+                    createdByClientId: true,
+                    actorContextHash: true,
+                  },
+                },
+              },
             }),
           ])
           if (
             !operation ||
             !stage ||
+            operation.clientId !== run.createdBy.id ||
+            operation.actorContextHash !==
+              run.authenticationAudit.contextHash ||
+            stage.workflow.createdByClientId !== run.createdBy.id ||
+            stage.workflow.actorContextHash !==
+              run.authenticationAudit.contextHash ||
             run.idempotencyKey !==
               fence.expectedStageIdempotencyKey
           ) {
@@ -901,6 +959,7 @@ implements HierarchicalProcessingRepository {
           workspaceId: run.workspaceId,
           projectId: run.projectId,
           idempotencyKey: run.idempotencyKey,
+          actorContextHash: run.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {

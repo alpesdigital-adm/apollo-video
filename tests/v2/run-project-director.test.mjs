@@ -17,6 +17,10 @@ import {
   startPublicOperationAttempt,
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
+import {
+  authenticatedActor,
+  authenticationAudit as testAuthenticationAudit,
+} from './helpers/authentication-audit.mjs'
 
 const baseHash = 'a'.repeat(64)
 
@@ -115,8 +119,12 @@ class InMemoryDirectorRepository {
     this.records = new Map()
   }
 
-  async findIdempotentResult({ workspaceId, projectId, idempotencyKey }) {
-    return this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
+  async findIdempotentResult({ workspaceId, projectId, idempotencyKey, actorContextHash }) {
+    const record = this.records.get(`${workspaceId}:${projectId}:${idempotencyKey}`) ?? null
+    if (record && record.authenticationAudit.contextHash !== actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'actor mismatch')
+    }
+    return record
   }
 
   async readContext({ workspaceId, projectId }) {
@@ -145,6 +153,7 @@ class InMemoryDirectorRepository {
     const result = Object.freeze({ run: bundle.run, command: bundle.command, version: bundle.version, impact, invalidations, replayed: false })
     this.records.set(`${bundle.command.workspaceId}:${bundle.command.projectId}:${bundle.command.idempotencyKey}`, {
       requestFingerprint: bundle.requestFingerprint,
+      authenticationAudit: bundle.authenticationAudit,
       result,
     })
     this.currentVersion = bundle.version
@@ -172,7 +181,12 @@ function fixture(options = {}) {
 function request(overrides = {}) {
   return {
     workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'project-version-4', baseHash,
-    actor: { type: 'api-client', id: 'client-1' }, idempotency: { key: 'director-first-pass' },
+    actor: authenticatedActor({
+      clientId: 'client-1',
+      credentialId: 'credential-director-direct-1',
+      workspaceId: 'workspace-1',
+    }),
+    idempotency: { key: 'director-first-pass' },
     reason: 'Planejar e criticar a composição completa.',
     ...overrides,
   }
@@ -242,6 +256,35 @@ test('Director V2 replays exactly and rejects payload or version drift', async (
   await assert.rejects(
     () => service(request({ reason: 'Outra intenção para a mesma chave.' })),
     (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+
+  await assert.rejects(
+    () => service(request({
+      actor: authenticatedActor({
+        clientId: 'client-1',
+        credentialId: 'credential-director-other',
+        workspaceId: 'workspace-1',
+      }),
+    })),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+
+  const unauthorized = fixture()
+  await assert.rejects(
+    () => unauthorized.service(request({
+      actor: authenticatedActor({
+        clientId: 'client-1',
+        credentialId: 'credential-director-read-only',
+        workspaceId: 'workspace-1',
+        scopes: ['projects:read'],
+      }),
+      idempotency: { key: 'director-read-only' },
+    })),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === 'AUTH_SCOPE_REQUIRED',
   )
 
   const stale = fixture()
@@ -365,6 +408,9 @@ test('Director enqueue fails closed for a stale immutable base', async () => {
 
 test('Director worker fences the atomic commit and settles the allocated version target', async () => {
   const directorRuns = new InMemoryDirectorRepository()
+  const workerAuthenticationAudit = materializeActorAuditContext(
+    directorEnqueueActor('credential-director-worker-1'),
+  )
   let operation = createQueuedPublicOperation({
     id: 'operation-director-worker-1',
     workspaceId: 'workspace-1',
@@ -380,7 +426,7 @@ test('Director worker fences the atomic commit and settles the allocated version
     baseVersionId: 'project-version-4',
     baseHash,
     resultVersionId: 'project-version-worker-result-1',
-    delegatedUserId: 'user-director-worker-1',
+    delegatedUserId: workerAuthenticationAudit.delegatedUserId,
     reason: 'Run through the durable worker.',
   })
   let lease
@@ -397,14 +443,21 @@ test('Director worker fences the atomic commit and settles the allocated version
         attempt: operation.attempt,
         expiresAt: input.leaseUntil,
       }
-      return { operation, context, lease: { ...lease, heartbeatAt: input.now } }
+      return {
+        operation,
+        context,
+        authenticationAudit: workerAuthenticationAudit,
+        lease: { ...lease, heartbeatAt: input.now },
+      }
     },
     async heartbeat(input) {
       if (!activeLease(input)) return false
       lease.expiresAt = input.leaseUntil
       return true
     },
-    async findById() { return { operation, context } },
+    async findById() {
+      return { operation, context, authenticationAudit: workerAuthenticationAudit }
+    },
     async failOrRetry() { throw new Error('successful worker must not fail') },
   }
   const originalCommit = directorRuns.commitOrReplay.bind(directorRuns)
@@ -448,6 +501,11 @@ test('Director worker fences the atomic commit and settles the allocated version
 })
 
 function createResilientDirectorOperation() {
+  const authenticationAudit = testAuthenticationAudit({
+    clientId: 'client-1',
+    credentialId: 'credential-director-resilience-1',
+    workspaceId: 'workspace-1',
+  })
   let operation = createQueuedPublicOperation({
     id: 'operation-director-resilience-1',
     workspaceId: 'workspace-1',
@@ -472,7 +530,7 @@ function createResilientDirectorOperation() {
     lease?.owner === input.leaseOwner &&
     lease?.attempt === input.attempt &&
     Date.parse(lease.expiresAt) > Date.parse(input.now)
-  const record = () => ({ operation, context })
+  const record = () => ({ operation, context, authenticationAudit })
   const repository = {
     async claimNext(input) {
       if (

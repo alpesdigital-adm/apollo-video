@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
+import {
+  requireScope,
+} from '@/v2/application/authenticate-api-client'
 import {
   executeHierarchicalProcessingService,
 } from '@/v2/application/hierarchical-processing'
@@ -57,7 +59,8 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
+      provenance: Object.freeze({ kind: 'external-request' as const }),
       idempotencyKey,
     })
     return NextResponse.json(

@@ -21,6 +21,13 @@ import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
+import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
+import { canonicalProjectMutationAudit } from './project-analysis-execution.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 export const PROJECT_DIRECTOR_PLANNER_VERSION = 'apollo-director-policy/v1'
 export const PROJECT_DIRECTOR_CRITIC_VERSION = 'apollo-director-critic/v1'
@@ -31,7 +38,8 @@ export interface RunProjectDirectorRequest {
   projectId: string
   baseVersionId: string
   baseHash: string
-  actor: Readonly<{ type: 'api-client'; id: string; delegatedUserId?: string }>
+  actor?: Readonly<AuthenticatedExternalActor>
+  authenticationAudit?: Readonly<ApiAccessAuditContext>
   idempotency: Readonly<{ key: string }>
   allocatedResultVersionId?: string
   operationFence?: Readonly<{
@@ -49,6 +57,8 @@ export function projectDirectorRequestFingerprint(input: {
   baseVersionId: string
   baseHash: string
   reason?: string
+  actorContextHash: string
+  operationId?: string
 }): string {
   return calculateVersionHash({
     type: 'run-director',
@@ -58,6 +68,10 @@ export function projectDirectorRequestFingerprint(input: {
     baseHash: input.baseHash,
     plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
     criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+    actorContextHash: input.actorContextHash,
+    execution: input.operationId
+      ? { kind: 'public-operation-worker', operationId: input.operationId }
+      : { kind: 'external-request' },
     reason: input.reason?.trim() || null,
   })
 }
@@ -350,15 +364,52 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const workspaceId = normalizedIdentifier(request.workspaceId, 'workspaceId')
     const projectId = normalizedIdentifier(request.projectId, 'projectId')
     const baseVersionId = normalizedIdentifier(request.baseVersionId, 'baseVersionId')
-    const clientId = normalizedIdentifier(request.actor.id, 'actor.id')
+    let authenticationAudit: Readonly<ApiAccessAuditContext>
+    if (request.operationFence) {
+      if (!request.authenticationAudit || request.actor) {
+        throw new DomainError(
+          'AUTH_INVALID',
+          'Director worker requires exactly one persisted authentication audit',
+        )
+      }
+      authenticationAudit = canonicalProjectMutationAudit(
+        request.authenticationAudit,
+        workspaceId,
+      )
+    } else {
+      if (!request.actor || request.authenticationAudit) {
+        throw new DomainError(
+          'AUTH_INVALID',
+          'Direct Director execution requires exactly one authenticated external actor',
+        )
+      }
+      requireScope(request.actor, 'projects:write')
+      authenticationAudit = canonicalProjectMutationAudit(
+        materializeActorAuditContext(request.actor),
+        workspaceId,
+      )
+    }
+    const clientId = normalizedIdentifier(
+      authenticationAudit.clientId,
+      'actor.id',
+    )
     const idempotencyKey = request.idempotency.key.trim()
     assertDomain(/^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_COMMAND', 'baseHash is invalid')
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_COMMAND', 'Idempotency-Key is invalid')
     const requestFingerprint = projectDirectorRequestFingerprint({
       workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
       reason: request.reason,
+      actorContextHash: authenticationAudit.contextHash,
+      ...(request.operationFence
+        ? { operationId: request.operationFence.operationId }
+        : {}),
     })
-    const existing = await dependencies.repository.findIdempotentResult({ workspaceId, projectId, idempotencyKey })
+    const existing = await dependencies.repository.findIdempotentResult({
+      workspaceId,
+      projectId,
+      idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
+    })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with different Director input')
       if (
@@ -515,8 +566,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
       author: {
         type: 'api-client', id: clientId,
-        ...(request.actor.delegatedUserId
-          ? { delegatedUserId: normalizedIdentifier(request.actor.delegatedUserId, 'actor.delegatedUserId') }
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
           : {}),
       }, type: 'run-director', scope: { project: true }, payload: commandPayload,
       reason: request.reason?.trim() || 'Generate the first complete V2 editorial direction and reviewable proxy.',
@@ -559,7 +610,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       },
     })
     return dependencies.repository.commitOrReplay({
-      command, requestFingerprint, snapshots, version, run, event,
+      command, authenticationAudit, requestFingerprint, snapshots, version, run, event,
       sourceEvidence: {
         transcriptId: context.transcript.id,
         transcriptHash: context.transcript.transcriptHash,
