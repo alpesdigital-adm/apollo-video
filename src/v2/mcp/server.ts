@@ -23,6 +23,14 @@ import type {
 
 const APPROVAL_TTL_MS = 5 * 60 * 1000
 const RESOURCE_PAGE_SIZE = 2
+const MAX_OBSERVED_PREFLIGHTS = 128
+
+export const MCP_PREFLIGHT_BINDINGS = Object.freeze([Object.freeze({
+  sourceCapabilityId: 'apollo.batches.edit-preflights.create',
+  targetCapabilityId: 'apollo.batches.edit-preflights.commit',
+})])
+
+const BATCH_EDIT_PREFLIGHT_BINDING = MCP_PREFLIGHT_BINDINGS[0]
 
 const RESOURCE_DEFINITIONS = Object.freeze([
   { collection: 'capabilities', capabilityId: 'apollo.capabilities.list', title: 'Authorized capabilities', description: 'Scope-filtered Apollo Public API capabilities.', query: ['limit', 'after'] },
@@ -73,6 +81,7 @@ export interface ApolloMcpServerDependencies {
   clock?: () => Date
   requestTrustedEvidence?: (input: {
     tool: AgentToolDescriptor
+    toolInput: Readonly<Record<string, unknown>>
     inputFingerprint: string
     now: Date
   }) => Promise<TrustedAgentToolGateEvidence | undefined>
@@ -92,6 +101,93 @@ function inputFingerprint(toolName: string, input: Record<string, unknown>): str
   return createHash('sha256')
     .update(JSON.stringify(canonical({ toolName, input })))
     .digest('hex')
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+interface ObservedPreflight {
+  readonly tokenHash: string
+  readonly targetCapabilityId: string
+  readonly batchId: string
+  readonly preflightId: string
+  readonly expectedPreflightHash: string
+  readonly expectedScopeHash: string
+  readonly issuedAt: string
+  readonly expiresAt: string
+}
+
+function observedBatchEditPreflight(
+  tool: AgentToolDescriptor,
+  payload: unknown,
+  observedAt: Date,
+): ObservedPreflight | undefined {
+  if (tool.apollo.capabilityId !== BATCH_EDIT_PREFLIGHT_BINDING.sourceCapabilityId) return undefined
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
+  const data = (payload as Record<string, unknown>).data
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined
+  const token = (data as Record<string, unknown>).commitToken
+  const preflight = (data as Record<string, unknown>).preflight
+  if (
+    typeof token !== 'string' ||
+    typeof preflight !== 'object' || preflight === null || Array.isArray(preflight)
+  ) return undefined
+  const record = preflight as Record<string, unknown>
+  const scope = record.scope
+  if (typeof scope !== 'object' || scope === null || Array.isArray(scope)) return undefined
+  const expiresAt = record.confirmationExpiresAt
+  if (
+    typeof record.batchId !== 'string' || typeof record.id !== 'string' ||
+    typeof record.preflightHash !== 'string' ||
+    typeof (scope as Record<string, unknown>).scopeHash !== 'string' ||
+    typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt)) ||
+    Date.parse(expiresAt) <= observedAt.getTime()
+  ) return undefined
+  return Object.freeze({
+    tokenHash: sha256(token),
+    targetCapabilityId: BATCH_EDIT_PREFLIGHT_BINDING.targetCapabilityId,
+    batchId: record.batchId,
+    preflightId: record.id,
+    expectedPreflightHash: record.preflightHash,
+    expectedScopeHash: (scope as Record<string, unknown>).scopeHash as string,
+    issuedAt: observedAt.toISOString(),
+    expiresAt,
+  })
+}
+
+function evidenceFromObservedPreflight(
+  observed: ReadonlyMap<string, ObservedPreflight>,
+  tool: AgentToolDescriptor,
+  input: Record<string, unknown>,
+  fingerprint: string,
+  now: Date,
+): TrustedAgentToolGateEvidence | undefined {
+  if (tool.apollo.confirmation !== 'preflight-token') return undefined
+  const path = input.path
+  const body = input.body
+  if (
+    typeof path !== 'object' || path === null || Array.isArray(path) ||
+    typeof body !== 'object' || body === null || Array.isArray(body)
+  ) return undefined
+  const token = (body as Record<string, unknown>).commitToken
+  if (typeof token !== 'string') return undefined
+  const record = observed.get(sha256(token))
+  if (
+    !record || record.targetCapabilityId !== tool.apollo.capabilityId ||
+    record.batchId !== (path as Record<string, unknown>).batchId ||
+    record.preflightId !== (path as Record<string, unknown>).preflightId ||
+    record.expectedPreflightHash !== (body as Record<string, unknown>).expectedPreflightHash ||
+    record.expectedScopeHash !== (body as Record<string, unknown>).expectedScopeHash ||
+    Date.parse(record.expiresAt) <= now.getTime()
+  ) return undefined
+  return Object.freeze({
+    kind: 'preflight-token' as const,
+    capabilityId: tool.apollo.capabilityId,
+    inputFingerprint: fingerprint,
+    issuedAt: record.issuedAt,
+    expiresAt: record.expiresAt,
+  })
 }
 
 function errorResult(error: unknown) {
@@ -138,6 +234,19 @@ function mcpTool(tool: AgentToolDescriptor) {
       readOnlyHint: tool.annotations.readOnlyHint,
       idempotentHint: tool.annotations.idempotentHint,
     },
+    _meta: {
+      'apollo/capability': {
+        capabilityId: tool.apollo.capabilityId,
+        capabilityVersion: tool.apollo.capabilityVersion,
+        operationKind: tool.apollo.operationKind,
+        requiredScopes: tool.apollo.requiredScopes,
+        costClass: tool.apollo.costClass,
+        confirmation: tool.apollo.confirmation,
+        supportsDryRun: tool.apollo.supportsDryRun,
+      },
+      'apollo/data-boundary': tool.apollo.dataBoundary,
+      'apollo/error-schema': tool.errorSchema,
+    },
   }
 }
 
@@ -145,7 +254,10 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
   const clock = dependencies.clock ?? (() => new Date())
   const tools = await dependencies.api.listTools()
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]))
+  if (toolsByName.size !== tools.length) throw new Error('Apollo tool catalog contains duplicate names')
   const capabilityIds = new Set(tools.map((tool) => tool.apollo.capabilityId))
+  if (capabilityIds.size !== tools.length) throw new Error('Apollo tool catalog contains duplicate capabilities')
+  const toolsByCapabilityId = new Map(tools.map((tool) => [tool.apollo.capabilityId, tool]))
   const resources = RESOURCE_DEFINITIONS.filter((definition) => capabilityIds.has(definition.capabilityId))
   const ajv = new Ajv2020({ allErrors: true, strict: false })
   addFormats(ajv)
@@ -155,6 +267,10 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
   const outputValidators = new Map(
     tools.map((tool) => [tool.name, ajv.compile(tool.outputSchema)]),
   )
+  const errorValidators = new Map(
+    tools.map((tool) => [tool.name, ajv.compile(tool.errorSchema)]),
+  )
+  const observedPreflights = new Map<string, ObservedPreflight>()
   const server = new Server(
     { name: 'apollo-video', version: '1.0.0' },
     {
@@ -166,8 +282,11 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
   )
 
   const requestTrustedEvidence = dependencies.requestTrustedEvidence ?? (async ({
-    tool, inputFingerprint: fingerprint, now,
+    tool, toolInput, inputFingerprint: fingerprint, now,
   }) => {
+    if (tool.apollo.confirmation === 'preflight-token') {
+      return evidenceFromObservedPreflight(observedPreflights, tool, toolInput, fingerprint, now)
+    }
     if (tool.apollo.confirmation !== 'human-approval') return undefined
     const capabilities = server.getClientCapabilities()
     if (!capabilities?.elicitation) return undefined
@@ -229,6 +348,10 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
       query,
     )
     if (!result.ok) throw new Error(`Apollo Public API rejected resource read with status ${result.status}`)
+    const resourceTool = toolsByCapabilityId.get(definition.capabilityId)
+    if (!resourceTool || !outputValidators.get(resourceTool.name)?.(result.payload)) {
+      throw new Error('Apollo Public API resource response does not match outputSchema')
+    }
     return {
       contents: [{
         uri: request.params.uri,
@@ -250,7 +373,12 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
       const now = clock()
       const evidence = tool.apollo.confirmation === 'none'
         ? undefined
-        : await requestTrustedEvidence({ tool, inputFingerprint: fingerprint, now })
+        : await requestTrustedEvidence({
+            tool,
+            toolInput: Object.freeze({ ...input }),
+            inputFingerprint: fingerprint,
+            now,
+          })
       requireAgentToolExecutionGate(
         { id: tool.apollo.capabilityId },
         {
@@ -267,9 +395,29 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
       if (result.ok && !outputValidators.get(tool.name)?.(result.payload)) {
         throw new Error('Apollo Public API response does not match outputSchema')
       }
+      if (!result.ok && !errorValidators.get(tool.name)?.(result.payload)) {
+        throw new Error('Apollo Public API error does not match errorSchema')
+      }
       const serialized = JSON.stringify(result.payload)
       if (!result.ok) {
-        return { isError: true, content: [{ type: 'text', text: serialized }] }
+        return {
+          isError: true,
+          content: [{ type: 'text', text: serialized }],
+          structuredContent: result.payload as Record<string, unknown>,
+          _meta: { 'apollo/data-boundary': tool.apollo.dataBoundary },
+        }
+      }
+      const observed = observedBatchEditPreflight(tool, result.payload, now)
+      if (observed) {
+        for (const [key, value] of observedPreflights) {
+          if (Date.parse(value.expiresAt) <= now.getTime()) observedPreflights.delete(key)
+        }
+        while (observedPreflights.size >= MAX_OBSERVED_PREFLIGHTS) {
+          const oldest = observedPreflights.keys().next().value
+          if (typeof oldest !== 'string') break
+          observedPreflights.delete(oldest)
+        }
+        observedPreflights.set(observed.tokenHash, observed)
       }
       return {
         content: [{ type: 'text', text: JSON.stringify(delimitedData(tool, result.payload)) }],

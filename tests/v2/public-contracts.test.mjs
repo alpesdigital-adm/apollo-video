@@ -408,7 +408,11 @@ test('agent data boundary identifies transcript, OCR and media metadata as data-
       properties: {
         body: {
           type: 'object',
-          properties: { transcript: { type: 'string' }, title: { type: 'string' } },
+          properties: {
+            transcript: { type: 'string' },
+            transcriptText: { type: 'string' },
+            title: { type: 'string' },
+          },
         },
       },
     },
@@ -419,14 +423,18 @@ test('agent data boundary identifies transcript, OCR and media metadata as data-
           type: 'object',
           properties: {
             ocr: { type: 'string' },
+            ocrText: { type: 'string' },
+            metadata: { type: 'object' },
             frames: { type: 'array', items: { type: 'object', properties: { mediaMetadata: { type: 'object' } } } },
           },
         },
       },
     },
   )
-  assert.deepEqual(boundary.inputPaths, ['/body/transcript'])
-  assert.deepEqual(boundary.outputPaths, ['/data/frames/*/mediaMetadata', '/data/ocr'])
+  assert.deepEqual(boundary.inputPaths, ['/body/transcript', '/body/transcriptText'])
+  assert.deepEqual(boundary.outputPaths, [
+    '/data/frames/*/mediaMetadata', '/data/metadata', '/data/ocr', '/data/ocrText',
+  ])
   assert.equal(boundary.mediaContentClassification, 'untrusted-data')
   assert.equal(boundary.instructionPolicy, 'never-execute')
 })

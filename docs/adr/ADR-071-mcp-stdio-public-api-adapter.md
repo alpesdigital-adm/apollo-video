@@ -24,11 +24,18 @@ sessão também permitiria mudança silenciosa entre aprovação e execução.
 - HTTPS é obrigatório fora de loopback; redirects e URLs com credentials são
   rejeitados para evitar exfiltração do bearer.
 - O adapter valida inputSchema antes da chamada e outputSchema antes de devolver
-  structuredContent. Output inválido não é ecoado ao host.
-- Erro HTTP público retorna `isError` com seu envelope JSON. Erro interno retorna
-  mensagem limitada e não inclui configuração sensível.
+  structuredContent. Resources usam o outputSchema da capability autorizada.
+  Output inválido não é ecoado ao host.
+- Erro HTTP público retorna `isError` e structuredContent somente após validar o
+  errorSchema publicado. Erro malformado ou interno retorna mensagem limitada e
+  não inclui configuração sensível nem o payload rejeitado.
 - Approval usa elicitation suportada pelo host e gera evidência efêmera vinculada
   ao fingerprint. Sem canal confiável, a tool protegida falha fechada.
+- `preflight-token` exige que o token tenha sido observado numa resposta de
+  preflight validada na mesma sessão. O adapter retém somente seu SHA-256 em
+  memória limitada e vincula target, batch, preflight, preflightHash, scopeHash e
+  expiry; a Public API permanece responsável pela validação criptográfica e de
+  autoridade.
 - O entrypoint stdio nunca escreve logs em stdout.
 
 ## Consequências
@@ -37,7 +44,8 @@ sessão também permitiria mudança silenciosa entre aprovação e execução.
 - O adapter pode ser testado com Public API fake sem iniciar banco ou workers.
 - Snapshot por sessão reduz risco de tool-definition drift/rug pull.
 - Streamable HTTP poderá reutilizar o mesmo cliente e handlers em fatia futura.
-- Resources, prompts e preflight token assinado permanecem incrementos separados.
+- Prompts e transportes adicionais permanecem incrementos separados; resources e
+  preflight token assinado já reutilizam a mesma fronteira Public API.
 
 ## Evidências exigidas
 
@@ -45,7 +53,9 @@ sessão também permitiria mudança silenciosa entre aprovação e execução.
 - bearer presente somente no request HTTP;
 - path/query/headers/body mapeados sem inferência;
 - input e output inválidos bloqueados;
+- erro e resource inválidos bloqueados sem eco do payload;
 - redirect e configuração insegura rejeitados;
 - tool protegida sem approval não chama a API;
+- commit protegido sem preflight observado ou com binding divergente não chama a API;
 - processo stdio real não corrompe stdout;
 - contratos, build, integrações e regressão completa verdes.

@@ -1920,6 +1920,8 @@ Incremento local de integridade: os dez consumers atuais de `V2IdempotencyRecord
 
 Capabilities operáveis devem possuir descrições, schemas e responses adequados a tool calling. Um adapter MCP pode expor o catálogo público sem duplicar regras de domínio. Agentes recebem apenas tools permitidas pelos escopos e nunca executam texto de mídia como instrução.
 
+Incremento local F0.040: o adapter valida input, output, erro estruturado e resources contra os schemas da mesma capability pública antes de entregar conteúdo ao host. Metadata MCP preserva capability, scopes, custo, confirmation e boundary. O único commit protegido por `preflight-token` só passa depois que o processo observou o token numa resposta de preflight validada; somente seu hash fica em memória limitada e batch, preflight, preflightHash, scopeHash e expiração precisam coincidir. A API continua responsável pela assinatura e pelos vínculos de client/workspace/snapshot/custo. `transcriptText`, `ocrText` e `metadata` também são classificados como dados não confiáveis. A prova é local; implantação e aceite permanecem abertos.
+
 ### FR-247 — Transferência externa de mídia
 
 Uploads e downloads usam sessões/signed URLs de curta duração, multipart/resume, checksum, tamanho/MIME declarados e confirmação. URIs internas, credenciais e paths de storage não são expostos como contrato permanente.

@@ -665,9 +665,20 @@ A implementação inicial usa stdio e o SDK MCP estável. Ao abrir a sessão, bu
 `GET /v1/tools` com o bearer do host e fixa um snapshot imutável; list/call nunca
 consultam domínio, banco ou storage. Argumentos são validados contra inputSchema,
 traduzidos para path/query/headers/body e enviados à URL base fixa com redirects
-bloqueados. Respostas de sucesso só chegam ao host após validar outputSchema.
-Erros públicos preservam o envelope JSON em `isError`; falhas internas do adapter
-retornam mensagem limitada sem bearer ou payload rejeitado.
+bloqueados. Respostas de sucesso e resources só chegam ao host após validar o
+outputSchema da capability correspondente. Erros públicos preservam o envelope
+JSON em `isError` e `structuredContent` somente depois de validar errorSchema;
+falhas internas do adapter retornam mensagem limitada sem bearer ou payload
+rejeitado. Tool definitions preservam capability, scopes, custo, confirmation,
+boundary e error schema em metadata namespaced.
+
+Para `preflight-token`, o adapter não confia no token por estar nos argumentos.
+Ele exige que o mesmo processo o tenha observado antes numa resposta validada da
+capability source, retém apenas SHA-256 em memória limitada e verifica target,
+batch, preflight, preflightHash, scopeHash e expiração antes do HTTP. A Public API
+continua validando HMAC, client, workspace, snapshot e custo. Um binding explícito
+e um gate exaustivo impedem que nova tool `preflight-token` seja suportada por
+convenção implícita.
 
 MCP é adapter, não substituto da API. Outras ferramentas podem usar REST/SDK diretamente.
 
@@ -685,7 +696,8 @@ MCP é adapter, não substituto da API. Outras ferramentas podem usar REST/SDK d
 10. Workspace pode desativar tools sintéticas, export ou admin por client.
 
 O catálogo `agent-tool-list/v2` publica `dataBoundary` com JSON Pointer paths
-para campos de mídia reconhecidos. Resultados textuais MCP são envelopados com
+para campos de mídia reconhecidos, incluindo `transcriptText`, `ocrText` e
+`metadata`. Resultados textuais MCP são envelopados com
 classificação `untrusted-data` e política `never-execute`; structuredContent
 mantém o contrato público original e recebe a mesma marca em `_meta`. A marca é
 emitida pelo adapter/host e não existe como argumento gravável pelo modelo.

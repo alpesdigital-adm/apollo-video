@@ -13,7 +13,8 @@ function embeddedSchema(ref: string) {
 
 const UNTRUSTED_MEDIA_FIELDS = new Set([
   'transcript', 'transcripts', 'ocr', 'detectedText', 'recognizedText',
-  'mediaMetadata', 'captions', 'subtitles', 'speakerLabels',
+  'transcriptText', 'ocrText', 'mediaMetadata', 'metadata',
+  'captions', 'subtitles', 'speakerLabels',
 ])
 
 function untrustedPaths(schema: unknown, prefix = ''): readonly string[] {

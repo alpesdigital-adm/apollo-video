@@ -9,7 +9,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { agentToolDescriptor } from '../../src/v2/public-api/agent-tool-catalog.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { ApolloMcpPublicApiClient } from '../../src/v2/mcp/public-api-client.ts'
-import { createApolloMcpServer } from '../../src/v2/mcp/server.ts'
+import {
+  MCP_PREFLIGHT_BINDINGS,
+  createApolloMcpServer,
+} from '../../src/v2/mcp/server.ts'
 
 function descriptor(id) {
   return agentToolDescriptor(
@@ -121,6 +124,15 @@ test('MCP server snapshots authorized tools, validates input and proxies structu
   try {
     const listed = await client.listTools()
     assert.deepEqual(listed.tools.map((tool) => tool.name), [healthTool.name])
+    assert.equal(
+      listed.tools[0]._meta['apollo/capability'].capabilityId,
+      healthTool.apollo.capabilityId,
+    )
+    assert.equal(
+      listed.tools[0]._meta['apollo/data-boundary'].instructionPolicy,
+      'never-execute',
+    )
+    assert.deepEqual(listed.tools[0]._meta['apollo/error-schema'], healthTool.errorSchema)
     assert.equal(discoveries, 1)
     const result = await client.callTool({ name: healthTool.name, arguments: {} })
     assert.equal(result.isError, undefined)
@@ -312,6 +324,34 @@ test('MCP adapter rejects unsafe configuration without leaking the bearer token'
   )
 })
 
+test('MCP client rejects duplicate identities and non-allowlisted catalog endpoints', async () => {
+  const healthTool = descriptor('apollo.health.read')
+  for (const tools of [
+    [healthTool, healthTool],
+    [{
+      ...healthTool,
+      apollo: {
+        ...healthTool.apollo,
+        endpoint: { method: 'CONNECT', path: '/v1/health' },
+      },
+    }],
+    [{
+      ...healthTool,
+      apollo: {
+        ...healthTool.apollo,
+        endpoint: { method: 'GET', path: '/internal/health' },
+      },
+    }],
+  ]) {
+    const client = new ApolloMcpPublicApiClient({
+      baseUrl: 'http://127.0.0.1:3333',
+      token: 'z'.repeat(32),
+      fetchImplementation: async () => jsonResponse({ data: { tools } }),
+    })
+    await assert.rejects(() => client.listTools(), /identity or endpoint is invalid/)
+  }
+})
+
 test('MCP adapter blocks malformed Public API output before it reaches the host', async () => {
   const healthTool = descriptor('apollo.health.read')
   const api = {
@@ -337,6 +377,208 @@ test('MCP adapter blocks malformed Public API output before it reaches the host'
   } finally {
     await client.close()
     await server.close()
+  }
+})
+
+test('MCP adapter validates structured HTTP errors before exposing them to the host', async () => {
+  const healthTool = descriptor('apollo.health.read')
+  let malformed = false
+  const api = {
+    async listTools() { return [healthTool] },
+    async callTool() {
+      return malformed
+        ? { ok: false, status: 500, payload: { secret: 'must-not-cross-mcp' } }
+        : {
+            ok: false,
+            status: 403,
+            payload: {
+              error: {
+                code: 'AUTH_SCOPE_REQUIRED',
+                message: 'The authenticated actor lacks the required scope.',
+                category: 'auth',
+                retryable: false,
+                requestId: 'request-mcp-error-1',
+                details: { requiredScope: 'projects:read' },
+              },
+            },
+          }
+    },
+  }
+  const { server } = await createApolloMcpServer({ api })
+  const client = new Client({ name: 'structured-error-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    const valid = await client.callTool({ name: healthTool.name, arguments: {} })
+    assert.equal(valid.isError, true)
+    assert.equal(valid.structuredContent.error.code, 'AUTH_SCOPE_REQUIRED')
+    malformed = true
+    const invalid = await client.callTool({ name: healthTool.name, arguments: {} })
+    assert.equal(invalid.isError, true)
+    assert.match(invalid.content[0].text, /does not match errorSchema/)
+    assert.equal(JSON.stringify(invalid).includes('must-not-cross-mcp'), false)
+  } finally {
+    await client.close()
+    await server.close()
+  }
+})
+
+test('MCP resource payloads must match the authorized Public API capability schema', async () => {
+  const projectTool = descriptor('apollo.projects.list')
+  const api = {
+    async listTools() { return [projectTool] },
+    async readResourceCollection() {
+      return { ok: true, status: 200, payload: { secret: 'resource-secret-must-not-cross' } }
+    },
+  }
+  const { server } = await createApolloMcpServer({ api })
+  const client = new Client({ name: 'resource-schema-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  await client.connect(clientTransport)
+  try {
+    await assert.rejects(
+      () => client.readResource({ uri: 'apollo://projects?limit=10' }),
+      (error) => error instanceof Error &&
+        /does not match outputSchema/.test(error.message) &&
+        !error.message.includes('resource-secret-must-not-cross'),
+    )
+  } finally {
+    await client.close()
+    await server.close()
+  }
+})
+
+test('MCP preflight commit accepts only a token observed from a validated bound API result', async () => {
+  const base = descriptor('apollo.health.read')
+  const sourceCapabilityId = 'apollo.batches.edit-preflights.create'
+  const targetCapabilityId = 'apollo.batches.edit-preflights.commit'
+  const sourceTool = {
+    ...base,
+    name: sourceCapabilityId,
+    inputSchema: { type: 'object', additionalProperties: false },
+    outputSchema: {
+      type: 'object', additionalProperties: false, required: ['data'],
+      properties: {
+        data: {
+          type: 'object', additionalProperties: false, required: ['preflight', 'commitToken'],
+          properties: {
+            commitToken: { type: 'string' },
+            preflight: {
+              type: 'object', additionalProperties: false,
+              required: ['batchId', 'id', 'preflightHash', 'scope', 'confirmationExpiresAt'],
+              properties: {
+                batchId: { type: 'string' }, id: { type: 'string' },
+                preflightHash: { type: 'string' }, confirmationExpiresAt: { type: 'string' },
+                scope: {
+                  type: 'object', additionalProperties: false, required: ['scopeHash'],
+                  properties: { scopeHash: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    apollo: { ...base.apollo, capabilityId: sourceCapabilityId, confirmation: 'none' },
+  }
+  const targetTool = {
+    ...base,
+    name: targetCapabilityId,
+    inputSchema: {
+      type: 'object', additionalProperties: false, required: ['path', 'body'],
+      properties: {
+        path: {
+          type: 'object', additionalProperties: false, required: ['batchId', 'preflightId'],
+          properties: { batchId: { type: 'string' }, preflightId: { type: 'string' } },
+        },
+        body: {
+          type: 'object', additionalProperties: false,
+          required: ['expectedPreflightHash', 'expectedScopeHash', 'commitToken'],
+          properties: {
+            expectedPreflightHash: { type: 'string' },
+            expectedScopeHash: { type: 'string' },
+            commitToken: { type: 'string' },
+          },
+        },
+      },
+    },
+    apollo: { ...base.apollo, capabilityId: targetCapabilityId, confirmation: 'preflight-token' },
+  }
+  const token = `${'a'.repeat(80)}.${'b'.repeat(43)}`
+  const preflightHash = 'c'.repeat(64)
+  const scopeHash = 'd'.repeat(64)
+  let commitCalls = 0
+  const api = {
+    async listTools() { return [sourceTool, targetTool] },
+    async callTool(tool) {
+      if (tool.apollo.capabilityId === sourceCapabilityId) {
+        return {
+          ok: true, status: 201,
+          payload: {
+            data: {
+              commitToken: token,
+              preflight: {
+                batchId: 'batch-mcp-1', id: 'preflight-mcp-1', preflightHash,
+                scope: { scopeHash }, confirmationExpiresAt: '2026-08-04T12:10:00.000Z',
+              },
+            },
+          },
+        }
+      }
+      commitCalls += 1
+      return { ok: true, status: 201, payload: { data: { status: 'ok', service: 'apollo-video' }, meta: { apiVersion: 'v1' } } }
+    },
+  }
+  let now = new Date('2026-08-04T12:00:00.000Z')
+  const { server } = await createApolloMcpServer({
+    api,
+    clock: () => now,
+  })
+  const client = new Client({ name: 'preflight-binding-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await server.connect(serverTransport)
+  await client.connect(clientTransport)
+  const validInput = {
+    path: { batchId: 'batch-mcp-1', preflightId: 'preflight-mcp-1' },
+    body: { expectedPreflightHash: preflightHash, expectedScopeHash: scopeHash, commitToken: token },
+  }
+  try {
+    const beforeObservation = await client.callTool({ name: targetTool.name, arguments: validInput })
+    assert.equal(beforeObservation.isError, true)
+    assert.equal(commitCalls, 0)
+    await client.callTool({ name: sourceTool.name, arguments: {} })
+    const mismatch = await client.callTool({
+      name: targetTool.name,
+      arguments: { ...validInput, path: { ...validInput.path, preflightId: 'other-preflight' } },
+    })
+    assert.equal(mismatch.isError, true)
+    assert.equal(commitCalls, 0)
+    const committed = await client.callTool({ name: targetTool.name, arguments: validInput })
+    assert.equal(committed.isError, undefined)
+    assert.equal(commitCalls, 1)
+    now = new Date('2026-08-04T12:10:00.001Z')
+    const expired = await client.callTool({ name: targetTool.name, arguments: validInput })
+    assert.equal(expired.isError, true)
+    assert.equal(commitCalls, 1)
+  } finally {
+    await client.close()
+    await server.close()
+  }
+})
+
+test('every preflight-token tool has one explicit MCP source binding', () => {
+  const targets = FOUNDATION_CAPABILITIES
+    .filter((capability) => capability.toolName && capability.confirmation === 'preflight-token')
+    .map((capability) => capability.id)
+    .sort()
+  assert.deepEqual(
+    MCP_PREFLIGHT_BINDINGS.map((binding) => binding.targetCapabilityId).sort(),
+    targets,
+  )
+  for (const binding of MCP_PREFLIGHT_BINDINGS) {
+    assert.ok(FOUNDATION_CAPABILITIES.some((capability) => capability.id === binding.sourceCapabilityId))
   }
 })
 

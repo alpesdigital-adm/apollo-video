@@ -134,16 +134,36 @@ function toolList(payload: unknown): readonly AgentToolDescriptor[] {
   }
   const tools = (data as Record<string, unknown>).tools
   if (!Array.isArray(tools)) throw new Error('Apollo tool catalog is missing tools')
+  const names = new Set<string>()
+  const capabilityIds = new Set<string>()
   for (const tool of tools) {
     if (
       typeof tool !== 'object' || tool === null || Array.isArray(tool) ||
       typeof tool.name !== 'string' || typeof tool.description !== 'string' ||
       typeof tool.inputSchema !== 'object' || tool.inputSchema === null ||
       typeof tool.outputSchema !== 'object' || tool.outputSchema === null ||
+      typeof tool.errorSchema !== 'object' || tool.errorSchema === null ||
+      typeof tool.annotations !== 'object' || tool.annotations === null ||
       typeof tool.apollo !== 'object' || tool.apollo === null
     ) {
       throw new Error('Apollo tool descriptor is invalid')
     }
+    const descriptor = tool as Record<string, unknown>
+    const apollo = descriptor.apollo as Record<string, unknown>
+    const endpoint = apollo.endpoint
+    if (
+      !/^[a-z][a-z0-9_.-]{2,127}$/.test(descriptor.name as string) ||
+      typeof apollo.capabilityId !== 'string' || !apollo.capabilityId.startsWith('apollo.') ||
+      typeof endpoint !== 'object' || endpoint === null || Array.isArray(endpoint) ||
+      !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String((endpoint as Record<string, unknown>).method)) ||
+      typeof (endpoint as Record<string, unknown>).path !== 'string' ||
+      !((endpoint as Record<string, unknown>).path as string).startsWith('/v1/') ||
+      names.has(descriptor.name as string) || capabilityIds.has(apollo.capabilityId)
+    ) {
+      throw new Error('Apollo tool descriptor identity or endpoint is invalid')
+    }
+    names.add(descriptor.name as string)
+    capabilityIds.add(apollo.capabilityId)
   }
   const deepFreeze = (value: unknown): unknown => {
     if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return value

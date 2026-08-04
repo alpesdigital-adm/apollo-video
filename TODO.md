@@ -625,12 +625,12 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.040 — Interface para agentes e MCP [FR-246]
 
-- [ ] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v2, annotations e metadata de custo/confirmation. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos.
+- [ ] Definir tool names, descriptions, input/output schemas e structured errors. Evidência F0-079: `GET /v1/tools` expõe catálogo scope-filtered derivado do registry, com nomes MCP-safe, descrições, input schema composto de path/query/headers/body, output schema, error envelope v3, annotations e metadata de custo/confirmation. Incremento local F0.040 valida também o `errorSchema` antes de expor erro REST e publica capability/custo/confirmation/boundary/error schema em `_meta` do MCP. Contract e HTTP tests comprovam paridade com capabilities, deny-by-default e ausência de valores internos; deploy e aceite permanecem pendentes.
 - [ ] Filtrar tools/capabilities por client, scope, environment e policy. Evidência F0-080: descoberta compartilhada exige client autenticado/ativo no environment correto, intersecta scopes, `availableIn` e policy deny-only global/por environment/workspace/client; configuração inválida falha fechada. Unit tests cobrem as quatro dimensões e a jornada HTTP prova paridade exata entre `/v1/capabilities` e `/v1/tools`, inclusive deny específico por client sem afetar o catálogo anônimo.
-- [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 21 tools mutáveis em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Descriptors anunciam o gate, mas não oferecem `approval/confirmed/preflightToken` gravável pelo modelo.
-- [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered, output malformado bloqueado e ausência de repositories/banco/storage/workers no adapter.
-- [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot.
-- [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução.
+- [ ] Exigir preflight/approval em tools caras, amplas ou destrutivas. Evidência F0-081: registry de segurança classifica exaustivamente as 85 tools mutáveis atuais em `bounded/broad/destructive`; impacto amplo/destrutivo ou custo high/variable exige gate. Evidência confiável é vinculada à capability, fingerprint e expiry; ausência, mismatch e expiração falham antes da execução. Incremento local F0.040 fecha a única tool `preflight-token`: o adapter guarda somente o hash do token observado na resposta validada de criação do preflight e exige batch, preflight, preflightHash e scopeHash exatos antes do HTTP; a Public API mantém a validação HMAC definitiva. Binding estrutural exaustivo falha quando uma nova tool desse tipo nascer sem source explícita. Deploy e aceite permanecem pendentes.
+- [ ] Implementar adapter MCP sobre cliente da Public API, sem acesso direto ao domínio interno. Evidência F0-082: servidor MCP stdio baseado no SDK estável descobre `/v1/tools` uma vez por sessão, valida input/output/error schemas, traduz namespaces para HTTP autenticado e bloqueia redirects. Incremento local F0.040 rejeita identidade/endpoint duplicado ou inválido, retorna erro público validado como `structuredContent` e impede payload malformado de cruzar a fronteira. E2E com client MCP oficial comprova list/call via API fake; testes garantem gate confiável, catálogo scope-filtered e ausência de repositories/banco/storage/workers no adapter. Deploy e aceite permanecem pendentes.
+- [ ] Expor resources paginados de capabilities, projects, operations e reports autorizados. Evidência F0-083: MCP lista collections e templates derivados exclusivamente das capabilities autorizadas, pagina descriptors e payloads com cursores opacos e bloqueia URI/query desconhecida. Incremento local F0.040 valida cada resposta de resource pelo output schema da mesma capability autorizada antes de delimitá-la. Projects ganhou paginação keyset pública versionada; reports só aparecem quando a capability correspondente existir no snapshot. Deploy e aceite permanecem pendentes.
+- [ ] Delimitar transcript/OCR/media metadata como untrusted data em tool inputs/results. Evidência F0-084: descriptors v2 publicam paths de transcript/OCR/media metadata e política `never-execute`; resultados MCP textuais carregam envelope explícito e `_meta`, preservando structuredContent validado sem promover conteúdo de mídia a instrução. Incremento local F0.040 cobre também os nomes efetivos `transcriptText`, `ocrText` e `metadata`; testes mantêm a classificação fail-closed. Deploy e aceite permanecem pendentes.
 - [ ] Criar E2E por agente para jornada válida, prompt injection e tool não autorizada. Evidência F0-085: `ToolLoopAgent` recebe somente descriptors do snapshot autorizado e executa pela Public API; E2E determinístico com model fake cobre chamada válida, transcript adversarial preservado como data-only e tool ausente convertida em invalid call sem execução.
 
 ### F0.041 — Transferência externa de mídia [FR-247]
@@ -5190,7 +5190,7 @@ Limites explícitos desta slice:
 
 - o transporte inicial é stdio; Streamable HTTP remoto será adicionado sem mudar o cliente da Public API;
 - resources paginados pertencem à próxima microtarefa da F0.040;
-- tools `preflight-token` dependerão da emissão/validação assinada prevista na F0.042;
+- tools `preflight-token` dependiam da emissão/validação assinada prevista na F0.042; o incremento local posterior do F0.040 integrou a observação hash-only da evidência emitida pela API e o binding exato do commit, ainda sem deploy/aceite;
 - o adapter não executa modelo nem escolhe provider; ele apenas expõe a superfície MCP autorizada.
 
 ### Slice F0-083 — Resources MCP paginados e autorizados
@@ -5254,6 +5254,19 @@ Regressões locais desta slice:
 - 168/168 testes gerais aprovados;
 - 3/3 jornadas E2E do agente aprovadas;
 - typecheck aprovado com a API atual do AI SDK instalada.
+
+### Incremento local F0.040 — hardening da fronteira MCP e commit por preflight
+
+**Status:** implementado e testado localmente em 4 de agosto de 2026; sem deploy ou aceite.
+
+- catálogo recebido da Public API falha fechado para descriptor incompleto, identidade/capability duplicada, método não allowlisted ou endpoint fora de `/v1`;
+- tools MCP publicam em `_meta` a capability, versão, scopes, custo, confirmation, boundary e error schema canônicos;
+- erro HTTP só cruza como `isError`/`structuredContent` depois de validar `errorSchema`; erro malformado é substituído por falha interna limitada sem ecoar payload;
+- resources autorizados validam o payload com o output schema da capability correspondente antes de entrar no envelope data-only;
+- a única tool `preflight-token` atual (`apollo.batches.edit-preflights.commit`) exige token previamente observado numa resposta de preflight já validada, guarda apenas SHA-256 em memória limitada e vincula batch/preflight/preflightHash/scopeHash/expiry antes do HTTP; a API continua validando assinatura, client, workspace, snapshot e custo;
+- gate estrutural compara todos os targets `preflight-token` do registry aos bindings MCP explícitos;
+- testes com o client MCP oficial provam ausência, mismatch, sucesso, erro estruturado, bloqueio de erro/resource adulterado e metadata publicada;
+- PostgreSQL real, fluxo do produto implantado e aceite permanecem pendentes; nenhuma caixa foi fechada.
 
 ### Slice F0-086 — Begin-upload durável e público
 
