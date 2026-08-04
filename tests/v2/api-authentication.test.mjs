@@ -9,9 +9,12 @@ import {
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
+  API_SCOPES,
+  API_SCOPE_MATRIX,
   apiCredentialRef,
   createApiClient,
   createServiceAccount,
+  isApiScope,
 } from '../../src/v2/domain/api-client.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
 
@@ -36,6 +39,20 @@ class InMemoryApiClientRepository {
 }
 
 test('service-account identity owns canonical grants, environments and credential refs', () => {
+  assert.deepEqual(API_SCOPE_MATRIX, {
+    artifacts: ['read', 'render', 'rights', 'write'],
+    clients: ['admin'],
+    media: ['write'],
+    operations: ['cancel', 'read', 'retry'],
+    projects: ['approve', 'read', 'write'],
+    webhooks: ['admin'],
+  })
+  assert.equal(Object.isFrozen(API_SCOPE_MATRIX), true)
+  assert.ok(Object.values(API_SCOPE_MATRIX).every(Object.isFrozen))
+  assert.equal(new Set(API_SCOPES).size, API_SCOPES.length)
+  assert.ok(API_SCOPES.every(isApiScope))
+  assert.equal(isApiScope('projects:delete'), false)
+
   const account = createServiceAccount({
     id: 'client-model-1', workspaceId: 'workspace-1', name: ' Model Agent ',
     status: 'active', scopeGrants: ['projects:write', 'projects:read'],
@@ -60,6 +77,7 @@ test('service-account identity owns canonical grants, environments and credentia
     { allowedEnvironments: [] },
     { allowedEnvironments: ['sandbox', 'sandbox'] },
     { scopeGrants: ['projects:read', 'projects:read'] },
+    { scopeGrants: ['projects:delete'] },
     { createdBy: 'unsafe creator' },
   ]) {
     assert.throws(

@@ -1,5 +1,5 @@
 import { assertDomain } from '../domain/errors.ts'
-import { API_ENVIRONMENTS, type ApiEnvironment } from '../domain/api-client.ts'
+import { API_ENVIRONMENTS, isApiScope, type ApiEnvironment, type ApiScope } from '../domain/api-client.ts'
 import { assertAllowlistedPublicQuery } from './conventions.ts'
 
 export type CapabilityExposure = 'public' | 'workspace-admin' | 'internal-only'
@@ -38,7 +38,7 @@ export interface PublicCapability {
   operationKind: CapabilityOperationKind
   authMode: CapabilityAuthMode
   authScheme?: CapabilityAuthScheme
-  requiredScopes: readonly string[]
+  requiredScopes: readonly ApiScope[]
   inputSchemaRef?: string
   outputSchemaRef: string
   endpoint?: Readonly<{ method: HttpMethod; path: string }>
@@ -191,8 +191,6 @@ const CAPABILITY_CONFIRMATIONS = Object.freeze<readonly CapabilityConfirmation[]
   'none', 'preflight-token', 'human-approval',
 ])
 const CAPABILITY_SCHEMA_REF = /^apollo:\/\/schemas\/[a-z0-9-]+\/v[1-9][0-9]*$/
-const CAPABILITY_SCOPE = /^[a-z][a-z0-9-]{1,63}:[a-z][a-z0-9-]{1,63}$/
-
 function validateCapability(capability: PublicCapability): void {
   assertDomain(
     CAPABILITY_EXPOSURES.includes(capability.exposure),
@@ -253,10 +251,10 @@ function validateCapability(capability: PublicCapability): void {
   )
   assertDomain(
     Array.isArray(capability.requiredScopes) &&
-      capability.requiredScopes.every((scope) => CAPABILITY_SCOPE.test(scope)) &&
+      capability.requiredScopes.every(isApiScope) &&
       new Set(capability.requiredScopes).size === capability.requiredScopes.length,
     'INVALID_CAPABILITY',
-    'Capability scopes must be canonical and cannot contain duplicates',
+    'Capability scopes must exist in the server authorization matrix and cannot contain duplicates',
     { capabilityId: capability.id },
   )
   assertDomain(

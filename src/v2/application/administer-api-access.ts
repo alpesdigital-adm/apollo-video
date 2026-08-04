@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import { requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type {
   ApiAccessCommandResult,
   ApiAccessControlRepository,
@@ -23,11 +23,7 @@ function assertAdministrator(actor: AuthenticatedExternalActor, workspaceId: str
   if (actor.workspaceId !== workspaceId) {
     throw new DomainError('WORKSPACE_NOT_FOUND', 'Workspace was not found')
   }
-  if (!actor.scopes.has('clients:admin')) {
-    throw new DomainError('AUTH_SCOPE_REQUIRED', 'API client lacks the required scope', {
-      requiredScope: 'clients:admin',
-    })
-  }
+  requireScope(actor, 'clients:admin')
 }
 
 function validateTarget(input: {

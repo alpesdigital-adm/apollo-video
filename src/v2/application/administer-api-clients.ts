@@ -1,4 +1,4 @@
-import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import { requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import type {
   ApiClientAdministrationRepository,
   ApiCredentialMutationResult,
@@ -32,11 +32,7 @@ function assertWorkspaceActor(actor: AuthenticatedExternalActor, workspaceId: st
 }
 
 function assertClientsAdministrator(actor: AuthenticatedExternalActor): void {
-  if (!actor.scopes.has('clients:admin')) {
-    throw new DomainError('AUTH_SCOPE_REQUIRED', 'API client lacks the required scope', {
-      requiredScope: 'clients:admin',
-    })
-  }
+  requireScope(actor, 'clients:admin')
 }
 
 function assertIdempotencyKey(key: string): string {

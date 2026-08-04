@@ -331,6 +331,8 @@ Evidência concluída F0.036/FR-242 (emissão e validação Bearer) — a creden
 
 Evidência concluída F0.036/FR-242 (one-shot, referência, rotação e revogação) — `ApiCredentialRef` identifica a credential independente; `ApiClient` não possui verifier e o secret bruto nunca é persistido. A migration `20260803190000_contract_api_credential_verifiers` remove as cópias salt/hash da identidade e limita o verifier one-way ao credential owner. Create/rotate retornam token somente ao primeiro vencedor; replay, perda de response e concorrência devolvem IDs sem token. A janela idempotente usa o clock do Application service, overlap é limitado e revoke concorrente converge antes de o token passar a 401. O run `30830871011` aprovou 1.037 testes, migration limpa, API/PostgreSQL, contratos/paridade, mídia/build e teardown. Esta evidência encerra a terceira microtarefa; deny-by-default, audit context, kill switches e security E2E permanecem abertos.
 
+Evidência local F0.036/FR-242 (matriz deny-by-default) — `API_SCOPE_MATRIX` fecha os 13 grants operáveis e é reutilizada por criação/hidratação de client, autenticação, `requireScope` e validação do registry. T-FR-242 prova igualdade matriz↔capabilities, recusa `projects:delete` apesar do formato válido e resolve cada endpoint até a rota/Application service que aplica seu guard. A prova ainda não atravessou PostgreSQL/HTTP hospedado nem deploy/aceite, portanto a microtarefa permanece aberta no status auditado.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

@@ -232,6 +232,7 @@ test('T-F0-034 registry fails closed for exposure, scopes, schema, cost and conf
     { exposure: 'partner' },
     { operationKind: 'mutation' },
     { requiredScopes: ['projects read'] },
+    { requiredScopes: ['projects:delete'] },
     { inputSchemaRef: 'https://schemas.example/create-project.json' },
     { outputSchemaRef: 'apollo://schemas/project-created/v0' },
     { costClass: 'unbounded' },

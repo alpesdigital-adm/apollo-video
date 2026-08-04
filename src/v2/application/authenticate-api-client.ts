@@ -1,4 +1,4 @@
-import type { ApiEnvironment } from '../domain/api-client.ts'
+import { isApiScope, type ApiEnvironment, type ApiScope } from '../domain/api-client.ts'
 import type { ApiAccessStatus } from '../domain/api-access-control.ts'
 import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -138,8 +138,8 @@ export function authenticateApiClientService(
   }
 }
 
-export function requireScope(actor: AuthenticatedExternalActor, scope: string): void {
-  if (!actor.scopes.has(scope)) {
+export function requireScope(actor: AuthenticatedExternalActor, scope: ApiScope): void {
+  if (!isApiScope(scope) || !actor.scopes.has(scope)) {
     throw new DomainError('AUTH_SCOPE_REQUIRED', 'API client lacks the required scope', {
       requiredScope: scope,
     })

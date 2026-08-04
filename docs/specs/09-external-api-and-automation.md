@@ -137,7 +137,7 @@ interface ApiClient {
   name: string
   type: 'service-account' | 'oauth-application' | 'personal-development'
   status: 'active' | 'suspended' | 'revoked'
-  scopeGrants: string[]
+  scopeGrants: ApiScope[]
   allowedEnvironments: Array<'sandbox' | 'production'>
   createdBy: string
   lastUsedAt?: string
@@ -204,6 +204,8 @@ Escopos mínimos iniciais:
 | API admin | `clients:admin`, `webhooks:admin`, `usage:read`, `audit:read` |
 
 Possuir scope não implica autorização final: resource ownership, role, rights, consent, Policy Snapshot, budget e protected state também são avaliados.
+
+`ApiScope` não é uma string aberta. A matriz server-side contém apenas os pares usados por capabilities operáveis e é a fonte comum de criação/hidratação de clients, autenticação, guards e registry. Um par novo precisa entrar deliberadamente na matriz junto de uma capability; regex válida isoladamente não concede autoridade. O gate estrutural resolve cada endpoint Bearer até sua rota e Application services e exige o mesmo `requireScope`, de modo que declaração pública e enforcement não possam divergir silenciosamente.
 
 ## 9. Convenções HTTP/JSON
 
