@@ -2,6 +2,7 @@ import type {
   CatalogedValidatedSegment,
   ValidatedSegmentSourceContext,
 } from '../../domain/validated-segment.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ValidatedSegmentCurrentRights {
   id: string
@@ -20,6 +21,7 @@ export interface PersistedValidatedSegment
 extends CatalogedValidatedSegment {
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ValidatedSegmentSearchQuery {
@@ -69,6 +71,7 @@ export interface ValidatedSegmentRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedValidatedSegment> | null>
   persist(
     segment: Readonly<PersistedValidatedSegment>,

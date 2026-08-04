@@ -336,7 +336,7 @@ export async function POST(
       extractionPolicyVersion: body.extractionPolicyVersion,
       producer: body.producer,
       annotations: body.annotations,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey,
     })
     return NextResponse.json(

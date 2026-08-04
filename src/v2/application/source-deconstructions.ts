@@ -14,6 +14,11 @@ import {
 import type {
   SourceDeconstructionRepository,
 } from './ports/source-deconstruction-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -58,7 +63,7 @@ function requestFingerprint(input: {
   validationScope: SourceDeconstructionValidationScope
   targetComposition: Readonly<SourceDeconstructionTargetComposition>
   boundaryPolicy: Readonly<SourceDeconstructionBoundaryPolicy>
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'source-deconstruction-request/v1',
@@ -96,7 +101,7 @@ export function createSourceDeconstructionService(dependencies: {
     validationScope: SourceDeconstructionValidationScope
     targetComposition: Readonly<SourceDeconstructionTargetComposition>
     boundaryPolicy: Readonly<SourceDeconstructionBoundaryPolicy>
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -117,7 +122,14 @@ export function createSourceDeconstructionService(dependencies: {
       request.expectedTranscriptHash,
       'expectedTranscriptHash',
     )
-    const actorClientId = identity(request.actor?.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Source deconstruction actor does not belong to the workspace',
+    )
+    const actorClientId = authenticationAudit.clientId
     assertDomain(
       SOURCE_DECONSTRUCTION_DESIRED_ROLES.includes(
         request.desiredRole,
@@ -144,12 +156,13 @@ export function createSourceDeconstructionService(dependencies: {
       validationScope: request.validationScope,
       targetComposition: request.targetComposition,
       boundaryPolicy: request.boundaryPolicy,
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       projectId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -199,6 +212,7 @@ export function createSourceDeconstructionService(dependencies: {
       report,
       requestFingerprint: fingerprint,
       idempotencyKey: replayKey,
+      authenticationAudit,
     })
   }
 }

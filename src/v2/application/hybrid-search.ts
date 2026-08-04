@@ -30,6 +30,11 @@ import type {
   SemanticSearchRepository,
   SemanticSearchSourceRef,
 } from './ports/semantic-search-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
@@ -177,7 +182,7 @@ export function catalogSemanticSearchDocumentService(dependencies: {
     expectedSourceHash: string
     indexVersion: string
     observations: SemanticSearchObservationInput
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -202,12 +207,14 @@ export function catalogSemanticSearchDocumentService(dependencies: {
       'INVALID_ARGUMENT',
       `indexVersion must be ${SEMANTIC_SEARCH_INDEX_VERSION}`,
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Semantic indexing requires an authenticated API client',
+      'Semantic indexing actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'catalog-semantic-search-document-request/v1',
@@ -217,12 +224,13 @@ export function catalogSemanticSearchDocumentService(dependencies: {
       expectedSourceHash,
       indexVersion: SEMANTIC_SEARCH_INDEX_VERSION,
       observations: request.observations,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotentDocument({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -297,6 +305,7 @@ export function catalogSemanticSearchDocumentService(dependencies: {
         ...domain,
         requestFingerprint,
         idempotencyKey: key,
+        authenticationAudit,
       })
     return dependencies.repository.persistDocument(
       document,
@@ -694,7 +703,7 @@ export function recordSemanticReuseRunService(dependencies: {
       identityKey: string
       reason: SemanticDirectorRejectionReason
     }[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -707,12 +716,14 @@ export function recordSemanticReuseRunService(dependencies: {
       request.expectedResultSetHash,
       'expectedResultSetHash',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Semantic reuse audit requires an authenticated API client',
+      'Semantic reuse actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     assertDomain(
       Array.isArray(request.reusedIdentityKeys) &&
@@ -772,13 +783,14 @@ export function recordSemanticReuseRunService(dependencies: {
       expectedResultSetHash,
       reusedIdentityKeys,
       directorRejections,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository
       .findIdempotentReuseRun({
         workspaceId,
         projectId,
         idempotencyKey: key,
+        actorContextHash: authenticationAudit.contextHash,
       })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -891,6 +903,7 @@ export function recordSemanticReuseRunService(dependencies: {
       Object.freeze({
         ...content,
         runHash: calculateCanonicalHash(content),
+        authenticationAudit,
       })
     return dependencies.repository.persistReuseRun(run)
   }
@@ -922,7 +935,7 @@ export function evaluateHybridRetrievalService(dependencies: {
       }
       relevantIdentityKeys: readonly string[]
     }[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -935,12 +948,14 @@ export function evaluateHybridRetrievalService(dependencies: {
       'INVALID_ARGUMENT',
       'retrieval cases must contain 1 to 50 items',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Retrieval evaluation requires an authenticated API client',
+      'Retrieval evaluation actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const normalizedCases = request.cases.map((item, index) => {
       const id = identity(item.id, `cases[${index}].id`)
@@ -981,13 +996,14 @@ export function evaluateHybridRetrievalService(dependencies: {
       projectId,
       k,
       cases: normalizedCases,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository
       .findIdempotentEvaluation({
         workspaceId,
         projectId,
         idempotencyKey: key,
+        actorContextHash: authenticationAudit.contextHash,
       })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -1054,6 +1070,7 @@ export function evaluateHybridRetrievalService(dependencies: {
       Object.freeze({
         ...content,
         reportHash: calculateCanonicalHash(content),
+        authenticationAudit,
       })
     return dependencies.repository.persistEvaluation(evaluation)
   }
@@ -1110,7 +1127,7 @@ export function evaluateRetrievalScaleService(dependencies: {
       }
       relevantIdentityKeys: readonly string[]
     }[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -1129,12 +1146,14 @@ export function evaluateRetrievalScaleService(dependencies: {
       'INVALID_ARGUMENT',
       'retrieval scale cases must contain 3 to 50 items',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Retrieval scale evaluation requires an authenticated API client',
+      'Retrieval scale actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const normalizedCases = request.cases.map((item, index) => {
       const id = identity(item.id, `cases[${index}].id`)
@@ -1177,13 +1196,14 @@ export function evaluateRetrievalScaleService(dependencies: {
       scope,
       k,
       cases: normalizedCases,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository
       .findIdempotentScaleEvaluation({
         workspaceId,
         projectId,
         idempotencyKey: key,
+        actorContextHash: authenticationAudit.contextHash,
       })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -1285,6 +1305,7 @@ export function evaluateRetrievalScaleService(dependencies: {
       Object.freeze({
         ...content,
         reportHash: calculateCanonicalHash(content),
+        authenticationAudit,
       })
     return dependencies.repository.persistScaleEvaluation(evaluation)
   }

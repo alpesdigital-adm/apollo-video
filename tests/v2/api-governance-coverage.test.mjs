@@ -97,6 +97,54 @@ test('T-FR-242 every batch mutation binds the full authentication context throug
   }
 })
 
+test('T-FR-242 project intelligence mutations bind one authenticated actor through idempotency and persistence', () => {
+  const applicationFiles = [
+    'catalog-speech-segments.ts',
+    'catalog-evidence-segments.ts',
+    'catalog-validated-segments.ts',
+    'hybrid-search.ts',
+    'source-deconstructions.ts',
+    'contamination-reports.ts',
+  ]
+  for (const relative of applicationFiles) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /type AuthenticatedExternalActor/)
+    assert.match(source, /requireScope\(request\.actor, 'projects:write'\)/)
+    assert.match(source, /materializeActorAuditContext\(request\.actor\)/)
+    assert.match(source, /actorContextHash:\s*authenticationAudit\.contextHash/)
+    assert.match(source, /authenticationAudit[,\s]/)
+  }
+
+  for (const relative of [
+    'speech-segment-catalog-repository.ts',
+    'evidence-segment-repository.ts',
+    'validated-segment-repository.ts',
+    'semantic-search-repository.ts',
+    'source-deconstruction-repository.ts',
+    'contamination-report-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /externalActorAuditData/)
+    assert.match(source, /hydrateExternalActorAudit/)
+  }
+
+  for (const relative of [
+    'projects/[projectId]/speech-segments/route.ts',
+    'projects/[projectId]/evidence-segments/route.ts',
+    'projects/[projectId]/validated-segments/route.ts',
+    'projects/[projectId]/semantic-search/documents/route.ts',
+    'projects/[projectId]/semantic-search/evaluations/route.ts',
+    'projects/[projectId]/semantic-search/reuse-runs/route.ts',
+    'projects/[projectId]/semantic-search/scale-evaluations/route.ts',
+    'projects/[projectId]/source-deconstructions/route.ts',
+    'projects/[projectId]/contamination-reports/route.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
+    assert.match(source, /actor[:,]/)
+  }
+})
+
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {
   const routesRoot = join(root, 'src/app/v1')
   const applicationRoot = join(root, 'src/v2/application')

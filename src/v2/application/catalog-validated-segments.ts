@@ -18,6 +18,11 @@ import type {
   ValidatedSegmentRepository,
   ValidatedSegmentSearchQuery,
 } from './ports/validated-segment-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
@@ -119,7 +124,7 @@ export function catalogValidatedSegmentService(dependencies: {
     performance: ValidationPerformanceEvidence
     validatedAt: string
     expiresAt?: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -164,12 +169,14 @@ export function catalogValidatedSegmentService(dependencies: {
           'expectedSpeechSegmentHash',
         )
       : undefined
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'ValidatedSegment requires an authenticated API client',
+      'ValidatedSegment actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'catalog-validated-segment-request/v1',
@@ -191,12 +198,13 @@ export function catalogValidatedSegmentService(dependencies: {
       performance: request.performance,
       validatedAt: request.validatedAt,
       ...(request.expiresAt ? { expiresAt: request.expiresAt } : {}),
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -262,6 +270,7 @@ export function catalogValidatedSegmentService(dependencies: {
       ...domain,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
     return dependencies.repository.persist(segment)
   }

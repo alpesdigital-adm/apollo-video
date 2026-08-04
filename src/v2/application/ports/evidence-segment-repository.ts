@@ -7,6 +7,7 @@ import type {
 import type {
   CatalogedSpeechSegment,
 } from '../../domain/speech-segment-catalog.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface EvidenceSegmentCreationContext {
   sourceSpeechSegment: Readonly<CatalogedSpeechSegment>
@@ -18,6 +19,7 @@ export interface PersistedEvidenceSegment
 extends CatalogedEvidenceSegment {
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface EvidenceSegmentSearchQuery {
@@ -66,6 +68,7 @@ export interface EvidenceSegmentRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedEvidenceSegment> | null>
   readCurrent(input: {
     workspaceId: string

@@ -14,6 +14,11 @@ import type {
   SpeechSegmentCatalogRepository,
   SpeechSegmentSearchQuery,
 } from './ports/speech-segment-catalog-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256_PATTERN = /^[a-f0-9]{64}$/
@@ -95,7 +100,7 @@ export function catalogSpeechSegmentsService(dependencies: {
     extractionPolicyVersion: string
     producer: SpeechCatalogProducer
     annotations: readonly Readonly<SpeechSegmentAnnotationInput>[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -116,12 +121,14 @@ export function catalogSpeechSegmentsService(dependencies: {
       'INVALID_ARGUMENT',
       'annotations must contain at most 100000 entries',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Speech catalog requires an authenticated API client',
+      'Speech catalog actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const catalogProducer = producer(request.producer)
     const annotations = Object.freeze(
@@ -137,12 +144,13 @@ export function catalogSpeechSegmentsService(dependencies: {
       extractionPolicyVersion: SPEECH_SEGMENT_EXTRACTION_POLICY_VERSION,
       producer: catalogProducer,
       annotations,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -218,6 +226,7 @@ export function catalogSpeechSegmentsService(dependencies: {
         type: 'api-client' as const,
         id: actorId,
       }),
+      authenticationAudit,
       createdAt,
     })
     const run = Object.freeze({

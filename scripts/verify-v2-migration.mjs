@@ -56,6 +56,10 @@ const batchActorAuditMigration = readFileSync(
   `${migrationsPath}/20260805010000_batch_actor_audit/migration.sql`,
   'utf8',
 )
+const projectIntelligenceActorAuditMigration = readFileSync(
+  `${migrationsPath}/20260805020000_project_intelligence_actor_audit/migration.sql`,
+  'utf8',
+)
 
 assert.match(
   committed,
@@ -87,6 +91,15 @@ const batchActorAuditModels = [
   'V2TakeLibraryRun', 'V2TakeLibrarySelection', 'V2CompatibilityGraphRun',
   'V2VariantRecipeRun', 'V2VariantPortfolioPreflightRun',
   'V2BatchEditPreflightRun', 'V2BatchEditCommand', 'V2ProductionBatchAction',
+].map((name) => [
+  schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '',
+  name,
+])
+const projectIntelligenceActorAuditModels = [
+  'V2SpeechSegmentCatalogRun', 'V2EvidenceSegment', 'V2ValidatedSegment',
+  'V2SemanticSearchDocument', 'V2RetrievalEvaluation',
+  'V2RetrievalScaleEvaluation', 'V2SemanticReuseRun',
+  'V2SourceDeconstructionReport', 'V2ContaminationReport',
 ].map((name) => [
   schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '',
   name,
@@ -350,6 +363,44 @@ assert.doesNotMatch(
   /(?:UPDATE|INSERT INTO) "(?:production_batches|script_alignment_runs|script_alignment_reviews|take_library_runs|take_library_selections|compatibility_graph_runs|variant_recipe_runs|variant_portfolio_preflight_runs|batch_edit_preflight_runs|batch_edit_commands|production_batch_actions)"/,
   'pre-contract batch actor identity must never be fabricated by backfill',
 )
+
+for (const [model, label] of projectIntelligenceActorAuditModels) {
+  for (const field of [
+    'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+    'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  ]) {
+    assert.match(model, new RegExp(`\\b${field}\\b`), `${label} must persist ${field}`)
+  }
+}
+for (const table of [
+  'speech_segment_catalog_runs', 'evidence_segments', 'validated_segments',
+  'semantic_search_documents', 'retrieval_evaluations',
+  'retrieval_scale_evaluations', 'semantic_reuse_runs',
+  'source_deconstruction_reports', 'contamination_reports',
+]) {
+  assert.match(
+    projectIntelligenceActorAuditMigration,
+    new RegExp(`ALTER TABLE "${table}"[\\s\\S]*?ADD COLUMN "actorCredentialId"[\\s\\S]*?ADD COLUMN "actorContextHash"`),
+    `${table} must receive the complete actor audit tuple`,
+  )
+}
+assert.doesNotMatch(
+  projectIntelligenceActorAuditMigration,
+  /(?:UPDATE|INSERT INTO) "(?:speech_segment_catalog_runs|evidence_segments|validated_segments|semantic_search_documents|retrieval_evaluations|retrieval_scale_evaluations|semantic_reuse_runs|source_deconstruction_reports|contamination_reports)"/,
+  'pre-contract project intelligence identity must never be fabricated by backfill',
+)
+for (const requiredNonNull of [
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash',
+]) {
+  assert.equal(
+    [...projectIntelligenceActorAuditMigration.matchAll(
+      new RegExp(`"${requiredNonNull}" IS NOT NULL`, 'g'),
+    )].length,
+    9,
+    `every project intelligence actor audit constraint must require ${requiredNonNull}`,
+  )
+}
 
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
@@ -636,6 +687,15 @@ const requiredChecks = [
   'variant_portfolio_preflight_runs_actor_audit_check',
   'batch_edit_preflights_actor_audit_check',
   'batch_edit_commands_actor_audit_check',
+  'speech_segment_catalog_runs_actor_audit_check',
+  'evidence_segments_actor_audit_check',
+  'validated_segments_actor_audit_check',
+  'semantic_search_documents_actor_audit_check',
+  'retrieval_evaluations_actor_audit_check',
+  'retrieval_scale_evaluations_actor_audit_check',
+  'semantic_reuse_runs_actor_audit_check',
+  'source_deconstruction_reports_actor_audit_check',
+  'contamination_reports_actor_audit_check',
   'contamination_reports_version_check',
   'contamination_reports_decision_check',
   'contamination_reports_counts_check',

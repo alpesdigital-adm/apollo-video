@@ -2428,6 +2428,13 @@ model V2SpeechSegmentCatalogRun {
   active                  Boolean  @default(true)
   createdByType           String   @db.VarChar(32)
   createdById             String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
   workspace        V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -2442,6 +2449,7 @@ model V2SpeechSegmentCatalogRun {
   @@index([workspaceId, projectId, active, createdAt(sort: Desc)])
   @@index([workspaceId, sourceTranscriptId, active, createdAt(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, active])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "speech_catalog_runs_actor_context_idx")
   @@map("speech_segment_catalog_runs")
 }
 
@@ -2554,6 +2562,13 @@ model V2EvidenceSegment {
   idempotencyKey             String   @db.VarChar(128)
   createdByType              String   @db.VarChar(32)
   createdById                String   @db.VarChar(80)
+  actorCredentialId          String?  @db.VarChar(128)
+  actorEnvironment           String?  @db.VarChar(16)
+  actorAuthenticationKind    String?  @db.VarChar(16)
+  actorContextHash           String?  @db.Char(64)
+  delegatedUserId            String?  @db.VarChar(128)
+  delegatedIdentityId        String?  @db.VarChar(128)
+  workspaceRole              String?  @db.VarChar(32)
   createdAt                  DateTime @default(now()) @db.Timestamptz(3)
   evidenceHash               String   @db.Char(64)
 
@@ -2578,6 +2593,7 @@ model V2EvidenceSegment {
   @@index([workspaceId, subjectNormalized])
   @@index([workspaceId, attributionNormalized])
   @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "evidence_segments_actor_context_idx")
   @@map("evidence_segments")
 }
 
@@ -3169,6 +3185,13 @@ model V2ValidatedSegment {
   idempotencyKey           String    @db.VarChar(128)
   createdByType            String    @db.VarChar(32)
   createdById              String    @db.VarChar(80)
+  actorCredentialId        String?   @db.VarChar(128)
+  actorEnvironment         String?   @db.VarChar(16)
+  actorAuthenticationKind  String?   @db.VarChar(16)
+  actorContextHash         String?   @db.Char(64)
+  delegatedUserId          String?   @db.VarChar(128)
+  delegatedIdentityId      String?   @db.VarChar(128)
+  workspaceRole            String?   @db.VarChar(32)
   createdAt                DateTime  @default(now()) @db.Timestamptz(3)
   validatedSegmentHash     String    @db.Char(64)
 
@@ -3192,6 +3215,7 @@ model V2ValidatedSegment {
   @@index([workspaceId, metricNormalized])
   @@index([workspaceId, expiresAt])
   @@index([workspaceId, rightsSnapshotId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "validated_segments_actor_context_idx")
   @@map("validated_segments")
 }
 
@@ -3613,6 +3637,13 @@ model V2SemanticSearchDocument {
   idempotencyKey           String                      @db.VarChar(128)
   createdByType            String                      @db.VarChar(32)
   createdById              String                      @db.VarChar(80)
+  actorCredentialId        String?                     @db.VarChar(128)
+  actorEnvironment         String?                     @db.VarChar(16)
+  actorAuthenticationKind  String?                     @db.VarChar(16)
+  actorContextHash         String?                     @db.Char(64)
+  delegatedUserId          String?                     @db.VarChar(128)
+  delegatedIdentityId      String?                     @db.VarChar(128)
+  workspaceRole            String?                     @db.VarChar(32)
   createdAt                DateTime                    @default(now()) @db.Timestamptz(3)
   documentHash             String                      @db.Char(64)
 
@@ -3631,6 +3662,7 @@ model V2SemanticSearchDocument {
   @@index([workspaceId, sourceType, sourceId, active])
   @@index([workspaceId, rightsSnapshotId])
   @@index([workspaceId, embeddingProvider, embeddingModel, embeddingVersion, embeddingState])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "semantic_documents_actor_context_idx")
   @@map("semantic_search_documents")
 }
 
@@ -3648,6 +3680,13 @@ model V2RetrievalEvaluation {
   idempotencyKey      String   @db.VarChar(128)
   createdByType       String   @db.VarChar(32)
   createdById         String   @db.VarChar(80)
+  actorCredentialId   String?  @db.VarChar(128)
+  actorEnvironment    String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash    String?  @db.Char(64)
+  delegatedUserId     String?  @db.VarChar(128)
+  delegatedIdentityId String?  @db.VarChar(128)
+  workspaceRole       String?  @db.VarChar(32)
   createdAt           DateTime @default(now()) @db.Timestamptz(3)
   reportHash          String   @db.Char(64)
 
@@ -3660,6 +3699,7 @@ model V2RetrievalEvaluation {
   @@unique([workspaceId, reportHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, policyVersion, rerankPolicyVersion])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "retrieval_evaluations_actor_context_idx")
   @@map("retrieval_evaluations")
 }
 
@@ -3679,6 +3719,13 @@ model V2RetrievalScaleEvaluation {
   requestFingerprint   String   @db.Char(64)
   idempotencyKey       String   @db.VarChar(128)
   createdByClientId    String   @db.VarChar(80)
+  actorCredentialId    String?  @db.VarChar(128)
+  actorEnvironment     String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash     String?  @db.Char(64)
+  delegatedUserId      String?  @db.VarChar(128)
+  delegatedIdentityId  String?  @db.VarChar(128)
+  workspaceRole        String?  @db.VarChar(32)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
   reportHash           String   @db.Char(64)
 
@@ -3691,6 +3738,7 @@ model V2RetrievalScaleEvaluation {
   @@unique([workspaceId, reportHash])
   @@index([workspaceId, projectId, scope, librarySize, createdAt(sort: Desc)])
   @@index([workspaceId, policyVersion, rerankPolicyVersion])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "retrieval_scale_evaluations_actor_context_idx")
   @@map("retrieval_scale_evaluations")
 }
 
@@ -3715,6 +3763,13 @@ model V2SemanticReuseRun {
   requestFingerprint       String   @db.Char(64)
   idempotencyKey           String   @db.VarChar(128)
   createdByClientId        String   @db.VarChar(80)
+  actorCredentialId        String?  @db.VarChar(128)
+  actorEnvironment         String?  @db.VarChar(16)
+  actorAuthenticationKind  String?  @db.VarChar(16)
+  actorContextHash         String?  @db.Char(64)
+  delegatedUserId          String?  @db.VarChar(128)
+  delegatedIdentityId      String?  @db.VarChar(128)
+  workspaceRole            String?  @db.VarChar(32)
   createdAt                DateTime @default(now()) @db.Timestamptz(3)
   runHash                  String   @db.Char(64)
 
@@ -3728,6 +3783,7 @@ model V2SemanticReuseRun {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, queryHash, createdAt(sort: Desc)])
   @@index([workspaceId, createdByClientId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "semantic_reuse_runs_actor_context_idx")
   @@map("semantic_reuse_runs")
 }
 
@@ -5146,6 +5202,13 @@ model V2SourceDeconstructionReport {
   requestFingerprint       String   @db.Char(64)
   idempotencyKey           String   @db.VarChar(128)
   createdByClientId        String   @db.VarChar(80)
+  actorCredentialId        String?  @db.VarChar(128)
+  actorEnvironment         String?  @db.VarChar(16)
+  actorAuthenticationKind  String?  @db.VarChar(16)
+  actorContextHash         String?  @db.Char(64)
+  delegatedUserId          String?  @db.VarChar(128)
+  delegatedIdentityId      String?  @db.VarChar(128)
+  workspaceRole            String?  @db.VarChar(32)
   createdAt                DateTime @db.Timestamptz(3)
 
   workspace            V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -5163,6 +5226,7 @@ model V2SourceDeconstructionReport {
   @@index([workspaceId, projectId, sourceArtifactId, createdAt(sort: Desc)])
   @@index([workspaceId, sourceTranscriptId, createdAt(sort: Desc)])
   @@index([workspaceId, decision, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "source_deconstruction_actor_context_idx")
   @@map("source_deconstruction_reports")
 }
 
@@ -5266,6 +5330,13 @@ model V2ContaminationReport {
   requestFingerprint             String   @db.Char(64)
   idempotencyKey                 String   @db.VarChar(128)
   createdByClientId              String   @db.VarChar(80)
+  actorCredentialId              String?  @db.VarChar(128)
+  actorEnvironment               String?  @db.VarChar(16)
+  actorAuthenticationKind        String?  @db.VarChar(16)
+  actorContextHash               String?  @db.Char(64)
+  delegatedUserId                String?  @db.VarChar(128)
+  delegatedIdentityId            String?  @db.VarChar(128)
+  workspaceRole                  String?  @db.VarChar(32)
   createdAt                      DateTime @db.Timestamptz(3)
 
   workspace            V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -5285,6 +5356,7 @@ model V2ContaminationReport {
   @@index([workspaceId, projectId, sourceDeconstructionReportId, createdAt(sort: Desc)], map: "contamination_reports_workspace_project_source_idx")
   @@index([workspaceId, sourceArtifactId, createdAt(sort: Desc)], map: "contamination_reports_workspace_artifact_created_idx")
   @@index([workspaceId, decision, humanReviewRequired, createdAt(sort: Desc)], map: "contamination_reports_workspace_decision_review_idx")
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "contamination_reports_actor_context_idx")
   @@map("contamination_reports")
 }
 

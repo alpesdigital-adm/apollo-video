@@ -10,6 +10,10 @@ import type {
   ContaminationReportRepository,
 } from '../../application/ports/contamination-report-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
@@ -304,6 +308,7 @@ function assertOverlapProjection(
 export function hydrateContaminationReportRow(
   row: ReportRow,
 ): Readonly<ContaminationReport> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const source = hydrateSourceDeconstructionRow(
     row.sourceDeconstruction,
   )
@@ -412,6 +417,11 @@ function reportData(
     idempotencyKey: record.idempotencyKey,
     createdByClientId: report.createdByClientId,
     createdAt: new Date(report.createdAt),
+    ...externalActorAuditData(
+      record.authenticationAudit,
+      report.workspaceId,
+      report.createdByClientId,
+    ),
   }
 }
 
@@ -550,6 +560,7 @@ implements ContaminationReportRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ContaminationReportReplay> | null> {
     const row = await this.prisma.v2ContaminationReport.findFirst({
@@ -561,12 +572,20 @@ implements ContaminationReportRepository {
       },
       include: CONTAMINATION_REPORT_INCLUDE,
     })
-    return row
-      ? Object.freeze({
-          report: hydrateContaminationReportRow(row),
-          requestFingerprint: row.requestFingerprint,
-        })
-      : null
+    if (!row) return null
+    if (
+      hydrateExternalActorAudit(row, row.createdByClientId).contextHash !==
+      input.actorContextHash
+    ) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Contamination replay belongs to another authentication context',
+      )
+    }
+    return Object.freeze({
+      report: hydrateContaminationReportRow(row),
+      requestFingerprint: row.requestFingerprint,
+    })
   }
 
   async create(
@@ -592,6 +611,15 @@ implements ContaminationReportRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different contamination request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(replay, replay.createdByClientId)
+              .contextHash !== record.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Contamination replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -668,6 +696,7 @@ implements ContaminationReportRepository {
           workspaceId: record.report.workspaceId,
           projectId: record.report.projectId,
           actorClientId: record.report.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

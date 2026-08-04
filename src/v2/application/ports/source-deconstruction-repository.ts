@@ -2,6 +2,7 @@ import type {
   SourceDeconstructionReport,
   SourceDeconstructionSpeechEvidence,
 } from '../../domain/source-deconstruction.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface SourceDeconstructionSourceContext {
   sourceArtifactId: string
@@ -17,6 +18,7 @@ export interface SourceDeconstructionCreateRecord {
   report: Readonly<SourceDeconstructionReport>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface SourceDeconstructionReplay {
@@ -41,6 +43,7 @@ export interface SourceDeconstructionRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<SourceDeconstructionReplay> | null>
   create(

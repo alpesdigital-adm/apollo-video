@@ -6,11 +6,13 @@ import type {
   SemanticEmbeddingDescriptor,
   SemanticSearchSourceContext,
 } from '../../domain/hybrid-search.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedSemanticSearchDocument
 extends CatalogedSemanticSearchDocument {
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface SemanticSearchSourceRef {
@@ -65,6 +67,7 @@ export interface PersistedRetrievalEvaluation {
   requestFingerprint: string
   idempotencyKey: string
   createdBy: Readonly<{ type: 'api-client'; id: string }>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   createdAt: string
   reportHash: string
 }
@@ -100,6 +103,7 @@ export interface PersistedRetrievalScaleEvaluation {
   requestFingerprint: string
   idempotencyKey: string
   createdBy: Readonly<{ type: 'api-client'; id: string }>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   createdAt: string
   reportHash: string
 }
@@ -149,6 +153,7 @@ export interface PersistedSemanticReuseRun {
   requestFingerprint: string
   idempotencyKey: string
   createdBy: Readonly<{ type: 'api-client'; id: string }>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   createdAt: string
   runHash: string
 }
@@ -170,6 +175,7 @@ export interface SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedSemanticSearchDocument> | null>
 
   persistDocument(
@@ -188,6 +194,7 @@ export interface SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedRetrievalEvaluation> | null>
 
   persistEvaluation(
@@ -201,6 +208,7 @@ export interface SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedRetrievalScaleEvaluation> | null>
 
   persistScaleEvaluation(
@@ -214,6 +222,7 @@ export interface SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedSemanticReuseRun> | null>
 
   persistReuseRun(

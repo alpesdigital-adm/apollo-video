@@ -1,11 +1,13 @@
 import type {
   ContaminationReport,
 } from '../../domain/contamination-report.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ContaminationReportCreateRecord {
   report: Readonly<ContaminationReport>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ContaminationReportReplay {
@@ -23,6 +25,7 @@ export interface ContaminationReportRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ContaminationReportReplay> | null>
   create(

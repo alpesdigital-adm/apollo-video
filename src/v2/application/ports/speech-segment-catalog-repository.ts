@@ -1,4 +1,5 @@
 import type { MediaTranscript } from '../../domain/media-transcript.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type {
   CatalogedSpeechSegment,
   SpeechCatalogProducer,
@@ -31,6 +32,7 @@ export interface PersistedSpeechCatalogRun {
   requestFingerprint: string
   idempotencyKey: string
   createdBy: Readonly<{ type: 'api-client'; id: string }>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   createdAt: string
   recordHash: string
   active: boolean
@@ -81,6 +83,7 @@ export interface SpeechSegmentCatalogRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedSpeechCatalogRun> | null>
   persist(
     run: Readonly<PersistedSpeechCatalogRun>,

@@ -15,6 +15,10 @@ import type {
   SpeechSegmentSearchResult,
 } from '../../application/ports/speech-segment-catalog-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
@@ -331,6 +335,7 @@ function hydrateRun(
       type: 'api-client' as const,
       id: row.createdById,
     }),
+    authenticationAudit: hydrateExternalActorAudit(row, row.createdById),
     createdAt: row.createdAt.toISOString(),
   })
   if (
@@ -424,6 +429,7 @@ implements SpeechSegmentCatalogRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2SpeechSegmentCatalogRun.findUnique({
       where: {
@@ -431,7 +437,15 @@ implements SpeechSegmentCatalogRepository {
       },
       include: { segments: true },
     })
-    return row ? hydrateRun(row) : null
+    if (!row) return null
+    const run = hydrateRun(row)
+    if (run.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Speech catalog replay belongs to another authentication context',
+      )
+    }
+    return run
   }
 
   async persist(
@@ -456,6 +470,15 @@ implements SpeechSegmentCatalogRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different speech catalog request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdById)
+              .contextHash !== run.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Speech catalog replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -540,6 +563,11 @@ implements SpeechSegmentCatalogRepository {
             active: true,
             createdByType: run.createdBy.type,
             createdById: run.createdBy.id,
+            ...externalActorAuditData(
+              run.authenticationAudit,
+              run.workspaceId,
+              run.createdBy.id,
+            ),
             createdAt: new Date(run.createdAt),
           },
         })
@@ -573,6 +601,7 @@ implements SpeechSegmentCatalogRepository {
           workspaceId: run.workspaceId,
           projectId: run.projectId,
           idempotencyKey: run.idempotencyKey,
+          actorContextHash: run.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {

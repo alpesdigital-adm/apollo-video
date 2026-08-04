@@ -14,6 +14,10 @@ import type {
   SourceDeconstructionSourceContext,
 } from '../../application/ports/source-deconstruction-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
@@ -184,6 +188,7 @@ function assertRangeProjection(
 export function hydrateSourceDeconstructionRow(
   row: ReportWithProjection,
 ): Readonly<SourceDeconstructionReport> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const report = hydrateSourceDeconstructionReport(
     canonicalJson<SourceDeconstructionReport>(
       row.reportJson,
@@ -288,6 +293,11 @@ function reportData(
     idempotencyKey: record.idempotencyKey,
     createdByClientId: report.createdByClientId,
     createdAt: new Date(report.createdAt),
+    ...externalActorAuditData(
+      record.authenticationAudit,
+      report.workspaceId,
+      report.createdByClientId,
+    ),
   }
 }
 
@@ -550,6 +560,7 @@ implements SourceDeconstructionRepository {
     workspaceId: string
     projectId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<SourceDeconstructionReplay> | null> {
     const row = await this.prisma.v2SourceDeconstructionReport.findFirst({
@@ -561,12 +572,20 @@ implements SourceDeconstructionRepository {
       },
       include: reportInclude(),
     })
-    return row
-      ? Object.freeze({
-          report: hydrateSourceDeconstructionRow(row),
-          requestFingerprint: row.requestFingerprint,
-        })
-      : null
+    if (!row) return null
+    if (
+      hydrateExternalActorAudit(row, row.createdByClientId).contextHash !==
+      input.actorContextHash
+    ) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Source deconstruction replay belongs to another authentication context',
+      )
+    }
+    return Object.freeze({
+      report: hydrateSourceDeconstructionRow(row),
+      requestFingerprint: row.requestFingerprint,
+    })
   }
 
   async create(
@@ -593,6 +612,15 @@ implements SourceDeconstructionRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different source deconstruction request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(replay, replay.createdByClientId)
+              .contextHash !== record.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Source deconstruction replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -632,6 +660,7 @@ implements SourceDeconstructionRepository {
           workspaceId: record.report.workspaceId,
           projectId: record.report.projectId,
           actorClientId: record.report.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

@@ -18,6 +18,10 @@ import type {
   SemanticSearchSourceRef,
 } from '../../application/ports/semantic-search-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
@@ -339,6 +343,7 @@ function hydrateDocument(
     documentHash: row.documentHash,
     requestFingerprint: row.requestFingerprint,
     idempotencyKey: row.idempotencyKey,
+    authenticationAudit: hydrateExternalActorAudit(row, row.createdById),
   })
 }
 
@@ -391,6 +396,11 @@ function documentData(
     createdById: document.createdBy.id,
     createdAt: new Date(document.createdAt),
     documentHash: document.documentHash,
+    ...externalActorAuditData(
+      document.authenticationAudit,
+      document.workspaceId,
+      document.createdBy.id,
+    ),
   }
 }
 
@@ -446,6 +456,7 @@ function hydrateEvaluation(
   return Object.freeze({
     ...content,
     reportHash: row.reportHash,
+    authenticationAudit: hydrateExternalActorAudit(row, row.createdById),
   })
 }
 
@@ -468,6 +479,11 @@ function evaluationData(
     createdById: evaluation.createdBy.id,
     createdAt: new Date(evaluation.createdAt),
     reportHash: evaluation.reportHash,
+    ...externalActorAuditData(
+      evaluation.authenticationAudit,
+      evaluation.workspaceId,
+      evaluation.createdBy.id,
+    ),
   }
 }
 
@@ -528,7 +544,14 @@ function hydrateScaleEvaluation(
       `Stored retrieval scale evaluation ${row.id} failed integrity validation`,
     )
   }
-  return Object.freeze({ ...content, reportHash: row.reportHash })
+  return Object.freeze({
+    ...content,
+    reportHash: row.reportHash,
+    authenticationAudit: hydrateExternalActorAudit(
+      row,
+      row.createdByClientId,
+    ),
+  })
 }
 
 function scaleEvaluationData(
@@ -552,6 +575,11 @@ function scaleEvaluationData(
     createdByClientId: evaluation.createdBy.id,
     createdAt: new Date(evaluation.createdAt),
     reportHash: evaluation.reportHash,
+    ...externalActorAuditData(
+      evaluation.authenticationAudit,
+      evaluation.workspaceId,
+      evaluation.createdBy.id,
+    ),
   }
 }
 
@@ -640,7 +668,14 @@ function hydrateReuseRun(
       `Stored semantic reuse run ${row.id} failed integrity validation`,
     )
   }
-  return Object.freeze({ ...content, runHash: row.runHash })
+  return Object.freeze({
+    ...content,
+    runHash: row.runHash,
+    authenticationAudit: hydrateExternalActorAudit(
+      row,
+      row.createdByClientId,
+    ),
+  })
 }
 
 function reuseRunData(
@@ -671,6 +706,11 @@ function reuseRunData(
     createdByClientId: run.createdBy.id,
     createdAt: new Date(run.createdAt),
     runHash: run.runHash,
+    ...externalActorAuditData(
+      run.authenticationAudit,
+      run.workspaceId,
+      run.createdBy.id,
+    ),
   }
 }
 
@@ -1106,13 +1146,22 @@ implements SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2SemanticSearchDocument.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrateDocument(row) : null
+    if (!row) return null
+    const document = hydrateDocument(row)
+    if (document.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Semantic document replay belongs to another authentication context',
+      )
+    }
+    return document
   }
 
   async persistDocument(
@@ -1140,6 +1189,15 @@ implements SemanticSearchRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different semantic document request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdById)
+              .contextHash !== document.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Semantic document replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -1253,6 +1311,7 @@ implements SemanticSearchRepository {
           workspaceId: document.workspaceId,
           projectId: document.projectId,
           idempotencyKey: document.idempotencyKey,
+          actorContextHash: document.authenticationAudit.contextHash,
         })
         if (replay) {
           if (
@@ -1454,13 +1513,22 @@ implements SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2RetrievalEvaluation.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrateEvaluation(row) : null
+    if (!row) return null
+    const evaluation = hydrateEvaluation(row)
+    if (evaluation.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Retrieval evaluation replay belongs to another authentication context',
+      )
+    }
+    return evaluation
   }
 
   async persistEvaluation(
@@ -1487,6 +1555,15 @@ implements SemanticSearchRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different retrieval evaluation',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdById)
+              .contextHash !== evaluation.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Retrieval evaluation replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -1537,6 +1614,7 @@ implements SemanticSearchRepository {
           workspaceId: evaluation.workspaceId,
           projectId: evaluation.projectId,
           idempotencyKey: evaluation.idempotencyKey,
+          actorContextHash: evaluation.authenticationAudit.contextHash,
         })
         if (replay) {
           if (
@@ -1565,13 +1643,22 @@ implements SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2RetrievalScaleEvaluation.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrateScaleEvaluation(row) : null
+    if (!row) return null
+    const evaluation = hydrateScaleEvaluation(row)
+    if (evaluation.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Retrieval scale replay belongs to another authentication context',
+      )
+    }
+    return evaluation
   }
 
   async persistScaleEvaluation(
@@ -1598,6 +1685,15 @@ implements SemanticSearchRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different retrieval scale evaluation',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdByClientId)
+              .contextHash !== evaluation.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Retrieval scale replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -1663,6 +1759,7 @@ implements SemanticSearchRepository {
           workspaceId: evaluation.workspaceId,
           projectId: evaluation.projectId,
           idempotencyKey: evaluation.idempotencyKey,
+          actorContextHash: evaluation.authenticationAudit.contextHash,
         })
         if (replay) {
           if (
@@ -1691,13 +1788,22 @@ implements SemanticSearchRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2SemanticReuseRun.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrateReuseRun(row) : null
+    if (!row) return null
+    const run = hydrateReuseRun(row)
+    if (run.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Semantic reuse replay belongs to another authentication context',
+      )
+    }
+    return run
   }
 
   async persistReuseRun(
@@ -1721,6 +1827,15 @@ implements SemanticSearchRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different semantic reuse request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdByClientId)
+              .contextHash !== run.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Semantic reuse replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -1770,6 +1885,7 @@ implements SemanticSearchRepository {
           workspaceId: run.workspaceId,
           projectId: run.projectId,
           idempotencyKey: run.idempotencyKey,
+          actorContextHash: run.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== run.requestFingerprint) {

@@ -15,6 +15,10 @@ import type {
   ValidatedSegmentSearchResult,
 } from '../../application/ports/validated-segment-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
@@ -272,6 +276,7 @@ function hydrate(
     validatedSegmentHash: row.validatedSegmentHash,
     requestFingerprint: row.requestFingerprint,
     idempotencyKey: row.idempotencyKey,
+    authenticationAudit: hydrateExternalActorAudit(row, row.createdById),
   })
 }
 
@@ -324,6 +329,11 @@ function rowData(segment: Readonly<PersistedValidatedSegment>) {
     createdById: segment.createdBy.id,
     createdAt: new Date(segment.createdAt),
     validatedSegmentHash: segment.validatedSegmentHash,
+    ...externalActorAuditData(
+      segment.authenticationAudit,
+      segment.workspaceId,
+      segment.createdBy.id,
+    ),
   }
 }
 
@@ -469,13 +479,22 @@ implements ValidatedSegmentRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2ValidatedSegment.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrate(row) : null
+    if (!row) return null
+    const segment = hydrate(row)
+    if (segment.authenticationAudit.contextHash !== input.actorContextHash) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'ValidatedSegment replay belongs to another authentication context',
+      )
+    }
+    return segment
   }
 
   async persist(
@@ -502,6 +521,15 @@ implements ValidatedSegmentRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different validation request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdById)
+              .contextHash !== segment.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'ValidatedSegment replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -605,6 +633,7 @@ implements ValidatedSegmentRepository {
           workspaceId: segment.workspaceId,
           projectId: segment.projectId,
           idempotencyKey: segment.idempotencyKey,
+          actorContextHash: segment.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== segment.requestFingerprint) {

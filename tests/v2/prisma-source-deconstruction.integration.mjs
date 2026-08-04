@@ -111,6 +111,8 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
   } = await import(
     '../../src/v2/application/create-api-client.ts'
   )
+  const { createExternalAuditContext, materializeActorAuditContext } =
+    await import('../../src/v2/application/authenticate-api-client.ts')
   const {
     catalogSpeechSegmentsService,
   } = await import(
@@ -174,6 +176,27 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    const authenticatedActor = Object.freeze({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
+    const expectedAuthenticationAudit =
+      materializeActorAuditContext(authenticatedActor)
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -309,11 +332,23 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
           confidence: 0.99,
         }],
       })),
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: authenticatedActor,
       idempotencyKey: `source-catalog-${suffix}`,
     })
     assert.equal(catalog.replayed, false)
     assert.equal(catalog.run.segments.length, 5)
+    const storedCatalogAudit =
+      await client.v2SpeechSegmentCatalogRun.findUniqueOrThrow({
+        where: { id: catalogRunId },
+      })
+    assert.equal(
+      storedCatalogAudit.actorContextHash,
+      expectedAuthenticationAudit.contextHash,
+    )
+    assert.equal(
+      storedCatalogAudit.actorCredentialId,
+      expectedAuthenticationAudit.credentialId,
+    )
     const artifactCountBefore =
       await client.v2MediaArtifact.count({ where: { workspaceId } })
 
@@ -404,6 +439,18 @@ test('T-FR-120 deconstructs an exact published Reel through public API and Postg
       new Set(concurrentPayloads.map((payload) =>
         payload.data.replayed)).size,
       2,
+    )
+    const storedReportAudit =
+      await client.v2SourceDeconstructionReport.findUniqueOrThrow({
+        where: { id: report.id },
+      })
+    assert.equal(
+      storedReportAudit.actorContextHash,
+      expectedAuthenticationAudit.contextHash,
+    )
+    assert.equal(
+      storedReportAudit.actorCredentialId,
+      expectedAuthenticationAudit.credentialId,
     )
     assert.equal(report.sourceArtifactSha256, fixture.sha256)
     assert.equal(report.sourceTranscriptHash, transcript.transcriptHash)

@@ -12,6 +12,10 @@ import type {
   PersistedEvidenceSegment,
 } from '../../application/ports/evidence-segment-repository.ts'
 import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
+import {
   authorizeEvidenceSegmentUse,
   EVIDENCE_INTEGRITY_POLICY_VERSION,
   type CatalogedEvidenceSegment,
@@ -285,6 +289,7 @@ function hydrate(
     evidenceHash: row.evidenceHash,
     requestFingerprint: row.requestFingerprint,
     idempotencyKey: row.idempotencyKey,
+    authenticationAudit: hydrateExternalActorAudit(row, row.createdById),
   })
 }
 
@@ -356,6 +361,11 @@ function persistenceData(
     createdById: evidence.createdBy.id,
     createdAt: new Date(evidence.createdAt),
     evidenceHash: evidence.evidenceHash,
+    ...externalActorAuditData(
+      evidence.authenticationAudit,
+      evidence.workspaceId,
+      evidence.createdBy.id,
+    ),
   }
 }
 
@@ -401,13 +411,24 @@ implements EvidenceSegmentRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2EvidenceSegment.findUnique({
       where: {
         workspaceId_projectId_idempotencyKey: input,
       },
     })
-    return row ? hydrate(row) : null
+    if (!row) return null
+    const evidence = hydrate(row)
+    if (
+      evidence.authenticationAudit.contextHash !== input.actorContextHash
+    ) {
+      throw new DomainError(
+        'IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'Evidence catalog replay belongs to another authentication context',
+      )
+    }
+    return evidence
   }
 
   async readCurrent(input: {
@@ -469,6 +490,15 @@ implements EvidenceSegmentRepository {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different evidence catalog request',
+            )
+          }
+          if (
+            hydrateExternalActorAudit(existing, existing.createdById)
+              .contextHash !== evidence.authenticationAudit.contextHash
+          ) {
+            throw new DomainError(
+              'IDEMPOTENCY_PAYLOAD_MISMATCH',
+              'Evidence catalog replay belongs to another authentication context',
             )
           }
           return Object.freeze({
@@ -553,6 +583,7 @@ implements EvidenceSegmentRepository {
           workspaceId: evidence.workspaceId,
           projectId: evidence.projectId,
           idempotencyKey: evidence.idempotencyKey,
+          actorContextHash: evidence.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== evidence.requestFingerprint) {

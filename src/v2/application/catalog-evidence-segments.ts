@@ -13,6 +13,11 @@ import type {
   EvidenceSegmentSearchQuery,
   PersistedEvidenceSegment,
 } from './ports/evidence-segment-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
@@ -97,7 +102,7 @@ export function catalogEvidenceSegmentService(dependencies: {
     adjacentEvidenceIds: readonly string[]
     requiresContext: boolean
     producer: EvidenceProducer
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -114,12 +119,14 @@ export function catalogEvidenceSegmentService(dependencies: {
       'INVALID_ARGUMENT',
       'category is invalid',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Evidence catalog requires an authenticated API client',
+      'Evidence catalog actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'catalog-evidence-segment-request/v1',
@@ -145,12 +152,13 @@ export function catalogEvidenceSegmentService(dependencies: {
       adjacentEvidenceIds: request.adjacentEvidenceIds,
       requiresContext: request.requiresContext,
       producer: request.producer,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -217,6 +225,7 @@ export function catalogEvidenceSegmentService(dependencies: {
       ...evidence,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     }) satisfies Readonly<PersistedEvidenceSegment>
     return dependencies.repository.persist(persisted)
   }

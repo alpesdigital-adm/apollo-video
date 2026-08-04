@@ -126,6 +126,8 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
   } = await import(
     '../../src/v2/application/create-api-client.ts'
   )
+  const { createExternalAuditContext, materializeActorAuditContext } =
+    await import('../../src/v2/application/authenticate-api-client.ts')
   const {
     catalogSpeechSegmentsService,
   } = await import(
@@ -231,6 +233,27 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    const authenticatedActor = Object.freeze({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
+    const expectedAuthenticationAudit =
+      materializeActorAuditContext(authenticatedActor)
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -412,7 +435,7 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
           confidence: 0.99,
         }],
       })),
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: authenticatedActor,
       idempotencyKey: `contamination-catalog-${suffix}`,
     })
     assert.equal(catalog.replayed, false)
@@ -442,12 +465,29 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
         maxContextGapMs: 0,
         minCompleteThoughtScore: 0.7,
       },
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: authenticatedActor,
       idempotencyKey: `contamination-source-${suffix}`,
     })
     assert.equal(source.replayed, false)
     assert.equal(source.report.contextPreserved, true)
     assert.equal(source.report.comparison.cleanDurationMs, 2_000)
+    for (const row of [
+      await client.v2SpeechSegmentCatalogRun.findUniqueOrThrow({
+        where: { id: catalogRunId },
+      }),
+      await client.v2SourceDeconstructionReport.findUniqueOrThrow({
+        where: { id: sourceReportId },
+      }),
+    ]) {
+      assert.equal(
+        row.actorContextHash,
+        expectedAuthenticationAudit.contextHash,
+      )
+      assert.equal(
+        row.actorCredentialId,
+        expectedAuthenticationAudit.credentialId,
+      )
+    }
     const artifactCountBefore =
       await client.v2MediaArtifact.count({ where: { workspaceId } })
 
@@ -537,6 +577,18 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       new Set(concurrentPayloads.map((payload) =>
         payload.data.replayed)).size,
       2,
+    )
+    const storedReportAudit =
+      await client.v2ContaminationReport.findUniqueOrThrow({
+        where: { id: report.id },
+      })
+    assert.equal(
+      storedReportAudit.actorContextHash,
+      expectedAuthenticationAudit.contextHash,
+    )
+    assert.equal(
+      storedReportAudit.actorCredentialId,
+      expectedAuthenticationAudit.credentialId,
     )
     assert.deepEqual(
       report.findings.map((finding) => finding.kind).sort(),

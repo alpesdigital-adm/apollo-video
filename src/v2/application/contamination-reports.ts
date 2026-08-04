@@ -14,6 +14,11 @@ import type {
 import type {
   SourceDeconstructionRepository,
 } from './ports/source-deconstruction-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -59,7 +64,7 @@ function fingerprint(input: {
     ContaminationProtectedRegion,
     'regionHash'
   >[]
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'create-contamination-report-request/v1',
@@ -86,7 +91,7 @@ export function createContaminationReportService(dependencies: {
       ContaminationProtectedRegion,
       'regionHash'
     >[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(
@@ -102,12 +107,14 @@ export function createContaminationReportService(dependencies: {
       request.expectedSourceDeconstructionReportHash,
       'expectedSourceDeconstructionReportHash',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Contamination analysis requires an API client',
+      'Contamination actor does not belong to the workspace',
     )
-    const actorClientId = identity(request.actor.id, 'actor.id')
+    const actorClientId = authenticationAudit.clientId
     const replayKey = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = fingerprint({
       workspaceId,
@@ -118,12 +125,13 @@ export function createContaminationReportService(dependencies: {
       policy: request.policy,
       observations: request.observations,
       protectedRegions: request.protectedRegions,
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       projectId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -164,6 +172,7 @@ export function createContaminationReportService(dependencies: {
       report,
       requestFingerprint,
       idempotencyKey: replayKey,
+      authenticationAudit,
     })
   }
 }

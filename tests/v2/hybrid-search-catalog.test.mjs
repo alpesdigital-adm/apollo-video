@@ -28,8 +28,33 @@ import {
 import {
   PrismaSemanticSearchRepository,
 } from '../../src/v2/infrastructure/prisma/semantic-search-repository.ts'
+import {
+  createExternalAuditContext,
+  materializeActorAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
 
 const createdAt = '2026-07-27T17:00:00.000Z'
+const semanticAuditContext = createExternalAuditContext({
+  clientId: 'client-semantic',
+  credentialId: 'credential-semantic',
+  workspaceId: 'workspace-semantic',
+  environment: 'production',
+})
+const semanticActor = Object.freeze({
+  clientId: 'client-semantic',
+  credentialId: 'credential-semantic',
+  workspaceId: 'workspace-semantic',
+  environment: 'production',
+  scopes: new Set(['projects:read', 'projects:write']),
+  authenticationKind: 'bearer',
+  clientKillSwitchEngaged: false,
+  workspaceKillSwitchEngaged: false,
+  clientAccessStatus: 'active',
+  workspaceAccessStatus: 'active',
+  auditContext: semanticAuditContext,
+})
+const semanticAuthenticationAudit =
+  materializeActorAuditContext(semanticActor)
 
 function context(overrides = {}) {
   return {
@@ -111,7 +136,7 @@ function document({
         ? { vectorHash: 'c'.repeat(64) }
         : {}),
     },
-    actor: { type: 'api-client', id: 'client-semantic' },
+    actor: semanticAuditContext.actor,
     createdAt,
   })
 }
@@ -627,7 +652,7 @@ test('T-FR-136 persists a bounded audit that separates reused, Director-rejected
       identityKey: alternative.identityKey,
       reason: 'quality-lower',
     }],
-    actor: { type: 'api-client', id: 'client-semantic' },
+    actor: semanticActor,
     idempotencyKey: 'semantic-reuse-key-1',
   })
   assert.equal(result.replayed, false)
@@ -704,7 +729,7 @@ test('T-FR-136 refuses reuse audit unless decisions partition every eligible res
       expectedResultSetHash: diagnostic.resultSetHash,
       reusedIdentityKeys: [],
       directorRejections: [],
-      actor: { type: 'api-client', id: 'client-semantic' },
+      actor: semanticActor,
       idempotencyKey: 'semantic-reuse-key-invalid',
     }),
     /partition every eligible returned candidate/,
@@ -791,7 +816,7 @@ test('T-FR-136 measures quality and latency across immutable growing-library sna
       scope: 'workspace',
       k: 1,
       cases,
-      actor: { type: 'api-client', id: 'client-semantic' },
+      actor: semanticActor,
       idempotencyKey: `retrieval-scale-${librarySize}`,
     })
     assert.equal(result.evaluation, persisted)
@@ -873,7 +898,7 @@ test('T-FR-136 scale evaluation rejects a library that changes during measuremen
         },
         relevantIdentityKeys: [item.identityKey],
       })),
-      actor: { type: 'api-client', id: 'client-semantic' },
+      actor: semanticActor,
       idempotencyKey: 'retrieval-scale-drift',
     }),
     /library changed during/,
@@ -968,7 +993,7 @@ test('T-FR-136 refuses reuse decisions after the ranked result set changes', asy
       expectedResultSetHash: 'f'.repeat(64),
       reusedIdentityKeys: [item.identityKey],
       directorRejections: [],
-      actor: { type: 'api-client', id: 'client-semantic' },
+      actor: semanticActor,
       idempotencyKey: 'semantic-reuse-key-stale',
     }),
     /results changed before reuse was recorded/,
@@ -1058,6 +1083,7 @@ test('T-FR-136 Prisma adapter persists and rehydrates the immutable semantic reu
   const run = {
     ...content,
     runHash: calculateCanonicalHash(content),
+    authenticationAudit: semanticAuthenticationAudit,
   }
   const transaction = {
     v2SemanticReuseRun: {
@@ -1141,6 +1167,7 @@ test('T-FR-136 Prisma adapter rechecks corpus size and rehydrates the immutable 
   const evaluation = {
     ...content,
     reportHash: calculateCanonicalHash(content),
+    authenticationAudit: semanticAuthenticationAudit,
   }
   const transaction = {
     v2RetrievalScaleEvaluation: {
