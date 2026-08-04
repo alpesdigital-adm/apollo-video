@@ -2870,7 +2870,26 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
     })).status, 200)
-    const childAccessUrl = `${baseUrl}/v1/workspaces/${workspaceId}/clients/${childCreated.data.client.id}/access`
+    const accessControlledClientResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/clients`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-create-access-controlled-client-1',
+        },
+        body: JSON.stringify({
+          name: 'Access-controlled external agent',
+          environment: apiEnvironment,
+          scopes: ['projects:read'],
+        }),
+      },
+    )
+    const accessControlledClient = await accessControlledClientResponse.json()
+    assert.equal(accessControlledClientResponse.status, 201, JSON.stringify(accessControlledClient))
+    const accessControlledAuthorization = `Bearer ${accessControlledClient.data.token}`
+    const childAccessUrl = `${baseUrl}/v1/workspaces/${workspaceId}/clients/${accessControlledClient.data.client.id}/access`
     const childAccess = await (await fetch(childAccessUrl, { headers: { authorization } })).json()
     const changeChildAccess = (action, baseRevision, idempotencyKey, reason) => fetch(childAccessUrl, {
       method: 'PATCH',
@@ -2885,7 +2904,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(suspendChildResponse.status, 201, JSON.stringify(suspendedChild))
     assert.equal(suspendedChild.data.access.status, 'suspended')
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
-      headers: { authorization: childAuthorization },
+      headers: { authorization: accessControlledAuthorization },
     })).status, 401)
     const suspendReplayResponse = await changeChildAccess(
       'suspend', childAccess.data.access.revision, 'public-api-suspend-child-1',
@@ -2906,7 +2925,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(activateChildResponse.status, 201, JSON.stringify(activatedChild))
     assert.equal(activatedChild.data.access.status, 'active')
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
-      headers: { authorization: childAuthorization },
+      headers: { authorization: accessControlledAuthorization },
     })).status, 200)
     const revokeChildResponse = await changeChildAccess(
       'revoke', activatedChild.data.access.revision, 'public-api-revoke-child-1',
@@ -2916,7 +2935,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(revokeChildResponse.status, 201, JSON.stringify(revokedChild))
     assert.equal(revokedChild.data.access.status, 'revoked')
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
-      headers: { authorization: childAuthorization },
+      headers: { authorization: accessControlledAuthorization },
     })).status, 401)
     const reactivateRevokedChildResponse = await changeChildAccess(
       'activate', revokedChild.data.access.revision, 'public-api-reactivate-revoked-child-1',
@@ -2979,7 +2998,6 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(typeof mismatchedWinner.data.token, 'string')
     assert.equal(mismatchedFailure.error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
 
-    const childAuthorization = `Bearer ${childCreated.data.token}`
     const childCapabilitiesResponse = await fetch(`${baseUrl}/v1/capabilities`, {
       headers: { authorization: childAuthorization },
     })

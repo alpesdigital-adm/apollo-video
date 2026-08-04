@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
@@ -25,6 +26,15 @@ const root = resolve(import.meta.dirname, '../..')
 const openApi = createOpenApiDocument()
 const ajv = addFormats(new Ajv2020({ allErrors: true, strict: true }))
 const validatedSchemaRefs = new Set()
+
+test('the public API PostgreSQL journey remains syntactically executable', () => {
+  const journey = resolve(root, 'tests/v2/public-project-api.integration.mjs')
+  const checked = spawnSync(process.execPath, ['--check', journey], {
+    encoding: 'utf8',
+    windowsHide: true,
+  })
+  assert.equal(checked.status, 0, checked.stderr || checked.stdout)
+})
 
 for (const definition of PUBLIC_SCHEMAS) {
   const document = publicSchemaDocument(definition)
