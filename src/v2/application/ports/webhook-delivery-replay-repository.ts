@@ -1,6 +1,8 @@
 import type { WebhookDeliveryDiagnosticRecord } from './webhook-delivery-query-repository.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface WebhookDeliveryReplayCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   idempotencyId: string
   workspaceId: string
   clientId: string

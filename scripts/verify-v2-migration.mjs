@@ -95,6 +95,11 @@ assert.match(
 )
 assert.match(
   committed,
+  /'webhook-delivery\.replay'[\s\S]*'webhook-event\.replay'[\s\S]*"targetType" = 'webhook-delivery'[\s\S]*"targetType" = 'webhook-event'/,
+  'webhook replay administration must constrain delivery and event targets in SQL',
+)
+assert.match(
+  committed,
   /DELETE FROM "idempotency_records"[\s\S]*'api-client\.create'[\s\S]*'api-credential\.rotate'/,
   'pre-contract administrative replays without audit identity must be removed',
 )

@@ -133,6 +133,20 @@ function webhookAdministratorActor(credentialId = 'credential-1') {
 
 const WEBHOOK_ADMINISTRATOR = webhookAdministratorActor()
 
+function replayAdministration({ id, action, targetId, idempotencyKey, requestFingerprint }) {
+  return createWebhookAdministrationCommand({
+    id,
+    workspaceId: 'workspace-1',
+    action,
+    targetType: action === 'webhook-delivery.replay' ? 'webhook-delivery' : 'webhook-event',
+    targetId,
+    audit: materializeActorAuditContext(WEBHOOK_ADMINISTRATOR),
+    idempotencyKey,
+    requestFingerprint,
+    occurredAt: '2026-07-16T08:02:00.000Z',
+  })
+}
+
 test('webhook administration commands fail closed on invalid intent and actor-bound replay', () => {
   const audit = materializeActorAuditContext(WEBHOOK_ADMINISTRATOR)
   const base = {
@@ -2189,7 +2203,7 @@ test('webhook replay service binds client and delivery into required idempotency
   })
   const result = await replay({
     workspaceId: 'workspace-1',
-    clientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     deliveryId: diagnostic.delivery.id,
     idempotencyKey: 'replay-request-1',
   })
@@ -2197,10 +2211,12 @@ test('webhook replay service binds client and delivery into required idempotency
   assert.equal(command.nextAttemptAt, '2026-07-15T01:30:00.001Z')
   assert.equal(command.expiresAt, '2026-07-16T01:30:00.000Z')
   assert.match(command.requestFingerprint, /^[a-f0-9]{64}$/)
+  assert.equal(command.administration.action, 'webhook-delivery.replay')
+  assert.equal(command.administration.audit.credentialId, 'credential-1')
   await assert.rejects(
     () => replay({
       workspaceId: 'workspace-1',
-      clientId: 'client-1',
+      actor: WEBHOOK_ADMINISTRATOR,
       deliveryId: diagnostic.delivery.id,
       idempotencyKey: '',
     }),
@@ -2222,6 +2238,13 @@ test('webhook delivery replay retries serialization conflicts before failing exp
 
   await assert.rejects(
     () => repository.replay({
+      administration: replayAdministration({
+        id: '00000000-0000-4000-8000-000000000845',
+        action: 'webhook-delivery.replay',
+        targetId: '00000000-0000-4000-8000-000000000847',
+        idempotencyKey: 'replay-serialization-retry-1',
+        requestFingerprint: 'e'.repeat(64),
+      }),
       idempotencyId: '00000000-0000-4000-8000-000000000846',
       workspaceId: 'workspace-1',
       clientId: 'client-1',
@@ -2275,6 +2298,17 @@ test('webhook delivery replay recovers a concurrent committed winner after seria
         }
       },
     },
+    v2WebhookAdministrationCommand: {
+      async findFirst() {
+        return webhookAdministrationCommandData(replayAdministration({
+          id: '00000000-0000-4000-8000-00000000084e',
+          action: 'webhook-delivery.replay',
+          targetId: deliveryId,
+          idempotencyKey: 'replay-concurrent-winner-1',
+          requestFingerprint,
+        }))
+      },
+    },
     async $transaction() {
       transactions += 1
       const error = new Error('serialization conflict')
@@ -2283,6 +2317,13 @@ test('webhook delivery replay recovers a concurrent committed winner after seria
     },
   })
   const result = await repository.replay({
+    administration: replayAdministration({
+      id: '00000000-0000-4000-8000-00000000084e',
+      action: 'webhook-delivery.replay',
+      targetId: deliveryId,
+      idempotencyKey: 'replay-concurrent-winner-1',
+      requestFingerprint,
+    }),
     idempotencyId: '00000000-0000-4000-8000-00000000084d',
     workspaceId: 'workspace-1',
     clientId: 'client-1',
@@ -2315,7 +2356,7 @@ test('webhook event replay service binds the exact event and bounded batch into 
   })
   assert.equal((await replay({
     workspaceId: 'workspace-1',
-    clientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     eventId,
     idempotencyKey: 'event-replay-request-1',
   })).eventId, eventId)
@@ -2323,10 +2364,12 @@ test('webhook event replay service binds the exact event and bounded batch into 
   assert.equal(command.nextAttemptAt, '2026-07-15T01:40:00.001Z')
   assert.equal(command.expiresAt, '2026-07-16T01:40:00.000Z')
   assert.match(command.requestFingerprint, /^[a-f0-9]{64}$/)
+  assert.equal(command.administration.action, 'webhook-event.replay')
+  assert.equal(command.administration.audit.credentialId, 'credential-1')
   await assert.rejects(
     () => replay({
       workspaceId: 'workspace-1',
-      clientId: 'client-1',
+      actor: WEBHOOK_ADMINISTRATOR,
       eventId,
       idempotencyKey: '',
     }),
@@ -2352,6 +2395,13 @@ test('webhook event replay retries serialization conflicts before failing explic
 
   await assert.rejects(
     () => repository.replayEvent({
+      administration: replayAdministration({
+        id: '00000000-0000-4000-8000-000000000855',
+        action: 'webhook-event.replay',
+        targetId: '00000000-0000-4000-8000-000000000854',
+        idempotencyKey: 'event-replay-serialization-retry-1',
+        requestFingerprint: 'f'.repeat(64),
+      }),
       idempotencyId: '00000000-0000-4000-8000-000000000853',
       workspaceId: 'workspace-1',
       clientId: 'client-1',

@@ -8,6 +8,11 @@ import type {
 } from '../../application/ports/webhook-event-replay-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
+import {
   createWebhookDelivery,
   replayWebhookDelivery,
   type WebhookDelivery,
@@ -113,6 +118,18 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
     command: Parameters<WebhookEventReplayRepository['replayEvent']>[0],
     serializationAttempt = 1,
   ): Promise<Readonly<WebhookEventReplayResult> | null> {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-event.replay',
+      targetType: 'webhook-event',
+      targetId: command.eventId,
+      workspaceId: command.workspaceId,
+      requestFingerprint: command.requestFingerprint,
+      idempotencyKey: command.idempotencyKey,
+    })
+    if (administration.audit.clientId !== command.clientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook event replay audit actor does not match its mutation')
+    }
     const requestedAt = new Date(command.requestedAt)
     const nextAttemptAt = new Date(command.nextAttemptAt)
     const expiresAt = new Date(command.expiresAt)
@@ -143,7 +160,7 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
         key: command.idempotencyKey,
       },
     }
-    const readReplay = (record: {
+    const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: {
       requestFingerprint: string
       status: string
       responseJson: string | null
@@ -157,6 +174,15 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
       if (record.status !== 'completed') {
         persistenceConflict('Webhook event replay idempotency record is incomplete')
       }
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-event',
+          targetId: command.eventId,
+          action: 'webhook-event.replay',
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       const stored = parseStoredResult(record.responseJson, command.workspaceId, command.eventId)
       return Object.freeze({ ...stored, replayed: true })
     }
@@ -164,7 +190,7 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+        if (existing && existing.expiresAt > requestedAt) return await readReplay(transaction, existing)
         if (existing) await transaction.v2IdempotencyRecord.delete({ where: { id: existing.id } })
 
         const event = await transaction.v2PublicEventOutbox.findFirst({
@@ -259,6 +285,9 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
         }
         const items = Object.freeze(planned.map(({ item }) => item))
         const snapshot = Object.freeze({ eventId: command.eventId, items })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         await transaction.v2IdempotencyRecord.update({
           where: { id: command.idempotencyId },
           data: {
@@ -274,7 +303,7 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
         await new Promise<void>((resolve) => setTimeout(resolve, serializationAttempt * 10))
         const committed = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (committed && committed.expiresAt > requestedAt && committed.status === 'completed') {
-          return readReplay(committed)
+          return await readReplay(this.client, committed)
         }
         if (serializationAttempt < 3) {
           return this.replayEvent(command, serializationAttempt + 1)
@@ -286,7 +315,7 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
       }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+        if (existing && existing.expiresAt > requestedAt) return await readReplay(this.client, existing)
       }
       throw error
     }

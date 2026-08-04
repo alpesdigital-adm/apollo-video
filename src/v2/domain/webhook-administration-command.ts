@@ -13,6 +13,8 @@ export const WEBHOOK_ADMINISTRATION_ACTIONS = [
   'webhook-signing-secret-rotation.stage',
   'webhook-signing-secret-rotation.activate',
   'webhook-signing-secret-rotation.cancel',
+  'webhook-delivery.replay',
+  'webhook-event.replay',
 ] as const
 
 export const WEBHOOK_ADMINISTRATION_TARGET_TYPES = [
@@ -20,6 +22,8 @@ export const WEBHOOK_ADMINISTRATION_TARGET_TYPES = [
   'webhook-subscription',
   'webhook-signing-secret',
   'webhook-signing-secret-rotation',
+  'webhook-delivery',
+  'webhook-event',
 ] as const
 
 export type WebhookAdministrationAction =
@@ -57,7 +61,11 @@ function actionTargetType(
       ? 'webhook-subscription'
       : action.startsWith('webhook-signing-secret-rotation.')
         ? 'webhook-signing-secret-rotation'
-        : 'webhook-signing-secret'
+        : action.startsWith('webhook-signing-secret.')
+          ? 'webhook-signing-secret'
+          : action.startsWith('webhook-delivery.')
+            ? 'webhook-delivery'
+            : 'webhook-event'
 }
 
 export function createWebhookAdministrationCommand(
@@ -92,8 +100,9 @@ export function createWebhookAdministrationCommand(
   )
 
   const isCreation = input.action.endsWith('.create')
-  const isIdempotent = isCreation || input.action.endsWith('.provision') || input.action.endsWith('.stage')
-  const requiresBaseRevision = !isCreation
+  const isReplay = input.action.endsWith('.replay')
+  const isIdempotent = isCreation || isReplay || input.action.endsWith('.provision') || input.action.endsWith('.stage')
+  const requiresBaseRevision = !isCreation && !isReplay
   assertDomain(
     (isIdempotent ? Boolean(input.idempotencyKey) : input.idempotencyKey === undefined) &&
       (requiresBaseRevision ? Boolean(input.baseRevision) : input.baseRevision === undefined),
@@ -106,7 +115,7 @@ export function createWebhookAdministrationCommand(
       ? ['active', 'paused', 'revoked']
       : []
   assertDomain(
-    isCreation || isSigningAction
+    isCreation || isSigningAction || isReplay
       ? input.targetStatus === undefined
       : typeof input.targetStatus === 'string' && allowedTargetStatuses.includes(input.targetStatus),
     'INVALID_ARGUMENT',

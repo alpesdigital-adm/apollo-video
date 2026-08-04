@@ -1712,7 +1712,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayDelivery({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         deliveryId: exhaustedClaim.delivery.id,
         idempotencyKey: 'webhook-replay-inactive-target',
       }),
@@ -1725,7 +1725,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     const firstReplay = await replayDelivery({
       workspaceId,
-      clientId,
+      actor: webhookActor,
       deliveryId: exhaustedClaim.delivery.id,
       idempotencyKey: 'webhook-replay-integration-1',
     })
@@ -1738,7 +1738,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     )
     const idempotentReplay = await replayDelivery({
       workspaceId,
-      clientId,
+      actor: webhookActor,
       deliveryId: exhaustedClaim.delivery.id,
       idempotencyKey: 'webhook-replay-integration-1',
     })
@@ -1747,7 +1747,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayDelivery({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         deliveryId: firstClaim.delivery.id,
         idempotencyKey: 'webhook-replay-integration-1',
       }),
@@ -1757,7 +1757,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayDelivery({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         deliveryId: exhaustedClaim.delivery.id,
         idempotencyKey: 'webhook-replay-integration-2',
       }),
@@ -1836,7 +1836,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     const firstEventReplay = await replayEvent({
       workspaceId,
-      clientId,
+      actor: webhookActor,
       eventId: firstClaim.delivery.eventId,
       idempotencyKey: 'webhook-event-replay-integration-1',
     })
@@ -1849,7 +1849,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     assert.equal(firstEventReplay.items[0].delivery.delivery.attemptCount, 3)
     const repeatedEventReplay = await replayEvent({
       workspaceId,
-      clientId,
+      actor: webhookActor,
       eventId: firstClaim.delivery.eventId,
       idempotencyKey: 'webhook-event-replay-integration-1',
     })
@@ -1858,7 +1858,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayEvent({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         eventId: exhaustedEventId,
         idempotencyKey: 'webhook-event-replay-integration-1',
       }),
@@ -1868,7 +1868,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayEvent({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         eventId: firstClaim.delivery.eventId,
         idempotencyKey: 'webhook-event-replay-integration-2',
       }),
@@ -1877,7 +1877,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     await assert.rejects(
       () => replayEvent({
         workspaceId,
-        clientId,
+        actor: webhookActor,
         eventId: '00000000-0000-4000-8000-000000000699',
         idempotencyKey: 'webhook-event-replay-missing',
       }),
@@ -1889,6 +1889,25 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       }),
       1,
     )
+    const replayAdministrationRows = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: { in: ['webhook-delivery.replay', 'webhook-event.replay'] },
+      },
+    })
+    assert.equal(replayAdministrationRows.length, 2)
+    assert.deepEqual(
+      replayAdministrationRows.map((command) => [command.action, command.targetId]).sort(),
+      [
+        ['webhook-delivery.replay', exhaustedClaim.delivery.id],
+        ['webhook-event.replay', firstClaim.delivery.eventId],
+      ],
+    )
+    for (const command of replayAdministrationRows) {
+      assert.equal(command.actorClientId, clientId)
+      assert.equal(command.actorCredentialId, clientId)
+      assert.equal(command.actorContextHash, actorAudit.contextHash)
+    }
     await client.v2WebhookDelivery.deleteMany({
       where: { id: { in: skippedReplayDeliveryIds } },
     })

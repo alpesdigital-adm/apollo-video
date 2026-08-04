@@ -29,6 +29,11 @@ import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
+import {
   createWebhookDelivery,
   createWebhookDeliveryAttempt,
   createWebhookSigningSecret,
@@ -413,6 +418,18 @@ export class PrismaWebhookDeliveryRepository
     command: Parameters<WebhookDeliveryReplayRepository['replay']>[0],
     serializationAttempt = 1,
   ): Promise<Readonly<WebhookDeliveryReplayResult> | null> {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-delivery.replay',
+      targetType: 'webhook-delivery',
+      targetId: command.deliveryId,
+      workspaceId: command.workspaceId,
+      requestFingerprint: command.requestFingerprint,
+      idempotencyKey: command.idempotencyKey,
+    })
+    if (administration.audit.clientId !== command.clientId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook delivery replay audit actor does not match its mutation')
+    }
     const requestedAt = new Date(command.requestedAt)
     const nextAttemptAt = new Date(command.nextAttemptAt)
     const expiresAt = new Date(command.expiresAt)
@@ -440,7 +457,7 @@ export class PrismaWebhookDeliveryRepository
         key: command.idempotencyKey,
       },
     }
-    const readReplay = (record: {
+    const readReplay = async (transaction: Prisma.TransactionClient | PrismaClient, record: {
       requestFingerprint: string
       status: string
       responseJson: string | null
@@ -454,6 +471,15 @@ export class PrismaWebhookDeliveryRepository
       if (record.status !== 'completed') {
         persistenceConflict('Webhook replay idempotency record is incomplete')
       }
+      const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+        where: {
+          workspaceId: command.workspaceId,
+          targetType: 'webhook-delivery',
+          targetId: command.deliveryId,
+          action: 'webhook-delivery.replay',
+        },
+      })
+      assertWebhookAdministrationReplay(auditCommand, administration)
       return Object.freeze({
         diagnostic: parseReplayDiagnostic(
           record.responseJson,
@@ -467,7 +493,7 @@ export class PrismaWebhookDeliveryRepository
     try {
       return await this.client.$transaction(async (transaction) => {
         const existing = await transaction.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+        if (existing && existing.expiresAt > requestedAt) return await readReplay(transaction, existing)
         if (existing) await transaction.v2IdempotencyRecord.delete({ where: { id: existing.id } })
 
         const stored = await transaction.v2WebhookDelivery.findFirst({
@@ -536,6 +562,9 @@ export class PrismaWebhookDeliveryRepository
           endpointId: persisted.subscription.endpointId,
           attempts: Object.freeze(persisted.attempts.map(hydrateAttempt)),
         })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         await transaction.v2IdempotencyRecord.update({
           where: { id: command.idempotencyId },
           data: {
@@ -551,7 +580,7 @@ export class PrismaWebhookDeliveryRepository
         await new Promise<void>((resolve) => setTimeout(resolve, serializationAttempt * 10))
         const committed = await this.client.v2IdempotencyRecord.findUnique({ where: key })
         if (committed && committed.expiresAt > requestedAt && committed.status === 'completed') {
-          return readReplay(committed)
+          return await readReplay(this.client, committed)
         }
         if (serializationAttempt < 3) {
           return this.replay(command, serializationAttempt + 1)
@@ -563,7 +592,7 @@ export class PrismaWebhookDeliveryRepository
       }
       if (isUniqueConstraintError(error)) {
         const existing = await this.client.v2IdempotencyRecord.findUnique({ where: key })
-        if (existing && existing.expiresAt > requestedAt) return readReplay(existing)
+        if (existing && existing.expiresAt > requestedAt) return await readReplay(this.client, existing)
       }
       throw error
     }

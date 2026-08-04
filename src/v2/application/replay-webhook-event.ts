@@ -2,6 +2,12 @@ import { createHash, randomUUID } from 'node:crypto'
 
 import type { WebhookEventReplayRepository } from './ports/webhook-event-replay-repository.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { createWebhookAdministrationCommand } from '../domain/webhook-administration-command.ts'
 
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
@@ -30,12 +36,16 @@ export function replayWebhookEventService(dependencies: {
 
   return async function replayWebhookEventCommand(request: {
     workspaceId: string
-    clientId: string
+    actor: AuthenticatedExternalActor
     eventId: string
     idempotencyKey: string
   }) {
     const workspaceId = request.workspaceId.trim()
-    const clientId = request.clientId.trim()
+    requireScope(request.actor, 'webhooks:admin')
+    if (request.actor.workspaceId !== workspaceId) {
+      throw new DomainError('WEBHOOK_EVENT_NOT_FOUND', 'Webhook event was not found')
+    }
+    const clientId = request.actor.clientId
     const eventId = request.eventId.trim().toLowerCase()
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(
@@ -64,9 +74,11 @@ export function replayWebhookEventService(dependencies: {
     )
     const idempotencyId = createId().trim().toLowerCase()
     assertDomain(UUID_V4_PATTERN.test(idempotencyId), 'INVALID_ARGUMENT', 'Webhook event replay id is invalid')
+    const audit = materializeActorAuditContext(request.actor)
     const requestFingerprint = createHash('sha256')
       .update(JSON.stringify({
         action: 'webhook-event-replay/v1',
+        actorContextHash: audit.contextHash,
         workspaceId,
         clientId,
         eventId,
@@ -74,6 +86,17 @@ export function replayWebhookEventService(dependencies: {
       }))
       .digest('hex')
     const result = await dependencies.replays.replayEvent({
+      administration: createWebhookAdministrationCommand({
+        id: createId(),
+        workspaceId,
+        action: 'webhook-event.replay',
+        targetType: 'webhook-event',
+        targetId: eventId,
+        audit,
+        idempotencyKey,
+        requestFingerprint,
+        occurredAt: requestedAt.toISOString(),
+      }),
       idempotencyId,
       workspaceId,
       clientId,

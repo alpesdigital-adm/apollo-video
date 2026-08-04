@@ -27,7 +27,7 @@ export async function POST(
     const replay = createWebhookEventReplay()
     const result = await replay({
       workspaceId: actor.workspaceId,
-      clientId: actor.clientId,
+      actor,
       eventId,
       idempotencyKey: request.headers.get('idempotency-key') ?? '',
     })

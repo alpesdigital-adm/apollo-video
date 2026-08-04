@@ -1,4 +1,5 @@
 import type { WebhookDeliverySummaryRecord } from './webhook-delivery-query-repository.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export type WebhookEventReplayItemStatus =
   | 'scheduled'
@@ -12,6 +13,7 @@ export interface WebhookEventReplayItem {
 }
 
 export interface WebhookEventReplayCommand {
+  administration: Readonly<WebhookAdministrationCommand>
   idempotencyId: string
   workspaceId: string
   clientId: string

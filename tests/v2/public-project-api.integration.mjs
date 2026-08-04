@@ -2938,6 +2938,31 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(recoveredEventReplay.data.eventId, webhookReplayEventId)
     assert.equal(recoveredEventReplay.data.items.length, 1)
     assert.equal(recoveredEventReplay.data.items[0].status, 'scheduled')
+    const replayAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: { in: ['webhook-delivery.replay', 'webhook-event.replay'] },
+      },
+    })
+    const deliveryReplayAudit = replayAudit.filter((command) =>
+      command.action === 'webhook-delivery.replay' && command.targetId === webhookDeliveryId)
+    const eventReplayAudit = replayAudit.filter((command) =>
+      command.action === 'webhook-event.replay' && command.targetId === webhookReplayEventId)
+    assert.equal(deliveryReplayAudit.length, 2)
+    assert.equal(eventReplayAudit.length, 2)
+    assert.deepEqual(
+      deliveryReplayAudit.map((command) => command.idempotencyKey).sort(),
+      ['public-webhook-replay-1', 'public-webhook-replay-loss-1'],
+    )
+    assert.deepEqual(
+      eventReplayAudit.map((command) => command.idempotencyKey).sort(),
+      ['public-webhook-event-replay-1', 'public-webhook-event-replay-loss-1'],
+    )
+    for (const command of [...deliveryReplayAudit, ...eventReplayAudit]) {
+      assert.equal(command.actorClientId, apiClientId)
+      assert.equal(command.actorCredentialId, issued.credential.id)
+      assert.match(command.actorContextHash, /^[a-f0-9]{64}$/)
+    }
 
     const revokeEndpointResponse = await setWebhookEndpointStatus(
       'revoked',
