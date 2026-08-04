@@ -136,7 +136,7 @@ export async function POST(
         baseVersionId: body.baseVersionId,
         baseHash: body.baseHash,
         expectedRevision: body.expectedRevision,
-        actor: actor.auditContext.actor,
+        actor,
         idempotencyKey,
         ...(typeof body.reason === 'string' && body.reason.trim()
           ? { reason: body.reason.trim() }
@@ -198,7 +198,7 @@ export async function POST(
       variantId: body.variantId,
       targetId: 'project-edit-plan',
       targetVersionId: body.beforeVersionId,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey,
       ...(typeof body.reason === 'string' && body.reason.trim()
         ? { reason: body.reason.trim() }

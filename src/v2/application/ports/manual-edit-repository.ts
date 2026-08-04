@@ -11,6 +11,7 @@ import type {
   CommandImpactOutputReference,
   CommandImpactV1,
 } from '../../domain/command-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ManualEditVersionRecord {
   version: Readonly<ProjectVersion>
@@ -55,6 +56,7 @@ export interface ManualEditResult {
 
 export interface ManualEditCommit {
   command: Readonly<EditCommand<PersistedManualEditPayload>>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   snapshot: Readonly<ProjectSnapshot>
   version: Readonly<ProjectVersion>
@@ -74,6 +76,7 @@ export interface ManualEditRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{ requestFingerprint: string; result: ManualEditResult }> | null>
   readContext(input: {
     workspaceId: string

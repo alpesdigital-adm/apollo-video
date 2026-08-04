@@ -5,7 +5,6 @@ import type {
 } from './ports/manual-edit-repository.ts'
 import {
   createEditCommand,
-  type CommandActor,
 } from '../domain/edit-command.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
@@ -21,6 +20,11 @@ import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
 import { createManualCommandImpact } from '../domain/command-impact.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 function identity(value: string, field: string): string {
   const normalized = value.trim()
@@ -104,7 +108,7 @@ export function applyManualEditService(dependencies: {
     operation?: ManualGesture
     targetVersionId?: string
     reason?: string
-    actor: Readonly<CommandActor>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }): Promise<ManualEditResult> {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -133,6 +137,9 @@ export function applyManualEditService(dependencies: {
       'INVALID_ARGUMENT',
       'Idempotency-Key is invalid',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Manual edit actor does not belong to the workspace')
     const operation = request.operation ? validateManualGesture(request.operation) : undefined
     if (request.action === 'apply') {
       assertDomain(Boolean(operation), 'INVALID_ARGUMENT', 'Apply requires one manual operation')
@@ -164,12 +171,13 @@ export function applyManualEditService(dependencies: {
       operation: operation ?? null,
       targetVersionId: targetVersionId ?? null,
       reason: request.reason?.trim() || null,
-      actor: request.actor,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findIdempotentResult({
       workspaceId,
       projectId,
       idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
@@ -274,7 +282,12 @@ export function applyManualEditService(dependencies: {
       projectId,
       baseVersionId,
       baseHash: request.baseHash,
-      author: request.actor,
+      author: {
+        type: 'api-client', id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       type: 'manual-edit',
       scope: {
         clipIds: [targetId],
@@ -312,7 +325,7 @@ export function applyManualEditService(dependencies: {
         action: request.action,
         targetVersionId: targetVersionId ?? null,
       }),
-      createdBy: request.actor.id,
+      createdBy: authenticationAudit.clientId,
       commandId,
       createdAt,
     })
@@ -331,14 +344,12 @@ export function applyManualEditService(dependencies: {
       workspaceId,
       occurredAt: createdAt,
       sequence: version.sequence,
-      actor: request.actor.type === 'api-client'
-        ? {
-            clientId: request.actor.id,
-            ...(request.actor.delegatedUserId
-              ? { userId: request.actor.delegatedUserId }
-              : {}),
-          }
-        : { userId: request.actor.id },
+      actor: {
+        clientId: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { userId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       resource: { type: 'project-version', id: version.id },
       data: {
         projectId,
@@ -359,6 +370,7 @@ export function applyManualEditService(dependencies: {
     })
     return dependencies.repository.commitOrReplay({
       command,
+      authenticationAudit,
       requestFingerprint,
       snapshot,
       version,

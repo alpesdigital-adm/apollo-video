@@ -4,7 +4,7 @@ import type {
   ReviewPatchBatchRepository,
 } from './ports/review-patch-batch-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
-import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
+import { createEditCommand } from '../domain/edit-command.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
@@ -16,6 +16,11 @@ import {
   type PatchImpact,
   type PatchSet,
 } from '../domain/review-system.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 interface AppliedReviewPatchBatchPayloadV2 {
   schemaVersion: 2
@@ -187,7 +192,7 @@ export function applyReviewPatchBatchService(dependencies: {
     projectId: string
     batchId: string
     confirmed: true
-    actor: Readonly<CommandActor>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = validateIdentity(request.workspaceId, 'workspaceId')
@@ -195,11 +200,14 @@ export function applyReviewPatchBatchService(dependencies: {
     const batchId = validateIdentity(request.batchId, 'batchId')
     assertDomain(request.confirmed === true, 'PRECONDITION_REQUIRED', 'Batch patch impact must be explicitly confirmed')
     const idempotencyKey = validateIdempotencyKey(request.idempotencyKey)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Batch review actor does not belong to the workspace')
     const context = await dependencies.repository.readApplyContext({ workspaceId, projectId, batchId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Review patch batch was not found')
-    const applyRequestFingerprint = calculateVersionHash({ batchId, confirmed: true, actor: request.actor })
+    const applyRequestFingerprint = calculateVersionHash({ batchId, confirmed: true, actorContextHash: authenticationAudit.contextHash })
     if (context.batch.status === 'applied') {
-      const replay = await dependencies.repository.readAppliedResult({ workspaceId, projectId, batchId, applyIdempotencyKey: idempotencyKey, applyRequestFingerprint })
+      const replay = await dependencies.repository.readAppliedResult({ workspaceId, projectId, batchId, applyIdempotencyKey: idempotencyKey, applyRequestFingerprint, actorContextHash: authenticationAudit.contextHash })
       if (!replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Batch review was already applied by another request')
       return replay
     }
@@ -256,7 +264,12 @@ export function applyReviewPatchBatchService(dependencies: {
       projectId,
       baseVersionId: context.currentVersion.id,
       baseHash: context.currentVersion.baseHash,
-      author: request.actor,
+      author: {
+        type: 'api-client', id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       type: 'apply-review-patch-batch',
       scope: { project: true },
       payload,
@@ -290,7 +303,7 @@ export function applyReviewPatchBatchService(dependencies: {
         batchId,
         editPlanHash,
       }),
-      createdBy: request.actor.id,
+      createdBy: authenticationAudit.clientId,
       commandId,
       createdAt,
     })
@@ -309,7 +322,7 @@ export function applyReviewPatchBatchService(dependencies: {
       workspaceId,
       occurredAt: createdAt,
       sequence: version.sequence,
-      actor: request.actor.type === 'api-client' ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) } : { userId: request.actor.id },
+      actor: { clientId: authenticationAudit.clientId, ...(authenticationAudit.delegatedUserId ? { userId: authenticationAudit.delegatedUserId } : {}) },
       resource: { type: 'project-version', id: version.id },
       data: {
         projectId,
@@ -330,6 +343,7 @@ export function applyReviewPatchBatchService(dependencies: {
       applyIdempotencyKey: idempotencyKey,
       applyRequestFingerprint,
       command,
+      authenticationAudit,
       snapshot,
       version,
       event,

@@ -7,6 +7,7 @@ import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { decideVersionComparisonService } from '../../src/v2/application/version-compare.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import {
@@ -25,6 +26,19 @@ const afterVersionId = 'project-version-compare-2'
 const commandId = 'edit-command-compare-1'
 const baseHash = 'a'.repeat(64)
 const createdAt = '2026-07-31T20:00:00.000Z'
+
+function compareActor(credentialId = 'credential-compare-1') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-compare-1', credentialId,
+    workspaceId, environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function impact(action = 'accept', overrides = {}) {
   return createCompareActionImpact({
@@ -245,7 +259,7 @@ function request(action, overrides = {}) {
     baseVersionId: afterVersionId,
     baseHash,
     expectedRevision: 2,
-    actor: { type: 'api-client', id: 'client-compare-1' },
+    actor: compareActor(),
     idempotencyKey: `compare-${action}-key`,
     ...overrides,
   }
@@ -274,7 +288,7 @@ test('T-F0-027 accept and reopen persist schemaVersion 2 with the zero impact', 
     const [bundle] = context.committed
     assert.deepEqual(
       Object.keys(bundle).toSorted(),
-      ['command', 'event', 'projectStatus', 'requestFingerprint'],
+      ['authenticationAudit', 'command', 'event', 'projectStatus', 'requestFingerprint'],
       'a compare decision commits nothing but the Command, its status and its event',
     )
     assert.equal(bundle.event.data.commandImpactHash, document.impactHash)
@@ -403,4 +417,16 @@ test('T-F0-027 and T-FR-236 preserve accept impact and expose restored version s
   assert.equal(restore.data.version.visibleState.label, 'current')
   restore.data.version.visibleState.label = 'superseded'
   assert.equal(validate(restore), false)
+})
+
+test('T-FR-242 a different credential cannot recover an editorial Command replay', async () => {
+  const context = harness()
+  await context.decide(request('accept'))
+  await assert.rejects(
+    () => context.decide(request('accept', {
+      actor: compareActor('credential-compare-2'),
+    })),
+    (error) => error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  assert.equal(context.committed.length, 1)
 })

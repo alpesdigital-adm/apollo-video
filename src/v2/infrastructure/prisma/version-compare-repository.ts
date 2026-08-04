@@ -15,6 +15,10 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 type StoredCompareCommand = Prisma.V2EditCommandGetPayload<{
   include: { baseVersion: true }
@@ -34,6 +38,7 @@ function hydrateDecision(
   row: StoredCompareCommand,
   replayed: boolean,
 ): VersionCompareDecisionResult {
+  hydrateEditCommandExternalActorAudit(row)
   if (row.type !== 'compare-action') {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored version comparison command is inconsistent')
   }
@@ -101,9 +106,16 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2EditCommand.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: {
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       include: { baseVersion: true },
     })
     if (!row) return null
@@ -112,6 +124,9 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
         'Idempotency key belongs to another command type',
       )
+    }
+    if (hydrateEditCommandExternalActorAudit(row).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Version comparison replay belongs to another authentication context')
     }
     return Object.freeze({
       requestFingerprint: row.requestFingerprint,
@@ -145,6 +160,9 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
               'Idempotency key was used with a different version comparison decision',
             )
+          }
+          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Version comparison replay belongs to another authentication context')
           }
           return hydrateDecision(existing, true)
         }
@@ -188,6 +206,7 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
             actorType: bundle.command.author.type,
             actorId: bundle.command.author.id,
             delegatedUserId: bundle.command.author.delegatedUserId,
+            ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
             idempotencyKey: bundle.command.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             createdAt: new Date(bundle.command.createdAt),
@@ -240,6 +259,7 @@ export class PrismaVersionCompareRepository implements VersionCompareRepository 
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
           idempotencyKey: bundle.command.idempotencyKey,
+          actorContextHash: bundle.authenticationAudit.contextHash,
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {

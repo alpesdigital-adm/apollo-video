@@ -5,6 +5,7 @@ import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { ReviewPatchProposal } from './review-patch-repository.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export type ReviewPatchBatchMode = 'all-or-nothing' | 'partial-retry'
 export type ReviewPatchBatchStatus = 'ready' | 'conflict' | 'partial' | 'applied'
@@ -68,6 +69,7 @@ export interface ReviewPatchBatchCommit {
   applyIdempotencyKey: string
   applyRequestFingerprint: string
   command: Readonly<EditCommand>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   snapshot: Readonly<ProjectSnapshot>
   version: Readonly<ProjectVersion>
   event: Readonly<PublicEvent>
@@ -92,7 +94,7 @@ export interface ReviewPatchBatchRepository {
   createBatch(input: { batch: ReviewPatchBatch; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchBatch>>
   readBatch(input: { workspaceId: string; projectId: string; batchId: string }): Promise<Readonly<ReviewPatchBatch> | null>
   readApplyContext(input: { workspaceId: string; projectId: string; batchId: string }): Promise<Readonly<ReviewPatchBatchApplyContext> | null>
-  readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchBatchApplyResult> | null>
+  readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchBatchApplyResult> | null>
   commitOrReplay(bundle: ReviewPatchBatchCommit): Promise<Readonly<ReviewPatchBatchApplyResult>>
   attachRenderOperation(input: { workspaceId: string; projectId: string; batchId: string; renderOperationId: string }): Promise<Readonly<ReviewPatchBatch>>
 }

@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projectId,
       batchId,
       confirmed: true,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey,
     })
     const render = await enqueueProjectProxyRenderService({

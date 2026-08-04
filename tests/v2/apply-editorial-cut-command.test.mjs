@@ -10,8 +10,22 @@ import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../src/v2/domain/editorial-cut-impact.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 
 const baseHash = 'a'.repeat(64)
+
+function editorialActor() {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-1', credentialId: 'credential-editorial-1',
+    workspaceId: 'workspace-1', environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 test('ingest compiles one full-source plan with transcript evidence and no fabricated cut', () => {
   const transcript = createMediaTranscript({
@@ -148,7 +162,7 @@ function request(overrides = {}) {
     workspaceId: 'workspace-1', projectId: 'project-1', baseVersionId: 'project-version-1', baseHash,
     sourceTranscriptId: 'transcript-1', rules: recoveryRules(),
     reason: 'Remover datas e duração que não pertencem à nova composição.',
-    actor: { type: 'api-client', id: 'client-1' },
+    actor: editorialActor(),
     idempotency: { clientId: 'client-1', key: 'remove-dates-v1' },
     ...overrides,
   }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { replaceSourceTranscriptService } from '../../src/v2/application/replace-source-transcript.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { calculateVersionHash, stableSerialize } from '../../src/v2/application/version-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
@@ -115,7 +116,7 @@ test('T-FR-233 source transcript replacement retimes immutable evidence and bloc
     baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
     replacementTranscriptId: 'transcript-replacement',
     expectedTranscriptHash: replacementTranscript.transcriptHash,
-    actor: { type: 'api-client', id: 'client-transcript' },
+    actor: transcriptActor(),
     idempotencyKey: 'source-transcript-replacement-1',
   }
   const result = await execute(request)
@@ -150,7 +151,7 @@ test('T-FR-233 source transcript replacement fails closed on cross-source and ha
   const base = {
     workspaceId: 'workspace-transcript', projectId: 'project-transcript',
     baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
-    replacementTranscriptId: 'transcript-replacement', actor: { type: 'api-client', id: 'client-transcript' },
+    replacementTranscriptId: 'transcript-replacement', actor: transcriptActor(),
     idempotencyKey: 'source-transcript-replacement-2',
   }
   await assert.rejects(() => execute({ ...base, expectedTranscriptHash: 'f'.repeat(64) }), (error) => error.code === 'VERSION_CONFLICT')
@@ -256,6 +257,19 @@ test('T-FR-233 each word is retimed through the timeline clip that fully contain
     ['depois', 48, 54], // source 66..78 in clip-fast: 30+round(36/2)=48, 30+round(48/2)=54
   ])
 })
+
+function transcriptActor() {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-transcript', credentialId: 'credential-transcript',
+    workspaceId: 'workspace-transcript', environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 test('T-FR-233 transcript evidence follows timeline order when source chronology is reordered', () => {
   const reorderedTranscript = transcriptFromFrames('t', [
@@ -481,7 +495,7 @@ test('T-FR-233 replaced transcript with retimed frames survives the snapshot and
     baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
     replacementTranscriptId: 'transcript-replacement',
     expectedTranscriptHash: directorTranscript.transcriptHash,
-    actor: { type: 'api-client', id: 'client-transcript' },
+    actor: transcriptActor(),
     idempotencyKey: 'source-transcript-rate-journey',
   })
 

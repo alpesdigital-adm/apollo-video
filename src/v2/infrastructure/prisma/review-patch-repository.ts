@@ -24,6 +24,10 @@ import {
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -268,7 +272,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     return context ? Object.freeze({ ...context, proposal: hydrateReviewPatchProposal(row) }) : null
   }
 
-  async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchApplyResult> | null> {
+  async readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchApplyResult> | null> {
     const proposal = await this.client.v2ReviewPatchProposal.findFirst({
       where: { id: input.proposalId, workspaceId: input.workspaceId, projectId: input.projectId },
       include: { renderOperation: true, resultVersion: { include: { editPlanSnapshot: true, command: { include: { artifactInvalidations: true } } } } },
@@ -276,6 +280,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
     if (!proposal || proposal.status !== 'applied' || !proposal.resultVersion || !proposal.resultVersion.command || !proposal.comparisonJson) return null
     if (proposal.applyIdempotencyKey !== input.applyIdempotencyKey || proposal.applyRequestFingerprint !== input.applyRequestFingerprint) return null
     const commandRow = proposal.resultVersion.command
+    if (hydrateEditCommandExternalActorAudit(commandRow).contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Review patch replay belongs to another authentication context')
     const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'review patch command payload')
     if (payload.schemaVersion !== 2 || !payload.impact) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored review patch command impact is missing')
     const impact = parseCommandImpact(payload.impact)
@@ -313,7 +318,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
   }
 
   async commitOrReplay(bundle: ReviewPatchCommit, serializationAttempt = 1): Promise<Readonly<ReviewPatchApplyResult>> {
-    const replay = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint })
+    const replay = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })
     if (replay) return replay
     try {
       await this.client.$transaction(async (transaction) => {
@@ -370,6 +375,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
           baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
           scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload), reason: bundle.command.reason,
           actorType: bundle.command.author.type, actorId: bundle.command.author.id, delegatedUserId: bundle.command.author.delegatedUserId,
+          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
           idempotencyKey: bundle.command.idempotencyKey, requestFingerprint: bundle.applyRequestFingerprint, createdAt: new Date(bundle.command.createdAt),
         } })
         await transaction.v2ProjectSnapshot.create({ data: {
@@ -434,7 +440,7 @@ export class PrismaReviewPatchRepository implements ReviewPatchRepository {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
       if (!isPrismaCode(error, 'P2002')) throw error
     }
-    const result = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint })
+    const result = await this.readAppliedResult({ workspaceId: bundle.version.workspaceId, projectId: bundle.version.projectId, proposalId: bundle.proposalId, applyIdempotencyKey: bundle.applyIdempotencyKey, applyRequestFingerprint: bundle.applyRequestFingerprint, actorContextHash: bundle.authenticationAudit.contextHash })
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied review patch could not be reconstructed')
     return Object.freeze({ ...result, replayed: false })
   }

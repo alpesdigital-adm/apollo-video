@@ -4,6 +4,7 @@ import type {
   VersionCompareMode,
 } from '../../domain/manual-editing.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 /**
  * schemaVersion 2 carries the explicit zero impact of the decision. There is no
@@ -31,6 +32,7 @@ export interface VersionCompareDecisionResult {
 
 export interface VersionCompareDecisionCommit {
   command: Readonly<EditCommand<PersistedVersionCompareDecision>>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   projectStatus: VersionCompareDecisionResult['projectStatus']
   event: Readonly<PublicEvent>
@@ -41,6 +43,7 @@ export interface VersionCompareRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{
     requestFingerprint: string
     result: VersionCompareDecisionResult

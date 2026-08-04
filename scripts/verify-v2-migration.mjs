@@ -60,6 +60,10 @@ const projectIntelligenceActorAuditMigration = readFileSync(
   `${migrationsPath}/20260805020000_project_intelligence_actor_audit/migration.sql`,
   'utf8',
 )
+const editCommandActorAuditContractMigration = readFileSync(
+  `${migrationsPath}/20260805030000_contract_edit_command_actor_audit/migration.sql`,
+  'utf8',
+)
 
 assert.match(
   committed,
@@ -229,6 +233,26 @@ assert.doesNotMatch(
   committed,
   /(?:UPDATE|INSERT INTO) "edit_commands"[\s\S]*(?:api_clients|api_credentials)/,
   'pre-contract EditCommand actor identity must never be fabricated by backfill',
+)
+assert.match(
+  editCommandActorAuditContractMigration,
+  /DROP CONSTRAINT "edit_commands_actor_audit_check"[\s\S]*ADD CONSTRAINT "edit_commands_actor_audit_check"/,
+  'the EditCommand audit constraint must be replaced contractually',
+)
+for (const requiredField of [
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash',
+]) {
+  assert.match(
+    editCommandActorAuditContractMigration,
+    new RegExp(`"${requiredField}" IS NOT NULL`),
+    `external EditCommand audit must require ${requiredField} explicitly`,
+  )
+}
+assert.doesNotMatch(
+  editCommandActorAuditContractMigration,
+  /(?:UPDATE|INSERT INTO) "edit_commands"/,
+  'the constraint correction must not invent historical EditCommand identity',
 )
 for (const field of [
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',

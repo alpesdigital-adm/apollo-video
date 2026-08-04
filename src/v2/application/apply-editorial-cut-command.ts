@@ -1,7 +1,6 @@
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   createEditCommand,
-  type CommandActor,
   type EditCommand,
 } from '../domain/edit-command.ts'
 import type { MediaTranscript, TranscriptWord } from '../domain/media-transcript.ts'
@@ -23,6 +22,11 @@ import {
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ManualCropRegion } from '../domain/manual-editing.ts'
 import { createEditorialCutImpact, type EditorialCutImpactV1 } from '../domain/editorial-cut-impact.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 export interface RemoveSpokenContentRuleInput {
   id: string
@@ -137,7 +141,7 @@ export interface ApplyEditorialCutCommandRequest {
   rules: readonly Readonly<RemoveSpokenContentRuleInput>[]
   exclusionOverrides?: readonly Readonly<EditorialExclusionOverrideInput>[]
   reason?: string
-  actor: Readonly<CommandActor>
+  actor: Readonly<AuthenticatedExternalActor>
   idempotency: Readonly<{ clientId: string; key: string }>
 }
 
@@ -406,6 +410,14 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     assertDomain(baseVersionId.length >= 3 && /^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_COMMAND', 'Editorial command base version is invalid')
     assertDomain(sourceTranscriptId.length >= 3, 'INVALID_COMMAND', 'Editorial command transcript is required')
     assertDomain(idempotencyKey.length > 0 && idempotencyKey.length <= 128, 'INVALID_COMMAND', 'Editorial command idempotency key is invalid')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId &&
+        request.idempotency.clientId === authenticationAudit.clientId,
+      'AUTH_INVALID',
+      'Editorial command actor does not match its workspace or idempotency client',
+    )
     const rules = defineEditorialPhraseRules(request.rules)
     const normalizedRules = rules.map((rule) => ({
       id: rule.id,
@@ -422,11 +434,13 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       rules: normalizedRules,
       exclusionOverrides: request.exclusionOverrides ?? null,
       reason: request.reason?.trim() || null,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findIdempotentResult({
       workspaceId,
       projectId,
       idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
@@ -492,7 +506,13 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       projectId,
       baseVersionId,
       baseHash: request.baseHash,
-      author: request.actor,
+      author: {
+        type: 'api-client',
+        id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       type: 'remove-spoken-content',
       scope: { project: true },
       payload: Object.freeze({
@@ -537,7 +557,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
         commandId,
         editPlanHash,
       }),
-      createdBy: request.actor.id,
+      createdBy: authenticationAudit.clientId,
       commandId,
       createdAt,
     })
@@ -548,9 +568,12 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
       workspaceId,
       occurredAt: createdAt,
       sequence: version.sequence,
-      actor: request.actor.type === 'api-client'
-        ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) }
-        : { userId: request.actor.id },
+      actor: {
+        clientId: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { userId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       resource: { type: 'project-version', id: version.id },
       data: {
         projectId,
@@ -567,6 +590,7 @@ export function applyEditorialCutCommandService(dependencies: ApplyEditorialCutC
     })
     return dependencies.repository.commitOrReplay({
       command,
+      authenticationAudit,
       requestFingerprint,
       snapshot,
       version,

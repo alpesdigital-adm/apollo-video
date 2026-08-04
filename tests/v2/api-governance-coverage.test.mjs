@@ -145,6 +145,67 @@ test('T-FR-242 project intelligence mutations bind one authenticated actor throu
   }
 })
 
+test('T-FR-242 external editorial Commands bind credential audit while Director stays internally attributable', () => {
+  const applicationFiles = [
+    'apply-editorial-cut-command.ts',
+    'replace-source-transcript.ts',
+    'manual-edit.ts',
+    'review-patch.ts',
+    'review-patch-batch.ts',
+    'version-compare.ts',
+  ]
+  for (const relative of applicationFiles) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /type AuthenticatedExternalActor/)
+    assert.match(source, /requireScope\(request\.actor, 'projects:write'\)/)
+    assert.match(source, /materializeActorAuditContext\(request\.actor\)/)
+    assert.match(source, /actorContextHash:\s*authenticationAudit\.contextHash/)
+    assert.match(source, /authenticationAudit[\s,]/)
+  }
+
+  for (const relative of [
+    'editorial-command-repository.ts',
+    'source-transcript-replacement-repository.ts',
+    'manual-edit-repository.ts',
+    'review-patch-repository.ts',
+    'review-patch-batch-repository.ts',
+    'version-compare-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /editCommandExternalActorAuditData/)
+    assert.match(source, /hydrateEditCommandExternalActorAudit/)
+    if (!relative.startsWith('review-patch')) {
+      assert.doesNotMatch(
+        source,
+        /workspaceId_projectId_idempotencyKey:\s*input/,
+        'the audit-only context hash must not leak into Prisma compound keys',
+      )
+    }
+  }
+
+  for (const relative of [
+    'projects/[projectId]/manual-edits/route.ts',
+    'projects/[projectId]/patch-proposals/[proposalId]/apply/route.ts',
+    'projects/[projectId]/patch-batches/[batchId]/apply/route.ts',
+    'projects/[projectId]/version-comparisons/route.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
+    assert.match(source, /actor[:,]/)
+  }
+
+  const commandsRoute = readFileSync(
+    join(root, 'src/app/v1/projects/[projectId]/commands/route.ts'),
+    'utf8',
+  )
+  assert.equal(
+    commandsRoute.match(/actor:\s*actor\.auditContext\.actor/g)?.length ?? 0,
+    1,
+    'only the durable internal Director command may use the projected Command actor',
+  )
+  assert.match(commandsRoute, /runProjectDirectorService[\s\S]*actor:\s*actor\.auditContext\.actor/)
+})
+
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {
   const routesRoot = join(root, 'src/app/v1')
   const applicationRoot = join(root, 'src/v2/application')

@@ -7,6 +7,7 @@ import type { EditorialCutEditPlan, RemoveSpokenContentPayload } from '../apply-
 import type { EditorialExclusionRange, SourceTimeRange } from '../recovery-project-acceptance.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { EditorialCutImpactV1 } from '../../domain/editorial-cut-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface EditorialCommandContext {
   projectId: string
@@ -35,6 +36,7 @@ export interface EditorialCommandResult {
 
 export interface EditorialCommandCommit {
   command: Readonly<EditCommand<RemoveSpokenContentPayload>>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   snapshot: Readonly<ProjectSnapshot>
   version: Readonly<ProjectVersion>
@@ -51,6 +53,7 @@ export interface EditorialCommandRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{ requestFingerprint: string; result: EditorialCommandResult }> | null>
   readContext(input: {
     workspaceId: string

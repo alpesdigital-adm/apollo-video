@@ -32,6 +32,14 @@ import {
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 import { publicSchemaExamples } from '../../src/v2/public-api/schema-examples.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import {
+  createExternalAuditContext,
+  materializeActorAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from '../../src/v2/infrastructure/prisma/edit-command-actor-audit.ts'
 
 const workspaceId = 'workspace-impact-1'
 const projectId = 'project-impact-1'
@@ -39,6 +47,19 @@ const baseVersionId = 'project-version-impact-1'
 const resultVersionId = 'project-version-impact-2'
 const commandId = 'edit-command-impact-1'
 const createdAt = '2026-07-31T19:00:00.000Z'
+
+function impactActor() {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-impact-1', credentialId: 'credential-impact-1',
+    workspaceId, environment: 'production',
+  })
+  return Object.freeze({
+    ...auditContext, scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
@@ -375,7 +396,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
       kind: 'crop', clipId: 'clip-1',
       crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
     },
-    actor: { type: 'api-client', id: 'client-impact-1' },
+    actor: impactActor(),
     idempotencyKey: 'command-impact-test-1',
   })
   assert.equal(committed.command.payload.schemaVersion, 2)
@@ -392,7 +413,7 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
       workspaceId, projectId, baseVersionId, baseHash: 'a'.repeat(64), expectedRevision: 1,
       action: 'apply', variantId: '16:9', targetId: 'clip-1',
       operation: { kind: 'inspect', clipId: 'clip-1', patch: { layout: 'unsafe-scope' } },
-      actor: { type: 'api-client', id: 'client-impact-1' },
+      actor: impactActor(),
       idempotencyKey: 'command-impact-invalid-variant',
     }),
     (error) => error.code === 'INVALID_ARGUMENT' && /variant/.test(error.message),
@@ -457,6 +478,11 @@ test('T-FR-233 manual Command persists the impact in payload v2 and binds it to 
               payloadJson: JSON.stringify(committed.command.payload), reason: null,
               actorType: committed.command.author.type, actorId: committed.command.author.id,
               delegatedUserId: null, idempotencyKey: committed.command.idempotencyKey,
+              actorCredentialId: committed.authenticationAudit.credentialId,
+              actorEnvironment: committed.authenticationAudit.environment,
+              actorAuthenticationKind: committed.authenticationAudit.authenticationKind,
+              actorContextHash: committed.authenticationAudit.contextHash,
+              actorDelegatedIdentityId: null, actorWorkspaceRole: null,
               requestFingerprint: committed.requestFingerprint,
               createdAt: new Date(committed.command.createdAt),
               baseVersion: baseVersionRow, resultVersion: resultVersionRow,
@@ -860,6 +886,40 @@ test('T-FR-233 completed final export resolves only stale finals for its exact v
   })
 })
 
+test('T-FR-242 external EditCommand audit round-trips canonically and rejects tampering', () => {
+  const actor = impactActor()
+  const audit = materializeActorAuditContext(actor)
+  const stored = {
+    workspaceId,
+    actorType: 'api-client',
+    actorId: actor.clientId,
+    delegatedUserId: null,
+    ...editCommandExternalActorAuditData(audit, workspaceId, actor.auditContext.actor),
+  }
+  assert.deepEqual(hydrateEditCommandExternalActorAudit(stored), audit)
+
+  for (const mutation of [
+    { actorCredentialId: null },
+    { actorContextHash: 'f'.repeat(64) },
+    { actorEnvironment: 'sandbox' },
+    { actorAuthenticationKind: 'ui-session' },
+    { actorType: 'system' },
+  ]) {
+    assert.throws(
+      () => hydrateEditCommandExternalActorAudit({ ...stored, ...mutation }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+    )
+  }
+  assert.throws(
+    () => editCommandExternalActorAuditData(
+      audit,
+      workspaceId,
+      { type: 'api-client', id: 'client-impact-other' },
+    ),
+    (error) => error.code === 'AUTH_INVALID',
+  )
+})
+
 test('T-FR-233 the real manual move materializer does not underinvalidate shifted middle clips', () => {
   const beforeEditPlan = plan()
   beforeEditPlan.videoTracks = [
@@ -1041,7 +1101,7 @@ test('T-FR-233 applied review batch persists impact v2 and normalized invalidati
   })
   const result = await service({
     workspaceId, projectId, batchId: 'review-patch-batch-impact-1', confirmed: true,
-    actor: { type: 'api-client', id: 'client-impact-1' }, idempotencyKey: 'review-batch-impact-apply-1',
+    actor: impactActor(), idempotencyKey: 'review-batch-impact-apply-1',
   })
   assert.equal(committed.command.payload.schemaVersion, 2)
   assert.equal(result.impact.commandType, 'apply-review-patch-batch')
@@ -1104,7 +1164,7 @@ test('T-FR-233 applied review patch persists impact v2 and normalized invalidati
   })
   const result = await service({
     workspaceId, projectId, proposalId: 'review-proposal-impact-1', confirmed: true,
-    actor: { type: 'api-client', id: 'client-impact-1' }, idempotencyKey: 'review-impact-apply-1',
+    actor: impactActor(), idempotencyKey: 'review-impact-apply-1',
   })
   assert.equal(committed.command.payload.schemaVersion, 2)
   assert.equal(committed.command.payload.impact.impactHash, result.impact.impactHash)

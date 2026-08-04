@@ -4,6 +4,7 @@ import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference, CommandImpactV1 } from '../../domain/command-impact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export type ReviewPatchProposalStatus = 'ready' | 'ambiguous' | 'prohibited' | 'budget-blocked' | 'applied'
 
@@ -55,6 +56,7 @@ export interface ReviewPatchCommit {
   applyIdempotencyKey: string
   applyRequestFingerprint: string
   command: Readonly<EditCommand>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   snapshot: Readonly<ProjectSnapshot>
   version: Readonly<ProjectVersion>
   event: Readonly<PublicEvent>
@@ -79,7 +81,7 @@ export interface ReviewPatchRepository {
   createProposal(input: { proposal: ReviewPatchProposal; idempotencyKey: string; requestFingerprint: string }): Promise<Readonly<ReviewPatchProposal>>
   readProposal(input: { workspaceId: string; projectId: string; proposalId: string }): Promise<Readonly<ReviewPatchProposal> | null>
   readApplyContext(input: { workspaceId: string; projectId: string; proposalId: string }): Promise<Readonly<ReviewPatchApplyContext> | null>
-  readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchApplyResult> | null>
+  readAppliedResult(input: { workspaceId: string; projectId: string; proposalId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchApplyResult> | null>
   commitOrReplay(bundle: ReviewPatchCommit): Promise<Readonly<ReviewPatchApplyResult>>
   attachRenderOperation(input: { workspaceId: string; projectId: string; proposalId: string; renderOperationId: string }): Promise<Readonly<ReviewPatchProposal>>
 }

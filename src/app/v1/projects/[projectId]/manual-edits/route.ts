@@ -192,7 +192,7 @@ export async function POST(
       ...(typeof body.reason === 'string' && body.reason.trim()
         ? { reason: body.reason.trim() }
         : {}),
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey,
     })
     const proxy = await enqueueProjectProxyRenderService({

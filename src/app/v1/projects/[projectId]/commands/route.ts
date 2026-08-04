@@ -190,7 +190,7 @@ export async function POST(
         replacementTranscriptId: body.sourceTranscriptId,
         expectedTranscriptHash: body.expectedTranscriptHash,
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
-        actor: actor.auditContext.actor,
+        actor,
         idempotencyKey,
       })
       return NextResponse.json(presentSuccess({
@@ -239,7 +239,7 @@ export async function POST(
       rules: parseRules(body.rules),
       ...(exclusionOverrides ? { exclusionOverrides } : {}),
       ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
-      actor: actor.auditContext.actor,
+      actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
     const proxy = await enqueueProjectProxyRenderService({

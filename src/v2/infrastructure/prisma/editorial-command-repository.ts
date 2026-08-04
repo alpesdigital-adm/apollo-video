@@ -21,6 +21,10 @@ import { createProjectVersion } from '../../domain/project-version.ts'
 import { createEditorialCutInvalidations, parseEditorialCutImpact } from '../../domain/editorial-cut-impact.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
   include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true }
@@ -47,6 +51,7 @@ function parseArray(value: string, field: string): readonly unknown[] {
 }
 
 function hydrateStoredCommand(row: StoredCommand, replayed: boolean): EditorialCommandResult {
+  hydrateEditCommandExternalActorAudit(row)
   if (!row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Editorial command result version is missing')
   const scope = parseRecord(row.scopeJson, 'editorial command scope') as EditScope
   const payload = parseRecord(row.payloadJson, 'editorial command payload') as unknown as RemoveSpokenContentPayload
@@ -139,14 +144,25 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2EditCommand.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
       include: { resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
     })
     if (!row) return null
+    if (
+      hydrateEditCommandExternalActorAudit(row).contextHash !==
+      input.actorContextHash
+    ) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Editorial command replay belongs to another authentication context')
+    }
     return Object.freeze({
       requestFingerprint: row.requestFingerprint,
       result: hydrateStoredCommand(row, true),
@@ -279,6 +295,9 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
           if (existing.requestFingerprint !== bundle.requestFingerprint) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different editorial command')
           }
+          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Editorial command replay belongs to another authentication context')
+          }
           return hydrateStoredCommand(existing, true)
         }
         const [project, transcript] = await Promise.all([
@@ -341,6 +360,11 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
             actorType: bundle.command.author.type,
             actorId: bundle.command.author.id,
             delegatedUserId: bundle.command.author.delegatedUserId,
+            ...editCommandExternalActorAuditData(
+              bundle.authenticationAudit,
+              bundle.command.workspaceId,
+              bundle.command.author,
+            ),
             idempotencyKey: bundle.command.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             createdAt: new Date(bundle.command.createdAt),
@@ -423,6 +447,7 @@ export class PrismaEditorialCommandRepository implements EditorialCommandReposit
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
           idempotencyKey: bundle.command.idempotencyKey,
+          actorContextHash: bundle.authenticationAudit.contextHash,
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {

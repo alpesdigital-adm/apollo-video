@@ -17,6 +17,10 @@ import {
 } from '../../domain/source-transcript-replacement.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 type StoredCommand = Prisma.V2EditCommandGetPayload<{
   include: {
@@ -80,6 +84,7 @@ function version(row: NonNullable<StoredCommand['resultVersion']>) {
 }
 
 function hydrateStoredCommand(row: StoredCommand, replayed: boolean): SourceTranscriptReplacementResult {
+  hydrateEditCommandExternalActorAudit(row)
   if (row.type !== 'replace-source-transcript' || !row.resultVersion) throw new DomainError('PERSISTENCE_CONFLICT', 'Source transcript replacement result is missing')
   const payload = parseRecord(row.payloadJson, 'source transcript replacement payload') as unknown as SourceTranscriptReplacementPayload
   const impact = parseSourceTranscriptReplacementImpact(payload.impact)
@@ -129,13 +134,20 @@ function isPrismaCode(error: unknown, code: string): boolean {
 export class PrismaSourceTranscriptReplacementRepository implements SourceTranscriptReplacementRepository {
   constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
 
-  async findIdempotentResult(input: { workspaceId: string; projectId: string; idempotencyKey: string }) {
+  async findIdempotentResult(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2EditCommand.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: {
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       include: { baseVersion: { include: { editPlanSnapshot: true } }, resultVersion: { include: { editPlanSnapshot: true } }, artifactInvalidations: true },
     })
     if (!row) return null
     if (row.type !== 'replace-source-transcript') throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another command type')
+    if (hydrateEditCommandExternalActorAudit(row).contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Transcript replacement replay belongs to another authentication context')
     return Object.freeze({ requestFingerprint: row.requestFingerprint, result: hydrateStoredCommand(row, true) })
   }
 
@@ -206,6 +218,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
         })
         if (existing) {
           if (existing.type !== 'replace-source-transcript' || existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
+          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Transcript replacement replay belongs to another authentication context')
           return hydrateStoredCommand(existing, true)
         }
         const [project, currentTranscript, replacementTranscript] = await Promise.all([
@@ -241,6 +254,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
           type: bundle.command.type, scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload),
           reason: bundle.command.reason, actorType: bundle.command.author.type, actorId: bundle.command.author.id,
           delegatedUserId: bundle.command.author.delegatedUserId, idempotencyKey: bundle.command.idempotencyKey,
+          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
           requestFingerprint: bundle.requestFingerprint, createdAt: new Date(bundle.command.createdAt),
         } })
         await transaction.v2ProjectSnapshot.create({ data: {
@@ -286,7 +300,7 @@ export class PrismaSourceTranscriptReplacementRepository implements SourceTransc
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) return this.commitOrReplay(bundle, serializationAttempt + 1)
       if (isPrismaCode(error, 'P2002')) {
-        const existing = await this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey })
+        const existing = await this.findIdempotentResult({ workspaceId: bundle.command.workspaceId, projectId: bundle.command.projectId, idempotencyKey: bundle.command.idempotencyKey, actorContextHash: bundle.authenticationAudit.contextHash })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
           return Object.freeze({ ...existing.result, replayed: true })

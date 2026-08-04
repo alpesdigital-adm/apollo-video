@@ -4,7 +4,7 @@ import type {
   SourceTranscriptReplacementRepository,
   SourceTranscriptReplacementResult,
 } from './ports/source-transcript-replacement-repository.ts'
-import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
+import { createEditCommand } from '../domain/edit-command.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
@@ -13,6 +13,11 @@ import {
   createSourceTranscriptReplacementImpact,
   materializeSourceTranscriptReplacement,
 } from '../domain/source-transcript-replacement.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 function identity(value: string, field: string): string {
   const normalized = value.trim()
@@ -34,7 +39,7 @@ export function replaceSourceTranscriptService(dependencies: {
     replacementTranscriptId: string
     expectedTranscriptHash: string
     reason?: string
-    actor: Readonly<CommandActor>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }): Promise<Readonly<SourceTranscriptReplacementResult>> {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -46,12 +51,21 @@ export function replaceSourceTranscriptService(dependencies: {
     assertDomain(/^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_ARGUMENT', 'baseHash must be a SHA-256 digest')
     assertDomain(/^[a-f0-9]{64}$/.test(expectedTranscriptHash), 'INVALID_ARGUMENT', 'expectedTranscriptHash must be a SHA-256 digest')
     assertDomain(idempotencyKey.length >= 8 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is invalid')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Transcript replacement actor does not belong to the workspace')
     const requestFingerprint = calculateVersionHash({
       type: 'replace-source-transcript', workspaceId, projectId, baseVersionId,
       baseHash: request.baseHash, replacementTranscriptId, expectedTranscriptHash,
-      reason: request.reason?.trim() || null, actor: request.actor,
+      reason: request.reason?.trim() || null,
+      actorContextHash: authenticationAudit.contextHash,
     })
-    const existing = await dependencies.repository.findIdempotentResult({ workspaceId, projectId, idempotencyKey })
+    const existing = await dependencies.repository.findIdempotentResult({
+      workspaceId,
+      projectId,
+      idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
+    })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different source transcript replacement')
       return Object.freeze({ ...existing.result, replayed: true })
@@ -112,7 +126,12 @@ export function replaceSourceTranscriptService(dependencies: {
     })
     const command = createEditCommand<SourceTranscriptReplacementPayload>({
       id: commandId, workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
-      author: request.actor, type: 'replace-source-transcript', scope: { project: true }, payload,
+      author: {
+        type: 'api-client', id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      }, type: 'replace-source-transcript', scope: { project: true }, payload,
       ...(request.reason?.trim() ? { reason: request.reason.trim() } : {}),
       idempotencyKey, createdAt,
     })
@@ -131,14 +150,17 @@ export function replaceSourceTranscriptService(dependencies: {
         parentVersionId: context.currentVersion.id, previousBaseHash: context.currentVersion.baseHash,
         commandId, editPlanHash, replacementTranscriptId, replacementTranscriptHash: expectedTranscriptHash,
       }),
-      createdBy: request.actor.id, commandId, createdAt,
+      createdBy: authenticationAudit.clientId, commandId, createdAt,
     })
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0',
       workspaceId, occurredAt: createdAt, sequence: version.sequence,
-      actor: request.actor.type === 'api-client'
-        ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) }
-        : { userId: request.actor.id },
+      actor: {
+        clientId: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { userId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       resource: { type: 'project-version', id: version.id },
       data: {
         projectId, sequence: version.sequence, parentVersionId: version.parentVersionId,
@@ -150,7 +172,7 @@ export function replaceSourceTranscriptService(dependencies: {
       },
     })
     return dependencies.repository.commitOrReplay({
-      command, requestFingerprint, snapshot, version, event,
+      command, authenticationAudit, requestFingerprint, snapshot, version, event,
       sourceEvidence: {
         currentTranscriptId: context.currentTranscript.id,
         currentTranscriptHash: context.currentTranscript.transcriptHash,

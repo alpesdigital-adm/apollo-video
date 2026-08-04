@@ -5,6 +5,7 @@ import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { PublicEvent } from '../../domain/public-event.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { SourceTranscriptReplacementImpactV1 } from '../../domain/source-transcript-replacement.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface SourceTranscriptReplacementPayload {
   schemaVersion: 1
@@ -42,6 +43,7 @@ export interface SourceTranscriptReplacementResult {
 
 export interface SourceTranscriptReplacementCommit {
   command: Readonly<EditCommand<SourceTranscriptReplacementPayload>>
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   requestFingerprint: string
   snapshot: Readonly<ProjectSnapshot>
   version: Readonly<ProjectVersion>
@@ -60,6 +62,7 @@ export interface SourceTranscriptReplacementRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{ requestFingerprint: string; result: SourceTranscriptReplacementResult }> | null>
   readContext(input: {
     workspaceId: string

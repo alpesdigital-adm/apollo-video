@@ -28,6 +28,10 @@ import {
   hydrateReviewPatchVersion,
 } from './review-patch-repository.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 function parseJson<T>(value: string, field: string): T {
   try {
@@ -240,7 +244,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     return context ? Object.freeze({ ...context, batch: hydrateBatch(row) }) : null
   }
 
-  async readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string }): Promise<Readonly<ReviewPatchBatchApplyResult> | null> {
+  async readAppliedResult(input: { workspaceId: string; projectId: string; batchId: string; applyIdempotencyKey: string; applyRequestFingerprint: string; actorContextHash: string }): Promise<Readonly<ReviewPatchBatchApplyResult> | null> {
     const row = await this.client.v2ReviewPatchBatch.findFirst({
       where: { id: input.batchId, workspaceId: input.workspaceId, projectId: input.projectId },
       include: {
@@ -252,6 +256,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
     if (!row || row.status !== 'applied' || !row.resultVersion?.command || !row.comparisonJson) return null
     if (row.applyIdempotencyKey !== input.applyIdempotencyKey || row.applyRequestFingerprint !== input.applyRequestFingerprint) return null
     const commandRow = row.resultVersion.command
+    if (hydrateEditCommandExternalActorAudit(commandRow).contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Batch review replay belongs to another authentication context')
     const payload = parseJson<Record<string, unknown>>(commandRow.payloadJson, 'batch patch command payload')
     if (payload.schemaVersion !== 2 || !payload.impact) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored batch review command impact is missing')
     const impact = parseCommandImpact(payload.impact)
@@ -295,6 +300,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       batchId: bundle.batchId,
       applyIdempotencyKey: bundle.applyIdempotencyKey,
       applyRequestFingerprint: bundle.applyRequestFingerprint,
+      actorContextHash: bundle.authenticationAudit.contextHash,
     })
     if (replay) return replay
     try {
@@ -364,6 +370,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
           baseVersionId: bundle.command.baseVersionId, baseHash: bundle.command.baseHash, type: bundle.command.type,
           scopeJson: stableSerialize(bundle.command.scope), payloadJson: stableSerialize(bundle.command.payload), reason: bundle.command.reason,
           actorType: bundle.command.author.type, actorId: bundle.command.author.id, delegatedUserId: bundle.command.author.delegatedUserId,
+          ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
           idempotencyKey: bundle.command.idempotencyKey, requestFingerprint: bundle.applyRequestFingerprint, createdAt: new Date(bundle.command.createdAt),
         } })
         await transaction.v2ProjectSnapshot.create({ data: {
@@ -453,6 +460,7 @@ export class PrismaReviewPatchBatchRepository implements ReviewPatchBatchReposit
       batchId: bundle.batchId,
       applyIdempotencyKey: bundle.applyIdempotencyKey,
       applyRequestFingerprint: bundle.applyRequestFingerprint,
+      actorContextHash: bundle.authenticationAudit.contextHash,
     })
     if (!result) throw new DomainError('PERSISTENCE_CONFLICT', 'Applied batch review could not be reconstructed')
     return Object.freeze({ ...result, replayed: false })

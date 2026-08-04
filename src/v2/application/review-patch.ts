@@ -1,6 +1,6 @@
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ReviewPatchProposal, ReviewPatchRepository } from './ports/review-patch-repository.ts'
-import { createEditCommand, type CommandActor } from '../domain/edit-command.ts'
+import { createEditCommand } from '../domain/edit-command.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
@@ -15,6 +15,11 @@ import {
   type PatchOperationKind,
   type PatchSet,
 } from '../domain/review-system.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const INTERPRETER_VERSION = 'review-patch-interpreter/1.0.0'
 const DEFAULT_POLICY_VERSION = 'review-patch-policy/1.0.0'
@@ -176,7 +181,7 @@ export function applyReviewPatchService(dependencies: {
     projectId: string
     proposalId: string
     confirmed: true
-    actor: Readonly<CommandActor>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = validateIdentity(request.workspaceId, 'workspaceId')
@@ -185,11 +190,14 @@ export function applyReviewPatchService(dependencies: {
     assertDomain(request.confirmed === true, 'PRECONDITION_REQUIRED', 'Patch impact must be explicitly confirmed')
     const idempotencyKey = request.idempotencyKey.trim()
     assertDomain(idempotencyKey.length >= 8 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is invalid')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Review patch actor does not belong to the workspace')
     const context = await dependencies.repository.readApplyContext({ workspaceId, projectId, proposalId })
     if (!context) throw new DomainError('PROJECT_NOT_FOUND', 'Review patch proposal was not found')
-    const applyRequestFingerprint = calculateVersionHash({ proposalId, confirmed: true, actor: request.actor })
+    const applyRequestFingerprint = calculateVersionHash({ proposalId, confirmed: true, actorContextHash: authenticationAudit.contextHash })
     if (context.proposal.status === 'applied') {
-      const replay = await dependencies.repository.readAppliedResult({ workspaceId, projectId, proposalId, applyIdempotencyKey: idempotencyKey, applyRequestFingerprint })
+      const replay = await dependencies.repository.readAppliedResult({ workspaceId, projectId, proposalId, applyIdempotencyKey: idempotencyKey, applyRequestFingerprint, actorContextHash: authenticationAudit.contextHash })
       if (!replay) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Patch proposal was already applied by another request')
       return replay
     }
@@ -238,7 +246,12 @@ export function applyReviewPatchService(dependencies: {
       projectId,
       baseVersionId: context.currentVersion.id,
       baseHash: context.currentVersion.baseHash,
-      author: request.actor,
+      author: {
+        type: 'api-client', id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       type: 'apply-review-patch',
       scope: { project: true },
       payload,
@@ -272,7 +285,7 @@ export function applyReviewPatchService(dependencies: {
         proposalId,
         editPlanHash,
       }),
-      createdBy: request.actor.id,
+      createdBy: authenticationAudit.clientId,
       commandId,
       createdAt,
     })
@@ -291,7 +304,7 @@ export function applyReviewPatchService(dependencies: {
       workspaceId,
       occurredAt: createdAt,
       sequence: version.sequence,
-      actor: request.actor.type === 'api-client' ? { clientId: request.actor.id, ...(request.actor.delegatedUserId ? { userId: request.actor.delegatedUserId } : {}) } : { userId: request.actor.id },
+      actor: { clientId: authenticationAudit.clientId, ...(authenticationAudit.delegatedUserId ? { userId: authenticationAudit.delegatedUserId } : {}) },
       resource: { type: 'project-version', id: version.id },
       data: { projectId, sequence: version.sequence, parentVersionId: version.parentVersionId, baseHash: version.baseHash, commandId, commandType: command.type, patchProposalId: proposalId, commandImpactHash: impact.impactHash, artifactInvalidationCount: impact.affectedArtifacts.length, snapshotRefs: version.snapshotRefs, createdAt },
     })
@@ -300,6 +313,7 @@ export function applyReviewPatchService(dependencies: {
       applyIdempotencyKey: idempotencyKey,
       applyRequestFingerprint,
       command,
+      authenticationAudit,
       snapshot,
       version,
       event,

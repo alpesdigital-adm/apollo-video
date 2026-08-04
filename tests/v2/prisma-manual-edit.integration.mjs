@@ -35,6 +35,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
@@ -59,6 +60,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let clockTick = 0
   let server
   let browser
+  let authenticatedActor
 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -87,7 +89,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   })({
     workspaceId,
     projectId,
-    actor: { type: 'api-client', id: `manual-client-${suffix}` },
+    actor: authenticatedActor,
     ...request,
   })
 
@@ -167,6 +169,22 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       name: 'Manual editing E2E',
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
+    })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    authenticatedActor = Object.freeze({
+      ...auditContext,
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
     })
     await client.v2Project.create({ data: {
       id: projectId, workspaceId, name: 'Manual Project', status: 'reviewing-proxy',
@@ -304,6 +322,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(split.timeline.clips[0].endMs, 1500)
     const splitStoredCommand = await client.v2EditCommand.findUnique({ where: { id: split.command.id } })
     assert.equal(splitStoredCommand.type, 'manual-edit')
+    assert.equal(splitStoredCommand.actorId, issued.client.id)
+    assert.equal(splitStoredCommand.actorCredentialId, issued.credential.id)
+    assert.equal(
+      splitStoredCommand.actorContextHash,
+      materializeActorAuditContext(authenticatedActor).contextHash,
+    )
     const splitPayload = JSON.parse(splitStoredCommand.payloadJson)
     assert.equal(splitPayload.schemaVersion, 2)
     assert.equal(splitPayload.impact.schemaVersion, 'command-impact/v1')

@@ -413,7 +413,7 @@ async function directRetimedPlan(options) {
     baseVersionId: 'version-base', baseHash: 'a'.repeat(64),
     replacementTranscriptId: 'transcript-replacement',
     expectedTranscriptHash: options.replacement.transcriptHash,
-    actor: { type: 'api-client', id: 'client-transcript-rate' },
+    actor: proxyActor(),
     idempotencyKey: `transcript-rate-render-journey-${options.suffix}`,
   })
   const persisted = JSON.parse(replacement.snapshot.contentJson)

@@ -7,7 +7,6 @@ import type {
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import {
   createEditCommand,
-  type CommandActor,
 } from '../domain/edit-command.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
@@ -15,6 +14,11 @@ import {
   type VersionCompareMode,
 } from '../domain/manual-editing.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 function identity(value: string, field: string): string {
   const normalized = value.trim()
@@ -122,7 +126,7 @@ export function decideVersionComparisonService(dependencies: {
     baseVersionId: string
     baseHash: string
     expectedRevision: number
-    actor: Readonly<CommandActor>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
     reason?: string
   }) {
@@ -143,6 +147,9 @@ export function decideVersionComparisonService(dependencies: {
       'INVALID_ARGUMENT',
       'Idempotency-Key is invalid',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Version comparison actor does not belong to the workspace')
     const comparisonState = await readComparison({
       workspaceId,
       projectId,
@@ -179,13 +186,14 @@ export function decideVersionComparisonService(dependencies: {
       afterVersionId: comparisonState.versions.after.id,
       mode: comparisonState.comparison.mode,
       comparison,
-      actor: request.actor,
+      actorContextHash: authenticationAudit.contextHash,
       reason: request.reason?.trim() || null,
     })
     const existing = await dependencies.comparisonRepository.findIdempotentDecision({
       workspaceId,
       projectId,
       idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (existing) {
       if (existing.requestFingerprint !== requestFingerprint) {
@@ -222,7 +230,12 @@ export function decideVersionComparisonService(dependencies: {
       projectId,
       baseVersionId,
       baseHash: request.baseHash,
-      author: request.actor,
+      author: {
+        type: 'api-client', id: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { delegatedUserId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       type: 'compare-action',
       scope: { project: true },
       payload,
@@ -238,9 +251,12 @@ export function decideVersionComparisonService(dependencies: {
       workspaceId,
       occurredAt: createdAt,
       sequence: request.expectedRevision,
-      actor: request.actor.type === 'api-client'
-        ? { clientId: request.actor.id }
-        : { userId: request.actor.id },
+      actor: {
+        clientId: authenticationAudit.clientId,
+        ...(authenticationAudit.delegatedUserId
+          ? { userId: authenticationAudit.delegatedUserId }
+          : {}),
+      },
       resource: { type: 'project', id: projectId },
       data: {
         projectId,
@@ -256,6 +272,7 @@ export function decideVersionComparisonService(dependencies: {
     })
     return dependencies.comparisonRepository.commitDecision({
       command,
+      authenticationAudit,
       requestFingerprint,
       projectStatus,
       event,

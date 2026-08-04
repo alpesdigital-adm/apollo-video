@@ -25,6 +25,10 @@ import {
   parseCommandArtifactInvalidation,
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
+import {
+  editCommandExternalActorAuditData,
+  hydrateEditCommandExternalActorAudit,
+} from './edit-command-actor-audit.ts'
 
 type VersionWithPlan = Prisma.V2ProjectVersionGetPayload<{
   include: { editPlanSnapshot: true }
@@ -113,6 +117,7 @@ function hydrateStoredCommand(
   row: StoredManualCommand,
   replayed: boolean,
 ): ManualEditResult {
+  hydrateEditCommandExternalActorAudit(row)
   if (row.type !== 'manual-edit' || !row.resultVersion) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Manual command result version is missing')
   }
@@ -211,9 +216,16 @@ export class PrismaManualEditRepository implements ManualEditRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2EditCommand.findUnique({
-      where: { workspaceId_projectId_idempotencyKey: input },
+      where: {
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
+      },
       include: {
         baseVersion: { include: { editPlanSnapshot: true } },
         resultVersion: { include: { editPlanSnapshot: true } },
@@ -226,6 +238,9 @@ export class PrismaManualEditRepository implements ManualEditRepository {
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
         'Idempotency key belongs to another command type',
       )
+    }
+    if (hydrateEditCommandExternalActorAudit(row).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Manual edit replay belongs to another authentication context')
     }
     return Object.freeze({
       requestFingerprint: row.requestFingerprint,
@@ -407,6 +422,9 @@ export class PrismaManualEditRepository implements ManualEditRepository {
               'Idempotency key was used with a different manual edit',
             )
           }
+          if (hydrateEditCommandExternalActorAudit(existing).contextHash !== bundle.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Manual edit replay belongs to another authentication context')
+          }
           return hydrateStoredCommand(existing, true)
         }
         const project = await transaction.v2Project.findFirst({
@@ -505,6 +523,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
             actorType: bundle.command.author.type,
             actorId: bundle.command.author.id,
             delegatedUserId: bundle.command.author.delegatedUserId,
+            ...editCommandExternalActorAuditData(bundle.authenticationAudit, bundle.command.workspaceId, bundle.command.author),
             idempotencyKey: bundle.command.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             createdAt: new Date(bundle.command.createdAt),
@@ -611,6 +630,7 @@ export class PrismaManualEditRepository implements ManualEditRepository {
           workspaceId: bundle.command.workspaceId,
           projectId: bundle.command.projectId,
           idempotencyKey: bundle.command.idempotencyKey,
+          actorContextHash: bundle.authenticationAudit.contextHash,
         })
         if (existing) {
           if (existing.requestFingerprint !== bundle.requestFingerprint) {

@@ -33,6 +33,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   const { proposeReviewPatchBatchService, applyReviewPatchBatchService } = await import('../../src/v2/application/review-patch-batch.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaReviewPatchBatchRepository } = await import('../../src/v2/infrastructure/prisma/review-patch-batch-repository.ts')
@@ -48,6 +49,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
   const artifactHash = calculateVersionHash({ artifactId })
   const repository = new PrismaReviewPatchBatchRepository(client)
   let server
+  let authenticatedActor
 
   const cleanup = async () => {
     await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
@@ -122,7 +124,7 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     createEventId: randomUUID,
   })({
     workspaceId, projectId, batchId, confirmed: true,
-    actor: { type: 'api-client', id: 'batch-test-client' },
+    actor: authenticatedActor,
     idempotencyKey: key,
   })
 
@@ -160,6 +162,22 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
       name: 'Batch Review E2E',
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
+    })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    authenticatedActor = Object.freeze({
+      ...auditContext,
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
     })
     await client.v2Project.create({ data: { id: projectId, workspaceId, name: 'Batch Review Project', status: 'reviewing-proxy', objective: 'discovery', format: '9:16', locale: 'pt-BR', createdByType: 'api-client', createdById: 'batch-test-client', createdAt, updatedAt: createdAt } })
     for (const [id, kind, content] of [[briefId, 'brief', brief], [policiesId, 'policies', policies], [editPlanId, 'edit-plan', editPlan]]) {
@@ -207,6 +225,10 @@ test('T-FR-215 batch review persists atomic apply, conflict rollback, explicit p
     assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 29, endFrame: 30 }, { startFrame: 59, endFrame: 60 }])
     assert.equal(applied.invalidations.length, 1)
     assert.equal(applied.invalidations[0].artifactId, artifactId)
+    const appliedCommand = await client.v2EditCommand.findUniqueOrThrow({ where: { id: applied.command.id } })
+    assert.equal(appliedCommand.actorId, issued.client.id)
+    assert.equal(appliedCommand.actorCredentialId, issued.credential.id)
+    assert.match(appliedCommand.actorContextHash, /^[a-f0-9]{64}$/)
     const persistedInvalidations = await client.v2CommandArtifactInvalidation.findMany({ where: { commandId: applied.command.id } })
     assert.equal(persistedInvalidations.length, 1)
     const replayed = await applyBatch(ready.batch.id, `batch-ready-apply-${suffix}`)
