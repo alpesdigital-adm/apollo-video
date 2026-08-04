@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { API_SCOPES, isApiScope } from '../../src/v2/domain/api-client.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
@@ -53,13 +53,26 @@ test('T-FR-242 every route uses the authenticated audit actor instead of rebuild
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {
   const routesRoot = join(root, 'src/app/v1')
   const applicationRoot = join(root, 'src/v2/application')
-  const applicationSources = new Map()
+  const applicationFiles = new Map()
+  const exportedApplicationFiles = new Map()
   for (const relative of readdirSync(applicationRoot, { recursive: true }).map(String)) {
     if (!relative.endsWith('.ts')) continue
-    const source = readFileSync(join(applicationRoot, relative), 'utf8')
+    const file = join(applicationRoot, relative)
+    const source = readFileSync(file, 'utf8')
+    applicationFiles.set(resolve(file), source)
     for (const match of source.matchAll(/export function\s+([A-Za-z0-9_]+)/g)) {
-      applicationSources.set(match[1], source)
+      exportedApplicationFiles.set(match[1], resolve(file))
     }
+  }
+  const applicationSourceClosure = (file, visited = new Set()) => {
+    if (!file || visited.has(file)) return ''
+    visited.add(file)
+    const source = applicationFiles.get(file) ?? ''
+    const dependencies = [...source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)]
+      .map((match) => resolve(dirname(file), match[1]))
+      .filter((dependency) => applicationFiles.has(dependency))
+    return [source, ...dependencies.map((dependency) => applicationSourceClosure(dependency, visited))]
+      .join('\n')
   }
   const capabilityScopes = [...new Set(
     FOUNDATION_CAPABILITIES.flatMap((capability) => capability.requiredScopes),
@@ -73,7 +86,7 @@ test('T-FR-242 capability grants and route enforcement share one closed resource
       .replace(/\{([^}]+)\}/g, '[$1]')
     const routeSource = readFileSync(join(routesRoot, routePath, 'route.ts'), 'utf8')
     const serviceSource = applicationServicesForEndpoint(root, capability.endpoint)
-      .map((name) => applicationSources.get(name) ?? '')
+      .map((name) => applicationSourceClosure(exportedApplicationFiles.get(name)))
       .join('\n')
     const enforcementSource = `${routeSource}\n${serviceSource}`
     for (const scope of capability.requiredScopes) {

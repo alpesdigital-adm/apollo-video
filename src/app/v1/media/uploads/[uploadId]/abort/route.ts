@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
 import { abortMediaUploadService } from '@/v2/application/manage-media-upload'
 import { createLocalMediaUploadStorageFromEnvironment } from '@/v2/infrastructure/media/local-media-upload-storage'
 import { createMediaTransferRepository } from '@/v2/infrastructure/repository-factory'
@@ -14,12 +13,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ up
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'media:write')
     const { uploadId } = await context.params
     const result = await abortMediaUploadService({
       repository: createMediaTransferRepository(),
       storage: createLocalMediaUploadStorageFromEnvironment(),
-    })({ workspaceId: actor.workspaceId, clientId: actor.clientId, uploadId })
+    })({ workspaceId: actor.workspaceId, actor, uploadId })
     return NextResponse.json(presentSuccess(result), { headers: publicApiHeaders(requestId) })
   } catch (error) {
     return respondPublicError(error, requestId)

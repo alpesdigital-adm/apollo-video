@@ -61,6 +61,9 @@ const apiAccessCommandModel = schema.match(/model V2ApiAccessCommand \{([\s\S]*?
 const apiAdministrationCommandModel = schema.match(/model V2ApiAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const webhookAdministrationCommandModel = schema.match(/model V2WebhookAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const mediaArtifactLifecycleTransitionModel = schema.match(/model V2MediaArtifactLifecycleTransition \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const mediaDownloadGrantModel = schema.match(/model V2MediaDownloadGrant \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const mediaUploadAuditEntryModel = schema.match(/model V2MediaUploadAuditEntry \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const assetRightsChangeModel = schema.match(/model V2AssetRightsChange \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -72,6 +75,58 @@ assert.match(
   committed,
   /ALTER TABLE "api_clients"[\s\S]*DROP COLUMN "secretSalt"[\s\S]*DROP COLUMN "secretHash"/,
   'the credential contract migration must remove verifier copies from api_clients',
+)
+for (const field of [
+  'issuerCredentialId', 'issuerEnvironment', 'issuerAuthenticationKind',
+  'issuerContextHash', 'issuerDelegatedUserId', 'issuerDelegatedIdentityId',
+  'issuerWorkspaceRole', 'revokerCredentialId', 'revokerEnvironment',
+  'revokerAuthenticationKind', 'revokerContextHash', 'revokerDelegatedUserId',
+  'revokerDelegatedIdentityId', 'revokerWorkspaceRole',
+]) {
+  assert.match(mediaDownloadGrantModel, new RegExp(`\\b${field}\\b`), `MediaDownloadGrant must persist ${field}`)
+}
+assert.match(
+  committed,
+  /DELETE FROM "media_download_grants";[\s\S]*ADD COLUMN "issuerCredentialId"[\s\S]*ADD COLUMN "revokerContextHash"/,
+  'unattributable short-lived download grants must be invalidated before audit fields become required',
+)
+for (const field of [
+  'workspaceId', 'uploadId', 'action', 'partNumber', 'actorClientId',
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  'requestFingerprint', 'occurredAt',
+]) {
+  assert.match(mediaUploadAuditEntryModel, new RegExp(`\\b${field}\\b`), `MediaUploadAuditEntry must persist ${field}`)
+}
+assert.match(
+  committed,
+  /ADD COLUMN "sessionAuditEntryId" UUID[\s\S]*CREATE TABLE "media_upload_audit_entries"[\s\S]*'begin'[\s\S]*'session-issue'[\s\S]*'part-record'[\s\S]*'complete'[\s\S]*'abort'/,
+  'media upload mutations must use one constrained immutable audit ledger',
+)
+assert.doesNotMatch(
+  committed,
+  /(?:UPDATE|INSERT INTO) "media_upload_audit_entries"[\s\S]*media_uploads/,
+  'pre-contract upload audit identity must never be fabricated by backfill',
+)
+for (const field of [
+  'workspaceId', 'artifactId', 'sequence', 'snapshotId', 'snapshotHash',
+  'baseRevision', 'resultRevision', 'actorKind', 'actorType', 'actorId',
+  'actorClientId', 'actorCredentialId', 'actorEnvironment',
+  'actorAuthenticationKind', 'actorDelegatedUserId',
+  'actorDelegatedIdentityId', 'actorWorkspaceRole', 'actorContextHash',
+  'requestFingerprint', 'changedAt',
+]) {
+  assert.match(assetRightsChangeModel, new RegExp(`\\b${field}\\b`), `AssetRightsChange must persist ${field}`)
+}
+assert.match(
+  committed,
+  /CREATE TABLE "asset_rights_changes"[\s\S]*"actorKind"[\s\S]*"actorContextHash"[\s\S]*asset_rights_changes_actor_check/,
+  'every asset rights revision must have a constrained immutable actor ledger entry',
+)
+assert.doesNotMatch(
+  committed,
+  /(?:UPDATE|INSERT INTO) "asset_rights_changes"[\s\S]*asset_rights_snapshots/,
+  'pre-contract asset rights authorship must never be fabricated by backfill',
 )
 for (const field of [
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
@@ -193,6 +248,15 @@ const requiredChecks = [
   'webhook_admin_commands_fingerprint_check',
   'webhook_admin_commands_replay_check',
   'webhook_admin_commands_delegation_check',
+  'media_upload_audit_entries_action_check',
+  'media_upload_audit_entries_part_check',
+  'media_upload_audit_entries_environment_check',
+  'media_upload_audit_entries_auth_kind_check',
+  'media_upload_audit_entries_hash_check',
+  'media_upload_audit_entries_delegation_check',
+  'asset_rights_changes_sequence_check',
+  'asset_rights_changes_hashes_check',
+  'asset_rights_changes_actor_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

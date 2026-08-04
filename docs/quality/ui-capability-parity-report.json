@@ -942,8 +942,7 @@
       "applicationServices": [
         "authenticateApiClientService",
         "authenticateUiSessionService",
-        "inspectMediaUploadService",
-        "requireScope"
+        "inspectMediaUploadService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -959,8 +958,7 @@
       "applicationServices": [
         "authenticateApiClientService",
         "authenticateUiSessionService",
-        "beginMediaUploadService",
-        "requireScope"
+        "beginMediaUploadService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -976,8 +974,7 @@
       "applicationServices": [
         "authenticateApiClientService",
         "authenticateUiSessionService",
-        "issueMediaUploadSessionService",
-        "requireScope"
+        "issueMediaUploadSessionService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -1007,8 +1004,7 @@
       "applicationServices": [
         "authenticateApiClientService",
         "authenticateUiSessionService",
-        "inspectMediaUploadService",
-        "requireScope"
+        "inspectMediaUploadService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -1039,8 +1035,7 @@
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "completeMediaUploadService",
-        "enqueueMediaIngestService",
-        "requireScope"
+        "enqueueMediaIngestService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -1056,8 +1051,7 @@
       "applicationServices": [
         "abortMediaUploadService",
         "authenticateApiClientService",
-        "authenticateUiSessionService",
-        "requireScope"
+        "authenticateUiSessionService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",

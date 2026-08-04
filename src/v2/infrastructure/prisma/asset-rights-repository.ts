@@ -1,4 +1,9 @@
-import { Prisma, type PrismaClient, type V2AssetRightsSnapshot } from '../../../../generated/prisma-v2/index.js'
+import {
+  Prisma,
+  type PrismaClient,
+  type V2AssetRightsChange,
+  type V2AssetRightsSnapshot,
+} from '../../../../generated/prisma-v2/index.js'
 
 import type {
   AssetRightsRecord,
@@ -13,6 +18,12 @@ import {
   type AssetRightsStatus,
   type AssetConsentStatus,
 } from '../../domain/asset-rights.ts'
+import {
+  createAssetRightsChangeIntent,
+  type AssetRightsChangeIntent,
+} from '../../domain/asset-rights-change.ts'
+import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 
@@ -200,6 +211,133 @@ function rowData(snapshot: AssetRightsSnapshot, sequence: number) {
   }
 }
 
+function changeData(
+  change: AssetRightsChangeIntent,
+  snapshotId: string,
+  sequence: number,
+  resultRevision: string,
+) {
+  const actor = change.actor.kind === 'external'
+    ? {
+        actorType: 'api-client' as const,
+        actorId: change.actor.audit.clientId,
+        external: change.actor.audit,
+      }
+    : {
+        actorType: change.actor.actorType,
+        actorId: change.actor.actorId,
+        external: undefined,
+      }
+  const external = actor.external
+  return {
+    id: change.id,
+    workspaceId: change.workspaceId,
+    artifactId: change.artifactId,
+    sequence,
+    snapshotId,
+    snapshotHash: change.snapshotHash,
+    baseRevision: change.baseRevision,
+    resultRevision,
+    actorKind: change.actor.kind,
+    actorType: actor.actorType,
+    actorId: actor.actorId,
+    actorClientId: external?.clientId,
+    actorCredentialId: external?.credentialId,
+    actorEnvironment: external?.environment,
+    actorAuthenticationKind: external?.authenticationKind,
+    actorDelegatedUserId: external?.delegatedUserId,
+    actorDelegatedIdentityId: external?.delegatedIdentityId,
+    actorWorkspaceRole: external?.workspaceRole,
+    actorContextHash: external?.contextHash,
+    requestFingerprint: change.requestFingerprint,
+    changedAt: new Date(change.changedAt),
+  }
+}
+
+function hydrateChangeIntent(row: V2AssetRightsChange): Readonly<AssetRightsChangeIntent> {
+  const actor = row.actorKind === 'external'
+    ? {
+        kind: 'external' as const,
+        audit: createApiAccessAuditContext({
+          clientId: row.actorClientId ?? '',
+          credentialId: row.actorCredentialId ?? '',
+          workspaceId: row.workspaceId,
+          environment: row.actorEnvironment as 'sandbox' | 'production',
+          authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+          ...(row.actorDelegatedUserId ? { delegatedUserId: row.actorDelegatedUserId } : {}),
+          ...(row.actorDelegatedIdentityId
+            ? { delegatedIdentityId: row.actorDelegatedIdentityId }
+            : {}),
+          ...(row.actorWorkspaceRole
+            ? { workspaceRole: row.actorWorkspaceRole as WorkspaceMemberRole }
+            : {}),
+        }),
+      }
+    : {
+        kind: 'internal' as const,
+        actorType: row.actorType as 'api-client' | 'user' | 'system',
+        actorId: row.actorId,
+      }
+  const hydrated = createAssetRightsChangeIntent({
+    workspaceId: row.workspaceId,
+    artifactId: row.artifactId,
+    snapshotHash: row.snapshotHash,
+    baseRevision: row.baseRevision,
+    actor,
+    changedAt: row.changedAt.toISOString(),
+  })
+  const externalFieldsAreEmpty = [
+    row.actorClientId,
+    row.actorCredentialId,
+    row.actorEnvironment,
+    row.actorAuthenticationKind,
+    row.actorDelegatedUserId,
+    row.actorDelegatedIdentityId,
+    row.actorWorkspaceRole,
+    row.actorContextHash,
+  ].every((value) => value === null)
+  if (
+    row.id !== hydrated.id || row.requestFingerprint !== hydrated.requestFingerprint ||
+    row.actorType !== (actor.kind === 'external' ? 'api-client' : actor.actorType) ||
+    row.actorId !== (actor.kind === 'external' ? actor.audit.clientId : actor.actorId) ||
+    (actor.kind === 'external' && row.actorContextHash !== actor.audit.contextHash) ||
+    (actor.kind === 'internal' && !externalFieldsAreEmpty)
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored asset rights change failed integrity validation')
+  }
+  return hydrated
+}
+
+function assertChangeMatches(
+  row: V2AssetRightsChange | null,
+  expected: AssetRightsChangeIntent,
+  snapshotId: string,
+  sequence: number,
+  resultRevision: string,
+): void {
+  if (!row) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights revision is missing its audit change')
+  }
+  if (!changeMatches(row, expected, snapshotId, sequence, resultRevision)) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights replay does not match its audit change')
+  }
+}
+
+function changeMatches(
+  row: V2AssetRightsChange,
+  expected: AssetRightsChangeIntent,
+  snapshotId: string,
+  sequence: number,
+  resultRevision: string,
+): boolean {
+  const hydrated = hydrateChangeIntent(row)
+  return !(
+    hydrated.requestFingerprint !== expected.requestFingerprint ||
+    row.snapshotId !== snapshotId || row.sequence !== sequence ||
+    row.resultRevision !== resultRevision
+  )
+}
+
 export class PrismaAssetRightsRepository implements AssetRightsRepository {
   private readonly client: PrismaClient
 
@@ -213,9 +351,25 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
   ): Promise<AssetRightsRecord | null> {
     const artifact = await this.client.v2MediaArtifact.findFirst({
       where: { id: artifactId, workspaceId },
-      include: { currentRightsSnapshot: true },
+      include: {
+        currentRightsSnapshot: true,
+        rightsChanges: { orderBy: { sequence: 'desc' }, take: 1 },
+      },
     })
     if (!artifact) return null
+    if (artifact.rightsRevision > 0 && artifact.currentRightsSnapshot) {
+      const change = artifact.rightsChanges[0]
+      if (!change) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights revision is missing its audit change')
+      }
+      assertChangeMatches(
+        change,
+        hydrateChangeIntent(change),
+        artifact.currentRightsSnapshot.id,
+        artifact.rightsRevision,
+        assetRightsRevision(artifact.id, artifact.rightsRevision),
+      )
+    }
     return {
       artifactId: artifact.id,
       revision: assetRightsRevision(artifact.id, artifact.rightsRevision),
@@ -232,8 +386,26 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
     const uniqueIds = [...new Set(artifactIds)]
     const artifacts = await this.client.v2MediaArtifact.findMany({
       where: { workspaceId, id: { in: uniqueIds } },
-      include: { currentRightsSnapshot: true },
+      include: {
+        currentRightsSnapshot: true,
+        rightsChanges: { orderBy: { sequence: 'desc' }, take: 1 },
+      },
     })
+    for (const artifact of artifacts) {
+      if (artifact.rightsRevision > 0 && artifact.currentRightsSnapshot) {
+        const change = artifact.rightsChanges[0]
+        if (!change) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights revision is missing its audit change')
+        }
+        assertChangeMatches(
+          change,
+          hydrateChangeIntent(change),
+          artifact.currentRightsSnapshot.id,
+          artifact.rightsRevision,
+          assetRightsRevision(artifact.id, artifact.rightsRevision),
+        )
+      }
+    }
     return new Map(
       artifacts.map((artifact) => [
         artifact.id,
@@ -247,8 +419,17 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
   async setCurrent(
     prototype: AssetRightsSnapshot,
     baseRevision: string,
+    change: AssetRightsChangeIntent,
     serializationAttempt = 1,
   ): Promise<SetAssetRightsResult> {
+    if (
+      change.workspaceId !== prototype.workspaceId ||
+      change.artifactId !== prototype.artifactId ||
+      change.snapshotHash !== prototype.snapshotHash ||
+      change.baseRevision !== baseRevision
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Asset rights change does not match its snapshot')
+    }
     try {
       return await this.client.$transaction(async (transaction) => {
         const artifact = await transaction.v2MediaArtifact.findFirst({
@@ -270,11 +451,30 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
         })
         const currentRevision = assetRightsRevision(artifact.id, artifact.rightsRevision)
         if (existing && artifact.currentRightsSnapshotId === existing.id) {
-          return {
-            artifactId: artifact.id,
-            revision: currentRevision,
-            snapshot: hydrateAssetRights(existing),
-            replayed: true,
+          const replayChange = await transaction.v2AssetRightsChange.findUnique({
+            where: {
+              artifactId_sequence: {
+                artifactId: artifact.id,
+                sequence: artifact.rightsRevision,
+              },
+            },
+          })
+          if (
+            replayChange &&
+            changeMatches(
+              replayChange,
+              change,
+              existing.id,
+              artifact.rightsRevision,
+              currentRevision,
+            )
+          ) {
+            return {
+              artifactId: artifact.id,
+              revision: currentRevision,
+              snapshot: hydrateAssetRights(existing),
+              replayed: true,
+            }
           }
         }
         if (currentRevision !== baseRevision) {
@@ -319,42 +519,38 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
         }
         const nextRevisionNumber = artifact.rightsRevision + 1
 
-        if (existing) {
-          return {
-            artifactId: artifact.id,
-            revision: assetRightsRevision(artifact.id, nextRevisionNumber),
-            snapshot: hydrateAssetRights(existing),
-            replayed: false,
-          }
+        const selected = existing ?? await transaction.v2AssetRightsSnapshot.create({
+          data: rowData(createAssetRightsSnapshot({
+            id: prototype.id,
+            workspaceId: prototype.workspaceId,
+            artifactId: prototype.artifactId,
+            sequence: nextRevisionNumber,
+            draft: draftFromSnapshot(prototype),
+            createdBy: prototype.createdBy,
+            createdAt: prototype.createdAt,
+          }), nextRevisionNumber),
+        })
+        if (!existing) {
+          await transaction.v2MediaArtifact.update({
+            where: { id: artifact.id },
+            data: { currentRightsSnapshotId: selected.id },
+          })
         }
-
-        const snapshot = createAssetRightsSnapshot({
-          id: prototype.id,
-          workspaceId: prototype.workspaceId,
-          artifactId: prototype.artifactId,
-          sequence: nextRevisionNumber,
-          draft: draftFromSnapshot(prototype),
-          createdBy: prototype.createdBy,
-          createdAt: prototype.createdAt,
-        })
-        const created = await transaction.v2AssetRightsSnapshot.create({
-          data: rowData(snapshot, snapshot.sequence),
-        })
-        await transaction.v2MediaArtifact.update({
-          where: { id: artifact.id },
-          data: { currentRightsSnapshotId: created.id },
+        const resultRevision = assetRightsRevision(artifact.id, nextRevisionNumber)
+        await transaction.v2AssetRightsChange.create({
+          data: changeData(change, selected.id, nextRevisionNumber, resultRevision),
         })
         return {
           artifactId: artifact.id,
-          revision: assetRightsRevision(artifact.id, nextRevisionNumber),
-          snapshot: hydrateAssetRights(created),
+          revision: resultRevision,
+          snapshot: hydrateAssetRights(selected),
           replayed: false,
         }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isSerializationConflict(error)) {
         if (serializationAttempt < 3) {
-          return this.setCurrent(prototype, baseRevision, serializationAttempt + 1)
+          return this.setCurrent(prototype, baseRevision, change, serializationAttempt + 1)
         }
         throw new DomainError(
           'PERSISTENCE_CONFLICT',
@@ -379,6 +575,21 @@ export class PrismaAssetRightsRepository implements AssetRightsRepository {
           existing.workspaceId === prototype.workspaceId &&
           artifact?.currentRightsSnapshotId === existing.id
         ) {
+          const replayChange = await this.client.v2AssetRightsChange.findUnique({
+            where: {
+              artifactId_sequence: {
+                artifactId: prototype.artifactId,
+                sequence: artifact.rightsRevision,
+              },
+            },
+          })
+          assertChangeMatches(
+            replayChange,
+            change,
+            existing.id,
+            artifact.rightsRevision,
+            assetRightsRevision(artifact.id, artifact.rightsRevision),
+          )
           return {
             artifactId: prototype.artifactId,
             revision: assetRightsRevision(artifact.id, artifact.rightsRevision),

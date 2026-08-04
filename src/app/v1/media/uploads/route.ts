@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
 import { beginMediaUploadService } from '@/v2/application/begin-media-upload'
 import { DomainError } from '@/v2/domain/errors'
 import { createMediaTransferRepository } from '@/v2/infrastructure/repository-factory'
@@ -14,7 +13,6 @@ export async function POST(request: NextRequest) {
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'media:write')
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     let body: Record<string, unknown>
     try { body = await request.json() as Record<string, unknown> } catch { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') }
@@ -22,7 +20,7 @@ export async function POST(request: NextRequest) {
       throw new DomainError('INVALID_ARGUMENT', 'projectId, fileName, rightsConfirmed=true and kind=video are required')
     }
     const result = await beginMediaUploadService({ repository: createMediaTransferRepository() })({
-      workspaceId: actor.workspaceId, clientId: actor.clientId, idempotencyKey,
+      workspaceId: actor.workspaceId, actor, idempotencyKey,
       projectId: body.projectId, fileName: body.fileName, rightsConfirmed: true,
       kind: 'video', size: body.size as string,
       mimeType: body.mimeType as string, checksum: body.checksum as string,

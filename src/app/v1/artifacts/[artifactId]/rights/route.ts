@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { readAssetRightsService } from '@/v2/application/read-asset-rights'
-import { setAssetRightsService } from '@/v2/application/set-asset-rights'
+import { setExternalAssetRightsService } from '@/v2/application/set-asset-rights'
 import type { AssetRightsDraft, AssetRightsSnapshot } from '@/v2/domain/asset-rights'
 import { DomainError } from '@/v2/domain/errors'
 import { createAssetRightsRepository } from '@/v2/infrastructure/repository-factory'
@@ -135,7 +135,6 @@ export async function PUT(
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'artifacts:rights')
     const baseRevision = parseIfMatch(request)
     let body: unknown
     try {
@@ -144,7 +143,7 @@ export async function PUT(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     const { artifactId } = await context.params
-    const setRights = setAssetRightsService({
+    const setRights = setExternalAssetRightsService({
       repository: createAssetRightsRepository(),
       clock: () => new Date(),
       createId: () => `rights-${randomUUID()}`,
@@ -154,7 +153,7 @@ export async function PUT(
       artifactId,
       baseRevision,
       draft: parseDraft(body),
-      actor: actor.auditContext.actor,
+      actor,
     })
     return NextResponse.json(
       presentSuccess({

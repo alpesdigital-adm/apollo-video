@@ -219,6 +219,9 @@ test('authenticated public API manages projects, clients and artifact inspection
       where: { workspaceId: { in: workspaceIds } },
       data: { currentRightsSnapshotId: null },
     })
+    await client.v2AssetRightsChange.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2AssetRightsSnapshot.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })

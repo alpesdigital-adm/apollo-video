@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireScope } from '@/v2/application/authenticate-api-client'
 import { completeMediaUploadService } from '@/v2/application/manage-media-upload'
 import { enqueueMediaIngestService } from '@/v2/application/enqueue-media-ingest'
 import { createLocalMediaUploadStorageFromEnvironment } from '@/v2/infrastructure/media/local-media-upload-storage'
@@ -12,12 +11,12 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest, context: { params: Promise<{ uploadId: string }> }) {
   const requestId = resolveRequestId(request)
   try {
-    const actor = await authenticateExternalRequest(request); requireScope(actor, 'media:write')
+    const actor = await authenticateExternalRequest(request)
     const { uploadId } = await context.params
     const verifier = process.env.APOLLO_MEDIA_STORAGE_VERIFY_BASE_URL
       ? createMediaUploadVerifierFromEnvironment()
       : createLocalMediaUploadStorageFromEnvironment()
-    const result = await completeMediaUploadService({ repository: createMediaTransferRepository(), verifier })({ workspaceId: actor.workspaceId, clientId: actor.clientId, uploadId })
+    const result = await completeMediaUploadService({ repository: createMediaTransferRepository(), verifier })({ workspaceId: actor.workspaceId, actor, uploadId })
     const queued = await enqueueMediaIngestService({ operations: createPublicOperationRepository() })({
       upload: result.upload!,
       traceId: requestId,

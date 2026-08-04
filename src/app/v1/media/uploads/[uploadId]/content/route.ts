@@ -44,6 +44,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ upl
       uploadId,
       mode: authorization.mode,
       maxParts: authorization.maxParts,
+      sessionExpiresAt: authorization.expiresAt,
       ...(partNumber !== undefined ? { partNumber } : {}),
       mimeType,
       expectedSha256: checksum,

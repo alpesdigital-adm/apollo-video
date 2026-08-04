@@ -140,6 +140,12 @@ jobs:
       - name: Run media artifact persistence tests
         run: npm run test:integration:artifacts
 
+      - name: Run media transfer audit persistence tests
+        run: npm run test:integration:media-transfer-audit
+
+      - name: Run asset rights audit persistence tests
+        run: npm run test:integration:asset-rights-audit
+
       - name: Run durable operation persistence tests
         run: npm run test:integration:operations
 

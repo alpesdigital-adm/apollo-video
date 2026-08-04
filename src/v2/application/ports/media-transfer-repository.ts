@@ -1,9 +1,12 @@
 import type { MediaUpload, MediaUploadPart } from '../../domain/media-transfer.ts'
+import type { MediaUploadAuditEntry } from '../../domain/media-upload-audit-entry.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface BeginMediaUploadRecord {
   upload: Readonly<MediaUpload>
   idempotencyKey: string
   requestFingerprint: string
+  auditEntry: Readonly<MediaUploadAuditEntry>
 }
 
 export interface MediaTransferRepository {
@@ -16,13 +19,20 @@ export interface MediaTransferRepository {
     mode: 'single' | 'multipart'
     partSize?: string
     sessionExpiresAt: string
+    auditEntry: Readonly<MediaUploadAuditEntry>
   }): Promise<Readonly<MediaUpload>>
   listUploadParts(input: { workspaceId: string; clientId: string; uploadId: string }): Promise<readonly Readonly<MediaUploadPart>[]>
-  recordUploadPart(input: { workspaceId: string; clientId: string; part: Readonly<MediaUploadPart> }): Promise<Readonly<MediaUploadPart>>
-  markUploadVerified(input: {
+  recordUploadPart(input: { workspaceId: string; clientId: string; part: Readonly<MediaUploadPart>; auditEntry: Readonly<MediaUploadAuditEntry> }): Promise<Readonly<MediaUploadPart>>
+  markUploadVerifiedOrReplay(input: {
     workspaceId: string; clientId: string; uploadId: string; actualByteSize: string; actualSha256: string; verifiedAt: string
-  }): Promise<Readonly<MediaUpload>>
-  markUploadAborted(input: { workspaceId: string; clientId: string; uploadId: string }): Promise<Readonly<MediaUpload>>
+    auditEntry: Readonly<MediaUploadAuditEntry>
+  }): Promise<Readonly<{ upload: Readonly<MediaUpload>; replayed: boolean }>>
+  markUploadAbortedOrReplay(input: {
+    workspaceId: string; clientId: string; uploadId: string; auditEntry: Readonly<MediaUploadAuditEntry>
+  }): Promise<Readonly<{ upload: Readonly<MediaUpload>; replayed: boolean }>>
+  findCurrentUploadSessionAudit(input: {
+    workspaceId: string; clientId: string; uploadId: string; sessionExpiresAt: string
+  }): Promise<Readonly<ApiAccessAuditContext> | undefined>
 }
 
 export interface MediaUploadVerifier {

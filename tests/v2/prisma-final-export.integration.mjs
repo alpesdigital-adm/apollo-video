@@ -636,6 +636,14 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     })
     const grantPayload = await grantResponse.json()
     assert.equal(grantResponse.status, 201, JSON.stringify(grantPayload))
+    const persistedGrant = await client.v2MediaDownloadGrant.findUnique({
+      where: { id: grantPayload.data.grant.id },
+    })
+    assert.equal(persistedGrant?.issuerCredentialId, issued.credential.id)
+    assert.equal(persistedGrant?.issuerEnvironment, 'production')
+    assert.equal(persistedGrant?.issuerAuthenticationKind, 'bearer')
+    assert.match(persistedGrant?.issuerContextHash ?? '', /^[a-f0-9]{64}$/)
+    assert.equal(persistedGrant?.revokerContextHash, null)
     const rangeResponse = await fetch(grantPayload.data.downloadUrl, {
       headers: { range: 'bytes=0-99' },
     })
@@ -680,6 +688,22 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
     tamperedUrl.searchParams.set('token', `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`)
     const tamperedResponse = await fetch(tamperedUrl)
     assert.equal(tamperedResponse.status, 409)
+
+    const revokeResponse = await fetch(
+      `${baseUrl}/v1/media/download-grants/${grantPayload.data.grant.id}/revoke`,
+      { method: 'POST', headers: { authorization } },
+    )
+    const revokePayload = await revokeResponse.json()
+    assert.equal(revokeResponse.status, 200, JSON.stringify(revokePayload))
+    assert.equal(revokePayload.data.grant.status, 'revoked')
+    const revokedGrant = await client.v2MediaDownloadGrant.findUnique({
+      where: { id: grantPayload.data.grant.id },
+    })
+    assert.equal(revokedGrant?.revokerCredentialId, issued.credential.id)
+    assert.equal(revokedGrant?.revokerEnvironment, 'production')
+    assert.equal(revokedGrant?.revokerAuthenticationKind, 'bearer')
+    assert.match(revokedGrant?.revokerContextHash ?? '', /^[a-f0-9]{64}$/)
+    assert.equal((await fetch(grantPayload.data.downloadUrl)).status, 409)
   } finally {
     if (server && server.exitCode === null) {
       server.kill()

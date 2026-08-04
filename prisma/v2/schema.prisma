@@ -30,6 +30,7 @@ model V2Workspace {
   mediaArtifacts                         V2MediaArtifact[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
+  mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
   projectMediaAssets                     V2ProjectMediaAsset[]
   mediaTranscripts                       V2MediaTranscript[]
   mediaIngestOperations                  V2MediaIngestOperation[]
@@ -42,6 +43,7 @@ model V2Workspace {
   recipeParameters                       V2RecipeParameterPayload[]
   renderInputs                           V2RenderInputPayload[]
   rightsSnapshots                        V2AssetRightsSnapshot[]
+  assetRightsChanges                     V2AssetRightsChange[]
   materializations                       V2MaterializationAuthorization[]
   assetUseDecisions                      V2AssetUseDecision[]
   publicOperations                       V2PublicOperation[]
@@ -177,8 +179,10 @@ model V2ApiClient {
   uiSessions                      V2UiSession[]
   workspaceUiPrincipal            V2WorkspaceUiPrincipal?
   mediaUploads                    V2MediaUpload[]
+  authoredMediaUploadAuditEntries V2MediaUploadAuditEntry[] @relation("MediaUploadAuditActor")
   mediaDownloadGrants             V2MediaDownloadGrant[]
   mediaArtifactLifecycleTransitions V2MediaArtifactLifecycleTransition[] @relation("MediaArtifactLifecycleTransitionActor")
+  authoredAssetRightsChanges        V2AssetRightsChange[]                @relation("AssetRightsChangeExternalActor")
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions     V2WebhookSubscription[]          @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions            V2ProxyReviewDecision[]
@@ -369,6 +373,7 @@ model V2MediaUpload {
   sessionMode        String?   @db.VarChar(16)
   partSize           BigInt?
   sessionExpiresAt   DateTime? @db.Timestamptz(3)
+  sessionAuditEntryId String?  @db.Uuid
   actualSha256       String?   @db.Char(64)
   actualByteSize     BigInt?
   verifiedAt         DateTime? @db.Timestamptz(3)
@@ -380,6 +385,7 @@ model V2MediaUpload {
   client          V2ApiClient             @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   project         V2Project?              @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   parts           V2MediaUploadPart[]
+  auditEntries    V2MediaUploadAuditEntry[]
   projectAssets   V2ProjectMediaAsset[]
   ingestOperation V2MediaIngestOperation?
 
@@ -389,6 +395,34 @@ model V2MediaUpload {
   @@index([workspaceId, status, expiresAt])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@map("media_uploads")
+}
+
+model V2MediaUploadAuditEntry {
+  id                      String   @id @db.Uuid
+  workspaceId             String   @db.VarChar(128)
+  uploadId                String   @db.Uuid
+  action                  String   @db.VarChar(24)
+  partNumber              Int?
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  requestFingerprint      String   @db.Char(64)
+  occurredAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  upload    V2MediaUpload @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  actor     V2ApiClient   @relation("MediaUploadAuditActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([uploadId, action, requestFingerprint])
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)])
+  @@index([workspaceId, uploadId, action, occurredAt(sort: Desc)])
+  @@map("media_upload_audit_entries")
 }
 
 model V2MediaUploadPart {
@@ -982,6 +1016,7 @@ model V2MediaArtifact {
   manifests                    V2MediaArtifactManifest[]
   lineageUses                  V2MediaArtifactLineage[]                  @relation("MediaLineageSource")
   rightsSnapshots              V2AssetRightsSnapshot[]                   @relation("AssetRightsSnapshots")
+  rightsChanges                V2AssetRightsChange[]
   currentRightsSnapshot        V2AssetRightsSnapshot?                    @relation("CurrentAssetRights", fields: [currentRightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   consentEvidenceFor           V2AssetRightsSnapshot[]                   @relation("ConsentDocument")
   materializationTargets       V2MaterializationAuthorization[]          @relation("MaterializationTarget")
@@ -1071,10 +1106,24 @@ model V2MediaDownloadGrant {
   tokenHash          String    @db.Char(64)
   idempotencyKey     String    @db.VarChar(128)
   requestFingerprint String    @db.Char(64)
+  issuerCredentialId String    @db.VarChar(128)
+  issuerEnvironment  String    @db.VarChar(16)
+  issuerAuthenticationKind String @db.VarChar(16)
+  issuerContextHash  String    @db.Char(64)
+  issuerDelegatedUserId String? @db.VarChar(128)
+  issuerDelegatedIdentityId String? @db.VarChar(128)
+  issuerWorkspaceRole String?  @db.VarChar(32)
   status             String    @default("active") @db.VarChar(16)
   expiresAt          DateTime  @db.Timestamptz(3)
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   revokedAt          DateTime? @db.Timestamptz(3)
+  revokerCredentialId String?  @db.VarChar(128)
+  revokerEnvironment String?   @db.VarChar(16)
+  revokerAuthenticationKind String? @db.VarChar(16)
+  revokerContextHash String?   @db.Char(64)
+  revokerDelegatedUserId String? @db.VarChar(128)
+  revokerDelegatedIdentityId String? @db.VarChar(128)
+  revokerWorkspaceRole String? @db.VarChar(32)
 
   workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   client    V2ApiClient     @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -1082,6 +1131,8 @@ model V2MediaDownloadGrant {
 
   @@unique([workspaceId, clientId, idempotencyKey])
   @@index([workspaceId, clientId, status, expiresAt])
+  @@index([workspaceId, issuerContextHash, createdAt(sort: Desc)])
+  @@index([workspaceId, revokerContextHash, revokedAt(sort: Desc)])
   @@index([workspaceId, artifactId, status])
   @@map("media_download_grants")
 }
@@ -1627,6 +1678,7 @@ model V2AssetRightsSnapshot {
   sourceCleanupPlans         V2SourceCleanupPlan[]         @relation("SourceCleanupSourceRights")
   sourceCleanupSourceReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewSourceRights")
   sourceCleanupOutputReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewOutputRights")
+  changes                    V2AssetRightsChange[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -1635,6 +1687,41 @@ model V2AssetRightsSnapshot {
   @@index([workspaceId, consentStatus, consentExpiresAt])
   @@index([workspaceId, consentDocumentArtifactId])
   @@map("asset_rights_snapshots")
+}
+
+model V2AssetRightsChange {
+  id                       String   @id @db.VarChar(80)
+  workspaceId              String   @db.VarChar(128)
+  artifactId               String   @db.VarChar(128)
+  sequence                 Int
+  snapshotId               String   @db.VarChar(128)
+  snapshotHash             String   @db.Char(64)
+  baseRevision             String   @db.Char(64)
+  resultRevision           String   @db.Char(64)
+  actorKind                String   @db.VarChar(16)
+  actorType                String   @db.VarChar(32)
+  actorId                  String   @db.VarChar(128)
+  actorClientId            String?  @db.VarChar(80)
+  actorCredentialId        String?  @db.VarChar(80)
+  actorEnvironment         String?  @db.VarChar(16)
+  actorAuthenticationKind  String?  @db.VarChar(16)
+  actorDelegatedUserId     String?  @db.VarChar(128)
+  actorDelegatedIdentityId String?  @db.VarChar(128)
+  actorWorkspaceRole       String?  @db.VarChar(32)
+  actorContextHash         String?  @db.Char(64)
+  requestFingerprint       String   @db.Char(64)
+  changedAt                DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact     V2MediaArtifact       @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  snapshot     V2AssetRightsSnapshot @relation(fields: [snapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  externalActor V2ApiClient?         @relation("AssetRightsChangeExternalActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([artifactId, sequence])
+  @@index([workspaceId, artifactId, changedAt(sort: Desc)])
+  @@index([workspaceId, actorClientId, changedAt(sort: Desc)])
+  @@map("asset_rights_changes")
 }
 
 model V2MaterializationAuthorization {

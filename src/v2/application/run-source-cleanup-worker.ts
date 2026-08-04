@@ -5,6 +5,7 @@ import {
   createAssetRightsSnapshot,
   evaluateAssetUse,
 } from '../domain/asset-rights.ts'
+import { createAssetRightsChangeIntent } from '../domain/asset-rights-change.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import {
@@ -487,6 +488,18 @@ export function runNextSourceCleanupOperationService(dependencies: {
       const outputRights = await dependencies.rights.setCurrent(
         outputRightsPrototype,
         assetRightsRevision(context.outputArtifactId, 0),
+        createAssetRightsChangeIntent({
+          workspaceId: operation.workspaceId,
+          artifactId: context.outputArtifactId,
+          snapshotHash: outputRightsPrototype.snapshotHash,
+          baseRevision: assetRightsRevision(context.outputArtifactId, 0),
+          actor: {
+            kind: 'internal',
+            actorType: 'system',
+            actorId: 'apollo-source-cleanup',
+          },
+          changedAt: cleanup.plan.createdAt,
+        }),
       )
       const outputRightsDecision = evaluateAssetUse(
         outputRights.snapshot,

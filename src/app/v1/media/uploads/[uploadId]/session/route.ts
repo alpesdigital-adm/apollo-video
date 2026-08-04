@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
 import { issueMediaUploadSessionService } from '@/v2/application/issue-media-upload-session'
 import {
   createMediaTransferRepository,
@@ -16,12 +15,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ up
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'media:write')
     const { uploadId } = await context.params
     const result = await issueMediaUploadSessionService({
       repository: createMediaTransferRepository(),
       signer: createMediaUploadSessionSignerFromEnvironment(),
-    })({ workspaceId: actor.workspaceId, clientId: actor.clientId, uploadId })
+    })({ workspaceId: actor.workspaceId, actor, uploadId })
     return NextResponse.json(presentSuccess({
       uploadId: result.upload.id,
       session: result.session,

@@ -1,4 +1,5 @@
 import type { AssetRightsSnapshot } from '../../domain/asset-rights.ts'
+import type { AssetRightsChangeIntent } from '../../domain/asset-rights-change.ts'
 
 export interface AssetRightsRecord {
   artifactId: string
@@ -19,5 +20,9 @@ export interface AssetRightsRepository {
     workspaceId: string,
     artifactIds: readonly string[],
   ): Promise<ReadonlyMap<string, AssetRightsSnapshot | null>>
-  setCurrent(snapshot: AssetRightsSnapshot, baseRevision: string): Promise<SetAssetRightsResult>
+  setCurrent(
+    snapshot: AssetRightsSnapshot,
+    baseRevision: string,
+    change: AssetRightsChangeIntent,
+  ): Promise<SetAssetRightsResult>
 }

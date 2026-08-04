@@ -1,5 +1,10 @@
 import { assertDomain } from '../domain/errors.ts'
 import type { MediaTransferRepository, MediaUploadSessionSigner } from './ports/media-transfer-repository.ts'
+import { randomUUID } from 'node:crypto'
+import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import { authorizeMediaUploadActor } from './secure-media-upload.ts'
+import { calculateVersionHash } from './version-hash.ts'
+import { createMediaUploadAuditEntry } from '../domain/media-upload-audit-entry.ts'
 
 const SINGLE_LIMIT = BigInt(100 * 1024 * 1024)
 const PART_SIZE = BigInt(64 * 1024 * 1024)
@@ -9,11 +14,15 @@ export function issueMediaUploadSessionService(dependencies: {
   signer: MediaUploadSessionSigner
   clock?: () => Date
   signedTtlMs?: number
+  createId?: () => string
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const ttl = dependencies.signedTtlMs ?? 10 * 60 * 1000
-  return async function issue(input: { workspaceId: string; clientId: string; uploadId: string }) {
-    const upload = await dependencies.repository.findUpload(input)
+  const createId = dependencies.createId ?? randomUUID
+  return async function issue(input: { workspaceId: string; actor: AuthenticatedExternalActor; uploadId: string }) {
+    const audit = authorizeMediaUploadActor(input.workspaceId, input.actor)
+    const identity = { workspaceId: input.workspaceId, clientId: audit.clientId, uploadId: input.uploadId }
+    const upload = await dependencies.repository.findUpload(identity)
     assertDomain(Boolean(upload), 'MEDIA_UPLOAD_NOT_FOUND', 'Upload was not found')
     const now = clock()
     assertDomain(new Date(upload!.expiresAt) > now, 'MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload intent has expired')
@@ -24,10 +33,19 @@ export function issueMediaUploadSessionService(dependencies: {
     const mode = size <= SINGLE_LIMIT ? 'single' as const : 'multipart' as const
     const maxParts = mode === 'single' ? 1 : Number((size + PART_SIZE - BigInt(1)) / PART_SIZE)
     assertDomain(maxParts <= 10_000, 'INVALID_ARGUMENT', 'Upload requires too many multipart parts')
-    const updated = await dependencies.repository.markSessionIssued({
-      ...input, mode, ...(mode === 'multipart' ? { partSize: PART_SIZE.toString() } : {}), sessionExpiresAt: expiresAt,
+    const requestFingerprint = calculateVersionHash({
+      action: 'media-upload.session-issue/v1', uploadId: input.uploadId,
+      mode, partSize: mode === 'multipart' ? PART_SIZE.toString() : null,
+      sessionExpiresAt: expiresAt, actorContextHash: audit.contextHash,
     })
-    const signed = dependencies.signer.sign({ ...input, mode, maxParts, expiresAt })
+    const updated = await dependencies.repository.markSessionIssued({
+      ...identity, mode, ...(mode === 'multipart' ? { partSize: PART_SIZE.toString() } : {}), sessionExpiresAt: expiresAt,
+      auditEntry: createMediaUploadAuditEntry({
+        id: createId(), workspaceId: input.workspaceId, uploadId: input.uploadId,
+        action: 'session-issue', audit, requestFingerprint, occurredAt: now.toISOString(),
+      }),
+    })
+    const signed = dependencies.signer.sign({ ...identity, mode, maxParts, expiresAt })
     return Object.freeze({
       upload: updated,
       session: Object.freeze({

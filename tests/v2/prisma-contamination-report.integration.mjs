@@ -113,6 +113,9 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
     assetRightsRevision,
     createAssetRightsSnapshot,
   } = await import('../../src/v2/domain/asset-rights.ts')
+  const { createAssetRightsChangeIntent } = await import(
+    '../../src/v2/domain/asset-rights-change.ts'
+  )
   const {
     SPEECH_SEGMENT_EXTRACTION_POLICY_VERSION,
   } = await import(
@@ -342,6 +345,18 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
     await new PrismaAssetRightsRepository(client).setCurrent(
       sourceRights,
       assetRightsRevision(artifactId, 0),
+      createAssetRightsChangeIntent({
+        workspaceId,
+        artifactId,
+        snapshotHash: sourceRights.snapshotHash,
+        baseRevision: assetRightsRevision(artifactId, 0),
+        actor: {
+          kind: 'internal',
+          actorType: 'api-client',
+          actorId: issued.client.id,
+        },
+        changedAt: createdAt.toISOString(),
+      }),
     )
     await client.v2ProjectMediaAsset.create({
       data: {

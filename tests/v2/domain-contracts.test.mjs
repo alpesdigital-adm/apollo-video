@@ -61,6 +61,7 @@ import {
   createAssetRightsSnapshot,
   evaluateAssetUse,
 } from '../../src/v2/domain/asset-rights.ts'
+import { createAssetRightsChangeIntent } from '../../src/v2/domain/asset-rights-change.ts'
 import { authorizeRenderInputMaterializationService } from '../../src/v2/application/authorize-render-input-materialization.ts'
 import { materializeAuthorizedRenderInputService } from '../../src/v2/application/materialize-authorized-render-input.ts'
 import { createMaterializationAuthorization } from '../../src/v2/domain/materialization-authorization.ts'
@@ -1607,7 +1608,18 @@ test('asset rights persistence retries serialization conflicts before failing ex
   })
 
   await assert.rejects(
-    () => repository.setCurrent(prototype, 'a'.repeat(64)),
+    () => repository.setCurrent(
+      prototype,
+      'a'.repeat(64),
+      createAssetRightsChangeIntent({
+        workspaceId: prototype.workspaceId,
+        artifactId: prototype.artifactId,
+        snapshotHash: prototype.snapshotHash,
+        baseRevision: 'a'.repeat(64),
+        actor: { kind: 'internal', actorType: 'api-client', actorId: 'client-1' },
+        changedAt: prototype.createdAt,
+      }),
+    ),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)
