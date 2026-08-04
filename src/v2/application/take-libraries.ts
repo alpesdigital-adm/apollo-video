@@ -12,6 +12,11 @@ import {
 import type {
   TakeLibraryRepository,
 } from './ports/take-library-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -33,17 +38,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Take library requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function now(clock: () => Date): string {
@@ -134,7 +128,7 @@ export interface CreateTakeLibraryRequest {
   alignmentId: string
   expectedAlignmentRunHash: string
   evaluations: readonly TakeSourceEvaluationInput[]
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -154,7 +148,10 @@ export function createTakeLibraryService(dependencies: {
       'INVALID_ARGUMENT',
       'expectedAlignmentRunHash is invalid',
     )
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Take library actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const supplied = evaluations(request.evaluations)
     const requestFingerprint = calculateCanonicalHash({
@@ -164,11 +161,12 @@ export function createTakeLibraryService(dependencies: {
       alignmentId,
       expectedAlignmentRunHash: request.expectedAlignmentRunHash,
       evaluations: supplied,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (existing) {
@@ -196,6 +194,7 @@ export function createTakeLibraryService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }
@@ -264,7 +263,7 @@ export function selectTakeService(dependencies: {
     protect: boolean
     replacedProtectedTakeId?: string
     note?: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -272,7 +271,10 @@ export function selectTakeService(dependencies: {
     const runId = identity(request.runId, 'takeLibraryId')
     const groupId = identity(request.groupId, 'groupId')
     const takeId = identity(request.takeId, 'takeId')
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Take selection actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     assertDomain(
       Number.isSafeInteger(request.expectedRevision) &&
@@ -300,11 +302,12 @@ export function selectTakeService(dependencies: {
           }
         : {}),
       ...(request.note ? { note: request.note } : {}),
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findSelectionReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (existing) {
@@ -345,6 +348,7 @@ export function selectTakeService(dependencies: {
       selection: result.selection,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

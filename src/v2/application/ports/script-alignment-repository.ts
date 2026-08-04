@@ -4,11 +4,13 @@ import type {
   ScriptBlockRole,
   ScriptTranscriptSource,
 } from '../../domain/script-alignment.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ScriptAlignmentCreateRecord {
   run: Readonly<ScriptAlignmentRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ScriptAlignmentReviewRecord {
@@ -17,6 +19,7 @@ export interface ScriptAlignmentReviewRecord {
   review: Readonly<ScriptAlignmentReview>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ScriptAlignmentReplay {
@@ -46,6 +49,7 @@ export interface ScriptAlignmentRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ScriptAlignmentReplay> | null>
   create(
@@ -68,6 +72,7 @@ export interface ScriptAlignmentRepository {
   findReviewReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ScriptAlignmentReplay> | null>
   persistReview(

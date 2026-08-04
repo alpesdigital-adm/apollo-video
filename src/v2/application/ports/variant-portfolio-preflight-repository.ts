@@ -6,11 +6,13 @@ import type {
   VariantPortfolioPolicy,
   VariantPortfolioPreflightRun,
 } from '../../domain/variant-portfolio-preflight.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface VariantPortfolioPreflightCreateRecord {
   run: Readonly<VariantPortfolioPreflightRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface VariantPortfolioPreflightReplay {
@@ -48,6 +50,7 @@ export interface VariantPortfolioPreflightRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<VariantPortfolioPreflightReplay> | null>
   create(

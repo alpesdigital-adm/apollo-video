@@ -5,17 +5,20 @@ import type {
   BatchEditPolicy,
   BatchEditPreflightRun,
 } from '../../domain/batch-edit.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface BatchEditPreflightRecord {
   run: Readonly<BatchEditPreflightRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface BatchEditCommandRecord {
   command: Readonly<BatchEditCommand>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface BatchEditPreflightReplay {
@@ -71,6 +74,7 @@ export interface BatchEditRepository {
   findPreflightReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<BatchEditPreflightReplay> | null>
   createPreflight(
@@ -93,6 +97,7 @@ export interface BatchEditRepository {
   findCommandReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<BatchEditCommandReplay> | null>
   commit(

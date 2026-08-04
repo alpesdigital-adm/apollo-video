@@ -23,6 +23,7 @@ import {
   hydrateStoredMediaTranscript,
 } from './speech-segment-catalog-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
   return typeof error === 'object' &&
@@ -53,6 +54,7 @@ function canonicalJson<T>(value: string, field: string): Readonly<T> {
 export function hydrateRunRow(
   row: V2ScriptAlignmentRun,
 ): Readonly<ScriptAlignmentRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const document = canonicalJson<ScriptAlignmentRun['document']>(
     row.documentJson,
     'script alignment document',
@@ -117,6 +119,7 @@ function runData(record: Readonly<ScriptAlignmentCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(record.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
     updatedAt: new Date(run.updatedAt),
   }
@@ -336,6 +339,7 @@ implements ScriptAlignmentRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ScriptAlignmentReplay> | null> {
     const row = await this.prisma.v2ScriptAlignmentRun.findFirst({
@@ -345,12 +349,16 @@ implements ScriptAlignmentRepository {
         idempotencyKey: input.idempotencyKey,
       },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateRunRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -370,6 +378,9 @@ implements ScriptAlignmentRepository {
           },
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -400,6 +411,7 @@ implements ScriptAlignmentRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
@@ -495,6 +507,7 @@ implements ScriptAlignmentRepository {
   async findReviewReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ScriptAlignmentReplay> | null> {
     const row = await this.prisma.v2ScriptAlignmentReview.findFirst({
@@ -507,9 +520,21 @@ implements ScriptAlignmentRepository {
         requestFingerprint: true,
         resultRunJson: true,
         resultRunHash: true,
+        actorClientId: true,
+        actorCredentialId: true,
+        actorEnvironment: true,
+        actorAuthenticationKind: true,
+        actorContextHash: true,
+        delegatedUserId: true,
+        delegatedIdentityId: true,
+        workspaceRole: true,
+        workspaceId: true,
       },
     })
     if (!row) return null
+    if (hydrateBatchActorAudit(row, row.actorClientId).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+    }
     const run = hydrateScriptAlignmentRun(
       canonicalJson<ScriptAlignmentRun>(
         row.resultRunJson,
@@ -547,9 +572,21 @@ implements ScriptAlignmentRepository {
             requestFingerprint: true,
             resultRunJson: true,
             resultRunHash: true,
+            actorClientId: true,
+            actorCredentialId: true,
+            actorEnvironment: true,
+            actorAuthenticationKind: true,
+            actorContextHash: true,
+            delegatedUserId: true,
+            delegatedIdentityId: true,
+            workspaceRole: true,
+            workspaceId: true,
           },
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.actorClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -656,6 +693,11 @@ implements ScriptAlignmentRepository {
             requestFingerprint: record.requestFingerprint,
             idempotencyKey: record.idempotencyKey,
             actorClientId: record.review.actorClientId,
+            ...batchActorAuditData(
+              record.authenticationAudit,
+              record.resultingRun.workspaceId,
+              record.review.actorClientId,
+            ),
             createdAt: new Date(record.review.createdAt),
           },
         })
@@ -678,6 +720,7 @@ implements ScriptAlignmentRepository {
         const replay = await this.findReviewReplay({
           workspaceId: record.resultingRun.workspaceId,
           actorClientId: record.review.actorClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

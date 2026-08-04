@@ -107,6 +107,8 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
   } = await import('../../src/v2/domain/production-batch.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
+  const { createApiAccessAuditContext } =
+    await import('../../src/v2/domain/api-access-control.ts')
   const { PrismaApiClientRepository } =
     await import(
       '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -154,6 +156,19 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
+    const expectedAuthenticationAudit = createApiAccessAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      authenticationKind: 'bearer',
+    })
+    const storedAuthenticationAudit = {
+      actorCredentialId: expectedAuthenticationAudit.credentialId,
+      actorEnvironment: expectedAuthenticationAudit.environment,
+      actorAuthenticationKind: expectedAuthenticationAudit.authenticationKind,
+      actorContextHash: expectedAuthenticationAudit.contextHash,
+    }
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -278,6 +293,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
         requestFingerprint: '2'.repeat(64),
         idempotencyKey: `take-e2e-batch-${suffix}`,
         createdByClientId: productionBatch.createdBy.id,
+        ...storedAuthenticationAudit,
         createdAt,
         updatedAt: createdAt,
       },
@@ -405,6 +421,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
         }),
         idempotencyKey: `take-e2e-alignment-${suffix}`,
         createdByClientId: issued.client.id,
+        ...storedAuthenticationAudit,
         createdAt,
         updatedAt: createdAt,
       },
@@ -729,6 +746,14 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       }),
       2,
     )
+    for (const row of [
+      ...(await client.v2TakeLibraryRun.findMany({ where: { workspaceId } })),
+      ...(await client.v2TakeLibrarySelection.findMany({ where: { workspaceId } })),
+    ]) {
+      assert.equal(row.actorCredentialId, expectedAuthenticationAudit.credentialId)
+      assert.equal(row.actorContextHash, expectedAuthenticationAudit.contextHash)
+      assert.equal(row.actorAuthenticationKind, 'bearer')
+    }
     await assert.rejects(
       client.$executeRaw(
         Prisma.sql`

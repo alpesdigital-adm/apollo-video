@@ -5,6 +5,7 @@ import {
   commitBatchEditService,
   createBatchEditPreflightService,
 } from '../../src/v2/application/batch-edits.ts'
+import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   createBatchEditCommand,
   createBatchEditItemState,
@@ -16,6 +17,7 @@ import {
 import {
   HmacPreflightCommitTokenIssuer,
 } from '../../src/v2/infrastructure/security/preflight-commit-token.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from '../../src/v2/infrastructure/prisma/batch-actor-audit.ts'
 
 const workspaceId = 'batch-edit-workspace'
 const batchId = 'batch-edit-batch'
@@ -23,6 +25,49 @@ const projectId = 'batch-edit-project'
 const clientId = 'batch-edit-client'
 const createdAt = '2026-07-28T12:40:00.000Z'
 const definitionHash = 'a'.repeat(64)
+
+function authenticatedActor(credentialId = 'batch-edit-credential') {
+  const auditContext = createExternalAuditContext({
+    clientId,
+    credentialId,
+    workspaceId,
+    environment: 'production',
+  })
+  return Object.freeze({
+    clientId,
+    credentialId,
+    workspaceId,
+    environment: 'production',
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+}
+
+test('T-FR-242 batch audit tuple is canonical and fails closed on missing or tampered persistence', () => {
+  const actor = authenticatedActor()
+  const audit = materializeActorAuditContext(actor)
+  const stored = {
+    workspaceId,
+    ...batchActorAuditData(audit, workspaceId, clientId),
+    delegatedUserId: null,
+    delegatedIdentityId: null,
+    workspaceRole: null,
+  }
+  assert.deepEqual(hydrateBatchActorAudit(stored, clientId), audit)
+  assert.throws(
+    () => hydrateBatchActorAudit({ ...stored, actorContextHash: '0'.repeat(64) }, clientId),
+    /audit hash is inconsistent/,
+  )
+  assert.throws(
+    () => hydrateBatchActorAudit({ ...stored, actorCredentialId: null }, clientId),
+    /predates credential-bound audit/,
+  )
+})
 
 function policy(overrides = {}) {
   return createBatchEditPolicy({
@@ -395,13 +440,17 @@ test('T-FR-086 application service binds signed commit, actor, scope and idempot
       type: 'subtitle-style',
       valueRef: 'subtitle-editorial-v3',
     },
-    actor: { type: 'api-client', id: clientId },
+    actor: authenticatedActor(),
     idempotencyKey: 'batch-edit-preflight-idempotency',
   }
   const preview = await createPreflight(request)
   assert.equal(preview.replayed, false)
   assert.equal(preview.run.status, 'ready')
   assert.ok(preview.commitToken)
+  assert.equal(
+    preflights.get(preview.run.id).authenticationAudit.credentialId,
+    'batch-edit-credential',
+  )
   assert.deepEqual(preview.run.scope.recipeIds, [
     'recipe-one',
     'recipe-two',
@@ -412,6 +461,13 @@ test('T-FR-086 application service binds signed commit, actor, scope and idempot
   assert.equal(previewReplay.replayed, true)
   assert.equal(previewReplay.run.preflightHash, preview.run.preflightHash)
   assert.equal(previewReplay.commitToken, preview.commitToken)
+  await assert.rejects(
+    () => createPreflight({
+      ...request,
+      actor: authenticatedActor('batch-edit-other-credential'),
+    }),
+    /different batch edit preflight request/,
+  )
 
   const commit = commitBatchEditService({
     repository,
@@ -427,7 +483,7 @@ test('T-FR-086 application service binds signed commit, actor, scope and idempot
     expectedPreflightHash: preview.run.preflightHash,
     expectedScopeHash: preview.run.scope.scopeHash,
     commitToken: preview.commitToken,
-    actor: { type: 'api-client', id: clientId },
+    actor: authenticatedActor(),
     idempotencyKey: 'batch-edit-command-idempotency',
   }
   await assert.rejects(

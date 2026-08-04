@@ -4,11 +4,13 @@ import type {
 import type {
   VariantRecipeRun,
 } from '../../domain/variant-recipe.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface VariantRecipeCreateRecord {
   run: Readonly<VariantRecipeRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface VariantRecipeReplay {
@@ -36,6 +38,7 @@ export interface VariantRecipeRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<VariantRecipeReplay> | null>
   create(

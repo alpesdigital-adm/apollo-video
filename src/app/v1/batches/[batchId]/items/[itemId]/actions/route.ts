@@ -56,7 +56,7 @@ export async function POST(
       batchId,
       itemId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

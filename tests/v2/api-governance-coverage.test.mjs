@@ -57,6 +57,46 @@ test('T-FR-242 every route uses the authenticated audit actor instead of rebuild
   assert.ok(fullActorBindings >= 4, `expected full authenticated actors, found ${fullActorBindings}`)
 })
 
+test('T-FR-242 every batch mutation binds the full authentication context through persistence', () => {
+  const applicationFiles = [
+    'production-batches.ts',
+    'batch-partial-retries.ts',
+    'script-alignments.ts',
+    'take-libraries.ts',
+    'compatibility-graphs.ts',
+    'variant-recipes.ts',
+    'variant-portfolio-preflights.ts',
+    'batch-edits.ts',
+  ]
+  for (const relative of applicationFiles) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /type AuthenticatedExternalActor/)
+    assert.match(source, /requireScope\(request\.actor, 'projects:write'\)/)
+    assert.match(source, /materializeActorAuditContext\(request\.actor\)/)
+    assert.match(source, /actorContextHash:\s*authenticationAudit\.contextHash/)
+    assert.match(source, /authenticationAudit[,\s]/)
+  }
+  for (const relative of [
+    'production-batch-repository.ts',
+    'script-alignment-repository.ts',
+    'take-library-repository.ts',
+    'compatibility-graph-repository.ts',
+    'variant-recipe-repository.ts',
+    'variant-portfolio-preflight-repository.ts',
+    'batch-edit-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /batchActorAuditData/)
+    assert.match(source, /hydrateBatchActorAudit/)
+  }
+  const routesRoot = join(root, 'src/app/v1/batches')
+  for (const relative of readdirSync(routesRoot, { recursive: true }).map(String)) {
+    if (!relative.endsWith('route.ts')) continue
+    const source = readFileSync(join(routesRoot, relative), 'utf8')
+    assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
+  }
+})
+
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {
   const routesRoot = join(root, 'src/app/v1')
   const applicationRoot = join(root, 'src/v2/application')

@@ -70,6 +70,8 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
     await import('../../src/v2/domain/asset-rights.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } =
+    await import('../../src/v2/application/authenticate-api-client.ts')
   const { setAssetRightsService } =
     await import('../../src/v2/application/set-asset-rights.ts')
   const { PrismaApiClientRepository } =
@@ -122,6 +124,26 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       environment: 'production',
       scopes: ['projects:read', 'projects:write'],
     })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    const authenticatedActor = Object.freeze({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      scopes: new Set(['projects:read', 'projects:write']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
+    const expectedAuthenticationAudit = materializeActorAuditContext(authenticatedActor)
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -214,7 +236,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
             allowedUses: [],
           },
         },
-        actor: { type: 'api-client', id: issued.client.id },
+        actor: authenticatedActor,
       })
     }
 
@@ -945,6 +967,19 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       }),
       11,
     )
+    const auditedRows = [
+      ...(await client.v2ProductionBatch.findMany({ where: { workspaceId } })),
+      ...(await client.v2ProductionBatchAction.findMany({ where: { workspaceId } })),
+      ...(await client.v2BatchEditPreflightRun.findMany({ where: { workspaceId } })),
+      ...(await client.v2BatchEditCommand.findMany({ where: { workspaceId } })),
+    ]
+    assert.ok(auditedRows.length >= 24)
+    for (const row of auditedRows) {
+      assert.equal(row.actorCredentialId, expectedAuthenticationAudit.credentialId)
+      assert.equal(row.actorContextHash, expectedAuthenticationAudit.contextHash)
+      assert.equal(row.actorAuthenticationKind, 'bearer')
+      assert.equal(row.actorEnvironment, 'production')
+    }
 
     await assert.rejects(
       client.$executeRaw(

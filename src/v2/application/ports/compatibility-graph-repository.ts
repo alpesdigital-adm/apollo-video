@@ -2,11 +2,13 @@ import type {
   CompatibilityGraphRun,
 } from '../../domain/compatibility-graph.ts'
 import type { TakeLibraryRun } from '../../domain/take-library.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface CompatibilityGraphCreateRecord {
   run: Readonly<CompatibilityGraphRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface CompatibilityGraphReplay {
@@ -33,6 +35,7 @@ export interface CompatibilityGraphRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<CompatibilityGraphReplay> | null>
   create(

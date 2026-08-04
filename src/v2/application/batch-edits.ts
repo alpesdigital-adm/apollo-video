@@ -18,6 +18,11 @@ import type {
 import {
   validatePreflightCommitTokenService,
 } from './validate-preflight-commit-token.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -64,17 +69,6 @@ function integer(
     `${field} must be an integer between ${minimum} and ${maximum}`,
   )
   return Number(value)
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Batch editing requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function now(clock: () => Date): Date {
@@ -142,7 +136,7 @@ function preflightRequestFingerprint(input: {
   itemIds: readonly string[]
   operation: Readonly<BatchEditOperation>
   mode?: BatchEditMode
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'batch-edit-preflight-request/v1',
@@ -156,7 +150,7 @@ function commandRequestFingerprint(input: {
   preflightId: string
   expectedPreflightHash: string
   expectedScopeHash: string
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'batch-edit-command-request/v1',
@@ -195,7 +189,7 @@ export interface CreateBatchEditPreflightRequest {
   itemIds: readonly string[]
   operation: Readonly<BatchEditOperation>
   mode?: BatchEditMode
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -225,7 +219,10 @@ export function createBatchEditPreflightService(dependencies: {
     const itemIds = ids(request.itemIds, 'itemIds')
     const operation = edit(request.operation)
     const resolvedMode = mode(request.mode)
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Batch edit preflight actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const idempotencyKey = key(request.idempotencyKey)
     const fingerprint = preflightRequestFingerprint({
       workspaceId,
@@ -237,11 +234,12 @@ export function createBatchEditPreflightService(dependencies: {
       itemIds,
       operation,
       ...(resolvedMode ? { mode: resolvedMode } : {}),
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findPreflightReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey,
     })
     if (replay) {
@@ -310,6 +308,7 @@ export function createBatchEditPreflightService(dependencies: {
       run,
       requestFingerprint: fingerprint,
       idempotencyKey,
+      authenticationAudit,
     })
     return Object.freeze({
       ...created,
@@ -329,7 +328,7 @@ export interface CommitBatchEditRequest {
   expectedPreflightHash: string
   expectedScopeHash: string
   commitToken: string
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -353,7 +352,10 @@ export function commitBatchEditService(dependencies: {
       request.expectedScopeHash,
       'expectedScopeHash',
     )
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Batch edit command actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const idempotencyKey = key(request.idempotencyKey)
     assertDomain(
       typeof request.commitToken === 'string' &&
@@ -369,11 +371,12 @@ export function commitBatchEditService(dependencies: {
       preflightId,
       expectedPreflightHash,
       expectedScopeHash,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCommandReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey,
     })
     if (replay) {
@@ -408,7 +411,8 @@ export function commitBatchEditService(dependencies: {
       'Batch edit preflight or explicit scope is stale',
     )
     assertDomain(
-      preflight.createdByClientId === clientId,
+      preflight.createdByClientId === clientId &&
+        preflightRecord.authenticationAudit.contextHash === authenticationAudit.contextHash,
       'AUTH_INVALID',
       'Batch edit commit actor differs from the preflight actor',
     )
@@ -443,6 +447,7 @@ export function commitBatchEditService(dependencies: {
       command,
       requestFingerprint: fingerprint,
       idempotencyKey,
+      authenticationAudit,
     })
   }
 }

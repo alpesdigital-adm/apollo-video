@@ -7,6 +7,11 @@ import {
 } from '../domain/batch-partial-retry.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const IDEMPOTENCY_KEY = /^[\x21-\x7E]{8,128}$/
@@ -88,7 +93,7 @@ function requestFingerprint(input: {
   batchId: string
   expectedBatchRevision: number
   targets: readonly Readonly<BatchPartialRetryTarget>[]
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'batch-partial-retry-request/v1',
@@ -119,12 +124,19 @@ export function createBatchPartialRetryService(dependencies: {
     batchId: string
     expectedBatchRevision: number
     targets: readonly Readonly<BatchPartialRetryTarget>[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const batchId = identity(request.batchId, 'batchId')
-    const actorClientId = identity(request.actor?.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Batch partial retry actor does not belong to the workspace',
+    )
+    const actorClientId = authenticationAudit.clientId
     const expectedBatchRevision = expectedRevision(
       request.expectedBatchRevision,
       'expectedBatchRevision',
@@ -136,11 +148,12 @@ export function createBatchPartialRetryService(dependencies: {
       batchId,
       expectedBatchRevision,
       targets,
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findPartialRetryReplay({
       workspaceId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -186,6 +199,7 @@ export function createBatchPartialRetryService(dependencies: {
       requestFingerprint: fingerprint,
       idempotencyKey: replayKey,
       actorClientId,
+      authenticationAudit,
       createdAt,
       resultingBatch: compiled.batch,
       partialRetry: compiled.retry,

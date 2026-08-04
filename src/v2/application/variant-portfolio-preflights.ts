@@ -14,6 +14,11 @@ import type {
 import {
   validatePreflightCommitTokenService,
 } from './validate-preflight-commit-token.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -37,17 +42,6 @@ function key(value: unknown): string {
   return value.trim()
 }
 
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-) {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Variant portfolio preflight requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
-}
-
 function validNow(clock: () => Date): Date {
   const value = clock()
   assertDomain(
@@ -65,7 +59,7 @@ function requestFingerprint(input: {
   expectedCompatibilityGraphRunHash: string
   requestedRecipeCount: number
   requireProof: boolean
-  actorClientId: string
+  actorContextHash: string
 }) {
   return calculateCanonicalHash({
     schemaVersion: 'variant-portfolio-preflight-request/v1',
@@ -118,7 +112,7 @@ export interface CreateVariantPortfolioPreflightRequest {
   requestedRecipeCount: number
   requireProof?: boolean
   confirmationToken?: string
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -149,7 +143,10 @@ export function createVariantPortfolioPreflightService(dependencies: {
       'INVALID_ARGUMENT',
       'requestedRecipeCount must be an integer between 1 and 1000',
     )
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Variant portfolio actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const idempotencyKey = key(request.idempotencyKey)
     const fingerprint = requestFingerprint({
       workspaceId,
@@ -159,11 +156,12 @@ export function createVariantPortfolioPreflightService(dependencies: {
         request.expectedCompatibilityGraphRunHash,
       requestedRecipeCount: request.requestedRecipeCount,
       requireProof: request.requireProof === true,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey,
     })
     if (replay) {
@@ -262,6 +260,7 @@ export function createVariantPortfolioPreflightService(dependencies: {
       run,
       requestFingerprint: fingerprint,
       idempotencyKey,
+      authenticationAudit,
     })
     return Object.freeze({
       ...created,

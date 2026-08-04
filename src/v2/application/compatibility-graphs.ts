@@ -7,6 +7,11 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import type {
   CompatibilityGraphRepository,
 } from './ports/compatibility-graph-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -28,17 +33,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Compatibility graph requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function now(clock: () => Date): string {
@@ -71,7 +65,7 @@ export interface CreateCompatibilityGraphRequest {
   contexts: readonly Readonly<CompatibilityNodeContextInput>[]
   acceptThreshold?: number
   reviewThreshold?: number
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -100,7 +94,14 @@ export function createCompatibilityGraphService(dependencies: {
       'INVALID_ARGUMENT',
       'contexts must contain at most 2000 entries',
     )
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Compatibility graph actor does not belong to the workspace',
+    )
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'compatibility-graph-create-request/v1',
@@ -111,11 +112,12 @@ export function createCompatibilityGraphService(dependencies: {
       contexts: request.contexts,
       acceptThreshold: request.acceptThreshold ?? 70,
       reviewThreshold: request.reviewThreshold ?? 60,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (existing) {
@@ -153,6 +155,7 @@ export function createCompatibilityGraphService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

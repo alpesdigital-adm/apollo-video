@@ -162,6 +162,8 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
   } = await import('../../src/v2/domain/production-batch.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
+  const { createExternalAuditContext, materializeActorAuditContext } =
+    await import('../../src/v2/application/authenticate-api-client.ts')
   const { PrismaApiClientRepository } =
     await import(
       '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -217,6 +219,38 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         'projects:approve',
       ],
     })
+    const auditContext = createExternalAuditContext({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+    })
+    const authenticatedActor = Object.freeze({
+      clientId: issued.client.id,
+      credentialId: issued.credential.id,
+      workspaceId,
+      environment: 'production',
+      scopes: new Set([
+        'projects:read',
+        'projects:write',
+        'projects:approve',
+      ]),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
+    const expectedAuthenticationAudit =
+      materializeActorAuditContext(authenticatedActor)
+    const storedAuthenticationAudit = {
+      actorCredentialId: expectedAuthenticationAudit.credentialId,
+      actorEnvironment: expectedAuthenticationAudit.environment,
+      actorAuthenticationKind:
+        expectedAuthenticationAudit.authenticationKind,
+      actorContextHash: expectedAuthenticationAudit.contextHash,
+    }
     await client.v2Project.create({
       data: {
         id: projectId,
@@ -296,6 +330,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         }),
         idempotencyKey: `compat-e2e-batch-${suffix}`,
         createdByClientId: issued.client.id,
+        ...storedAuthenticationAudit,
         createdAt,
         updatedAt: createdAt,
       },
@@ -441,7 +476,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: ['rendering', 'editorial-reuse'],
         },
       },
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: authenticatedActor,
     })
     const validatedArtifactSha256 = '9'.repeat(64)
     const validatedArtifactKey =
@@ -563,7 +598,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: [],
         },
       },
-      actor: { type: 'api-client', id: issued.client.id },
+      actor: authenticatedActor,
     })
     const alignment = createScriptAlignmentRun({
       id: alignmentId,
@@ -613,6 +648,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         }),
         idempotencyKey: `compat-e2e-alignment-${suffix}`,
         createdByClientId: issued.client.id,
+        ...storedAuthenticationAudit,
         createdAt,
         updatedAt: createdAt,
       },
@@ -2455,6 +2491,31 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       }),
       2,
     )
+    for (const rows of [
+      await client.v2CompatibilityGraphRun.findMany({
+        where: { workspaceId },
+      }),
+      await client.v2VariantRecipeRun.findMany({
+        where: { workspaceId },
+      }),
+      await client.v2VariantPortfolioPreflightRun.findMany({
+        where: { workspaceId },
+      }),
+    ]) {
+      assert.ok(rows.length > 0)
+      for (const row of rows) {
+        assert.equal(
+          row.actorCredentialId,
+          expectedAuthenticationAudit.credentialId,
+        )
+        assert.equal(
+          row.actorContextHash,
+          expectedAuthenticationAudit.contextHash,
+        )
+        assert.equal(row.actorAuthenticationKind, 'bearer')
+        assert.equal(row.actorEnvironment, 'production')
+      }
+    }
     const storedFullRecipe = await client.v2VariantRecipeRun
       .findUniqueOrThrow({
         where: { id: fullRecipe.id },

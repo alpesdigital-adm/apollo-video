@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     })({
       workspaceId: actor.workspaceId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

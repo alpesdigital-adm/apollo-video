@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   createVariantRecipeService,
 } from '../../src/v2/application/variant-recipes.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   createVariantPortfolioPreflightService,
 } from '../../src/v2/application/variant-portfolio-preflights.ts'
@@ -32,6 +33,29 @@ import {
 import {
   HmacPreflightCommitTokenIssuer,
 } from '../../src/v2/infrastructure/security/preflight-commit-token.ts'
+
+function authenticatedActor(workspaceId, clientId = 'client-recipe') {
+  const credentialId = `${clientId}-credential`
+  const auditContext = createExternalAuditContext({
+    clientId,
+    credentialId,
+    workspaceId,
+    environment: 'production',
+  })
+  return Object.freeze({
+    clientId,
+    credentialId,
+    workspaceId,
+    environment: 'production',
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+}
 
 const lines = {
   hook: 'Pare agora e descubra o erro que bloqueia suas vendas',
@@ -399,7 +423,7 @@ test('T-FR-085 application binds signed expansion confirmation to graph, policy,
     compatibilityGraphId: graph.id,
     expectedCompatibilityGraphRunHash: graph.runHash,
     requestedRecipeCount: 2,
-    actor: { type: 'api-client', id: 'client-recipe' },
+    actor: authenticatedActor(graph.workspaceId),
   }
   const initial = await service({
     ...request,
@@ -639,7 +663,7 @@ test('T-FR-084 application service binds graph hash, batch objective, actor and 
     compatibilityGraphId: graph.id,
     expectedCompatibilityGraphRunHash: graph.runHash,
     ...selected,
-    actor: { type: 'api-client', id: 'client-recipe' },
+    actor: authenticatedActor(graph.workspaceId),
     idempotencyKey: 'variant-service-idempotency',
   }
   const created = await execute(request)

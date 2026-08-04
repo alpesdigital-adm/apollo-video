@@ -1,4 +1,5 @@
 import type { ScriptAlignmentRun } from '../../domain/script-alignment.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type {
   TakeLibraryRun,
   TakeLibrarySelection,
@@ -8,6 +9,7 @@ export interface TakeLibraryCreateRecord {
   run: Readonly<TakeLibraryRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface TakeLibrarySelectionRecord {
@@ -16,6 +18,7 @@ export interface TakeLibrarySelectionRecord {
   selection: Readonly<TakeLibrarySelection>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface TakeLibraryReplay {
@@ -42,6 +45,7 @@ export interface TakeLibraryRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<TakeLibraryReplay> | null>
   create(
@@ -64,6 +68,7 @@ export interface TakeLibraryRepository {
   findSelectionReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<TakeLibraryReplay> | null>
   persistSelection(

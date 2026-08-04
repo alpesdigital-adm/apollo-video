@@ -27,6 +27,7 @@ import {
   type VariantRecipeRun,
 } from '../../domain/variant-recipe.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 import {
   hydrateCompatibilityGraphRow,
 } from './compatibility-graph-repository.ts'
@@ -108,6 +109,7 @@ export function hydrateVariantPortfolioPolicyRow(
 export function hydrateVariantPortfolioPreflightRow(
   row: V2VariantPortfolioPreflightRun,
 ): Readonly<VariantPortfolioPreflightRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const run = hydrateVariantPortfolioPreflight(
     canonicalJson<VariantPortfolioPreflightRun>(
       row.resultJson,
@@ -248,6 +250,7 @@ function runData(
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(record.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -480,6 +483,7 @@ implements VariantPortfolioPreflightRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<VariantPortfolioPreflightReplay> | null> {
     const row =
@@ -490,12 +494,16 @@ implements VariantPortfolioPreflightRepository {
           idempotencyKey: input.idempotencyKey,
         },
       })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateVariantPortfolioPreflightRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -516,6 +524,9 @@ implements VariantPortfolioPreflightRepository {
             },
           })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (
             replay.requestFingerprint !== record.requestFingerprint
           ) {
@@ -549,6 +560,7 @@ implements VariantPortfolioPreflightRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

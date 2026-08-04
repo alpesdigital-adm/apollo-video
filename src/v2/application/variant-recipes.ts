@@ -9,6 +9,11 @@ import {
 import type {
   VariantRecipeRepository,
 } from './ports/variant-recipe-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -30,17 +35,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Variant recipe requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function now(clock: () => Date): string {
@@ -75,7 +69,7 @@ export interface CreateVariantRecipeRequest {
   assumptions?: readonly Readonly<VariantRecipeAssumptionInput>[]
   requireProof?: boolean
   coldOpen?: Readonly<VariantRecipeColdOpenInput>
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -98,7 +92,10 @@ export function createVariantRecipeService(dependencies: {
       'INVALID_ARGUMENT',
       'expectedCompatibilityGraphRunHash is invalid',
     )
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Variant recipe actor does not belong to the workspace')
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'variant-recipe-create-request/v1',
@@ -112,11 +109,12 @@ export function createVariantRecipeService(dependencies: {
       assumptions: request.assumptions ?? [],
       requireProof: request.requireProof ?? false,
       coldOpen: request.coldOpen ?? null,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const existing = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (existing) {
@@ -157,6 +155,7 @@ export function createVariantRecipeService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

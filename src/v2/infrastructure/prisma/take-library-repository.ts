@@ -18,6 +18,7 @@ import {
   type TakeLibraryRun,
 } from '../../domain/take-library.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 import { hydrateRunRow as hydrateAlignmentRow } from './script-alignment-repository.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -49,6 +50,7 @@ function canonicalJson<T>(value: string, field: string): Readonly<T> {
 function hydrateRunRow(
   row: V2TakeLibraryRun,
 ): Readonly<TakeLibraryRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const run = hydrateTakeLibraryRun(
     canonicalJson<TakeLibraryRun>(
       row.resultJson,
@@ -120,6 +122,7 @@ function runData(record: Readonly<TakeLibraryCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(record.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
     updatedAt: new Date(run.updatedAt),
   }
@@ -238,6 +241,7 @@ implements TakeLibraryRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<TakeLibraryReplay> | null> {
     const row = await this.prisma.v2TakeLibraryRun.findFirst({
@@ -247,12 +251,16 @@ implements TakeLibraryRepository {
         idempotencyKey: input.idempotencyKey,
       },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateRunRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -272,6 +280,9 @@ implements TakeLibraryRepository {
           },
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -302,6 +313,7 @@ implements TakeLibraryRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
@@ -397,6 +409,7 @@ implements TakeLibraryRepository {
   async findSelectionReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<TakeLibraryReplay> | null> {
     const row = await this.prisma.v2TakeLibrarySelection.findFirst({
@@ -409,9 +422,21 @@ implements TakeLibraryRepository {
         requestFingerprint: true,
         resultRunJson: true,
         resultRunHash: true,
+        actorClientId: true,
+        actorCredentialId: true,
+        actorEnvironment: true,
+        actorAuthenticationKind: true,
+        actorContextHash: true,
+        delegatedUserId: true,
+        delegatedIdentityId: true,
+        workspaceRole: true,
+        workspaceId: true,
       },
     })
     if (!row) return null
+    if (hydrateBatchActorAudit(row, row.actorClientId).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+    }
     const run = hydrateTakeLibraryRun(
       canonicalJson<TakeLibraryRun>(
         row.resultRunJson,
@@ -449,9 +474,21 @@ implements TakeLibraryRepository {
             requestFingerprint: true,
             resultRunJson: true,
             resultRunHash: true,
+            actorClientId: true,
+            actorCredentialId: true,
+            actorEnvironment: true,
+            actorAuthenticationKind: true,
+            actorContextHash: true,
+            delegatedUserId: true,
+            delegatedIdentityId: true,
+            workspaceRole: true,
+            workspaceId: true,
           },
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.actorClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -575,6 +612,11 @@ implements TakeLibraryRepository {
             requestFingerprint: record.requestFingerprint,
             idempotencyKey: record.idempotencyKey,
             actorClientId: record.selection.actorClientId,
+            ...batchActorAuditData(
+              record.authenticationAudit,
+              next.workspaceId,
+              record.selection.actorClientId,
+            ),
             createdAt: new Date(record.selection.createdAt),
           },
         })
@@ -595,6 +637,7 @@ implements TakeLibraryRepository {
         const replay = await this.findSelectionReplay({
           workspaceId: record.resultingRun.workspaceId,
           actorClientId: record.selection.actorClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

@@ -21,6 +21,10 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   hydrateTakeLibraryRow,
 } from './take-library-repository.ts'
+import {
+  batchActorAuditData,
+  hydrateBatchActorAudit,
+} from './batch-actor-audit.ts'
 
 export type CompatibilityGraphPrismaRow =
 Prisma.V2CompatibilityGraphRunGetPayload<{
@@ -56,6 +60,7 @@ function canonicalJson<T>(value: string, field: string): Readonly<T> {
 export function hydrateCompatibilityGraphRow(
   row: CompatibilityGraphPrismaRow,
 ): Readonly<CompatibilityGraphRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const run = hydrateCompatibilityGraph(
     canonicalJson<CompatibilityGraphRun>(
       row.resultJson,
@@ -183,6 +188,11 @@ function runData(record: Readonly<CompatibilityGraphCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(
+      record.authenticationAudit,
+      run.workspaceId,
+      run.createdByClientId,
+    ),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -344,6 +354,7 @@ implements CompatibilityGraphRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<CompatibilityGraphReplay> | null> {
     const row = await this.prisma.v2CompatibilityGraphRun.findFirst({
@@ -354,12 +365,16 @@ implements CompatibilityGraphRepository {
       },
       include: { nodes: true, edges: true },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateCompatibilityGraphRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -381,6 +396,12 @@ implements CompatibilityGraphRepository {
             include: { nodes: true, edges: true },
           })
         if (replay) {
+          if (
+            hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !==
+              record.authenticationAudit.contextHash
+          ) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -424,6 +445,7 @@ implements CompatibilityGraphRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

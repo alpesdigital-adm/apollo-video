@@ -52,6 +52,10 @@ const operationActorAuditMigration = readFileSync(
   `${migrationsPath}/20260805000000_public_operation_actor_audit/migration.sql`,
   'utf8',
 )
+const batchActorAuditMigration = readFileSync(
+  `${migrationsPath}/20260805010000_batch_actor_audit/migration.sql`,
+  'utf8',
+)
 
 assert.match(
   committed,
@@ -78,6 +82,15 @@ const publicOperationModel = schema.match(/model V2PublicOperation \{([\s\S]*?)\
 const publicOperationControlCommandModel = schema.match(/model V2PublicOperationControlCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const longFormIndexWorkflowModel = schema.match(/model V2LongFormIndexWorkflow \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const sourceCleanupPlanModel = schema.match(/model V2SourceCleanupPlan \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const batchActorAuditModels = [
+  'V2ProductionBatch', 'V2ScriptAlignmentRun', 'V2ScriptAlignmentReview',
+  'V2TakeLibraryRun', 'V2TakeLibrarySelection', 'V2CompatibilityGraphRun',
+  'V2VariantRecipeRun', 'V2VariantPortfolioPreflightRun',
+  'V2BatchEditPreflightRun', 'V2BatchEditCommand', 'V2ProductionBatchAction',
+].map((name) => [
+  schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '',
+  name,
+])
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -312,6 +325,32 @@ assert.doesNotMatch(
   'pre-contract operation actor identity must never be fabricated by backfill',
 )
 
+for (const [model, label] of batchActorAuditModels) {
+  for (const field of [
+    'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+    'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  ]) {
+    assert.match(model, new RegExp(`\\b${field}\\b`), `${label} must persist ${field}`)
+  }
+}
+for (const table of [
+  'production_batches', 'script_alignment_runs', 'script_alignment_reviews',
+  'take_library_runs', 'take_library_selections', 'compatibility_graph_runs',
+  'variant_recipe_runs', 'variant_portfolio_preflight_runs',
+  'batch_edit_preflight_runs', 'batch_edit_commands', 'production_batch_actions',
+]) {
+  assert.match(
+    batchActorAuditMigration,
+    new RegExp(`ALTER TABLE "${table}"[\\s\\S]*?ADD COLUMN "actorCredentialId"[\\s\\S]*?ADD COLUMN "actorContextHash"`),
+    `${table} must receive the complete actor audit tuple`,
+  )
+}
+assert.doesNotMatch(
+  batchActorAuditMigration,
+  /(?:UPDATE|INSERT INTO) "(?:production_batches|script_alignment_runs|script_alignment_reviews|take_library_runs|take_library_selections|compatibility_graph_runs|variant_recipe_runs|variant_portfolio_preflight_runs|batch_edit_preflight_runs|batch_edit_commands|production_batch_actions)"/,
+  'pre-contract batch actor identity must never be fabricated by backfill',
+)
+
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
   names(generated, /CREATE TABLE "([^"]+)"/g),
@@ -543,6 +582,8 @@ const requiredChecks = [
   'production_batch_item_artifacts_sequence_check',
   'production_batch_actions_scope_check',
   'production_batch_actions_bounds_check',
+  'production_batches_actor_audit_check',
+  'production_batch_actions_actor_audit_check',
   'script_alignment_runs_schema_check',
   'script_alignment_runs_status_check',
   'script_alignment_runs_revision_check',
@@ -553,6 +594,8 @@ const requiredChecks = [
   'script_alignment_reviews_revision_check',
   'script_alignment_reviews_hash_check',
   'script_alignment_reviews_json_check',
+  'script_alignment_runs_actor_audit_check',
+  'script_alignment_reviews_actor_audit_check',
   'take_library_runs_versions_check',
   'take_library_runs_status_check',
   'take_library_runs_counts_check',
@@ -561,11 +604,14 @@ const requiredChecks = [
   'take_library_selections_revision_check',
   'take_library_selections_hashes_check',
   'take_library_selections_json_check',
+  'take_library_runs_actor_audit_check',
+  'take_library_selections_actor_audit_check',
   'compatibility_graph_runs_versions_check',
   'compatibility_graph_runs_thresholds_check',
   'compatibility_graph_runs_counts_check',
   'compatibility_graph_runs_hashes_check',
   'compatibility_graph_runs_json_check',
+  'compatibility_graph_runs_actor_audit_check',
   'compatibility_graph_nodes_role_check',
   'compatibility_graph_nodes_hashes_check',
   'compatibility_graph_nodes_json_check',
@@ -580,12 +626,16 @@ const requiredChecks = [
   'variant_recipe_runs_scores_check',
   'variant_recipe_runs_hashes_check',
   'variant_recipe_runs_json_check',
+  'variant_recipe_runs_actor_audit_check',
   'variant_recipe_lineage_sequence_check',
   'variant_recipe_lineage_usage_check',
   'variant_recipe_lineage_role_check',
   'variant_recipe_lineage_range_check',
   'variant_recipe_lineage_hashes_check',
   'variant_recipe_lineage_json_check',
+  'variant_portfolio_preflight_runs_actor_audit_check',
+  'batch_edit_preflights_actor_audit_check',
+  'batch_edit_commands_actor_audit_check',
   'contamination_reports_version_check',
   'contamination_reports_decision_check',
   'contamination_reports_counts_check',

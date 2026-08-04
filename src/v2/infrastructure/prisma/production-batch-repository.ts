@@ -41,6 +41,7 @@ import {
   type ProductionBatchVariant,
 } from '../../domain/production-batch.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 
 type ItemRow = V2ProductionBatchItem & {
   steps: V2ProductionBatchStep[]
@@ -154,6 +155,7 @@ function hydrateItem(row: ItemRow): Readonly<BatchItem> {
 }
 
 function hydrateBatch(row: BatchRow): Readonly<ProductionBatch> {
+  const authenticationAudit = hydrateBatchActorAudit(row, row.createdByClientId)
   const sourceGroups = canonicalJson<
     readonly Readonly<ProductionBatchSourceGroup>[]
   >(row.sourceGroupsJson, 'production batch source groups')
@@ -189,6 +191,9 @@ function hydrateBatch(row: BatchRow): Readonly<ProductionBatch> {
     createdBy: Object.freeze({
       type: 'api-client',
       id: row.createdByClientId,
+      ...(authenticationAudit.delegatedUserId
+        ? { delegatedUserId: authenticationAudit.delegatedUserId }
+        : {}),
     }),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -259,6 +264,7 @@ function retryJobFromRow(
 function hydratePartialRetryAction(
   row: PartialRetryActionRow,
 ): Readonly<BatchPartialRetryRun> {
+  hydrateBatchActorAudit(row, row.actorClientId)
   if (
     row.action !== 'partial-retry' ||
     row.scope !== 'batch' ||
@@ -397,6 +403,11 @@ function batchData(record: Readonly<ProductionBatchCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: batch.createdBy.id,
+    ...batchActorAuditData(
+      record.authenticationAudit,
+      batch.workspaceId,
+      batch.createdBy.id,
+    ),
     createdAt: new Date(batch.createdAt),
     updatedAt: new Date(batch.updatedAt),
   }
@@ -535,6 +546,7 @@ implements ProductionBatchRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchReplay> | null> {
     const row = await this.prisma.v2ProductionBatch.findFirst({
@@ -545,12 +557,16 @@ implements ProductionBatchRepository {
       },
       include: batchInclude,
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           batch: hydrateBatch(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -571,6 +587,9 @@ implements ProductionBatchRepository {
           include: batchInclude,
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -615,6 +634,7 @@ implements ProductionBatchRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.batch.workspaceId,
           actorClientId: record.batch.createdBy.id,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
@@ -735,6 +755,7 @@ implements ProductionBatchRepository {
   async findActionReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchReplay> | null> {
     const row = await this.prisma.v2ProductionBatchAction.findFirst({
@@ -746,19 +767,33 @@ implements ProductionBatchRepository {
       select: {
         requestFingerprint: true,
         responseJson: true,
+        actorClientId: true,
+        actorCredentialId: true,
+        actorEnvironment: true,
+        actorAuthenticationKind: true,
+        actorContextHash: true,
+        delegatedUserId: true,
+        delegatedIdentityId: true,
+        workspaceRole: true,
+        workspaceId: true,
       },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.actorClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           batch: hydrateResponseJson(row.responseJson),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async findPartialRetryReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchPartialRetryReplay> | null> {
     const row = await this.prisma.v2ProductionBatchAction.findFirst({
@@ -770,6 +805,9 @@ implements ProductionBatchRepository {
       include: partialRetryActionInclude,
     })
     if (!row) return null
+    if (hydrateBatchActorAudit(row, row.actorClientId).contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+    }
     if (row.action !== 'partial-retry') {
       throw new DomainError(
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -896,6 +934,9 @@ implements ProductionBatchRepository {
           include: partialRetryActionInclude,
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.actorClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -1108,6 +1149,11 @@ implements ProductionBatchRepository {
               : null,
             retryManifestHash: partialRetry?.retryHash ?? null,
             actorClientId: record.actorClientId,
+            ...batchActorAuditData(
+              record.authenticationAudit,
+              record.workspaceId,
+              record.actorClientId,
+            ),
             createdAt: new Date(record.createdAt),
           },
         })
@@ -1164,11 +1210,13 @@ implements ProductionBatchRepository {
           ? await this.findPartialRetryReplay({
               workspaceId: record.workspaceId,
               actorClientId: record.actorClientId,
+              actorContextHash: record.authenticationAudit.contextHash,
               idempotencyKey: record.idempotencyKey,
             })
           : await this.findActionReplay({
               workspaceId: record.workspaceId,
               actorClientId: record.actorClientId,
+              actorContextHash: record.authenticationAudit.contextHash,
               idempotencyKey: record.idempotencyKey,
             })
         if (replay) {

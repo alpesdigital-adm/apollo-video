@@ -20,6 +20,11 @@ import {
 import type {
   ProductionBatchRepository,
 } from './ports/production-batch-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const IDEMPOTENCY = /^[\x21-\x7E]{8,128}$/
@@ -103,7 +108,7 @@ export interface CreateProductionBatchRequest {
     recipeId: string
     variantId: string
   }>[]
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -118,12 +123,14 @@ export function createProductionBatchService(dependencies: {
   ) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
-    const actorClientId = identity(request.actor?.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'Production batch requires an API client actor',
+      'Production batch actor does not belong to the workspace',
     )
+    const actorClientId = authenticationAudit.clientId
     const replayKey = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'production-batch-create-request/v1',
@@ -136,11 +143,12 @@ export function createProductionBatchService(dependencies: {
       variants: request.variants,
       budget: request.budget,
       items: request.items,
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -165,13 +173,20 @@ export function createProductionBatchService(dependencies: {
         ...item,
         id: identity(dependencies.createItemId(), 'created item ID'),
       })),
-      createdBy: request.actor,
+      createdBy: authenticationAudit.delegatedUserId
+        ? Object.freeze({
+            type: 'api-client' as const,
+            id: actorClientId,
+            delegatedUserId: authenticationAudit.delegatedUserId,
+          })
+        : Object.freeze({ type: 'api-client' as const, id: actorClientId }),
       createdAt,
     })
     return dependencies.repository.create({
       batch,
       requestFingerprint,
       idempotencyKey: replayKey,
+      authenticationAudit,
     })
   }
 }
@@ -254,7 +269,7 @@ function actionFingerprint(input: {
   cacheHit?: boolean
   error?: Readonly<BatchItemError>
   artifactIds?: readonly string[]
-  actorClientId: string
+  actorContextHash: string
 }): string {
   return calculateCanonicalHash({
     schemaVersion: 'production-batch-action-request/v1',
@@ -293,13 +308,20 @@ export function actOnProductionBatchItemService(dependencies: {
     cacheHit?: boolean
     error?: Readonly<BatchItemError>
     artifactIds?: readonly string[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const batchId = identity(request.batchId, 'batchId')
     const itemId = identity(request.itemId, 'itemId')
-    const actorClientId = identity(request.actor?.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Production batch action actor does not belong to the workspace',
+    )
+    const actorClientId = authenticationAudit.clientId
     const batchRevision = expectedRevision(
       request.expectedBatchRevision,
       'expectedBatchRevision',
@@ -327,11 +349,12 @@ export function actOnProductionBatchItemService(dependencies: {
       ...(request.artifactIds
         ? { artifactIds: request.artifactIds }
         : {}),
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findActionReplay({
       workspaceId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -426,6 +449,7 @@ export function actOnProductionBatchItemService(dependencies: {
       requestFingerprint: fingerprint,
       idempotencyKey: replayKey,
       actorClientId,
+      authenticationAudit,
       createdAt: now,
       resultingBatch: next,
     })
@@ -442,12 +466,19 @@ export function actOnProductionBatchService(dependencies: {
     batchId: string
     action: 'cancel' | 'resume'
     expectedBatchRevision: number
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const batchId = identity(request.batchId, 'batchId')
-    const actorClientId = identity(request.actor?.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Production batch action actor does not belong to the workspace',
+    )
+    const actorClientId = authenticationAudit.clientId
     const batchRevision = expectedRevision(
       request.expectedBatchRevision,
       'expectedBatchRevision',
@@ -458,11 +489,12 @@ export function actOnProductionBatchService(dependencies: {
       batchId,
       action: request.action,
       expectedBatchRevision: batchRevision,
-      actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findActionReplay({
       workspaceId,
       actorClientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: replayKey,
     })
     if (replay) {
@@ -505,6 +537,7 @@ export function actOnProductionBatchService(dependencies: {
       requestFingerprint: fingerprint,
       idempotencyKey: replayKey,
       actorClientId,
+      authenticationAudit,
       createdAt: now,
       resultingBatch: next,
     })

@@ -20,6 +20,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   hydrateCompatibilityGraphRow,
 } from './compatibility-graph-repository.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 
 type RecipeRow = Prisma.V2VariantRecipeRunGetPayload<{
   include: { lineage: true }
@@ -57,6 +58,7 @@ function canonicalJson<T>(
 export function hydrateVariantRecipeRow(
   row: RecipeRow,
 ): Readonly<VariantRecipeRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const run = hydrateVariantRecipe(
     canonicalJson<VariantRecipeRun>(
       row.resultJson,
@@ -194,6 +196,11 @@ function runData(record: Readonly<VariantRecipeCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(
+      record.authenticationAudit,
+      run.workspaceId,
+      run.createdByClientId,
+    ),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -361,6 +368,7 @@ implements VariantRecipeRepository {
   async findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<VariantRecipeReplay> | null> {
     const row = await this.prisma.v2VariantRecipeRun.findFirst({
@@ -371,12 +379,16 @@ implements VariantRecipeRepository {
       },
       include: { lineage: true },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateVariantRecipeRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async create(
@@ -397,6 +409,9 @@ implements VariantRecipeRepository {
           include: { lineage: true },
         })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (
             replay.requestFingerprint !== record.requestFingerprint
           ) {
@@ -438,6 +453,7 @@ implements VariantRecipeRepository {
         const replay = await this.findCreateReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {

@@ -7,11 +7,13 @@ import type {
   ProductionBatchStatus,
   ProductionBatchStep,
 } from '../../domain/production-batch.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ProductionBatchCreateRecord {
   batch: Readonly<ProductionBatch>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
 }
 
 export interface ProductionBatchActionRecord {
@@ -27,6 +29,7 @@ export interface ProductionBatchActionRecord {
   requestFingerprint: string
   idempotencyKey: string
   actorClientId: string
+  authenticationAudit: Readonly<ApiAccessAuditContext>
   createdAt: string
   resultingBatch: Readonly<ProductionBatch>
   partialRetry?: Readonly<BatchPartialRetryRun>
@@ -56,6 +59,7 @@ export interface ProductionBatchRepository {
   findCreateReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchReplay> | null>
   create(
@@ -79,11 +83,13 @@ export interface ProductionBatchRepository {
   findActionReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchReplay> | null>
   findPartialRetryReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<ProductionBatchPartialRetryReplay> | null>
   readPartialRetry(input: {

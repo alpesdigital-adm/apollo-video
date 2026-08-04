@@ -11,6 +11,11 @@ import {
 import type {
   ScriptAlignmentRepository,
 } from './ports/script-alignment-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -32,17 +37,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorClientId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Script alignment requires an API client actor',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function now(clock: () => Date): string {
@@ -112,7 +106,7 @@ export interface CreateScriptAlignmentRequest {
     expectedTranscriptHash: string
     roleHint?: ScriptBlockRole
   }>[]
-  actor: Readonly<{ type: 'api-client'; id: string }>
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -126,7 +120,14 @@ export function createScriptAlignmentService(dependencies: {
   ) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const batchId = identity(request.batchId, 'batchId')
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Script alignment actor does not belong to the workspace',
+    )
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     const document = importScriptDocument({
       title: request.title,
@@ -140,11 +141,12 @@ export function createScriptAlignmentService(dependencies: {
       batchId,
       documentHash: document.documentHash,
       sources,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findCreateReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (replay) {
@@ -171,6 +173,7 @@ export function createScriptAlignmentService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }
@@ -235,13 +238,20 @@ export function reviewScriptAlignmentService(dependencies: {
     runId: string
     expectedRevision: number
     decisions: readonly ScriptAlignmentReviewDecision[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: AuthenticatedExternalActor
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const batchId = identity(request.batchId, 'batchId')
     const runId = identity(request.runId, 'alignmentId')
-    const clientId = actorClientId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Script alignment review actor does not belong to the workspace',
+    )
+    const clientId = authenticationAudit.clientId
     const key = idempotencyKey(request.idempotencyKey)
     assertDomain(
       Number.isSafeInteger(request.expectedRevision) &&
@@ -258,11 +268,12 @@ export function reviewScriptAlignmentService(dependencies: {
       runId,
       expectedRevision: request.expectedRevision,
       decisions: request.decisions,
-      actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findReviewReplay({
       workspaceId,
       actorClientId: clientId,
+      actorContextHash: authenticationAudit.contextHash,
       idempotencyKey: key,
     })
     if (replay) {
@@ -297,6 +308,7 @@ export function reviewScriptAlignmentService(dependencies: {
       review: resultingRun.reviews.at(-1)!,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

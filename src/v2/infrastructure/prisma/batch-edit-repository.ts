@@ -39,6 +39,7 @@ import type {
   ProductionBatchVariant,
 } from '../../domain/production-batch.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { batchActorAuditData, hydrateBatchActorAudit } from './batch-actor-audit.ts'
 
 type CommandRow = V2BatchEditCommand & {
   items: Array<V2BatchEditCommandItem & {
@@ -150,6 +151,7 @@ export function hydrateBatchEditItemStateRow(
 export function hydrateBatchEditPreflightRow(
   row: V2BatchEditPreflightRun,
 ): Readonly<BatchEditPreflightRun> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const run = hydrateBatchEditPreflight(
     canonicalJson<BatchEditPreflightRun>(
       row.resultJson,
@@ -198,6 +200,7 @@ export function hydrateBatchEditPreflightRow(
 export function hydrateBatchEditCommandRow(
   row: CommandRow,
 ): Readonly<BatchEditCommand> {
+  hydrateBatchActorAudit(row, row.createdByClientId)
   const command = hydrateBatchEditCommand(
     canonicalJson<BatchEditCommand>(
       row.resultJson,
@@ -373,6 +376,7 @@ function preflightData(
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...batchActorAuditData(record.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -408,6 +412,7 @@ function commandData(
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: command.createdByClientId,
+    ...batchActorAuditData(record.authenticationAudit, command.workspaceId, command.createdByClientId),
     createdAt: new Date(command.createdAt),
   }
 }
@@ -749,6 +754,7 @@ implements BatchEditRepository {
   async findPreflightReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<BatchEditPreflightReplay> | null> {
     const row = await this.prisma.v2BatchEditPreflightRun.findFirst({
@@ -758,12 +764,16 @@ implements BatchEditRepository {
         idempotencyKey: input.idempotencyKey,
       },
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           run: hydrateBatchEditPreflightRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async createPreflight(
@@ -784,6 +794,9 @@ implements BatchEditRepository {
             },
           })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (
             replay.requestFingerprint !== record.requestFingerprint
           ) {
@@ -907,6 +920,7 @@ implements BatchEditRepository {
         const replay = await this.findPreflightReplay({
           workspaceId: record.run.workspaceId,
           actorClientId: record.run.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
@@ -951,6 +965,7 @@ implements BatchEditRepository {
           run: hydrateBatchEditPreflightRow(row),
           requestFingerprint: row.requestFingerprint,
           idempotencyKey: row.idempotencyKey,
+          authenticationAudit: hydrateBatchActorAudit(row, row.createdByClientId),
         })
       : null
   }
@@ -1009,6 +1024,7 @@ implements BatchEditRepository {
   async findCommandReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
   }): Promise<Readonly<BatchEditCommandReplay> | null> {
     const row = await this.prisma.v2BatchEditCommand.findFirst({
@@ -1019,12 +1035,16 @@ implements BatchEditRepository {
       },
       include: commandInclude,
     })
-    return row
-      ? Object.freeze({
+    if (row) {
+      if (hydrateBatchActorAudit(row, row.createdByClientId).contextHash !== input.actorContextHash) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+      }
+      return Object.freeze({
           command: hydrateBatchEditCommandRow(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
+    }
+    return null
   }
 
   async commit(
@@ -1046,6 +1066,9 @@ implements BatchEditRepository {
             include: commandInclude,
           })
         if (replay) {
+          if (hydrateBatchActorAudit(replay, replay.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to a different authentication context')
+          }
           if (
             replay.requestFingerprint !== record.requestFingerprint
           ) {
@@ -1065,6 +1088,9 @@ implements BatchEditRepository {
             include: commandInclude,
           })
         if (existing) {
+          if (hydrateBatchActorAudit(existing, existing.createdByClientId).contextHash !== record.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Batch edit preflight was committed by a different authentication context')
+          }
           if (
             existing.requestFingerprint !==
               record.requestFingerprint ||
@@ -1246,6 +1272,7 @@ implements BatchEditRepository {
         const replay = await this.findCommandReplay({
           workspaceId: record.command.workspaceId,
           actorClientId: record.command.createdByClientId,
+          actorContextHash: record.authenticationAudit.contextHash,
           idempotencyKey: record.idempotencyKey,
         })
         if (replay) {
