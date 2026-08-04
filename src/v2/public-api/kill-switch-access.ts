@@ -19,6 +19,7 @@ export function assertKillSwitchRecoveryAccess(
   if (
     actor.authenticationKind === 'ui-session' &&
     actor.delegatedUserId &&
+    actor.workspaceRole === 'administrator' &&
     KILL_SWITCH_RECOVERY_CAPABILITIES.has(capabilityId)
   ) return
   throw new DomainError('OPERATIONAL_KILL_SWITCH_ACTIVE', 'API access kill switch is active')

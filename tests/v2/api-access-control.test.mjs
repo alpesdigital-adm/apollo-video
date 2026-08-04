@@ -211,10 +211,22 @@ test('T-FR-242 API access administration rejects missing authority, confirmation
   for (const mutation of [
     { actor: actor({ workspaceId: 'workspace-other' }) },
     { actor: actor({ scopes: new Set() }) },
+    { actor: actor({ workspaceRole: 'reviewer' }) },
     { confirmed: false },
     { baseRevision: 'f'.repeat(64) },
   ]) {
     await assert.rejects(() => execute({ ...base, ...mutation }), DomainError)
+  }
+})
+
+test('T-FR-242 containment cannot irrecoverably deactivate its authenticating client', async () => {
+  const execute = changeApiAccessControlService({ repository: new InMemoryAccessRepository() })
+  for (const action of ['suspend', 'revoke']) {
+    await assert.rejects(() => execute({
+      actor: actor(), workspaceId: 'workspace-1', targetType: 'client', targetId: 'client-admin',
+      action, baseRevision: ZERO_REVISION, reason: 'Unsafe self containment',
+      idempotencyKey: `self-${action}`, confirmed: true,
+    }), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
   }
 })
 
@@ -242,6 +254,10 @@ test('T-FR-242 kill switch permits only delegated recovery capabilities', () => 
     authenticationKind: 'ui-session', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: true,
   })
   assert.doesNotThrow(() => assertKillSwitchRecoveryAccess(delegated, 'apollo.api-access.workspace.change'))
+  assert.throws(
+    () => assertKillSwitchRecoveryAccess(actor({ workspaceRole: 'reviewer', workspaceKillSwitchEngaged: true }), 'apollo.api-access.workspace.change'),
+    (error) => error instanceof DomainError && error.code === 'OPERATIONAL_KILL_SWITCH_ACTIVE',
+  )
   assert.throws(
     () => assertKillSwitchRecoveryAccess(delegated, 'apollo.projects.list'),
     (error) => error instanceof DomainError && error.code === 'OPERATIONAL_KILL_SWITCH_ACTIVE',

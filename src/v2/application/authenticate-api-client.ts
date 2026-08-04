@@ -8,6 +8,7 @@ import {
 import type { ApiAccessStatus } from '../domain/api-access-control.ts'
 import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
+import { WORKSPACE_MEMBER_ROLES } from '../domain/workspace-member.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
 
@@ -67,6 +68,9 @@ export function createExternalAuditContext(input: {
   const delegation = [input.delegatedUserId, input.delegatedIdentityId, input.workspaceRole]
   if (delegation.some(Boolean) && !delegation.every(Boolean)) {
     throw new DomainError('AUTH_INVALID', 'Authenticated delegation context is incomplete')
+  }
+  if (input.workspaceRole && !WORKSPACE_MEMBER_ROLES.includes(input.workspaceRole as typeof WORKSPACE_MEMBER_ROLES[number])) {
+    throw new DomainError('AUTH_INVALID', 'Authenticated workspace role is invalid')
   }
   for (const [field, value] of [
     ['delegated user identity', input.delegatedUserId],
@@ -163,7 +167,11 @@ export function authenticateApiClientService(
 
 export function requireScope(actor: AuthenticatedExternalActor, scope: ApiScope): void {
   assertExternalAuditContextBinding(actor)
-  if (!isApiScope(scope) || !actor.scopes.has(scope)) {
+  const requiresHumanAdministrator = scope === 'clients:admin' || scope === 'webhooks:admin'
+  if (
+    !isApiScope(scope) || !actor.scopes.has(scope) ||
+    (actor.authenticationKind === 'ui-session' && requiresHumanAdministrator && actor.workspaceRole !== 'administrator')
+  ) {
     throw new DomainError('AUTH_SCOPE_REQUIRED', 'API client lacks the required scope', {
       requiredScope: scope,
     })

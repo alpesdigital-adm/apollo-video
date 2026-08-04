@@ -335,6 +335,8 @@ Evidência local F0.036/FR-242 (matriz deny-by-default) — `API_SCOPE_MATRIX` f
 
 Evidência local F0.036/FR-242 (audit binding) — os dois autenticadores derivam `ExternalAuditContext` da identidade persistida e `requireScope` falha antes da autorização se client, credential, workspace, environment ou delegação divergir do actor. A sessão humana vincula member/identity/role como um conjunto completo; Bearer não recebe esses campos. O conjunto de grants autenticados é uma view imutável sem métodos de mutação. Testes provam binding, falsificação cross-workspace, delegação parcial e ausência de `add`; ledger PostgreSQL completo, execução hospedada, deploy e aceite permanecem pendentes.
 
+Evidência local F0.036/FR-242 (containment) — comandos revisionados de suspend/revoke/kill switch já cercam state, operações canceláveis, outbox e audit identity na mesma transação. O hardening atual exige role humana `administrator` para scopes administrativos e para recovery durante containment, recusa role persistida desconhecida e impede o client autenticante de suspender/revogar a si próprio. Testes preservam kill switch próprio recuperável, bloqueiam recovery por reviewer e comprovam o erro de self-lockout antes da persistência. PostgreSQL/HTTP hospedado, deploy e aceite permanecem abertos.
+
 ## Verificação
 
 - Todo `FR-*` do PRD deve aparecer exatamente uma vez nesta matriz.

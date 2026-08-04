@@ -209,6 +209,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 
 O actor autenticado e seu audit context formam um único vínculo. Client, credential, workspace e environment devem coincidir; delegação é ausente ou contém simultaneamente member, login identity e workspace role persistidos, e a projeção de actor repete somente client e member. O guard de scope valida esse vínculo antes da grant. O conjunto de scopes entregue ao runtime implementa apenas a interface read-only e não expõe `add`, `delete` ou `clear`, mesmo em JavaScript.
 
+Na sessão humana, os scopes administrativos do principal técnico compartilhado não substituem a role do member: `clients:admin`, `webhooks:admin` e recovery de containment exigem `administrator`. Role desconhecida falha na autenticação. Um comando pode acionar/release o kill switch do próprio client porque o recovery permanece disponível, mas suspend/revoke do client que autentica a chamada é proibido para não produzir lockout sem autoridade alternativa.
+
 ## 9. Convenções HTTP/JSON
 
 A fonte executável destas convenções é `src/v2/public-api/conventions.ts`; `PUBLIC_API_VERSION`, presenters e os schemas comuns não mantêm constantes paralelas. O registry declara a allowlist de query por capability. Requisições autenticadas validam nome, duplicidade e obrigatoriedade depois da autenticação e antes do Application service; endpoints com token assinado executam a mesma validação localmente. A resolução de pathname segue a precedência do App Router: entre templates compatíveis, vence o de maior número de segmentos literais; empate continua erro de paridade.

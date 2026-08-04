@@ -200,6 +200,7 @@ test('audit context rejects partial delegation and unsafe identities', () => {
     { delegatedUserId: 'member-audit-1' },
     { delegatedUserId: 'member-audit-1', delegatedIdentityId: 'identity-audit-1' },
     { clientId: '../client' },
+    { delegatedUserId: 'member-audit-1', delegatedIdentityId: 'identity-audit-1', workspaceRole: 'owner' },
   ]) {
     assert.throws(
       () => createExternalAuditContext({ ...base, ...mutation }),

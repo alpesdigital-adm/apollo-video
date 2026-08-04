@@ -79,6 +79,12 @@ export function changeApiAccessControlService(dependencies: {
     assertAdministrator(request.actor, request.workspaceId)
     validateTarget(request)
     assertDomain(API_ACCESS_ACTIONS.includes(request.action), 'INVALID_ARGUMENT', 'API access action is invalid')
+    if (
+      request.targetType === 'client' && request.targetId === request.actor.clientId &&
+      (request.action === 'suspend' || request.action === 'revoke')
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'The client authenticating this request cannot deactivate itself')
+    }
     assertDomain(request.confirmed === true, 'TOOL_CONFIRMATION_REQUIRED', 'API access change requires explicit confirmation')
     const reason = request.reason.trim().replace(/\s+/g, ' ')
     const idempotencyKey = request.idempotencyKey.trim()
