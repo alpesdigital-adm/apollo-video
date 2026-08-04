@@ -9,6 +9,7 @@ import { calculateVersionHash } from './version-hash.ts'
 import {
   API_ACCESS_ACTIONS,
   API_ACCESS_TARGET_TYPES,
+  createApiAccessAuditContext,
   createApiAccessControl,
   transitionApiAccessControl,
   type ApiAccessAction,
@@ -16,6 +17,7 @@ import {
   type ApiAccessTargetType,
 } from '../domain/api-access-control.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import type { WorkspaceMemberRole } from '../domain/workspace-member.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
@@ -92,8 +94,26 @@ export function changeApiAccessControlService(dependencies: {
     assertDomain(idempotencyKey.length >= 1 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is invalid')
     assertDomain(/^[a-f0-9]{64}$/.test(request.baseRevision), 'INVALID_ARGUMENT', 'API access base revision is invalid')
 
+    const audit = createApiAccessAuditContext({
+      clientId: request.actor.auditContext.clientId,
+      credentialId: request.actor.auditContext.credentialId,
+      workspaceId: request.actor.auditContext.workspaceId,
+      environment: request.actor.auditContext.environment,
+      authenticationKind: request.actor.authenticationKind,
+      ...(request.actor.auditContext.delegatedUserId
+        ? { delegatedUserId: request.actor.auditContext.delegatedUserId }
+        : {}),
+      ...(request.actor.auditContext.delegatedIdentityId
+        ? { delegatedIdentityId: request.actor.auditContext.delegatedIdentityId }
+        : {}),
+      ...(request.actor.auditContext.workspaceRole
+        ? { workspaceRole: request.actor.auditContext.workspaceRole as WorkspaceMemberRole }
+        : {}),
+    })
+
     const requestFingerprint = calculateVersionHash({
       operation: 'api-access.change',
+      actorContextHash: audit.contextHash,
       workspaceId: request.workspaceId,
       targetType: request.targetType,
       targetId: request.targetId,
@@ -104,6 +124,7 @@ export function changeApiAccessControlService(dependencies: {
     const replay = await dependencies.repository.findReplay({
       workspaceId: request.workspaceId,
       actorClientId: request.actor.clientId,
+      actorContextHash: audit.contextHash,
       idempotencyKey,
       requestFingerprint,
     })
@@ -125,6 +146,7 @@ export function changeApiAccessControlService(dependencies: {
       requestFingerprint,
       actorClientId: request.actor.clientId,
       delegatedUserId: request.actor.delegatedUserId ?? null,
+      actorContextHash: audit.contextHash,
       changedAt,
     })
     const command: ApiAccessCommand = Object.freeze({
@@ -144,7 +166,7 @@ export function changeApiAccessControlService(dependencies: {
       requestFingerprint,
       changedAt,
     })
-    const result = await dependencies.repository.apply(command)
+    const result = await dependencies.repository.apply(command, audit)
     createApiAccessControl({
       workspaceId: result.access.workspaceId,
       targetType: result.access.targetType,

@@ -259,7 +259,13 @@ model V2ApiAccessCommand {
   resultKillSwitchEngaged    Boolean
   reason                     String   @db.VarChar(500)
   actorClientId              String   @db.VarChar(80)
+  actorCredentialId          String   @db.VarChar(128)
+  actorEnvironment           String   @db.VarChar(16)
+  actorAuthenticationKind    String   @db.VarChar(16)
+  actorContextHash           String   @db.Char(64)
   delegatedUserId            String?  @db.VarChar(128)
+  delegatedIdentityId        String?  @db.VarChar(128)
+  workspaceRole              String?  @db.VarChar(32)
   idempotencyKey             String   @db.VarChar(128)
   requestFingerprint         String   @db.Char(64)
   canceledOperationCount     Int      @default(0)
@@ -273,6 +279,7 @@ model V2ApiAccessCommand {
   @@unique([workspaceId, actorClientId, idempotencyKey])
   @@index([workspaceId, targetType, targetId, changedAt(sort: Desc)])
   @@index([workspaceId, action, changedAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, changedAt(sort: Desc)])
   @@map("api_access_commands")
 }
 

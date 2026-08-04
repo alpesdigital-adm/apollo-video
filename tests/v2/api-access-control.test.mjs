@@ -7,6 +7,8 @@ import {
 } from '../../src/v2/application/administer-api-access.ts'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
+  assertApiAccessAuditBinding,
+  createApiAccessAuditContext,
   createApiAccessControl,
   transitionApiAccessControl,
 } from '../../src/v2/domain/api-access-control.ts'
@@ -56,13 +58,16 @@ class InMemoryAccessRepository {
   async findReplay(input) {
     const stored = this.replays.get(`${input.workspaceId}:${input.actorClientId}:${input.idempotencyKey}`)
     if (!stored) return null
-    if (stored.command.requestFingerprint !== input.requestFingerprint) {
+    if (
+      stored.audit.contextHash !== input.actorContextHash ||
+      stored.command.requestFingerprint !== input.requestFingerprint
+    ) {
       throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'mismatch')
     }
     return { ...stored, replayed: true }
   }
 
-  async apply(command) {
+  async apply(command, audit) {
     const key = `${command.workspaceId}:${command.actorClientId}:${command.idempotencyKey}`
     const existing = this.replays.get(key)
     if (existing) return { ...existing, replayed: true }
@@ -73,7 +78,7 @@ class InMemoryAccessRepository {
       revision: command.resultRevision,
     })
     const result = {
-      access: this.current, command,
+      access: this.current, command, audit,
       canceledOperationCount: this.canceledOperationCount, replayed: false,
     }
     this.replays.set(key, result)
@@ -104,6 +109,25 @@ test('T-FR-242 API access transitions are strict and revocation is terminal', ()
   )
 })
 
+test('T-FR-242 API access audit context is canonical, authentication-specific and tamper-evident', () => {
+  const bearer = createApiAccessAuditContext({
+    clientId: 'client-bearer', credentialId: 'credential-bearer', workspaceId: 'workspace-1',
+    environment: 'production', authenticationKind: 'bearer',
+  })
+  assert.match(bearer.contextHash, /^[a-f0-9]{64}$/)
+  assert.doesNotThrow(() => assertApiAccessAuditBinding({
+    workspaceId: 'workspace-1', actorClientId: 'client-bearer',
+  }, bearer))
+  assert.throws(() => createApiAccessAuditContext({
+    clientId: 'client-bearer', credentialId: 'credential-bearer', workspaceId: 'workspace-1',
+    environment: 'production', authenticationKind: 'bearer', delegatedUserId: 'member-forged',
+  }), (error) => error instanceof DomainError && error.code === 'AUTH_INVALID')
+  assert.throws(() => assertApiAccessAuditBinding({
+    workspaceId: 'workspace-1', actorClientId: 'client-bearer',
+  }, { ...bearer, contextHash: 'f'.repeat(64) }), (error) =>
+    error instanceof DomainError && error.code === 'AUTH_INVALID')
+})
+
 test('T-FR-242 kill switch command binds actor, delegated user, CAS, audit and cancellation evidence', async () => {
   const repository = new InMemoryAccessRepository()
   const execute = changeApiAccessControlService({
@@ -124,6 +148,13 @@ test('T-FR-242 kill switch command binds actor, delegated user, CAS, audit and c
   assert.equal(first.command.actorClientId, 'client-admin')
   assert.equal(first.command.delegatedUserId, 'member-admin')
   assert.equal(first.command.reason, 'Emergency containment requested')
+  assert.deepEqual(first.audit, {
+    clientId: 'client-admin', credentialId: 'credential-admin', workspaceId: 'workspace-1',
+    environment: 'sandbox', authenticationKind: 'ui-session', delegatedUserId: 'member-admin',
+    delegatedIdentityId: 'identity-admin', workspaceRole: 'administrator',
+    contextHash: first.audit.contextHash,
+  })
+  assert.match(first.audit.contextHash, /^[a-f0-9]{64}$/)
   assert.equal(first.canceledOperationCount, 3)
   assert.match(first.command.requestFingerprint, /^[a-f0-9]{64}$/)
   assert.match(first.command.resultRevision, /^[a-f0-9]{64}$/)
@@ -132,12 +163,46 @@ test('T-FR-242 kill switch command binds actor, delegated user, CAS, audit and c
   assert.deepEqual(replay.access, first.access)
 })
 
+test('T-FR-242 administrative idempotency is bound to the complete delegated audit identity', async () => {
+  const repository = new InMemoryAccessRepository()
+  const execute = changeApiAccessControlService({
+    repository,
+    clock: () => new Date('2026-08-03T22:00:00.000Z'),
+    createId: () => 'api-access-command-audit-replay-1',
+  })
+  const request = {
+    actor: actor(), workspaceId: 'workspace-1', targetType: 'client', targetId: 'client-target',
+    action: 'engage-kill-switch', baseRevision: ZERO_REVISION,
+    reason: 'Contain one exact delegated actor', idempotencyKey: 'audit-bound-replay-1', confirmed: true,
+  }
+  await execute(request)
+  await assert.rejects(
+    () => execute({
+      ...request,
+      actor: actor({
+        delegatedUserId: 'member-other',
+        delegatedIdentityId: 'identity-other',
+      }),
+    }),
+    (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+})
+
 test('T-FR-244 client suspension atomically outboxes containment and the redacted client event', async () => {
   const events = []
+  const storedCommands = []
   const transaction = {
     v2ApiAccessCommand: {
       async findUnique() { return null },
-      async create({ data }) { return { ...data, delegatedUserId: data.delegatedUserId ?? null } },
+      async create({ data }) {
+        storedCommands.push(data)
+        return {
+          ...data,
+          delegatedUserId: data.delegatedUserId ?? null,
+          delegatedIdentityId: data.delegatedIdentityId ?? null,
+          workspaceRole: data.workspaceRole ?? null,
+        }
+      },
     },
     v2ApiClient: {
       async findFirst() {
@@ -198,6 +263,43 @@ test('T-FR-244 client suspension atomically outboxes containment and the redacte
   assert.equal(events[1].actorClientId, 'client-admin')
   assert.equal(events[1].actorUserId, 'member-admin')
   assert.equal(events[1].dataJson.includes('Contain compromised automation'), false)
+  assert.deepEqual({
+    actorCredentialId: storedCommands[0].actorCredentialId,
+    actorEnvironment: storedCommands[0].actorEnvironment,
+    actorAuthenticationKind: storedCommands[0].actorAuthenticationKind,
+    delegatedUserId: storedCommands[0].delegatedUserId,
+    delegatedIdentityId: storedCommands[0].delegatedIdentityId,
+    workspaceRole: storedCommands[0].workspaceRole,
+  }, {
+    actorCredentialId: 'credential-admin',
+    actorEnvironment: 'sandbox',
+    actorAuthenticationKind: 'ui-session',
+    delegatedUserId: 'member-admin',
+    delegatedIdentityId: 'identity-admin',
+    workspaceRole: 'administrator',
+  })
+  assert.match(storedCommands[0].actorContextHash, /^[a-f0-9]{64}$/)
+})
+
+test('T-FR-242 persisted API access audit context fails closed when storage is tampered', async () => {
+  const repository = new PrismaApiAccessControlRepository({
+    v2ApiAccessCommand: {
+      async findUnique() {
+        return {
+          id: 'api-access-command-tampered-1', workspaceId: 'workspace-1',
+          actorClientId: 'client-admin', actorCredentialId: 'credential-admin',
+          actorEnvironment: 'sandbox', actorAuthenticationKind: 'ui-session',
+          actorContextHash: 'f'.repeat(64), delegatedUserId: 'member-admin',
+          delegatedIdentityId: 'identity-admin', workspaceRole: 'administrator',
+        }
+      },
+    },
+  })
+  await assert.rejects(() => repository.findReplay({
+    workspaceId: 'workspace-1', actorClientId: 'client-admin',
+    actorContextHash: 'f'.repeat(64), idempotencyKey: 'tampered-audit-replay',
+    requestFingerprint: 'e'.repeat(64),
+  }), (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT')
 })
 
 test('T-FR-242 API access administration rejects missing authority, confirmation and stale revisions', async () => {

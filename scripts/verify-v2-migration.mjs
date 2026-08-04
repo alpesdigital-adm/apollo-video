@@ -57,6 +57,7 @@ assert.match(
 
 const apiClientModel = schema.match(/model V2ApiClient \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiCredentialModel = schema.match(/model V2ApiCredential \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const apiAccessCommandModel = schema.match(/model V2ApiAccessCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -68,6 +69,21 @@ assert.match(
   committed,
   /ALTER TABLE "api_clients"[\s\S]*DROP COLUMN "secretSalt"[\s\S]*DROP COLUMN "secretHash"/,
   'the credential contract migration must remove verifier copies from api_clients',
+)
+for (const field of [
+  'actorCredentialId',
+  'actorEnvironment',
+  'actorAuthenticationKind',
+  'actorContextHash',
+  'delegatedIdentityId',
+  'workspaceRole',
+]) {
+  assert.match(apiAccessCommandModel, new RegExp(`\\b${field}\\b`), `ApiAccessCommand must persist ${field}`)
+}
+assert.match(
+  committed,
+  /TRUNCATE TABLE "api_access_commands";[\s\S]*ADD COLUMN "actorCredentialId"[\s\S]*ADD COLUMN "actorContextHash"/,
+  'unattributable pre-contract access commands must be removed before audit fields become required',
 )
 
 assertSetContains(
@@ -99,6 +115,10 @@ const requiredChecks = [
   'api_credentials_salt_check',
   'api_credentials_hash_check',
   'api_credentials_revocation_check',
+  'api_access_commands_actor_environment_check',
+  'api_access_commands_actor_authentication_kind_check',
+  'api_access_commands_actor_context_hash_check',
+  'api_access_commands_delegation_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

@@ -7,17 +7,23 @@ import type {
   ApiAccessControlRepository,
 } from '../../application/ports/api-access-control-repository.ts'
 import {
+  assertApiAccessAuditBinding,
+  createApiAccessAuditContext,
   createApiAccessControl,
+  type ApiAccessAuthenticationKind,
+  type ApiAccessAuditContext,
   type ApiAccessCommand,
   type ApiAccessControl,
   type ApiAccessStatus,
 } from '../../domain/api-access-control.ts'
+import type { ApiEnvironment } from '../../domain/api-client.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { PublicOperation, PublicOperationStatus } from '../../domain/public-operation.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
 import { persistManyOperationStatusEvents } from './public-operation-repository.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 type StoredCommand = {
   id: string
@@ -33,7 +39,13 @@ type StoredCommand = {
   resultKillSwitchEngaged: boolean
   reason: string
   actorClientId: string
+  actorCredentialId: string
+  actorEnvironment: string
+  actorAuthenticationKind: string
+  actorContextHash: string
   delegatedUserId: string | null
+  delegatedIdentityId: string | null
+  workspaceRole: string | null
   idempotencyKey: string
   requestFingerprint: string
   canceledOperationCount: number
@@ -61,6 +73,29 @@ function hydrateCommand(row: StoredCommand): Readonly<ApiAccessCommand> {
     requestFingerprint: row.requestFingerprint,
     changedAt: row.changedAt.toISOString(),
   })
+}
+
+function hydrateStoredAudit(row: StoredCommand): Readonly<ApiAccessAuditContext> {
+  try {
+    const audit = createApiAccessAuditContext({
+      clientId: row.actorClientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as ApiEnvironment,
+      authenticationKind: row.actorAuthenticationKind as ApiAccessAuthenticationKind,
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored API access audit context is invalid',
+      { commandId: row.id },
+    )
+  }
 }
 
 function accessFromCommand(row: StoredCommand): Readonly<ApiAccessControl> {
@@ -132,6 +167,7 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
   async findReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<Readonly<ApiAccessCommandResult> | null> {
@@ -143,13 +179,22 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
       } },
     })
     if (!row) return null
-    if (row.requestFingerprint !== input.requestFingerprint) {
+    hydrateStoredAudit(row)
+    if (
+      row.actorContextHash !== input.actorContextHash ||
+      row.requestFingerprint !== input.requestFingerprint
+    ) {
       throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
     }
     return replayResult(row)
   }
 
-  async apply(command: Readonly<ApiAccessCommand>, attempt = 1): Promise<Readonly<ApiAccessCommandResult>> {
+  async apply(
+    command: Readonly<ApiAccessCommand>,
+    audit: Readonly<ApiAccessAuditContext>,
+    attempt = 1,
+  ): Promise<Readonly<ApiAccessCommandResult>> {
+    assertApiAccessAuditBinding(command, audit)
     try {
       return await this.client.$transaction(async (transaction) => {
         const replay = await transaction.v2ApiAccessCommand.findUnique({
@@ -160,7 +205,11 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
           } },
         })
         if (replay) {
-          if (replay.requestFingerprint !== command.requestFingerprint) {
+          hydrateStoredAudit(replay)
+          if (
+            replay.actorContextHash !== audit.contextHash ||
+            replay.requestFingerprint !== command.requestFingerprint
+          ) {
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
           }
           return replayResult(replay)
@@ -312,13 +361,20 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
             resultKillSwitchEngaged: command.resultKillSwitchEngaged,
             reason: command.reason,
             actorClientId: command.actorClientId,
+            actorCredentialId: audit.credentialId,
+            actorEnvironment: audit.environment,
+            actorAuthenticationKind: audit.authenticationKind,
+            actorContextHash: audit.contextHash,
             delegatedUserId: command.delegatedUserId,
+            delegatedIdentityId: audit.delegatedIdentityId,
+            workspaceRole: audit.workspaceRole,
             idempotencyKey: command.idempotencyKey,
             requestFingerprint: command.requestFingerprint,
             canceledOperationCount,
             changedAt: new Date(command.changedAt),
           },
         })
+        hydrateStoredAudit(stored)
         return Object.freeze({
           access: accessFromCommand(stored),
           command: hydrateCommand(stored),
@@ -327,7 +383,7 @@ export class PrismaApiAccessControlRepository implements ApiAccessControlReposit
         })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (isConcurrentWrite(error) && attempt < 3) return this.apply(command, attempt + 1)
+      if (isConcurrentWrite(error) && attempt < 3) return this.apply(command, audit, attempt + 1)
       if (isConcurrentWrite(error)) throw new DomainError('PERSISTENCE_CONFLICT', 'API access command conflicted with another write')
       throw error
     }

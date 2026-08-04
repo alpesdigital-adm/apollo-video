@@ -1,4 +1,7 @@
+import { API_ENVIRONMENTS, type ApiEnvironment } from './api-client.ts'
+import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
+import { WORKSPACE_MEMBER_ROLES, type WorkspaceMemberRole } from './workspace-member.ts'
 
 export const API_ACCESS_STATUSES = ['active', 'suspended', 'revoked'] as const
 export const API_ACCESS_ACTIONS = [
@@ -13,6 +16,19 @@ export const API_ACCESS_TARGET_TYPES = ['client', 'workspace'] as const
 export type ApiAccessStatus = (typeof API_ACCESS_STATUSES)[number]
 export type ApiAccessAction = (typeof API_ACCESS_ACTIONS)[number]
 export type ApiAccessTargetType = (typeof API_ACCESS_TARGET_TYPES)[number]
+export type ApiAccessAuthenticationKind = 'bearer' | 'ui-session'
+
+export interface ApiAccessAuditContext {
+  readonly clientId: string
+  readonly credentialId: string
+  readonly workspaceId: string
+  readonly environment: ApiEnvironment
+  readonly authenticationKind: ApiAccessAuthenticationKind
+  readonly delegatedUserId?: string
+  readonly delegatedIdentityId?: string
+  readonly workspaceRole?: WorkspaceMemberRole
+  readonly contextHash: string
+}
 
 export interface ApiAccessControl {
   readonly schemaVersion: 1
@@ -47,6 +63,74 @@ export interface ApiAccessCommand {
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH_PATTERN = /^[a-f0-9]{64}$/
+
+export function createApiAccessAuditContext(input: Omit<ApiAccessAuditContext, 'contextHash'>): Readonly<ApiAccessAuditContext> {
+  assertDomain(
+    ID_PATTERN.test(input.clientId) && ID_PATTERN.test(input.credentialId) &&
+      ID_PATTERN.test(input.workspaceId),
+    'AUTH_INVALID',
+    'API access audit identity is invalid',
+  )
+  assertDomain(
+    API_ENVIRONMENTS.includes(input.environment) &&
+      (input.authenticationKind === 'bearer' || input.authenticationKind === 'ui-session'),
+    'AUTH_INVALID',
+    'API access audit authentication is invalid',
+  )
+  const delegation = [input.delegatedUserId, input.delegatedIdentityId, input.workspaceRole]
+  const hasCompleteDelegation = delegation.every(Boolean)
+  assertDomain(
+    input.authenticationKind === 'ui-session'
+      ? hasCompleteDelegation
+      : delegation.every((value) => value === undefined),
+    'AUTH_INVALID',
+    'API access audit delegation does not match its authentication kind',
+  )
+  if (hasCompleteDelegation) {
+    assertDomain(
+      ID_PATTERN.test(input.delegatedUserId as string) &&
+        ID_PATTERN.test(input.delegatedIdentityId as string) &&
+        WORKSPACE_MEMBER_ROLES.includes(input.workspaceRole as WorkspaceMemberRole),
+      'AUTH_INVALID',
+      'API access audit delegation is invalid',
+    )
+  }
+  const canonical = {
+    clientId: input.clientId,
+    credentialId: input.credentialId,
+    workspaceId: input.workspaceId,
+    environment: input.environment,
+    authenticationKind: input.authenticationKind,
+    delegatedUserId: input.delegatedUserId ?? null,
+    delegatedIdentityId: input.delegatedIdentityId ?? null,
+    workspaceRole: input.workspaceRole ?? null,
+  }
+  return Object.freeze({ ...input, contextHash: calculateCanonicalHash(canonical) })
+}
+
+export function assertApiAccessAuditBinding(
+  command: Pick<ApiAccessCommand, 'workspaceId' | 'actorClientId' | 'delegatedUserId'>,
+  audit: ApiAccessAuditContext,
+): void {
+  const canonical = createApiAccessAuditContext({
+    clientId: audit.clientId,
+    credentialId: audit.credentialId,
+    workspaceId: audit.workspaceId,
+    environment: audit.environment,
+    authenticationKind: audit.authenticationKind,
+    ...(audit.delegatedUserId ? { delegatedUserId: audit.delegatedUserId } : {}),
+    ...(audit.delegatedIdentityId ? { delegatedIdentityId: audit.delegatedIdentityId } : {}),
+    ...(audit.workspaceRole ? { workspaceRole: audit.workspaceRole } : {}),
+  })
+  assertDomain(
+    canonical.contextHash === audit.contextHash &&
+      audit.clientId === command.actorClientId &&
+      audit.workspaceId === command.workspaceId &&
+      audit.delegatedUserId === command.delegatedUserId,
+    'AUTH_INVALID',
+    'API access command audit context does not match its actor',
+  )
+}
 
 export function createApiAccessControl(
   input: Omit<ApiAccessControl, 'schemaVersion'>,

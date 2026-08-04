@@ -1,4 +1,5 @@
 import type {
+  ApiAccessAuditContext,
   ApiAccessCommand,
   ApiAccessControl,
   ApiAccessTargetType,
@@ -20,8 +21,12 @@ export interface ApiAccessControlRepository {
   findReplay(input: {
     workspaceId: string
     actorClientId: string
+    actorContextHash: string
     idempotencyKey: string
     requestFingerprint: string
   }): Promise<Readonly<ApiAccessCommandResult> | null>
-  apply(command: Readonly<ApiAccessCommand>): Promise<Readonly<ApiAccessCommandResult>>
+  apply(
+    command: Readonly<ApiAccessCommand>,
+    audit: Readonly<ApiAccessAuditContext>,
+  ): Promise<Readonly<ApiAccessCommandResult>>
 }

@@ -1364,6 +1364,16 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(engageClientKillResponse.status, 201, JSON.stringify(engagedClientKill))
     assert.equal(engagedClientKill.data.access.killSwitchEngaged, true)
     assert.equal(engagedClientKill.data.canceledOperationCount, 1)
+    const storedBearerContainment = await client.v2ApiAccessCommand.findUniqueOrThrow({
+      where: { id: engagedClientKill.data.command.id },
+    })
+    assert.equal(storedBearerContainment.actorCredentialId, issued.credential.id)
+    assert.equal(storedBearerContainment.actorEnvironment, apiEnvironment)
+    assert.equal(storedBearerContainment.actorAuthenticationKind, 'bearer')
+    assert.equal(storedBearerContainment.delegatedUserId, null)
+    assert.equal(storedBearerContainment.delegatedIdentityId, null)
+    assert.equal(storedBearerContainment.workspaceRole, null)
+    assert.match(storedBearerContainment.actorContextHash, /^[a-f0-9]{64}$/)
     assert.equal((await client.v2PublicOperation.findUnique({
       where: { id: 'public-api-client-kill-operation-v2' },
     }))?.status, 'canceled')
@@ -1428,6 +1438,20 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(releaseClientKillResponse.status, 201, JSON.stringify(releasedClientKill))
     assert.equal(releasedClientKill.data.access.killSwitchEngaged, false)
     assert.equal(releasedClientKill.data.command.delegatedUserId, persistedMember.id)
+    const storedDelegatedRecovery = await client.v2ApiAccessCommand.findUniqueOrThrow({
+      where: { id: releasedClientKill.data.command.id },
+    })
+    assert.match(storedDelegatedRecovery.actorCredentialId, /^ui-session:[a-f0-9]{64}$/)
+    assert.equal(storedDelegatedRecovery.actorEnvironment, apiEnvironment)
+    assert.equal(storedDelegatedRecovery.actorAuthenticationKind, 'ui-session')
+    assert.equal(storedDelegatedRecovery.delegatedUserId, persistedMember.id)
+    assert.equal(storedDelegatedRecovery.delegatedIdentityId, persistedMember.identityId)
+    assert.equal(storedDelegatedRecovery.workspaceRole, 'administrator')
+    assert.match(storedDelegatedRecovery.actorContextHash, /^[a-f0-9]{64}$/)
+    assert.notEqual(
+      storedDelegatedRecovery.actorContextHash,
+      storedBearerContainment.actorContextHash,
+    )
     assert.equal((await fetch(`${baseUrl}/v1/projects`, { headers: { authorization } })).status, 200)
 
     await client.v2PublicOperation.create({

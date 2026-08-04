@@ -209,6 +209,8 @@ Possuir scope não implica autorização final: resource ownership, role, rights
 
 O actor autenticado e seu audit context formam um único vínculo. Client, credential, workspace e environment devem coincidir; delegação é ausente ou contém simultaneamente member, login identity e workspace role persistidos, e a projeção de actor repete somente client e member. O guard de scope valida esse vínculo antes da grant. O conjunto de scopes entregue ao runtime implementa apenas a interface read-only e não expõe `add`, `delete` ou `clear`, mesmo em JavaScript.
 
+Comandos administrativos de containment persistem o audit context completo em colunas internas e um hash canônico revalidado ao ler. O hash também integra o fingerprint de idempotência: a chave pertence ao mesmo client técnico, mas um credential ou member delegado diferente não pode receber o replay. A response pública continua expondo somente a projeção redigida do command, nunca credential/session identity, login identity, role ou context hash.
+
 Na sessão humana, os scopes administrativos do principal técnico compartilhado não substituem a role do member: `clients:admin`, `webhooks:admin` e recovery de containment exigem `administrator`. Role desconhecida falha na autenticação. Um comando pode acionar/release o kill switch do próprio client porque o recovery permanece disponível, mas suspend/revoke do client que autentica a chamada é proibido para não produzir lockout sem autoridade alternativa.
 
 ## 9. Convenções HTTP/JSON
