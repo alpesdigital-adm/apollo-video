@@ -21,6 +21,9 @@ import {
 } from '../../domain/media-artifact.ts'
 import { createPublicEvent } from '../../domain/public-event.ts'
 import { persistPublicEvents } from './public-event-outbox.ts'
+import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { ApiEnvironment } from '../../domain/api-client.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 interface StoredResponse {
   transitionId: string
@@ -85,6 +88,26 @@ function hydrateTransition(
       { transitionId: row.id },
     )
   }
+  let audit
+  try {
+    audit = createApiAccessAuditContext({
+      clientId: row.actorClientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as ApiEnvironment,
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+      ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+      ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored media artifact lifecycle audit identity is invalid',
+      { transitionId: row.id },
+    )
+  }
   return Object.freeze({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -96,6 +119,7 @@ function hydrateTransition(
     changed: row.changed,
     reason: row.reason,
     actorClientId: row.actorClientId,
+    audit,
     idempotencyKey: row.idempotencyKey,
     requestFingerprint: row.requestFingerprint,
     createdAt: row.createdAt.toISOString(),
@@ -117,11 +141,32 @@ implements MediaArtifactLifecycleRepository {
     serializationAttempt = 1,
   ): Promise<MediaArtifactLifecycleTransitionResult> {
     try {
+      let canonicalAudit
+      try {
+        canonicalAudit = createApiAccessAuditContext({
+          clientId: bundle.audit.clientId,
+          credentialId: bundle.audit.credentialId,
+          workspaceId: bundle.audit.workspaceId,
+          environment: bundle.audit.environment,
+          authenticationKind: bundle.audit.authenticationKind,
+          ...(bundle.audit.delegatedUserId ? { delegatedUserId: bundle.audit.delegatedUserId } : {}),
+          ...(bundle.audit.delegatedIdentityId ? { delegatedIdentityId: bundle.audit.delegatedIdentityId } : {}),
+          ...(bundle.audit.workspaceRole ? { workspaceRole: bundle.audit.workspaceRole } : {}),
+        })
+      } catch {
+        throw new DomainError('AUTH_INVALID', 'Artifact lifecycle audit identity is invalid')
+      }
+      if (
+        bundle.audit.workspaceId !== bundle.workspaceId ||
+        canonicalAudit.contextHash !== bundle.audit.contextHash
+      ) {
+        throw new DomainError('AUTH_INVALID', 'Artifact lifecycle audit identity is mismatched')
+      }
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const idempotencyWhere = {
           workspaceId_clientId_key: {
             workspaceId: bundle.workspaceId,
-            clientId: bundle.actorClientId,
+            clientId: bundle.audit.clientId,
             key: bundle.idempotencyKey,
           },
         }
@@ -143,7 +188,8 @@ implements MediaArtifactLifecycleRepository {
           })
           if (
             !transition || transition.workspaceId !== bundle.workspaceId ||
-            transition.actorClientId !== bundle.actorClientId ||
+            transition.actorClientId !== bundle.audit.clientId ||
+            transition.actorContextHash !== bundle.audit.contextHash ||
             transition.idempotencyKey !== bundle.idempotencyKey ||
             transition.requestFingerprint !== bundle.requestFingerprint
           ) {
@@ -191,7 +237,7 @@ implements MediaArtifactLifecycleRepository {
           data: {
             id: bundle.idempotencyRecordId,
             workspaceId: bundle.workspaceId,
-            clientId: bundle.actorClientId,
+            clientId: bundle.audit.clientId,
             key: bundle.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             status: 'processing',
@@ -229,7 +275,14 @@ implements MediaArtifactLifecycleRepository {
             targetStatus: bundle.targetStatus,
             changed,
             reason: bundle.reason,
-            actorClientId: bundle.actorClientId,
+            actorClientId: bundle.audit.clientId,
+            actorCredentialId: bundle.audit.credentialId,
+            actorEnvironment: bundle.audit.environment,
+            actorAuthenticationKind: bundle.audit.authenticationKind,
+            actorContextHash: bundle.audit.contextHash,
+            delegatedUserId: bundle.audit.delegatedUserId,
+            delegatedIdentityId: bundle.audit.delegatedIdentityId,
+            workspaceRole: bundle.audit.workspaceRole,
             idempotencyKey: bundle.idempotencyKey,
             requestFingerprint: bundle.requestFingerprint,
             createdAt: new Date(bundle.createdAt),
@@ -244,7 +297,12 @@ implements MediaArtifactLifecycleRepository {
             workspaceId: bundle.workspaceId,
             occurredAt: bundle.createdAt,
             sequence: resultRevision,
-            actor: { clientId: bundle.actorClientId },
+            actor: {
+              clientId: bundle.audit.clientId,
+              ...(bundle.audit.delegatedUserId
+                ? { delegatedUserId: bundle.audit.delegatedUserId }
+                : {}),
+            },
             resource: { type: 'media-artifact', id: bundle.artifactId },
             data: {
               fromStatus,
@@ -280,7 +338,7 @@ implements MediaArtifactLifecycleRepository {
           where: {
             workspaceId_clientId_key: {
               workspaceId: bundle.workspaceId,
-              clientId: bundle.actorClientId,
+              clientId: bundle.audit.clientId,
               key: bundle.idempotencyKey,
             },
           },

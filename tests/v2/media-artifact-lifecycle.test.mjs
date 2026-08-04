@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   assertMediaArtifactLifecycleTransition,
   mediaArtifactLifecycleTargets,
@@ -17,6 +18,24 @@ import {
 
 function expectCode(callback, code) {
   assert.throws(callback, (error) => error instanceof DomainError && error.code === code)
+}
+
+function artifactWriterActor(identityOverrides = {}) {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-lifecycle-1', credentialId: 'credential-lifecycle-1',
+    workspaceId: 'workspace-lifecycle-1', environment: 'sandbox',
+    ...identityOverrides,
+  })
+  return Object.freeze({
+    ...auditContext,
+    scopes: new Set(['artifacts:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
 }
 
 function memoryPrisma() {
@@ -131,7 +150,7 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   const base = {
     workspaceId: state.workspace.id,
     artifactId: state.artifact.id,
-    actorClientId: 'client-lifecycle-1',
+    actor: artifactWriterActor(),
     reason: 'Integrity probe requires human inspection.',
   }
   const quarantined = await execute({
@@ -140,6 +159,9 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   assert.equal(quarantined.replayed, false)
   assert.equal(quarantined.transition.changed, true)
   assert.equal(quarantined.transition.resultRevision, 2)
+  assert.equal(quarantined.transition.audit.credentialId, 'credential-lifecycle-1')
+  assert.equal(quarantined.transition.audit.environment, 'sandbox')
+  assert.equal(quarantined.transition.audit.authenticationKind, 'bearer')
   assert.equal(state.events.length, 1)
   assert.equal(state.events[0].type, 'artifact.rejected')
   assert.deepEqual(JSON.parse(state.events[0].dataJson), {
@@ -213,6 +235,59 @@ test('T-FR-236 artifact lifecycle command is revision-fenced, idempotent and aud
   assert.equal(noop.transition.resultRevision, 4)
   assert.equal(state.artifact.lifecycleRevision, 4)
   assert.equal(state.events.length, 2)
+})
+
+test('T-FR-236 lifecycle audit identity scopes the fingerprint and fails closed on tampering', async () => {
+  const { client, state } = memoryPrisma()
+  const repository = new PrismaMediaArtifactLifecycleRepository(client)
+  let sequence = 100
+  const execute = transitionMediaArtifactLifecycleService({
+    repository,
+    clock: () => new Date('2026-08-02T16:00:00.000Z'),
+    createId: () => `123e4567-e89b-42d3-a456-${String(++sequence).padStart(12, '0')}`,
+  })
+  const request = {
+    workspaceId: state.workspace.id,
+    artifactId: state.artifact.id,
+    actor: artifactWriterActor(),
+    reason: 'Audit identity probe.',
+    baseRevision: 1,
+    targetStatus: 'quarantined',
+    idempotencyKey: 'lifecycle-audit-command-1',
+  }
+  const created = await execute(request)
+  await assert.rejects(
+    execute({ ...request, actor: artifactWriterActor({ credentialId: 'credential-lifecycle-2' }) }),
+    (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+  const stored = state.transitions.get(created.transition.id)
+  stored.actorCredentialId = 'credential-forged'
+  await assert.rejects(
+    execute(request),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('T-FR-236 lifecycle service enforces scope and hides cross-workspace artifacts', async () => {
+  const { client, state } = memoryPrisma()
+  const execute = transitionMediaArtifactLifecycleService({
+    repository: new PrismaMediaArtifactLifecycleRepository(client),
+    clock: () => new Date('2026-08-02T16:00:00.000Z'),
+    createId: () => '123e4567-e89b-42d3-a456-000000000999',
+  })
+  const base = {
+    workspaceId: state.workspace.id, artifactId: state.artifact.id,
+    reason: 'Authorization probe.', baseRevision: 1, targetStatus: 'quarantined',
+    idempotencyKey: 'lifecycle-auth-command-1',
+  }
+  await assert.rejects(
+    execute({ ...base, actor: { ...artifactWriterActor(), scopes: new Set() } }),
+    (error) => error instanceof DomainError && error.code === 'AUTH_SCOPE_REQUIRED',
+  )
+  await assert.rejects(
+    execute({ ...base, actor: artifactWriterActor({ workspaceId: 'workspace-other-1' }) }),
+    (error) => error instanceof DomainError && error.code === 'MEDIA_ARTIFACT_NOT_FOUND',
+  )
 })
 
 test('T-FR-236 lifecycle public contract is exact, immutable and API-first', () => {

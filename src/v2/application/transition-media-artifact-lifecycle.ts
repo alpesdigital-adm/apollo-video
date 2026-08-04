@@ -8,6 +8,12 @@ import type {
   MediaArtifactLifecycleRepository,
   MediaArtifactLifecycleTransitionResult,
 } from './ports/media-artifact-lifecycle-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { DomainError } from '../domain/errors.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const IDEMPOTENCY_PATTERN = /^[\x21-\x7e]{8,128}$/
@@ -19,7 +25,7 @@ export interface TransitionMediaArtifactLifecycleRequest {
   baseRevision: number
   targetStatus: string
   reason: string
-  actorClientId: string
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
 }
 
@@ -37,14 +43,16 @@ export function transitionMediaArtifactLifecycleService(
   ): Promise<MediaArtifactLifecycleTransitionResult> {
     const workspaceId = request.workspaceId.trim()
     const artifactId = request.artifactId.trim()
-    const actorClientId = request.actorClientId.trim()
+    requireScope(request.actor, 'artifacts:write')
+    if (request.actor.workspaceId !== workspaceId) {
+      throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact was not found')
+    }
     const idempotencyKey = request.idempotencyKey.trim()
     const reason = request.reason.trim().replace(/\s+/g, ' ')
     const targetStatus = request.targetStatus.trim() as MediaArtifactLifecycleStatus
 
     assertDomain(ID_PATTERN.test(workspaceId), 'INVALID_ARGUMENT', 'workspaceId is invalid')
     assertDomain(ID_PATTERN.test(artifactId), 'INVALID_ARGUMENT', 'artifactId is invalid')
-    assertDomain(ID_PATTERN.test(actorClientId), 'INVALID_ARGUMENT', 'actorClientId is invalid')
     assertDomain(
       IDEMPOTENCY_PATTERN.test(idempotencyKey),
       'INVALID_ARGUMENT',
@@ -61,6 +69,7 @@ export function transitionMediaArtifactLifecycleService(
       'reason must contain 3 to 500 characters',
     )
     assertMediaArtifactLifecycleStatus(targetStatus)
+    const audit = materializeActorAuditContext(request.actor)
 
     const createdAt = dependencies.clock()
     assertDomain(!Number.isNaN(createdAt.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
@@ -71,7 +80,7 @@ export function transitionMediaArtifactLifecycleService(
       baseRevision: request.baseRevision,
       targetStatus,
       reason,
-      actorClientId,
+      actorContextHash: audit.contextHash,
     })
 
     return dependencies.repository.transitionOrReplay({
@@ -82,7 +91,7 @@ export function transitionMediaArtifactLifecycleService(
       baseRevision: request.baseRevision,
       targetStatus,
       reason,
-      actorClientId,
+      audit,
       idempotencyKey,
       requestFingerprint,
       createdAt: createdAt.toISOString(),

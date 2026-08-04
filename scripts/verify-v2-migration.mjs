@@ -60,6 +60,7 @@ const apiCredentialModel = schema.match(/model V2ApiCredential \{([\s\S]*?)\n\}/
 const apiAccessCommandModel = schema.match(/model V2ApiAccessCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiAdministrationCommandModel = schema.match(/model V2ApiAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const webhookAdministrationCommandModel = schema.match(/model V2WebhookAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const mediaArtifactLifecycleTransitionModel = schema.match(/model V2MediaArtifactLifecycleTransition \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -71,6 +72,21 @@ assert.match(
   committed,
   /ALTER TABLE "api_clients"[\s\S]*DROP COLUMN "secretSalt"[\s\S]*DROP COLUMN "secretHash"/,
   'the credential contract migration must remove verifier copies from api_clients',
+)
+for (const field of [
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+]) {
+  assert.match(
+    mediaArtifactLifecycleTransitionModel,
+    new RegExp(`\\b${field}\\b`),
+    `MediaArtifactLifecycleTransition must persist ${field}`,
+  )
+}
+assert.match(
+  committed,
+  /DELETE FROM "idempotency_records" AS replay[\s\S]*TRUNCATE TABLE "media_artifact_lifecycle_transitions";[\s\S]*ADD COLUMN "actorCredentialId"[\s\S]*ADD COLUMN "actorContextHash"/,
+  'unattributable lifecycle transitions and their replay records must be removed before audit fields become required',
 )
 for (const field of [
   'action', 'targetClientId', 'targetCredentialId', 'actorClientId',

@@ -1,4 +1,5 @@
 import type { MediaArtifactLifecycleStatus } from '../../domain/media-artifact.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface MediaArtifactLifecycleTransitionRecord {
   id: string
@@ -11,6 +12,7 @@ export interface MediaArtifactLifecycleTransitionRecord {
   changed: boolean
   reason: string
   actorClientId: string
+  audit: Readonly<ApiAccessAuditContext>
   idempotencyKey: string
   requestFingerprint: string
   createdAt: string
@@ -24,7 +26,7 @@ export interface MediaArtifactLifecycleTransitionBundle {
   baseRevision: number
   targetStatus: MediaArtifactLifecycleStatus
   reason: string
-  actorClientId: string
+  audit: Readonly<ApiAccessAuditContext>
   idempotencyKey: string
   requestFingerprint: string
   createdAt: string

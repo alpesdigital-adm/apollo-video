@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireScope } from '@/v2/application/authenticate-api-client'
 import { transitionMediaArtifactLifecycleService } from '@/v2/application/transition-media-artifact-lifecycle'
 import { createMediaArtifactLifecycleRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
@@ -21,7 +20,6 @@ export async function POST(
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
-    requireScope(actor, 'artifacts:write')
     const { artifactId } = await context.params
     const body = parseMediaArtifactLifecycleTransitionBody(await request.json())
     const result = await transitionMediaArtifactLifecycleService({
@@ -32,7 +30,7 @@ export async function POST(
       ...body,
       workspaceId: actor.workspaceId,
       artifactId,
-      actorClientId: actor.clientId,
+      actor,
       idempotencyKey: request.headers.get('idempotency-key') ?? '',
     })
     return NextResponse.json(

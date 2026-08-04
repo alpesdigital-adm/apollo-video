@@ -178,6 +178,7 @@ model V2ApiClient {
   workspaceUiPrincipal            V2WorkspaceUiPrincipal?
   mediaUploads                    V2MediaUpload[]
   mediaDownloadGrants             V2MediaDownloadGrant[]
+  mediaArtifactLifecycleTransitions V2MediaArtifactLifecycleTransition[] @relation("MediaArtifactLifecycleTransitionActor")
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions     V2WebhookSubscription[]          @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions            V2ProxyReviewDecision[]
@@ -1040,14 +1041,23 @@ model V2MediaArtifactLifecycleTransition {
   changed            Boolean
   reason             String   @db.VarChar(500)
   actorClientId      String   @db.VarChar(80)
+  actorCredentialId  String   @db.VarChar(128)
+  actorEnvironment   String   @db.VarChar(16)
+  actorAuthenticationKind String @db.VarChar(16)
+  actorContextHash   String   @db.Char(64)
+  delegatedUserId    String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole      String?  @db.VarChar(32)
   idempotencyKey     String   @db.VarChar(128)
   requestFingerprint String   @db.Char(64)
   createdAt          DateTime @db.Timestamptz(3)
 
   workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   artifact  V2MediaArtifact @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  actor     V2ApiClient     @relation("MediaArtifactLifecycleTransitionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
 
   @@index([workspaceId, actorClientId, idempotencyKey])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@index([workspaceId, artifactId, createdAt(sort: Desc)])
   @@index([workspaceId, targetStatus, createdAt(sort: Desc)])
   @@map("media_artifact_lifecycle_transitions")
