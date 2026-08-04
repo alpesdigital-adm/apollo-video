@@ -491,7 +491,7 @@ interface UploadSession {
 }
 ```
 
-Downloads retornam signed URL curta ou stream autorizado. Client não persiste URI como identidade; usa `assetId`/`artifactId` e solicita novo download grant.
+Downloads retornam signed URL curta ou stream autorizado. Client não persiste URI como identidade; usa `assetId`/`artifactId` e solicita novo download grant. Depois de validar assinatura, grant, expiração, revogação e artifact, a Application passa somente ao port privado a key, o tamanho e o SHA-256 persistidos. O composition root usa o driver canônico `local|s3`: local verifica hash antes do stream e invalida cache por tamanho/mtime; S3 exige checksum e `VersionId` no `HeadObject`, lê exatamente essa versão e valida `ContentLength`/`Content-Range`. Nenhuma key, bucket, path ou versão entra na resposta pública.
 
 ## 16. Commands externos
 

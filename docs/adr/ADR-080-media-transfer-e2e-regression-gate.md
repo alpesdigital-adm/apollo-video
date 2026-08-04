@@ -19,10 +19,14 @@ Uma jornada determinística obrigatória conecta o ciclo completo e cobre:
 - expiração e renovação da sessão assinada;
 - rejeição de checksum autoritativo divergente;
 - conclusão verificada;
-- emissão, autorização e revogação de download grant.
+- emissão, autorização e revogação de download grant;
+- stream full/range pelo driver configurado, com tamanho, checksum e versão
+  imutável revalidados antes da entrega.
 
-O teste usa adapters em memória e signers reais, sem rede ou custo externo, para
-ser executado em toda regressão.
+O teste usa adapters em memória, storage local temporário, S3 controlado e
+signers reais, sem rede ou custo externo, para ser executado em toda regressão.
+O adapter S3 exige `VersionId`, checksum e tamanho no HEAD, fixa a mesma versão
+no GET e valida `Content-Range`; o adapter local verifica o hash antes do stream.
 
 ## Consequências
 
@@ -37,4 +41,5 @@ ser executado em toda regressão.
 - receipts sobrevivem à interrupção;
 - sessão expirada e checksum incorreto falham;
 - grant revogado não autoriza download;
+- bytes adulterados, objeto sem versão ou range inconsistente não cruzam o port;
 - regressão geral e CI hospedado permanecem verdes.

@@ -41,7 +41,12 @@ export function readArtifactContentService(dependencies: {
     if (artifact.byteSize > BigInt(Number.MAX_SAFE_INTEGER)) throw new DomainError('PERSISTENCE_CONFLICT', 'Media artifact is too large to stream safely')
     const total = Number(artifact.byteSize)
     const range = parseRange(input.rangeHeader, total)
-    const content = await dependencies.storage.open({ artifactKey: artifact.artifactKey, expectedByteSize: artifact.byteSize, ...(range ? { range } : {}) })
+    const content = await dependencies.storage.open({
+      artifactKey: artifact.artifactKey,
+      expectedByteSize: artifact.byteSize,
+      expectedSha256: artifact.sha256,
+      ...(range ? { range } : {}),
+    })
     return Object.freeze({
       ...content,
       totalByteSize: total,

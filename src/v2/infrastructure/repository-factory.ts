@@ -267,6 +267,7 @@ import {
 } from './media/local-media-upload-storage.ts'
 import {
   createArtifactS3ClientFromEnvironment,
+  S3ArtifactContentStorage,
   S3ArtifactSourceMaterializer,
   S3VerifiedMediaStorage,
 } from './media/s3-artifact-storage.ts'
@@ -732,7 +733,10 @@ export function createMediaArtifactPersistenceRepository(
 }
 
 export function createArtifactContentStorage(environment: NodeJS.ProcessEnv = process.env) {
-  return createLocalArtifactContentStorageFromEnvironment(environment)
+  if (artifactStorageDriver(environment) === 'local') {
+    return createLocalArtifactContentStorageFromEnvironment(environment)
+  }
+  return new S3ArtifactContentStorage(createArtifactS3ClientFromEnvironment(environment))
 }
 
 export function createProjectMediaRepository(): ProjectMediaRepository {

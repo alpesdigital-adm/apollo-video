@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-s3'
 
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from '../../application/ports/media-ingest.ts'
+import type { ArtifactContentStorage } from '../../application/ports/artifact-content-storage.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { MediaUpload, MediaUploadPart } from '../../domain/media-transfer.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -140,6 +141,78 @@ function nodeReadable(body: unknown): Readable {
     return Readable.fromWeb(body.transformToWebStream() as never)
   }
   throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact body is not readable')
+}
+
+export class S3ArtifactContentStorage implements ArtifactContentStorage {
+  private readonly bucket: string
+  private readonly client: ArtifactS3Client
+
+  constructor(options: S3ArtifactStorageOptions) {
+    this.bucket = options.bucket.trim()
+    if (!this.bucket) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'S3 artifact bucket is not configured')
+    this.client = options.client
+  }
+
+  async open(input: Parameters<ArtifactContentStorage['open']>[0]) {
+    assertKey(input.artifactKey)
+    if (
+      !/^[a-f0-9]{64}$/.test(input.expectedSha256) ||
+      input.expectedByteSize <= BigInt(0) || input.expectedByteSize > BigInt(Number.MAX_SAFE_INTEGER)
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored S3 artifact identity is invalid')
+    const total = Number(input.expectedByteSize)
+    const start = input.range?.start ?? 0
+    const end = input.range?.end ?? total - 1
+    if (
+      !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+      start < 0 || end < start || end >= total
+    ) throw new DomainError('MEDIA_RANGE_NOT_SATISFIABLE', 'Requested S3 media byte range cannot be satisfied')
+
+    let head
+    try {
+      head = await this.client.send(new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: input.artifactKey,
+        ChecksumMode: 'ENABLED',
+      }))
+    } catch {
+      throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact bytes were not found')
+    }
+    if (!head.VersionId || head.VersionId === 'null') {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact content is not version-bound')
+    }
+    await verifyHead({
+      client: this.client,
+      bucket: this.bucket,
+      key: input.artifactKey,
+      versionId: head.VersionId,
+      sha256: input.expectedSha256,
+      byteSize: total,
+    })
+
+    const partial = Boolean(input.range)
+    let object
+    try {
+      object = await this.client.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: input.artifactKey,
+        VersionId: head.VersionId,
+        ...(partial ? { Range: `bytes=${start}-${end}` } : {}),
+      }))
+    } catch {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact content could not be read')
+    }
+    const byteSize = end - start + 1
+    if (
+      object.VersionId !== head.VersionId || object.ContentLength !== byteSize ||
+      (partial && object.ContentRange !== `bytes ${start}-${end}/${total}`)
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'S3 artifact content response is inconsistent')
+    return Object.freeze({
+      body: Readable.toWeb(nodeReadable(object.Body)) as ReadableStream<Uint8Array>,
+      byteSize,
+      start,
+      end,
+    })
+  }
 }
 
 export class S3ArtifactSourceMaterializer implements ArtifactSourceMaterializer {

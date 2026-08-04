@@ -5,9 +5,15 @@ import { Readable } from 'node:stream'
 
 import type { ArtifactContentStorage } from '../../application/ports/artifact-content-storage.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { calculateFileSha256 } from './local-artifact-manifest.ts'
 
 export class LocalArtifactContentStorage implements ArtifactContentStorage {
   private readonly root: string
+  private readonly verified = new Map<string, Readonly<{
+    byteSize: number
+    modifiedAtMs: number
+    sha256: string
+  }>>()
 
   constructor(root: string) {
     this.root = normalize(resolve(root.trim()))
@@ -21,8 +27,30 @@ export class LocalArtifactContentStorage implements ArtifactContentStorage {
     if (rel.startsWith('..') || isAbsolute(rel)) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored artifact key escaped its storage root')
     const metadata = await stat(path).catch(() => null)
     if (!metadata?.isFile() || BigInt(metadata.size) !== input.expectedByteSize) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Media artifact bytes were not found')
+    if (!/^[a-f0-9]{64}$/.test(input.expectedSha256)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored media artifact checksum is invalid')
+    }
+    const cached = this.verified.get(path)
+    if (
+      !cached || cached.byteSize !== metadata.size ||
+      cached.modifiedAtMs !== metadata.mtimeMs || cached.sha256 !== input.expectedSha256
+    ) {
+      if (await calculateFileSha256(path) !== input.expectedSha256) {
+        this.verified.delete(path)
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Local media artifact failed immutable identity verification')
+      }
+      this.verified.set(path, Object.freeze({
+        byteSize: metadata.size,
+        modifiedAtMs: metadata.mtimeMs,
+        sha256: input.expectedSha256,
+      }))
+    }
     const start = input.range?.start ?? 0
     const end = input.range?.end ?? metadata.size - 1
+    if (
+      !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+      start < 0 || end < start || end >= metadata.size
+    ) throw new DomainError('MEDIA_RANGE_NOT_SATISFIABLE', 'Requested local media byte range cannot be satisfied')
     const stream = createReadStream(path, { start, end })
     return Object.freeze({
       body: Readable.toWeb(stream) as ReadableStream<Uint8Array>,

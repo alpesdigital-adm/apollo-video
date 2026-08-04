@@ -1926,6 +1926,8 @@ Incremento local F0.040: o adapter valida input, output, erro estruturado e reso
 
 Uploads e downloads usam sessões/signed URLs de curta duração, multipart/resume, checksum, tamanho/MIME declarados e confirmação. URIs internas, credenciais e paths de storage não são expostos como contrato permanente.
 
+Incremento local F0.041: depois de autorizar o grant, o application service entrega ao port privado key, tamanho e SHA-256 esperados. O composition root escolhe o mesmo driver `local|s3` do runtime. O S3 faz `HeadObject` com checksum, exige `VersionId` e usa essa versão exata no `GetObject`, validando range e tamanho antes do stream; o local verifica o hash antes da primeira leitura e invalida seu cache quando tamanho ou mtime mudam. Esses detalhes nunca viram identidade pública. PostgreSQL/MinIO implantados e aceite continuam pendentes.
+
 ### FR-248 — Preflight, dry-run e operações em lote
 
 Operações de alto alcance ou custo devem oferecer preflight/dry-run com targets, conflicts, invalidations, jobs, custo e quota antes do commit. Lotes retornam resultado por item e suportam retry parcial segundo a mesma política da interface.

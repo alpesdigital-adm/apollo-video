@@ -109,6 +109,19 @@ test('local V2 storage streams multipart bytes, verifies checksum, promotes a ma
   assert.equal(content.contentType, 'video/mp4')
   assert.equal(new TextDecoder().decode(await new Response(content.body).arrayBuffer()), 'poll')
 
+  await writeFile(promoted.path, 'tamper!')
+  await assert.rejects(
+    readArtifactContentService({
+      artifacts,
+      storage: new LocalArtifactContentStorage(root),
+    })({
+      workspaceId: 'workspace-ingest-1',
+      artifactId: 'artifact-ingest-test-1',
+      rangeHeader: null,
+    }),
+    /immutable identity verification/,
+  )
+
   await storage.discard(uploadId)
   await assert.rejects(() => storage.verifiedSourcePath(upload, receipts), /missing|ENOENT/)
 })

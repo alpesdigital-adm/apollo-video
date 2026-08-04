@@ -638,9 +638,9 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 - [x] Implementar `begin-upload` com kind, size, MIME e checksum esperado. Evidência F0-086 + E2E real: `POST /v1/media/uploads` persiste intent isolado, e o master de 145 MB atravessou o contrato sem bufferizar o Proxy do Next.
 - [x] Gerar signed single/multipart sessions curtas com headers obrigatórios. Evidência F0-087 + E2E real: autorização assinada foi usada pela UI para transferir o master e permanece vinculada a workspace/client/upload/expiry.
 - [x] Implementar resume, parts completion e verification antes do ingest. Evidência F0-088 + E2E real: bytes foram verificados por tamanho/MIME/SHA-256 antes de enfileirar `media-ingest`; regressões cobrem interrupção, descarte e range.
-- [ ] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente.
+- [ ] Gerar download grants curtos por asset/artifact autorizado. Evidência F0-089: artifact disponível e workspace-scoped recebe grant HMAC de 30–900 segundos, vinculado ao client e idempotency key; banco retém somente hash do token, e revogação convergente invalida a autorização imediatamente. Incremento local F0.041 faz o stream autorizado respeitar o driver `local|s3`, revalida checksum/tamanho e, no S3, fixa `VersionId` antes de entregar bytes ou ranges. PostgreSQL/MinIO implantados e aceite permanecem pendentes.
 - [ ] Impedir storage path/URI permanente de virar identidade pública. Evidência F0-090: presenters convertem chaves internas em referências lógicas `artifact:<id>`; um gate recursivo rejeita storage path/URI/bucket/object key e valida todos os exemplos públicos, enquanto URLs efêmeras permanecem limitadas aos grants/sessions.
-- [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado.
+- [ ] Criar E2E de upload grande, interrupção, checksum incorreto, expiração e download revogado. Evidência F0-091: jornada determinística cobre 256 MiB/4 parts, retomada após sessão expirada, preservação de receipts, bloqueio de checksum divergente, conclusão verificada e invalidação imediata do grant revogado. Incremento local F0.041 prova o port real de leitura contra adapters local e S3 controlado, inclusive range, versão imutável e adulteração; jornada PostgreSQL + MinIO + HTTP, deploy e aceite continuam abertos.
 
 ### F0.042 — Preflight e lote externo [FR-248]
 
@@ -5400,6 +5400,18 @@ Regressões locais desta slice:
 - 1/1 jornada E2E integrada aprovada;
 - cenários unitários anteriores continuam cobrindo limites, replay e isolamento;
 - typecheck e regressão geral permanecem gates obrigatórios.
+
+### Incremento local F0.041 — download íntegro no driver S3 de produção
+
+**Status:** implementado e testado localmente em 4 de agosto de 2026; sem PostgreSQL/MinIO real, deploy ou aceite.
+
+- a rota de conteúdo continua atravessando o mesmo `ArtifactContentStorage` da Application, mas o composition root agora seleciona `LocalArtifactContentStorage` ou `S3ArtifactContentStorage` pelo driver canônico `APOLLO_V2_ARTIFACT_STORAGE_DRIVER`;
+- o port recebe key privada, byte size e SHA-256 esperados apenas após autorização do grant; nada disso entra no contrato público;
+- o adapter S3 exige bucket versionado, valida `ContentLength` e checksum SHA-256/metadata via `HeadObject`, fixa o `VersionId` no `GetObject` e verifica `VersionId`, `ContentLength` e `Content-Range` antes do stream;
+- o adapter local verifica o SHA-256 antes do primeiro stream e só reutiliza a verificação enquanto path, tamanho, mtime e checksum esperado permanecerem iguais;
+- ambos falham fechado para range inválido e identidade adulterada; o teste S3 cruza `readArtifactContentService`, stream completo e parcial, e rejeita checksum divergente;
+- gate estrutural prova que a factory de conteúdo segue o mesmo driver já usado por ingest/render;
+- a jornada HTTP/PostgreSQL existente de final export + grant + range + download + tamper + revoke permanece preparada; execução com MinIO real, deploy e aceite ainda são necessários, portanto nenhuma caixa adicional foi marcada.
 
 ### Slice F0-092 — PreflightResult canônico e público
 
