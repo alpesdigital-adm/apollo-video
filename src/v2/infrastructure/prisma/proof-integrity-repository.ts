@@ -17,6 +17,7 @@ import {
   type ProofIntegrityRun,
 } from '../../domain/proof-integrity.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 type RunWithEvaluations = V2ProofIntegrityRun & {
   evaluations: V2ProofIntegrityEvaluation[]
@@ -73,6 +74,7 @@ function normalizedReasons(
 function hydrateRecord(
   row: RunWithEvaluations,
 ): Readonly<PersistedProofIntegrityRun> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const run = hydrateProofIntegrityRun(
     canonicalValue<ProofIntegrityRun>(
       row.runJson,
@@ -181,6 +183,7 @@ function runData(input: {
   run: Readonly<ProofIntegrityRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Parameters<ProofIntegrityRepository['create']>[0]['authenticationAudit']
 }) {
   const { run } = input
   return {
@@ -207,6 +210,7 @@ function runData(input: {
     requestFingerprint: input.requestFingerprint,
     idempotencyKey: input.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...externalActorAuditData(input.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -442,6 +446,7 @@ implements ProofIntegrityRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.prisma.v2ProofIntegrityRun.findUnique({
       where: {
@@ -456,7 +461,10 @@ implements ProofIntegrityRepository {
         evaluations: { orderBy: { sequence: 'asc' } },
       },
     })
-    return row ? hydrateRecord(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdByClientId)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return hydrateRecord(row)
   }
 
   async create(
@@ -464,6 +472,7 @@ implements ProofIntegrityRepository {
       run: Readonly<ProofIntegrityRun>
       requestFingerprint: string
       idempotencyKey: string
+      authenticationAudit: Parameters<ProofIntegrityRepository['create']>[0]['authenticationAudit']
     },
     attempt = 1,
   ): ReturnType<ProofIntegrityRepository['create']> {
@@ -484,6 +493,8 @@ implements ProofIntegrityRepository {
             },
           })
         if (replay) {
+          const audit = hydrateExternalActorAudit(replay, replay.createdByClientId)
+          if (audit.contextHash !== input.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (replay.requestFingerprint !== input.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -532,6 +543,7 @@ implements ProofIntegrityRepository {
           projectId: input.run.projectId,
           actorClientId: input.run.createdByClientId,
           idempotencyKey: input.idempotencyKey,
+          actorContextHash: input.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== input.requestFingerprint) {

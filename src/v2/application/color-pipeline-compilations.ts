@@ -7,6 +7,11 @@ import type {
   ColorPipelineCompilationRepository,
   CreateColorPipelineCompilationInput,
 } from './ports/color-pipeline-compilation-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const IDEMPOTENCY = /^[\x21-\x7E]{8,128}$/
@@ -25,15 +30,17 @@ export function createColorPipelineCompilationService(dependencies: {
   clock?: () => Date
 }) {
   const clock = dependencies.clock ?? (() => new Date())
-  return async function create(request: Readonly<CreateColorPipelineCompilationInput>) {
+  return async function create(request: Readonly<Omit<CreateColorPipelineCompilationInput, 'actor'> & {
+    actor: Readonly<AuthenticatedExternalActor>
+  }>) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
     const sourceArtifactId = identity(request.sourceArtifactId, 'sourceArtifactId')
     const sourceManifestId = identity(request.sourceManifestId, 'sourceManifestId')
-    if (request.actor?.type !== 'api-client') {
-      throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
-    }
-    const createdByClientId = identity(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    if (authenticationAudit.workspaceId !== workspaceId) throw new DomainError('AUTH_INVALID', 'Color pipeline actor does not belong to the workspace')
+    const createdByClientId = identity(authenticationAudit.clientId, 'actor.id')
     const idempotencyKey = request.idempotencyKey.trim()
     if (!IDEMPOTENCY.test(idempotencyKey)) {
       throw new DomainError('INVALID_ARGUMENT', 'Idempotency-Key is invalid')
@@ -47,12 +54,14 @@ export function createColorPipelineCompilationService(dependencies: {
       outputMetadata: request.outputMetadata,
       stages: request.stages,
       createdByClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       createdByClientId,
       idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -104,7 +113,7 @@ export function createColorPipelineCompilationService(dependencies: {
       compilation,
       requestFingerprint,
       idempotencyKey,
-    })
+    }, authenticationAudit)
   }
 }
 

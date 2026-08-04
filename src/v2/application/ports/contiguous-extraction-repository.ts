@@ -2,6 +2,7 @@ import type {
   ContiguousExtractionResult,
   ContiguousSourceMoment,
 } from '../../domain/contiguous-extraction.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedContiguousExtraction {
   result: Readonly<ContiguousExtractionResult>
@@ -20,6 +21,7 @@ export interface ContiguousExtractionRepository {
     projectId: string
     createdByClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedContiguousExtraction> | null>
   readCandidateMoments(input: {
     workspaceId: string
@@ -33,6 +35,7 @@ export interface ContiguousExtractionRepository {
   }): Promise<readonly Readonly<ContiguousSourceMoment>[]>
   persist(
     value: Readonly<PersistedContiguousExtraction>,
+    authenticationAudit: Readonly<ApiAccessAuditContext>,
   ): Promise<Readonly<{
     extraction: Readonly<PersistedContiguousExtraction>
     replayed: boolean

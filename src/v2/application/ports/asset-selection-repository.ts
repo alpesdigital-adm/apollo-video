@@ -4,6 +4,7 @@ import type {
   AssetCandidateRightsEvidence,
   AssetSelectionDecision,
 } from '../../domain/asset-selection.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedAssetSelection {
   schemaVersion: 'asset-selection/v1'
@@ -42,8 +43,9 @@ export interface AssetSelectionRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedAssetSelection> | null>
-  persist(selection: Readonly<PersistedAssetSelection>): Promise<Readonly<{
+  persist(selection: Readonly<PersistedAssetSelection>, authenticationAudit: Readonly<ApiAccessAuditContext>): Promise<Readonly<{
     selection: Readonly<PersistedAssetSelection>
     replayed: boolean
   }>>

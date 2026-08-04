@@ -6,6 +6,7 @@ import type {
 import type { PersistedAssetSelection } from './asset-selection-repository.ts'
 import type { PersistedProxyReview } from './proxy-review-repository.ts'
 import type { AssetRightsSnapshot } from '../../domain/asset-rights.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface QualityRubricEvidence {
   criterionId: string
@@ -128,6 +129,7 @@ export interface QualityIterationRepository {
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedQualityIteration> | null>
   readContext(input: {
     workspaceId: string
@@ -138,6 +140,7 @@ export interface QualityIterationRepository {
   }): Promise<Readonly<QualityIterationContext> | null>
   persist(
     iteration: Readonly<PersistedQualityIteration>,
+    authenticationAudit: Readonly<ApiAccessAuditContext>,
   ): Promise<Readonly<{
     iteration: Readonly<PersistedQualityIteration>
     replayed: boolean

@@ -64,6 +64,10 @@ const editCommandActorAuditContractMigration = readFileSync(
   `${migrationsPath}/20260805030000_contract_edit_command_actor_audit/migration.sql`,
   'utf8',
 )
+const projectEvaluationActorAuditMigration = readFileSync(
+  `${migrationsPath}/20260805040000_project_evaluation_actor_audit/migration.sql`,
+  'utf8',
+)
 
 assert.match(
   committed,
@@ -104,6 +108,15 @@ const projectIntelligenceActorAuditModels = [
   'V2SemanticSearchDocument', 'V2RetrievalEvaluation',
   'V2RetrievalScaleEvaluation', 'V2SemanticReuseRun',
   'V2SourceDeconstructionReport', 'V2ContaminationReport',
+].map((name) => [
+  schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '',
+  name,
+])
+const projectEvaluationActorAuditModels = [
+  'V2ColorPipelineCompilation', 'V2AssetSelection', 'V2QualityIteration',
+  'V2MvpCoreGate', 'V2ProxyReviewDecision', 'V2ContiguousExtraction',
+  'V2ValidationEnvelopeReuse', 'V2ValidationEnvelopeDecision',
+  'V2ProofNeedRun', 'V2ProofIntegrityRun', 'V2ProofModeRun',
 ].map((name) => [
   schema.match(new RegExp(`model ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '',
   name,
@@ -426,6 +439,45 @@ for (const requiredNonNull of [
   )
 }
 
+for (const [model, label] of projectEvaluationActorAuditModels) {
+  for (const field of [
+    'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+    'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  ]) {
+    assert.match(model, new RegExp(`\\b${field}\\b`), `${label} must persist ${field}`)
+  }
+}
+const projectEvaluationActorAuditTables = [
+  'color_pipeline_compilations', 'asset_selections', 'quality_iterations',
+  'mvp_core_gates', 'proxy_review_decisions', 'contiguous_extractions',
+  'validation_envelope_reuses', 'validation_envelope_decisions',
+  'proof_need_runs', 'proof_integrity_runs', 'proof_mode_runs',
+]
+for (const table of projectEvaluationActorAuditTables) {
+  assert.match(
+    projectEvaluationActorAuditMigration,
+    new RegExp(`ALTER TABLE "${table}"[\\s\\S]*?ADD COLUMN "actorCredentialId"[\\s\\S]*?ADD COLUMN "actorContextHash"`),
+    `${table} must receive the complete actor audit tuple`,
+  )
+}
+assert.doesNotMatch(
+  projectEvaluationActorAuditMigration,
+  /(?:UPDATE|INSERT INTO) "(?:color_pipeline_compilations|asset_selections|quality_iterations|mvp_core_gates|proxy_review_decisions|contiguous_extractions|validation_envelope_reuses|validation_envelope_decisions|proof_need_runs|proof_integrity_runs|proof_mode_runs)"/,
+  'pre-contract project evaluation identity must never be fabricated by backfill',
+)
+for (const requiredNonNull of [
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash',
+]) {
+  assert.equal(
+    [...projectEvaluationActorAuditMigration.matchAll(
+      new RegExp(`"${requiredNonNull}" IS NOT NULL`, 'g'),
+    )].length,
+    11,
+    `every project evaluation actor audit constraint must require ${requiredNonNull}`,
+  )
+}
+
 assertSetContains(
   names(committed, /CREATE TABLE "([^"]+)"/g),
   names(generated, /CREATE TABLE "([^"]+)"/g),
@@ -720,6 +772,17 @@ const requiredChecks = [
   'semantic_reuse_runs_actor_audit_check',
   'source_deconstruction_reports_actor_audit_check',
   'contamination_reports_actor_audit_check',
+  'color_pipeline_compilations_actor_audit_check',
+  'asset_selections_actor_audit_check',
+  'quality_iterations_actor_audit_check',
+  'mvp_core_gates_actor_audit_check',
+  'proxy_review_decisions_actor_audit_check',
+  'contiguous_extractions_actor_audit_check',
+  'validation_envelope_reuses_actor_audit_check',
+  'validation_envelope_decisions_actor_audit_check',
+  'proof_need_runs_actor_audit_check',
+  'proof_integrity_runs_actor_audit_check',
+  'proof_mode_runs_actor_audit_check',
   'contamination_reports_version_check',
   'contamination_reports_decision_check',
   'contamination_reports_counts_check',

@@ -187,7 +187,7 @@ export async function POST(
       projectVersionHash: body.projectVersionHash,
       brief: body.brief,
       candidates: body.candidates,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
     })
     return NextResponse.json(

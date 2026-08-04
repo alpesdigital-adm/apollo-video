@@ -23,6 +23,10 @@ import {
 } from '../../domain/color-and-export.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
 
 type CompilationRow = V2ColorPipelineCompilation & {
   colorProbe: V2MediaColorProbe
@@ -75,6 +79,7 @@ function hydrateProbe(row: V2MediaColorProbe) {
 }
 
 function hydrate(row: CompilationRow): Readonly<PersistedColorPipelineCompilation> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const stored = canonical<{
     pipeline: {
       outputMetadata: ColorMetadata
@@ -169,17 +174,28 @@ implements ColorPipelineCompilationRepository {
     projectId: string
     createdByClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2ColorPipelineCompilation.findUnique({
       where: {
-        workspaceId_projectId_createdByClientId_idempotencyKey: input,
+        workspaceId_projectId_createdByClientId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          createdByClientId: input.createdByClientId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
       include: includeProbe(),
     })
-    return row ? hydrate(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdByClientId)
+    if (audit.contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    }
+    return hydrate(row)
   }
 
-  async persist(value: Readonly<PersistedColorPipelineCompilation>) {
+  async persist(value: Readonly<PersistedColorPipelineCompilation>, authenticationAudit: Parameters<ColorPipelineCompilationRepository['persist']>[1]) {
     const item = value.compilation
     const versions = item.pipeline.stages.map((stage) => ({
       kind: stage.kind,
@@ -206,6 +222,7 @@ implements ColorPipelineCompilationRepository {
           requestFingerprint: value.requestFingerprint,
           idempotencyKey: value.idempotencyKey,
           createdByClientId: item.createdBy.id,
+          ...externalActorAuditData(authenticationAudit, item.workspaceId, item.createdBy.id),
           createdAt: new Date(item.createdAt),
         },
         include: includeProbe(),
@@ -218,6 +235,7 @@ implements ColorPipelineCompilationRepository {
           projectId: item.projectId,
           createdByClientId: item.createdBy.id,
           idempotencyKey: value.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (replay && replay.requestFingerprint === value.requestFingerprint) {
           return Object.freeze({ value: replay, replayed: true })

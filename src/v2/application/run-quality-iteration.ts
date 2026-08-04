@@ -27,6 +27,11 @@ import {
   type StrategicObjectiveId,
 } from '../domain/strategic-objective.ts'
 import type { ProxyOutputFormat } from './render-workflow.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const IDEMPOTENCY_PATTERN = /^[\x21-\x7E]{8,128}$/
@@ -309,7 +314,7 @@ export function runQualityIterationService(dependencies: {
     datasetId: string
     datasetVersion: number
     budgetLimitUnits: number
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -336,12 +341,14 @@ export function runQualityIterationService(dependencies: {
       'INVALID_ARGUMENT',
       'budgetLimitUnits must be between 1 and 1000',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor.type === 'api-client',
-      'INVALID_ARGUMENT',
-      'Quality iteration actor is invalid',
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Quality iteration actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = identity(authenticationAudit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const placements = normalizePlacements(request.assetPlacements)
     const rangeMetrics = normalizeRangeMetrics(request.rangeMetrics)
@@ -364,12 +371,13 @@ export function runQualityIterationService(dependencies: {
       datasetId,
       datasetVersion: request.datasetVersion,
       budgetLimitUnits: request.budgetLimitUnits,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.iterations.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -703,7 +711,7 @@ export function runQualityIterationService(dependencies: {
       ...content,
       recordHash: calculateQualityIterationRecordHash(content),
     })
-    return dependencies.iterations.persist(iteration)
+    return dependencies.iterations.persist(iteration, authenticationAudit)
   }
 }
 

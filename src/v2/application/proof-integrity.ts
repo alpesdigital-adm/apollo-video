@@ -22,6 +22,11 @@ import type {
 import type {
   VariantRecipeRepository,
 } from './ports/variant-recipe-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -53,17 +58,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Proof integrity evaluation requires an API client',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function use(
@@ -139,7 +133,7 @@ export function createProofIntegrityRunService(dependencies: {
     expectedProofNeedRunHash: string
     policyVersion: string
     uses: readonly Readonly<ProofIntegrityUseInput>[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -169,7 +163,10 @@ export function createProofIntegrityRunService(dependencies: {
       'INVALID_ARGUMENT',
       'uses must not repeat a ProofNeed item',
     )
-    const createdByClientId = actorId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Proof integrity actor does not belong to the workspace')
+    const createdByClientId = identity(authenticationAudit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'create-proof-integrity-run-request/v1',
@@ -180,12 +177,14 @@ export function createProofIntegrityRunService(dependencies: {
       expectedProofNeedRunHash,
       uses,
       createdByClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findReplay({
       workspaceId,
       projectId,
       actorClientId: createdByClientId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -306,6 +305,7 @@ export function createProofIntegrityRunService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

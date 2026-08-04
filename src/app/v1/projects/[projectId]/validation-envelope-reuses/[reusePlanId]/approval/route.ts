@@ -59,7 +59,7 @@ export async function POST(
       projectId,
       reusePlanId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

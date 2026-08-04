@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 
 import {
   createProofModeRun,
@@ -28,6 +29,17 @@ import {
 
 const hash = (character) => character.repeat(64)
 const createdAt = '2026-07-29T15:30:00.000Z'
+
+function authenticatedActor(workspaceId, clientId) {
+  const credentialId = 'credential-proof-mode-service'
+  const auditContext = createExternalAuditContext({ clientId, credentialId, workspaceId, environment: 'production' })
+  return Object.freeze({
+    clientId, credentialId, workspaceId, environment: 'production',
+    scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function fixture(input = {}) {
   const evaluation = {
@@ -386,10 +398,7 @@ test('T-FR-132 application service binds current evidence and idempotency', asyn
     formats: ['9:16'],
     rhythm: 'measured',
     overrides: [],
-    actor: {
-      type: 'api-client',
-      id: source.createdByClientId,
-    },
+    actor: authenticatedActor(source.workspaceId, source.createdByClientId),
     idempotencyKey: 'proof-mode-service-key',
   })
   assert.equal(result.replayed, false)

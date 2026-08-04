@@ -31,6 +31,7 @@ import { hydrateAssetSelection } from './asset-selection-repository.ts'
 import { hydrateProxyReview } from './proxy-review-repository.ts'
 import { hydrateQualityIteration } from './quality-iteration-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 const SHA_256_PATTERN = /^[a-f0-9]{64}$/
 
@@ -282,6 +283,7 @@ function manifestComplete(row: {
 }
 
 function hydrateGate(row: V2MvpCoreGate): Readonly<PersistedMvpCoreGate> {
+  hydrateExternalActorAudit(row, row.createdById)
   const reportValue = record(parseJson(row.reportJson, 'MVP core gate report'))
   if (!reportValue || !Array.isArray(reportValue.evidence)) {
     throw new DomainError(
@@ -348,13 +350,21 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
     workspaceId: string
     primaryProjectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2MvpCoreGate.findUnique({
       where: {
-        workspaceId_primaryProjectId_idempotencyKey: input,
+        workspaceId_primaryProjectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          primaryProjectId: input.primaryProjectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
-    return row ? hydrateGate(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdById)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return hydrateGate(row)
   }
 
   async readEvidence(input: Readonly<MvpCoreGateEvidenceQuery>) {
@@ -1415,6 +1425,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
 
   async persist(
     gate: Readonly<PersistedMvpCoreGate>,
+    authenticationAudit: Parameters<MvpCoreGateRepository['persist']>[1],
     attempt = 1,
   ): ReturnType<MvpCoreGateRepository['persist']> {
     try {
@@ -1430,6 +1441,8 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
           where: key,
         })
         if (existing) {
+          const audit = hydrateExternalActorAudit(existing, existing.createdById)
+          if (audit.contextHash !== authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (existing.requestFingerprint !== gate.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -1502,6 +1515,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
             requestFingerprint: gate.requestFingerprint,
             createdByType: gate.createdBy.type,
             createdById: gate.createdBy.id,
+            ...externalActorAuditData(authenticationAudit, gate.workspaceId, gate.createdBy.id),
             createdAt: new Date(gate.createdAt),
           },
         })
@@ -1514,7 +1528,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persist(gate, attempt + 1)
+        return this.persist(gate, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2034')) {
         throw new DomainError(
@@ -1527,6 +1541,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
           workspaceId: gate.workspaceId,
           primaryProjectId: gate.primaryProjectId,
           idempotencyKey: gate.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== gate.requestFingerprint) {

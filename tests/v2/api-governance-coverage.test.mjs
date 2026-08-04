@@ -206,6 +206,52 @@ test('T-FR-242 external editorial Commands bind credential audit while Director 
   assert.match(commandsRoute, /runProjectDirectorService[\s\S]*actor:\s*actor\.auditContext\.actor/)
 })
 
+test('T-FR-242 project evaluation mutations bind credential audit across API, Application and Prisma', () => {
+  for (const relative of [
+    'color-pipeline-compilations.ts', 'contiguous-extraction.ts',
+    'proof-needs.ts', 'proof-integrity.ts', 'proof-mode.ts', 'proxy-review.ts',
+    'run-quality-iteration.ts', 'select-project-asset.ts',
+    'run-mvp-core-gate.ts', 'validation-envelopes.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/application', relative), 'utf8')
+    assert.match(source, /type AuthenticatedExternalActor/)
+    assert.match(source, /requireScope\(request\.actor, 'projects:write'\)/)
+    assert.match(source, /materializeActorAuditContext\(request\.actor\)/)
+    assert.match(source, /actorContextHash:\s*authenticationAudit\.contextHash/)
+  }
+
+  for (const relative of [
+    'color-pipeline-compilation-repository.ts', 'contiguous-extraction-repository.ts',
+    'proof-need-repository.ts', 'proof-integrity-repository.ts',
+    'proof-mode-repository.ts', 'proxy-review-repository.ts',
+    'quality-iteration-repository.ts', 'asset-selection-repository.ts',
+    'mvp-core-gate-repository.ts', 'validation-envelope-repository.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/v2/infrastructure/prisma', relative), 'utf8')
+    assert.match(source, /externalActorAuditData/)
+    assert.match(source, /hydrateExternalActorAudit/)
+    assert.doesNotMatch(source, /idempotencyKey:\s*input\s*[,}]/)
+  }
+
+  for (const relative of [
+    'projects/[projectId]/asset-selections/route.ts',
+    'projects/[projectId]/color-pipeline-compilations/route.ts',
+    'projects/[projectId]/contiguous-extractions/route.ts',
+    'projects/[projectId]/mvp-core-gates/route.ts',
+    'projects/[projectId]/proof-integrity-runs/route.ts',
+    'projects/[projectId]/proof-mode-runs/route.ts',
+    'projects/[projectId]/proof-needs/route.ts',
+    'projects/[projectId]/proxy-reviews/route.ts',
+    'projects/[projectId]/quality-iterations/route.ts',
+    'projects/[projectId]/validation-envelope-reuses/route.ts',
+    'projects/[projectId]/validation-envelope-reuses/[reusePlanId]/approval/route.ts',
+  ]) {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    assert.doesNotMatch(source, /actor:\s*actor\.auditContext\.actor/)
+    assert.match(source, /actor[:,]/)
+  }
+})
+
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {
   const routesRoot = join(root, 'src/app/v1')
   const applicationRoot = join(root, 'src/v2/application')

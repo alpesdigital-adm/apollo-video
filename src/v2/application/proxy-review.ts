@@ -1,6 +1,11 @@
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 function validateId(value: string, field: string): string {
   const normalized = value.trim()
@@ -54,14 +59,17 @@ export function acknowledgeProxyWarningsService(dependencies: {
     baseReviewHash: string
     expectedRevision: number
     action: 'acknowledge-warnings'
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
     const projectVersionId = validateId(request.projectVersionId, 'projectVersionId')
     const proxyReviewId = validateId(request.proxyReviewId, 'proxyReviewId')
-    const actorId = validateId(request.actor.id, 'actor.id')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Proxy review actor does not belong to the workspace')
+    const actorId = validateId(authenticationAudit.clientId, 'actor.id')
     const baseReviewHash = validateHash(request.baseReviewHash, 'baseReviewHash')
     assertDomain(
       Number.isSafeInteger(request.expectedRevision) && request.expectedRevision >= 1,
@@ -84,7 +92,7 @@ export function acknowledgeProxyWarningsService(dependencies: {
       action: request.action,
       baseReviewHash,
       expectedRevision: request.expectedRevision,
-      actorId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     return dependencies.repository.acknowledgeWarnings({
       workspaceId,
@@ -95,6 +103,7 @@ export function acknowledgeProxyWarningsService(dependencies: {
       expectedRevision: request.expectedRevision,
       decisionId: dependencies.createId(),
       actor: { type: 'api-client', id: actorId },
+      authenticationAudit,
       idempotencyKey,
       requestFingerprint,
       createdAt: dependencies.clock().toISOString(),

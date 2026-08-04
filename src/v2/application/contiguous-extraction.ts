@@ -3,6 +3,11 @@ import type {
   PersistedContiguousExtraction,
 } from './ports/contiguous-extraction-repository.ts'
 import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import {
   calculateCanonicalHash,
 } from '../domain/canonical-hash.ts'
 import {
@@ -78,10 +83,7 @@ export interface CreateContiguousExtractionRequest {
   targetDurationMs: number
   toleranceMs: number
   fps: number
-  actor: Readonly<{
-    type: 'api-client'
-    id: string
-  }>
+  actor: Readonly<AuthenticatedExternalActor>
   idempotencyKey: string
 }
 
@@ -130,14 +132,11 @@ export function createContiguousExtractionService(dependencies: {
       targetDurationMs,
     )
     const fps = integer(request.fps, 'fps', 1, 120)
-    if (request.actor.type !== 'api-client') {
-      throw new DomainError(
-        'INVALID_ARGUMENT',
-        'contiguous extraction actor is invalid',
-      )
-    }
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    if (authenticationAudit.workspaceId !== workspaceId) throw new DomainError('AUTH_INVALID', 'Contiguous extraction actor does not belong to the workspace')
     const createdByClientId = identity(
-      request.actor.id,
+      authenticationAudit.clientId,
       'actor.id',
     )
     const idempotencyKey = request.idempotencyKey.trim()
@@ -157,12 +156,14 @@ export function createContiguousExtractionService(dependencies: {
       toleranceMs,
       fps,
       createdByClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       projectId,
       createdByClientId,
       idempotencyKey,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -209,7 +210,7 @@ export function createContiguousExtractionService(dependencies: {
       }),
       createdAt,
     })
-    const persisted = await dependencies.repository.persist(extraction)
+    const persisted = await dependencies.repository.persist(extraction, authenticationAudit)
     if (
       persisted.extraction.requestFingerprint !==
         requestFingerprint ||

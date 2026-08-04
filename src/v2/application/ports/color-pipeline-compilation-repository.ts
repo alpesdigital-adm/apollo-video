@@ -6,6 +6,7 @@ import type {
 import type {
   ColorPipelineCompilation,
 } from '../../domain/color-pipeline-compilation.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedColorPipelineCompilation {
   compilation: Readonly<ColorPipelineCompilation>
@@ -25,8 +26,9 @@ export interface ColorPipelineCompilationRepository {
     projectId: string
     createdByClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedColorPipelineCompilation> | null>
-  persist(value: Readonly<PersistedColorPipelineCompilation>): Promise<Readonly<{
+  persist(value: Readonly<PersistedColorPipelineCompilation>, authenticationAudit: Readonly<ApiAccessAuditContext>): Promise<Readonly<{
     value: Readonly<PersistedColorPipelineCompilation>
     replayed: boolean
   }>>

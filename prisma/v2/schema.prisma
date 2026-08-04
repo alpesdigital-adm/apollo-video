@@ -1317,6 +1317,13 @@ model V2ColorPipelineCompilation {
   requestFingerprint    String   @db.Char(64)
   idempotencyKey        String   @db.VarChar(128)
   createdByClientId     String   @db.VarChar(80)
+  actorCredentialId     String?  @db.VarChar(128)
+  actorEnvironment      String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash      String?  @db.Char(64)
+  delegatedUserId       String?  @db.VarChar(128)
+  delegatedIdentityId   String?  @db.VarChar(128)
+  workspaceRole         String?  @db.VarChar(32)
   createdAt             DateTime @db.Timestamptz(3)
 
   workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1332,6 +1339,7 @@ model V2ColorPipelineCompilation {
   @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, sourceArtifactId, sourceManifestId])
   @@index([workspaceId, colorProbeId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("color_pipeline_compilations")
 }
 
@@ -1578,6 +1586,13 @@ model V2AssetSelection {
   requestFingerprint      String   @db.Char(64)
   createdByType           String   @db.VarChar(32)
   createdById             String   @db.VarChar(128)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
 
   workspace         V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1592,6 +1607,7 @@ model V2AssetSelection {
   @@index([workspaceId, projectVersionId, createdAt(sort: Desc)])
   @@index([workspaceId, auditId])
   @@index([workspaceId, selectedArtifactId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("asset_selections")
 }
 
@@ -1628,6 +1644,13 @@ model V2QualityIteration {
   requestFingerprint   String   @db.Char(64)
   createdByType        String   @db.VarChar(32)
   createdById          String   @db.VarChar(80)
+  actorCredentialId    String?  @db.VarChar(128)
+  actorEnvironment     String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash     String?  @db.Char(64)
+  delegatedUserId      String?  @db.VarChar(128)
+  delegatedIdentityId  String?  @db.VarChar(128)
+  workspaceRole        String?  @db.VarChar(32)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
 
   workspace       V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1647,6 +1670,7 @@ model V2QualityIteration {
   @@index([workspaceId, proxyReviewId, proxyReviewRevision])
   @@index([workspaceId, terminalReason, createdAt(sort: Desc)])
   @@index([previousIterationId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("quality_iterations")
 }
 
@@ -1686,6 +1710,13 @@ model V2MvpCoreGate {
   requestFingerprint   String   @db.Char(64)
   createdByType        String   @db.VarChar(32)
   createdById          String   @db.VarChar(80)
+  actorCredentialId    String?  @db.VarChar(128)
+  actorEnvironment     String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash     String?  @db.Char(64)
+  delegatedUserId      String?  @db.VarChar(128)
+  delegatedIdentityId  String?  @db.VarChar(128)
+  workspaceRole        String?  @db.VarChar(32)
   createdAt            DateTime @default(now()) @db.Timestamptz(3)
 
   workspace        V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -1702,6 +1733,7 @@ model V2MvpCoreGate {
   @@index([workspaceId, approved, createdAt(sort: Desc)])
   @@index([workspaceId, primaryVersionId])
   @@index([workspaceId, companionVersionId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("mvp_core_gates")
 }
 
@@ -2250,6 +2282,13 @@ model V2ProxyReviewDecision {
   action             String   @db.VarChar(32)
   actorType          String   @db.VarChar(32)
   actorId            String   @db.VarChar(80)
+  actorCredentialId  String?  @db.VarChar(128)
+  actorEnvironment   String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?  @db.Char(64)
+  delegatedUserId    String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole      String?  @db.VarChar(32)
   baseReviewHash     String   @db.Char(64)
   resultReviewHash   String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
@@ -2265,6 +2304,7 @@ model V2ProxyReviewDecision {
   @@unique([workspaceId, projectId, idempotencyKey])
   @@index([workspaceId, proxyReviewId, createdAt(sort: Desc)])
   @@index([workspaceId, actorId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("proxy_review_decisions")
 }
 
@@ -3133,6 +3173,13 @@ model V2ContiguousExtraction {
   requestFingerprint    String   @db.Char(64)
   idempotencyKey        String   @db.VarChar(128)
   createdByClientId     String   @db.VarChar(80)
+  actorCredentialId     String?  @db.VarChar(128)
+  actorEnvironment      String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash      String?  @db.Char(64)
+  delegatedUserId       String?  @db.VarChar(128)
+  delegatedIdentityId   String?  @db.VarChar(128)
+  workspaceRole         String?  @db.VarChar(32)
   createdAt             DateTime @default(now()) @db.Timestamptz(3)
 
   workspace          V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3148,6 +3195,7 @@ model V2ContiguousExtraction {
   @@index([workspaceId, sourceIndexRunId, createdAt(sort: Desc)])
   @@index([workspaceId, selectedMomentId])
   @@index([workspaceId, selectedEvaluationId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("contiguous_extractions")
 }
 
@@ -3253,6 +3301,13 @@ model V2ValidationEnvelopeReuse {
   requestFingerprint            String   @db.Char(64)
   idempotencyKey                String   @db.VarChar(128)
   createdByClientId             String   @db.VarChar(80)
+  actorCredentialId             String?  @db.VarChar(128)
+  actorEnvironment              String?  @db.VarChar(16)
+  actorAuthenticationKind       String?  @db.VarChar(16)
+  actorContextHash              String?  @db.Char(64)
+  delegatedUserId               String?  @db.VarChar(128)
+  delegatedIdentityId           String?  @db.VarChar(128)
+  workspaceRole                 String?  @db.VarChar(32)
   createdAt                     DateTime @db.Timestamptz(3)
 
   workspace        V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3271,6 +3326,7 @@ model V2ValidationEnvelopeReuse {
   @@index([workspaceId, targetRecipeId, createdAt(sort: Desc)])
   @@index([workspaceId, batchId, createdAt(sort: Desc)])
   @@index([workspaceId, approvalRequired, initialValidation, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("validation_envelope_reuses")
 }
 
@@ -3289,6 +3345,13 @@ model V2ValidationEnvelopeDecision {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   actorClientId      String   @db.VarChar(80)
+  actorCredentialId  String?  @db.VarChar(128)
+  actorEnvironment   String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash   String?  @db.Char(64)
+  delegatedUserId    String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole      String?  @db.VarChar(32)
   createdAt          DateTime @db.Timestamptz(3)
 
   workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3302,6 +3365,7 @@ model V2ValidationEnvelopeDecision {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, reusePlanId, sequence])
   @@index([workspaceId, validation, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("validation_envelope_decisions")
 }
 
@@ -3331,6 +3395,13 @@ model V2ProofNeedRun {
   requestFingerprint    String   @db.Char(64)
   idempotencyKey        String   @db.VarChar(128)
   createdByClientId     String   @db.VarChar(80)
+  actorCredentialId     String?  @db.VarChar(128)
+  actorEnvironment      String?  @db.VarChar(16)
+  actorAuthenticationKind String? @db.VarChar(16)
+  actorContextHash      String?  @db.Char(64)
+  delegatedUserId       String?  @db.VarChar(128)
+  delegatedIdentityId   String?  @db.VarChar(128)
+  workspaceRole         String?  @db.VarChar(32)
   createdAt             DateTime @db.Timestamptz(3)
 
   workspace     V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3349,6 +3420,7 @@ model V2ProofNeedRun {
   @@index([workspaceId, batchId, createdAt(sort: Desc)])
   @@index([workspaceId, targetRecipeId, createdAt(sort: Desc)])
   @@index([workspaceId, proofUnavailableCount, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("proof_need_runs")
 }
 
@@ -3420,6 +3492,13 @@ model V2ProofIntegrityRun {
   requestFingerprint         String   @db.Char(64)
   idempotencyKey             String   @db.VarChar(128)
   createdByClientId          String   @db.VarChar(80)
+  actorCredentialId          String?  @db.VarChar(128)
+  actorEnvironment           String?  @db.VarChar(16)
+  actorAuthenticationKind    String?  @db.VarChar(16)
+  actorContextHash           String?  @db.Char(64)
+  delegatedUserId            String?  @db.VarChar(128)
+  delegatedIdentityId        String?  @db.VarChar(128)
+  workspaceRole              String?  @db.VarChar(32)
   createdAt                  DateTime @db.Timestamptz(3)
 
   workspace     V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3438,6 +3517,7 @@ model V2ProofIntegrityRun {
   @@index([workspaceId, proofNeedRunId, createdAt(sort: Desc)])
   @@index([workspaceId, targetRecipeId, createdAt(sort: Desc)])
   @@index([workspaceId, readyForAssembly, blockedCount, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("proof_integrity_runs")
 }
 
@@ -3518,6 +3598,13 @@ model V2ProofModeRun {
   requestFingerprint            String   @db.Char(64)
   idempotencyKey                String   @db.VarChar(128)
   createdByClientId             String   @db.VarChar(80)
+  actorCredentialId             String?  @db.VarChar(128)
+  actorEnvironment              String?  @db.VarChar(16)
+  actorAuthenticationKind       String?  @db.VarChar(16)
+  actorContextHash              String?  @db.Char(64)
+  delegatedUserId               String?  @db.VarChar(128)
+  delegatedIdentityId           String?  @db.VarChar(128)
+  workspaceRole                 String?  @db.VarChar(32)
   createdAt                     DateTime @db.Timestamptz(3)
 
   workspace         V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -3535,6 +3622,7 @@ model V2ProofModeRun {
   @@index([workspaceId, proofIntegrityRunId, createdAt(sort: Desc)])
   @@index([workspaceId, proofNeedRunId, createdAt(sort: Desc)])
   @@index([workspaceId, readyForCompilation, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("proof_mode_runs")
 }
 

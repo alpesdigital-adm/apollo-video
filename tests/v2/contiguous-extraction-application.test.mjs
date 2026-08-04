@@ -8,6 +8,7 @@ import {
 import {
   calculateContiguousMomentEvaluationHash,
 } from '../../src/v2/domain/contiguous-extraction.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 
 const sha = (value) => value.repeat(64).slice(0, 64)
 const evaluationProducer = {
@@ -21,6 +22,19 @@ const observation = (value, reference) => ({
   value,
   evidenceRefs: [reference],
 })
+
+function authenticatedActor() {
+  const clientId = 'client-contiguous-app'
+  const credentialId = 'credential-contiguous-app'
+  const workspaceId = 'workspace-contiguous-app'
+  const auditContext = createExternalAuditContext({ clientId, credentialId, workspaceId, environment: 'production' })
+  return Object.freeze({
+    clientId, credentialId, workspaceId, environment: 'production',
+    scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 function sourceMoment() {
   const value = {
@@ -108,10 +122,7 @@ function fixture() {
     targetDurationMs: 120_000,
     toleranceMs: 15_000,
     fps: 30,
-    actor: {
-      type: 'api-client',
-      id: 'client-contiguous-app',
-    },
+    actor: authenticatedActor(),
     idempotencyKey: 'contiguous-app-key-0001',
   }
   return {

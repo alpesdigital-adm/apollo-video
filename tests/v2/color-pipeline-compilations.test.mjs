@@ -10,6 +10,7 @@ import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts'
 import { parseCreateColorPipelineCompilationBody } from '../../src/v2/public-api/color-pipeline-compilation-contract.ts'
 import { resolveRenderColorPipelineBindings } from '../../src/v2/application/resolve-render-color-pipelines.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 
 const source = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
@@ -38,6 +39,18 @@ const probe = createMediaColorProbe({
   createdAt: '2026-07-31T03:00:00.000Z',
 })
 
+function authenticatedActor() {
+  const clientId = 'client-color-1'
+  const credentialId = 'credential-color-1'
+  const auditContext = createExternalAuditContext({ clientId, credentialId, workspaceId: probe.workspaceId, environment: 'production' })
+  return Object.freeze({
+    clientId, credentialId, workspaceId: probe.workspaceId, environment: 'production',
+    scopes: new Set(['projects:write']), authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
+
 function request(overrides = {}) {
   return {
     workspaceId: probe.workspaceId,
@@ -46,7 +59,7 @@ function request(overrides = {}) {
     sourceManifestId: probe.manifestId,
     outputMetadata: output,
     stages: requestedStages,
-    actor: { type: 'api-client', id: 'client-color-1' },
+    actor: authenticatedActor(),
     idempotencyKey: 'color-pipeline-request-1',
     ...overrides,
   }

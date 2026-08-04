@@ -19,6 +19,7 @@ import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionSources } from '../../domain/project.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 type StoredProxyReview = Prisma.V2ProxyReviewGetPayload<Record<string, never>>
 type StoredProxyReviewDecision = Prisma.V2ProxyReviewDecisionGetPayload<Record<string, never>>
@@ -121,6 +122,7 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
 }
 
 function hydrateDecision(row: StoredProxyReviewDecision): Readonly<ProxyReviewDecision> {
+  hydrateExternalActorAudit(row, row.actorId)
   if (row.action !== 'acknowledge-warnings' || row.actorType !== 'api-client') {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy review decision is invalid')
   }
@@ -249,6 +251,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
     projectId: string
     idempotencyKey: string
     requestFingerprint: string
+    authenticationAudit: Parameters<ProxyReviewRepository['acknowledgeWarnings']>[0]['authenticationAudit']
   }) {
     const decision = await this.client.v2ProxyReviewDecision.findUnique({
       where: {
@@ -260,6 +263,10 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
       },
     })
     if (!decision) return null
+    const audit = hydrateExternalActorAudit(decision, decision.actorId)
+    if (audit.contextHash !== input.authenticationAudit.contextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    }
     if (decision.requestFingerprint !== input.requestFingerprint) {
       throw new DomainError(
         'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -288,6 +295,10 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
         }
         const existing = await transaction.v2ProxyReviewDecision.findUnique({ where: key })
         if (existing) {
+          const audit = hydrateExternalActorAudit(existing, existing.actorId)
+          if (audit.contextHash !== input.authenticationAudit.contextHash) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+          }
           if (existing.requestFingerprint !== input.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -403,6 +414,7 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
             action: 'acknowledge-warnings',
             actorType: input.actor.type,
             actorId: input.actor.id,
+            ...externalActorAuditData(input.authenticationAudit, input.workspaceId, input.actor.id),
             baseReviewHash: input.baseReviewHash,
             resultReviewHash,
             idempotencyKey: input.idempotencyKey,

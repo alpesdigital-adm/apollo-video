@@ -2,6 +2,7 @@ import type {
   ProofMode,
   ProofModeRun,
 } from '../../domain/proof-mode.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedProofModeRun extends ProofModeRun {
   requestFingerprint: string
@@ -30,11 +31,13 @@ export interface ProofModeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedProofModeRun> | null>
   create(input: {
     run: Readonly<ProofModeRun>
     requestFingerprint: string
     idempotencyKey: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<{
     run: Readonly<PersistedProofModeRun>
     replayed: boolean

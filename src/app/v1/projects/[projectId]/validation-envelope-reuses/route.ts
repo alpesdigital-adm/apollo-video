@@ -97,7 +97,7 @@ export async function POST(
       workspaceId: actor.workspaceId,
       projectId,
       ...body,
-      actor: actor.auditContext.actor,
+      actor,
       idempotencyKey:
         request.headers.get('idempotency-key')?.trim() ?? '',
     })

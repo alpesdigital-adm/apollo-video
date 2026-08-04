@@ -2,6 +2,11 @@ import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { AssetSelectionRepository } from './ports/asset-selection-repository.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
 import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import {
   calculateAssetSelectionRecordHash,
   createAssetBrief,
   createAssetCandidate,
@@ -104,15 +109,17 @@ export function selectProjectAssetService(dependencies: {
     projectVersionHash: string
     brief: AssetBrief
     candidates: readonly AssetSelectionCandidateInput[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
     const projectId = identity(request.projectId, 'projectId')
     const projectVersionId = identity(request.projectVersionId, 'projectVersionId')
     const projectVersionHash = sha256(request.projectVersionHash, 'projectVersionHash')
-    const actorId = identity(request.actor.id, 'actor.id')
-    assertDomain(request.actor.type === 'api-client', 'INVALID_ARGUMENT', 'Asset selection actor is invalid')
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Asset selection actor does not belong to the workspace')
+    const actorId = identity(authenticationAudit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const brief = createAssetBrief(request.brief)
     const requestedCandidates = normalizeRequestedCandidates(request.candidates)
@@ -124,12 +131,13 @@ export function selectProjectAssetService(dependencies: {
       projectVersionHash,
       brief,
       candidates: requestedCandidates,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.selections.findIdempotent({
       workspaceId,
       projectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -247,7 +255,7 @@ export function selectProjectAssetService(dependencies: {
       ...content,
       selectionHash: calculateAssetSelectionRecordHash(content),
     })
-    return dependencies.selections.persist(selection)
+    return dependencies.selections.persist(selection, authenticationAudit)
   }
 }
 

@@ -24,6 +24,7 @@ import {
   type ValidationEnvelopeReusePlan,
 } from '../../domain/validation-envelope.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 type ReuseWithDecisions = ReuseRow & {
   decisions: DecisionRow[]
@@ -75,6 +76,7 @@ function normalizedItems(values: readonly string[]): string {
 function hydrateDecision(
   row: DecisionRow,
 ): Readonly<ValidationEnvelopeDecision> {
+  hydrateExternalActorAudit(row, row.actorClientId)
   const decision = canonicalJson<ValidationEnvelopeDecision>(
     row.decisionJson,
     `validation envelope decision ${row.id}`,
@@ -107,6 +109,7 @@ function hydrateDecision(
 function hydratePlan(
   row: ReuseRow,
 ): Readonly<ValidationEnvelopeReusePlan> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const plan = canonicalJson<ValidationEnvelopeReusePlan>(
     row.planJson,
     `validation envelope reuse ${row.id}`,
@@ -190,7 +193,7 @@ function hydrateRecord(
   })
 }
 
-function planData(record: Readonly<ValidationEnvelopeCreateRecord>) {
+function planData(record: Readonly<ValidationEnvelopeCreateRecord>, authenticationAudit: Parameters<ValidationEnvelopeRepository['create']>[1]) {
   const { plan } = record
   return {
     id: plan.id,
@@ -232,6 +235,7 @@ function planData(record: Readonly<ValidationEnvelopeCreateRecord>) {
     requestFingerprint: record.requestFingerprint,
     idempotencyKey: record.idempotencyKey,
     createdByClientId: plan.createdByClientId,
+    ...externalActorAuditData(authenticationAudit, plan.workspaceId, plan.createdByClientId),
     createdAt: new Date(plan.createdAt),
   }
 }
@@ -239,6 +243,7 @@ function planData(record: Readonly<ValidationEnvelopeCreateRecord>) {
 function decisionData(
   input: Readonly<ValidationEnvelopeDecisionRecord>,
   scope: { workspaceId: string; projectId: string },
+  authenticationAudit: Parameters<ValidationEnvelopeRepository['appendDecision']>[1],
 ) {
   const { decision } = input
   return {
@@ -256,6 +261,7 @@ function decisionData(
     requestFingerprint: input.requestFingerprint,
     idempotencyKey: input.idempotencyKey,
     actorClientId: decision.actorClientId,
+    ...externalActorAuditData(authenticationAudit, scope.workspaceId, decision.actorClientId),
     createdAt: new Date(decision.createdAt),
   }
 }
@@ -291,6 +297,7 @@ implements ValidationEnvelopeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.prisma.v2ValidationEnvelopeReuse.findUnique({
       where: {
@@ -305,16 +312,18 @@ implements ValidationEnvelopeRepository {
         decisions: { orderBy: { sequence: 'asc' } },
       },
     })
-    return row
-      ? Object.freeze({
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdByClientId)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return Object.freeze({
           record: hydrateRecord(row),
           requestFingerprint: row.requestFingerprint,
         })
-      : null
   }
 
   async create(
     record: Readonly<ValidationEnvelopeCreateRecord>,
+    authenticationAudit: Parameters<ValidationEnvelopeRepository['create']>[1],
     attempt = 1,
   ): ReturnType<ValidationEnvelopeRepository['create']> {
     try {
@@ -334,6 +343,8 @@ implements ValidationEnvelopeRepository {
             },
           })
         if (replay) {
+          const audit = hydrateExternalActorAudit(replay, replay.createdByClientId)
+          if (audit.contextHash !== authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -385,7 +396,7 @@ implements ValidationEnvelopeRepository {
           )
         }
         await transaction.v2ValidationEnvelopeReuse.create({
-          data: planData(record),
+          data: planData(record, authenticationAudit),
         })
         await transaction.v2ValidationEnvelopeDecision.create({
           data: decisionData({
@@ -395,7 +406,7 @@ implements ValidationEnvelopeRepository {
           }, {
             workspaceId: record.plan.workspaceId,
             projectId: record.plan.projectId,
-          }),
+          }, authenticationAudit),
         })
         const persisted = await readWithDecisions(transaction, {
           workspaceId: record.plan.workspaceId,
@@ -417,7 +428,7 @@ implements ValidationEnvelopeRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.create(record, attempt + 1)
+        return this.create(record, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findCreateReplay({
@@ -425,6 +436,7 @@ implements ValidationEnvelopeRepository {
           projectId: record.plan.projectId,
           actorClientId: record.plan.createdByClientId,
           idempotencyKey: record.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== record.requestFingerprint) {
@@ -531,6 +543,7 @@ implements ValidationEnvelopeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.prisma.v2ValidationEnvelopeDecision
       .findUnique({
@@ -543,17 +556,19 @@ implements ValidationEnvelopeRepository {
           },
         },
       })
-    return row
-      ? Object.freeze({
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.actorClientId)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return Object.freeze({
           decision: hydrateDecision(row),
           requestFingerprint: row.requestFingerprint,
           idempotencyKey: row.idempotencyKey,
         })
-      : null
   }
 
   async appendDecision(
     record: Readonly<ValidationEnvelopeDecisionRecord>,
+    authenticationAudit: Parameters<ValidationEnvelopeRepository['appendDecision']>[1],
     attempt = 1,
   ): ReturnType<ValidationEnvelopeRepository['appendDecision']> {
     try {
@@ -583,6 +598,8 @@ implements ValidationEnvelopeRepository {
             },
           })
         if (replay) {
+          const audit = hydrateExternalActorAudit(replay, replay.actorClientId)
+          if (audit.contextHash !== authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (replay.requestFingerprint !== record.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -633,7 +650,7 @@ implements ValidationEnvelopeRepository {
           data: decisionData(record, {
             workspaceId: plan.workspaceId,
             projectId: plan.projectId,
-          }),
+          }, authenticationAudit),
         })
         const persisted = await readWithDecisions(transaction, {
           workspaceId: plan.workspaceId,
@@ -655,7 +672,7 @@ implements ValidationEnvelopeRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.appendDecision(record, attempt + 1)
+        return this.appendDecision(record, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const plan = await this.prisma.v2ValidationEnvelopeReuse
@@ -668,6 +685,7 @@ implements ValidationEnvelopeRepository {
             ...plan,
             actorClientId: record.decision.actorClientId,
             idempotencyKey: record.idempotencyKey,
+            actorContextHash: authenticationAudit.contextHash,
           })
           if (replay) {
             if (

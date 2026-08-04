@@ -20,6 +20,10 @@ import {
 } from '../../domain/contiguous-extraction.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import {
+  externalActorAuditData,
+  hydrateExternalActorAudit,
+} from './external-actor-audit.ts'
 
 const DIMENSIONS = [
   'selfContained',
@@ -73,6 +77,7 @@ function stringArray(
 function hydrate(
   row: V2ContiguousExtraction,
 ): Readonly<PersistedContiguousExtraction> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const result = canonical<ContiguousExtractionResult>(
     row.resultJson,
     'contiguous extraction result',
@@ -131,14 +136,24 @@ implements ContiguousExtractionRepository {
     projectId: string
     createdByClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2ContiguousExtraction.findUnique({
       where: {
-        workspaceId_projectId_createdByClientId_idempotencyKey:
-          input,
+        workspaceId_projectId_createdByClientId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          createdByClientId: input.createdByClientId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
-    return row ? hydrate(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdByClientId)
+    if (audit.contextHash !== input.actorContextHash) {
+      throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    }
+    return hydrate(row)
   }
 
   async readCandidateMoments(input: {
@@ -284,6 +299,7 @@ implements ContiguousExtractionRepository {
 
   async persist(
     value: Readonly<PersistedContiguousExtraction>,
+    authenticationAudit: Parameters<ContiguousExtractionRepository['persist']>[1],
     attempt = 1,
   ): ReturnType<ContiguousExtractionRepository['persist']> {
     const result = value.result
@@ -380,6 +396,7 @@ implements ContiguousExtractionRepository {
               requestFingerprint: value.requestFingerprint,
               idempotencyKey: value.idempotencyKey,
               createdByClientId: value.createdBy.id,
+              ...externalActorAuditData(authenticationAudit, result.workspaceId, value.createdBy.id),
               createdAt: new Date(value.createdAt),
             },
           })
@@ -395,7 +412,7 @@ implements ContiguousExtractionRepository {
       })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && attempt < 3) {
-        return this.persist(value, attempt + 1)
+        return this.persist(value, authenticationAudit, attempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({
@@ -403,6 +420,7 @@ implements ContiguousExtractionRepository {
           projectId: result.projectId,
           createdByClientId: value.createdBy.id,
           idempotencyKey: value.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (replay) {
           if (

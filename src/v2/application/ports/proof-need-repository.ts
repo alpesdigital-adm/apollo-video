@@ -2,6 +2,7 @@ import type {
   ProofNeedRun,
   ProofNeedResolution,
 } from '../../domain/proof-need.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedProofNeedRun extends ProofNeedRun {
   requestFingerprint: string
@@ -29,11 +30,13 @@ export interface ProofNeedRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedProofNeedRun> | null>
   create(input: {
     run: Readonly<ProofNeedRun>
     requestFingerprint: string
     idempotencyKey: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<{
     run: Readonly<PersistedProofNeedRun>
     replayed: boolean

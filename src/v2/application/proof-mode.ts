@@ -26,6 +26,11 @@ import type {
 import type {
   ProofNeedRepository,
 } from './ports/proof-need-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
@@ -57,17 +62,6 @@ function idempotencyKey(value: unknown): string {
     'Idempotency-Key must contain 8 to 128 visible ASCII characters',
   )
   return value.trim()
-}
-
-function actorId(
-  actor: Readonly<{ type: 'api-client'; id: string }>,
-): string {
-  assertDomain(
-    actor?.type === 'api-client',
-    'AUTH_INVALID',
-    'Proof mode planning requires an API client',
-  )
-  return identity(actor.id, 'actor.id')
 }
 
 function formats(
@@ -145,7 +139,7 @@ export function createProofModeRunService(dependencies: {
     formats: readonly OutputAspectRatio[]
     rhythm: ProofRhythm
     overrides: readonly Readonly<ProofModeOverride>[]
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -170,7 +164,10 @@ export function createProofModeRunService(dependencies: {
     )
     const selectedFormats = formats(request.formats)
     const selectedOverrides = overrides(request.overrides)
-    const createdByClientId = actorId(request.actor)
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    assertDomain(authenticationAudit.workspaceId === workspaceId, 'AUTH_INVALID', 'Proof mode actor does not belong to the workspace')
+    const createdByClientId = identity(authenticationAudit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'create-proof-mode-run-request/v1',
@@ -183,12 +180,14 @@ export function createProofModeRunService(dependencies: {
       rhythm: request.rhythm,
       overrides: selectedOverrides,
       createdByClientId,
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findReplay({
       workspaceId,
       projectId,
       actorClientId: createdByClientId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -296,6 +295,7 @@ export function createProofModeRunService(dependencies: {
       run,
       requestFingerprint,
       idempotencyKey: key,
+      authenticationAudit,
     })
   }
 }

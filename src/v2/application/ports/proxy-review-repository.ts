@@ -1,4 +1,5 @@
 import type { ProxyReview } from '../render-workflow.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedProxyReview extends ProxyReview {
   id: string
@@ -48,6 +49,7 @@ export interface ProxyReviewRepository {
     expectedRevision: number
     decisionId: string
     actor: Readonly<{ type: 'api-client'; id: string }>
+    authenticationAudit: Readonly<ApiAccessAuditContext>
     idempotencyKey: string
     requestFingerprint: string
     createdAt: string

@@ -2,6 +2,7 @@ import type {
   ProofIntegrityOutcome,
   ProofIntegrityRun,
 } from '../../domain/proof-integrity.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface PersistedProofIntegrityRun
 extends ProofIntegrityRun {
@@ -31,11 +32,13 @@ export interface ProofIntegrityRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedProofIntegrityRun> | null>
   create(input: {
     run: Readonly<ProofIntegrityRun>
     requestFingerprint: string
     idempotencyKey: string
+    authenticationAudit: Readonly<ApiAccessAuditContext>
   }): Promise<Readonly<{
     run: Readonly<PersistedProofIntegrityRun>
     replayed: boolean

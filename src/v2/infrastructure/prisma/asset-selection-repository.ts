@@ -19,6 +19,7 @@ import {
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 type StoredSelection = Prisma.V2AssetSelectionGetPayload<Record<string, never>>
 
@@ -89,6 +90,7 @@ function parseRightsEvidence(
 }
 
 export function hydrateAssetSelection(row: StoredSelection): Readonly<PersistedAssetSelection> {
+  hydrateExternalActorAudit(row, row.createdById)
   const briefValue = parseJson(row.briefJson, 'asset brief')
   if (typeof briefValue !== 'object' || briefValue === null || Array.isArray(briefValue)) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored asset brief is invalid')
@@ -192,6 +194,7 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
     workspaceId: string
     projectId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.client.v2AssetSelection.findUnique({
       where: {
@@ -202,11 +205,15 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
         },
       },
     })
-    return row ? hydrateAssetSelection(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdById)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return hydrateAssetSelection(row)
   }
 
   async persist(
     selection: Readonly<PersistedAssetSelection>,
+    authenticationAudit: Parameters<AssetSelectionRepository['persist']>[1],
     serializationAttempt = 1,
   ): ReturnType<AssetSelectionRepository['persist']> {
     try {
@@ -220,6 +227,8 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
         }
         const existing = await transaction.v2AssetSelection.findUnique({ where: key })
         if (existing) {
+          const audit = hydrateExternalActorAudit(existing, existing.createdById)
+          if (audit.contextHash !== authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (existing.requestFingerprint !== selection.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -306,6 +315,7 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
             requestFingerprint: selection.requestFingerprint,
             createdByType: selection.createdBy.type,
             createdById: selection.createdBy.id,
+            ...externalActorAuditData(authenticationAudit, selection.workspaceId, selection.createdBy.id),
             createdAt: new Date(selection.createdAt),
           },
         })
@@ -335,13 +345,14 @@ export class PrismaAssetSelectionRepository implements AssetSelectionRepository 
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (isPrismaCode(error, 'P2034') && serializationAttempt < 3) {
-        return this.persist(selection, serializationAttempt + 1)
+        return this.persist(selection, authenticationAudit, serializationAttempt + 1)
       }
       if (isPrismaCode(error, 'P2002')) {
         const replay = await this.findIdempotent({
           workspaceId: selection.workspaceId,
           projectId: selection.projectId,
           idempotencyKey: selection.idempotencyKey,
+          actorContextHash: authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== selection.requestFingerprint) {

@@ -7,6 +7,11 @@ import type {
   MvpCoreGateRepository,
   PersistedMvpCoreGate,
 } from './ports/mvp-core-gate-repository.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const SHA_256_PATTERN = /^[a-f0-9]{64}$/
@@ -62,7 +67,7 @@ export function runMvpCoreGateService(dependencies: {
     companionVersionId: string
     companionVersionHash: string
     duplicateProjectId: string
-    actor: Readonly<{ type: 'api-client'; id: string }>
+    actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
     const workspaceId = identity(request.workspaceId, 'workspaceId')
@@ -101,12 +106,14 @@ export function runMvpCoreGateService(dependencies: {
       'INVALID_ARGUMENT',
       'MVP gate projects must have distinct identities',
     )
+    requireScope(request.actor, 'projects:write')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
     assertDomain(
-      request.actor?.type === 'api-client',
+      authenticationAudit.workspaceId === workspaceId,
       'AUTH_INVALID',
-      'MVP gate requires an authenticated API client',
+      'MVP gate actor does not belong to the workspace',
     )
-    const actorId = identity(request.actor.id, 'actor.id')
+    const actorId = identity(authenticationAudit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'mvp-core-gate-request/v1',
@@ -118,12 +125,13 @@ export function runMvpCoreGateService(dependencies: {
       companionVersionId,
       companionVersionHash,
       duplicateProjectId,
-      actor: { type: 'api-client', id: actorId },
+      actorContextHash: authenticationAudit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({
       workspaceId,
       primaryProjectId,
       idempotencyKey: key,
+      actorContextHash: authenticationAudit.contextHash,
     })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) {
@@ -206,7 +214,7 @@ export function runMvpCoreGateService(dependencies: {
       ...content,
       recordHash: calculateMvpCoreGateRecordHash(content),
     })
-    return dependencies.repository.persist(gate)
+    return dependencies.repository.persist(gate, authenticationAudit)
   }
 }
 

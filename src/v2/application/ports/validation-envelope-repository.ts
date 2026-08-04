@@ -2,6 +2,7 @@ import type {
   ValidationEnvelopeDecision,
   ValidationEnvelopeReusePlan,
 } from '../../domain/validation-envelope.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface ValidationEnvelopeReuseRecord {
   plan: Readonly<ValidationEnvelopeReusePlan>
@@ -33,12 +34,14 @@ export interface ValidationEnvelopeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<{
     record: Readonly<ValidationEnvelopeReuseRecord>
     requestFingerprint: string
   }> | null>
   create(
     record: Readonly<ValidationEnvelopeCreateRecord>,
+    authenticationAudit: Readonly<ApiAccessAuditContext>,
   ): Promise<Readonly<
     ValidationEnvelopeReuseRecord & { replayed: boolean }
   >>
@@ -60,9 +63,11 @@ export interface ValidationEnvelopeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<ValidationEnvelopeDecisionRecord> | null>
   appendDecision(
     record: Readonly<ValidationEnvelopeDecisionRecord>,
+    authenticationAudit: Readonly<ApiAccessAuditContext>,
   ): Promise<Readonly<
     ValidationEnvelopeReuseRecord & { replayed: boolean }
   >>

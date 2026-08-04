@@ -17,6 +17,7 @@ import {
   type ProofModeRun,
 } from '../../domain/proof-mode.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
+import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
 type RunWithPlans = V2ProofModeRun & {
   plans: V2ProofModePlan[]
@@ -70,6 +71,7 @@ function lineList(values: readonly string[]): string {
 function hydrateRecord(
   row: RunWithPlans,
 ): Readonly<PersistedProofModeRun> {
+  hydrateExternalActorAudit(row, row.createdByClientId)
   const run = hydrateProofModeRun(
     canonicalValue<ProofModeRun>(
       row.runJson,
@@ -177,6 +179,7 @@ function runData(input: {
   run: Readonly<ProofModeRun>
   requestFingerprint: string
   idempotencyKey: string
+  authenticationAudit: Parameters<ProofModeRepository['create']>[0]['authenticationAudit']
 }) {
   const { run } = input
   return {
@@ -208,6 +211,7 @@ function runData(input: {
     requestFingerprint: input.requestFingerprint,
     idempotencyKey: input.idempotencyKey,
     createdByClientId: run.createdByClientId,
+    ...externalActorAuditData(input.authenticationAudit, run.workspaceId, run.createdByClientId),
     createdAt: new Date(run.createdAt),
   }
 }
@@ -394,6 +398,7 @@ implements ProofModeRepository {
     projectId: string
     actorClientId: string
     idempotencyKey: string
+    actorContextHash: string
   }) {
     const row = await this.prisma.v2ProofModeRun.findUnique({
       where: {
@@ -406,7 +411,10 @@ implements ProofModeRepository {
       },
       include: { plans: { orderBy: { sequence: 'asc' } } },
     })
-    return row ? hydrateRecord(row) : null
+    if (!row) return null
+    const audit = hydrateExternalActorAudit(row, row.createdByClientId)
+    if (audit.contextHash !== input.actorContextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
+    return hydrateRecord(row)
   }
 
   async create(
@@ -414,6 +422,7 @@ implements ProofModeRepository {
       run: Readonly<ProofModeRun>
       requestFingerprint: string
       idempotencyKey: string
+      authenticationAudit: Parameters<ProofModeRepository['create']>[0]['authenticationAudit']
     },
     attempt = 1,
   ): ReturnType<ProofModeRepository['create']> {
@@ -431,6 +440,8 @@ implements ProofModeRepository {
           include: { plans: { orderBy: { sequence: 'asc' } } },
         })
         if (replay) {
+          const audit = hydrateExternalActorAudit(replay, replay.createdByClientId)
+          if (audit.contextHash !== input.authenticationAudit.contextHash) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key belongs to another authenticated actor context')
           if (replay.requestFingerprint !== input.requestFingerprint) {
             throw new DomainError(
               'IDEMPOTENCY_PAYLOAD_MISMATCH',
@@ -478,6 +489,7 @@ implements ProofModeRepository {
           projectId: input.run.projectId,
           actorClientId: input.run.createdByClientId,
           idempotencyKey: input.idempotencyKey,
+          actorContextHash: input.authenticationAudit.contextHash,
         })
         if (replay) {
           if (replay.requestFingerprint !== input.requestFingerprint) {

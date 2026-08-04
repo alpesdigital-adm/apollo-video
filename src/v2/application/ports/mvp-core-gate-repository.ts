@@ -2,6 +2,7 @@ import type {
   MvpCoreCriterionEvidenceInput,
 } from '../../domain/mvp-core-gate.ts'
 import type { MvpCoreGateReport } from '../run-mvp-core-gate.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface MvpCoreGateEvidenceQuery {
   workspaceId: string
@@ -47,12 +48,14 @@ export interface MvpCoreGateRepository {
     workspaceId: string
     primaryProjectId: string
     idempotencyKey: string
+    actorContextHash: string
   }): Promise<Readonly<PersistedMvpCoreGate> | null>
   readEvidence(
     input: Readonly<MvpCoreGateEvidenceQuery>,
   ): Promise<Readonly<MvpCoreGateEvidenceContext> | null>
   persist(
     gate: Readonly<PersistedMvpCoreGate>,
+    authenticationAudit: Readonly<ApiAccessAuditContext>,
   ): Promise<Readonly<{ gate: Readonly<PersistedMvpCoreGate>; replayed: boolean }>>
   list(input: {
     workspaceId: string
