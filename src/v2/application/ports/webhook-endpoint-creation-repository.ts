@@ -1,5 +1,6 @@
 import type { WebhookEndpoint, WebhookSigningSecret } from '../../domain/webhook.ts'
 import type { WebhookSigningSecretPayload } from '../../domain/webhook-signing-secret-payload.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface WebhookEndpointCreationIdempotency {
   id: string
@@ -12,6 +13,7 @@ export interface WebhookEndpointCreationIdempotency {
 }
 
 export interface WebhookEndpointCreationBundle {
+  command: Readonly<WebhookAdministrationCommand>
   endpoint: Readonly<WebhookEndpoint>
   secret: Readonly<WebhookSigningSecret>
   secretPayload: Readonly<WebhookSigningSecretPayload>

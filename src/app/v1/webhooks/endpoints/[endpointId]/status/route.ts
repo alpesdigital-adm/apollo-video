@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
@@ -42,9 +43,11 @@ export async function PUT(
     const { endpointId } = await context.params
     const setStatus = setWebhookEndpointStatusService({
       repository: createWebhookEndpointCommandRepository(),
+      createId: randomUUID,
     })
     const result = await setStatus({
       workspaceId: actor.workspaceId,
+      actor,
       endpointId,
       ...parseBody(body),
     })

@@ -155,6 +155,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2WebhookDelivery.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2WebhookAdministrationCommand.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2WebhookSubscription.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
@@ -1870,6 +1873,19 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(createdEndpoint).includes('workspaceId'), false)
     assert.equal(replayedEndpoint.data.replayed, true)
     assert.equal(replayedEndpoint.data.endpoint.id, createdEndpoint.data.endpoint.id)
+    const endpointCreateAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.create',
+        targetId: createdEndpoint.data.endpoint.id,
+      },
+    })
+    assert.equal(endpointCreateAudit.length, 1)
+    assert.equal(endpointCreateAudit[0].actorClientId, apiClientId)
+    assert.equal(endpointCreateAudit[0].actorCredentialId, issued.credential.id)
+    assert.match(endpointCreateAudit[0].actorContextHash, /^[a-f0-9]{64}$/)
+    assert.equal(endpointCreateAudit[0].idempotencyKey, 'public-endpoint-create-1')
+    assert.equal(JSON.stringify(endpointCreateAudit[0]).includes(issued.token), false)
     const mismatchedEndpointResponse = await createWebhookEndpointRequest(
       'public-endpoint-create-1',
       { url: 'https://different-hooks.example.com/apollo' },
@@ -2437,6 +2453,16 @@ test('authenticated public API manages projects, clients and artifact inspection
       replayedCreatedSubscription.data.subscription.id,
       createdSubscription.data.subscription.id,
     )
+    const subscriptionCreateAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-subscription.create',
+        targetId: createdSubscription.data.subscription.id,
+      },
+    })
+    assert.equal(subscriptionCreateAudit.length, 1)
+    assert.equal(subscriptionCreateAudit[0].actorCredentialId, issued.credential.id)
+    assert.equal(subscriptionCreateAudit[0].idempotencyKey, 'public-subscription-create-1')
     const mismatchedSubscriptionResponse = await createWebhookSubscriptionRequest(
       'public-subscription-create-1',
       { ...createSubscriptionBody, eventTypes: ['project.version.created'] },
@@ -2569,6 +2595,17 @@ test('authenticated public API manages projects, clients and artifact inspection
       pausedSubscription.data.subscription.revision,
       webhookSubscriptionRead.data.subscription.revision,
     )
+    const pauseSubscriptionAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-subscription.status.set',
+        targetId: webhookSubscriptionId,
+        baseRevision: webhookSubscriptionRead.data.subscription.revision,
+      },
+    })
+    assert.equal(pauseSubscriptionAudit.length, 1)
+    assert.equal(pauseSubscriptionAudit[0].targetStatus, 'paused')
+    assert.equal(pauseSubscriptionAudit[0].actorCredentialId, issued.credential.id)
     const pauseSubscriptionAgainResponse = await setWebhookSubscriptionStatus(
       'paused',
       webhookSubscriptionRead.data.subscription.revision,
@@ -2625,6 +2662,17 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(JSON.stringify(suspendedEndpoint).includes('/public-api'), false)
     assert.equal(JSON.stringify(suspendedEndpoint).includes('keyRef'), false)
     assert.equal(suspendedEndpointConcurrentReplay.data.effects.pausedSubscriptions, 0)
+    const suspendEndpointAudit = await client.v2WebhookAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'webhook-endpoint.status.set',
+        targetId: webhookEndpointId,
+        baseRevision: activatedRotation.data.endpoint.revision,
+      },
+    })
+    assert.equal(suspendEndpointAudit.length, 1)
+    assert.equal(suspendEndpointAudit[0].targetStatus, 'suspended')
+    assert.equal(suspendEndpointAudit[0].actorCredentialId, issued.credential.id)
     const suspendEndpointAgainResponse = await setWebhookEndpointStatus(
       'suspended',
       activatedRotation.data.endpoint.revision,

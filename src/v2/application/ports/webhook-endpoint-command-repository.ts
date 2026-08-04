@@ -1,12 +1,10 @@
 import type { WebhookEndpointMutableStatus } from '../../domain/webhook.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 import type { WebhookEndpointSummaryRecord } from './webhook-administration-query-repository.ts'
 
 export interface SetWebhookEndpointStatusCommand {
-  workspaceId: string
-  endpointId: string
+  administration: Readonly<WebhookAdministrationCommand>
   targetStatus: WebhookEndpointMutableStatus
-  baseRevision: string
-  changedAt: string
 }
 
 export interface SetWebhookEndpointStatusResult {

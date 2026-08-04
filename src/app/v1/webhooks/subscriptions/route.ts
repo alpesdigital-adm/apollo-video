@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       endpointId: body.endpointId,
       eventTypes: body.eventTypes,
       ...(body.resourceIds ? { resourceIds: body.resourceIds as string[] } : {}),
-      createdByClientId: actor.clientId,
+      actor,
       idempotencyKey,
     })
     return NextResponse.json(

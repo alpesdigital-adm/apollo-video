@@ -59,6 +59,7 @@ const apiClientModel = schema.match(/model V2ApiClient \{([\s\S]*?)\n\}/)?.[1] ?
 const apiCredentialModel = schema.match(/model V2ApiCredential \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiAccessCommandModel = schema.match(/model V2ApiAccessCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiAdministrationCommandModel = schema.match(/model V2ApiAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const webhookAdministrationCommandModel = schema.match(/model V2WebhookAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -78,6 +79,14 @@ for (const field of [
   'requestFingerprint', 'occurredAt',
 ]) {
   assert.match(apiAdministrationCommandModel, new RegExp(`\\b${field}\\b`), `ApiAdministrationCommand must persist ${field}`)
+}
+for (const field of [
+  'action', 'targetType', 'targetId', 'targetStatus', 'actorClientId',
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  'idempotencyKey', 'baseRevision', 'requestFingerprint', 'occurredAt',
+]) {
+  assert.match(webhookAdministrationCommandModel, new RegExp(`\\b${field}\\b`), `WebhookAdministrationCommand must persist ${field}`)
 }
 assert.match(
   committed,
@@ -145,6 +154,14 @@ const requiredChecks = [
   'api_admin_commands_fingerprint_check',
   'api_admin_commands_idempotency_check',
   'api_admin_commands_delegation_check',
+  'webhook_admin_commands_action_check',
+  'webhook_admin_commands_target_check',
+  'webhook_admin_commands_environment_check',
+  'webhook_admin_commands_auth_kind_check',
+  'webhook_admin_commands_actor_hash_check',
+  'webhook_admin_commands_fingerprint_check',
+  'webhook_admin_commands_replay_check',
+  'webhook_admin_commands_delegation_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

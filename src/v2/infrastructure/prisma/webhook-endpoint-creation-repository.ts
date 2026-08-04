@@ -18,6 +18,11 @@ import {
   type WebhookEndpoint,
   type WebhookSigningSecret,
 } from '../../domain/webhook.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 interface StoredEndpointCreationResponse {
   endpointId: string
@@ -90,7 +95,7 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
     bundle: Readonly<WebhookEndpointCreationBundle>,
     serializationAttempt = 1,
   ): Promise<Readonly<WebhookEndpointCreationResult>> {
-    const { endpoint: candidate, secret: signingSecret, secretPayload, idempotency } = bundle
+    const { command, endpoint: candidate, secret: signingSecret, secretPayload, idempotency } = bundle
     if (
       candidate.workspaceId !== signingSecret.workspaceId ||
       candidate.workspaceId !== secretPayload.workspaceId ||
@@ -99,10 +104,19 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
       candidate.id !== secretPayload.endpointId ||
       signingSecret.id !== secretPayload.secretId ||
       signingSecret.version !== secretPayload.secretVersion ||
-      candidate.createdByClientId !== idempotency.clientId
+      candidate.createdByClientId !== idempotency.clientId ||
+      command.audit.clientId !== idempotency.clientId
     ) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook endpoint creation bundle is inconsistent')
     }
+    assertWebhookAdministrationCommandTarget(command, {
+      action: 'webhook-endpoint.create',
+      targetType: 'webhook-endpoint',
+      targetId: candidate.id,
+      workspaceId: candidate.workspaceId,
+      requestFingerprint: idempotency.requestFingerprint,
+      idempotencyKey: idempotency.key,
+    })
 
     try {
       return await this.client.$transaction(async (transaction) => {
@@ -119,6 +133,15 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
           }
           const stored = storedResponse(existing)
+          const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: candidate.workspaceId,
+              targetType: 'webhook-endpoint',
+              targetId: stored.endpointId,
+              action: 'webhook-endpoint.create',
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, command)
           const [endpointRow, secretRow] = await Promise.all([
             transaction.v2WebhookEndpoint.findFirst({ where: { id: stored.endpointId, workspaceId: candidate.workspaceId } }),
             transaction.v2WebhookSigningSecret.findFirst({ where: { id: stored.secretId, workspaceId: candidate.workspaceId } }),
@@ -191,6 +214,9 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
             createdAt: new Date(secretPayload.createdAt),
           },
         })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(command),
+        })
         await transaction.v2IdempotencyRecord.update({
           where: { id: idempotency.id },
           data: {
@@ -223,6 +249,15 @@ export class PrismaWebhookEndpointCreationRepository implements WebhookEndpointC
             throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different request')
           }
           const stored = storedResponse(existing)
+          const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: candidate.workspaceId,
+              targetType: 'webhook-endpoint',
+              targetId: stored.endpointId,
+              action: 'webhook-endpoint.create',
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, command)
           const [endpointRow, secretRow] = await Promise.all([
             this.client.v2WebhookEndpoint.findFirst({ where: { id: stored.endpointId, workspaceId: candidate.workspaceId } }),
             this.client.v2WebhookSigningSecret.findFirst({ where: { id: stored.secretId, workspaceId: candidate.workspaceId } }),

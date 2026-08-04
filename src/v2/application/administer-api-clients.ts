@@ -1,16 +1,18 @@
-import { requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 import type {
   ApiClientAdministrationRepository,
   ApiCredentialMutationResult,
 } from './ports/api-client-administration-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
 import { createApiAdministrationCommand } from '../domain/api-administration-command.ts'
-import { createApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { createServiceAccount, isApiScope, type ApiEnvironment } from '../domain/api-client.ts'
 import { createApiCredential } from '../domain/api-credential.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { calculateVersionHash } from './version-hash.ts'
-import type { WorkspaceMemberRole } from '../domain/workspace-member.ts'
 
 export type ApiAdministrationEntityKind =
   | 'api-client'
@@ -44,25 +46,6 @@ function assertIdempotencyKey(key: string): string {
   assertDomain(normalized.length > 0, 'INVALID_ARGUMENT', 'Idempotency-Key is required')
   assertDomain(normalized.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is too long')
   return normalized
-}
-
-function administrationAudit(actor: AuthenticatedExternalActor) {
-  return createApiAccessAuditContext({
-    clientId: actor.auditContext.clientId,
-    credentialId: actor.auditContext.credentialId,
-    workspaceId: actor.auditContext.workspaceId,
-    environment: actor.auditContext.environment,
-    authenticationKind: actor.authenticationKind,
-    ...(actor.auditContext.delegatedUserId
-      ? { delegatedUserId: actor.auditContext.delegatedUserId }
-      : {}),
-    ...(actor.auditContext.delegatedIdentityId
-      ? { delegatedIdentityId: actor.auditContext.delegatedIdentityId }
-      : {}),
-    ...(actor.auditContext.workspaceRole
-      ? { workspaceRole: actor.auditContext.workspaceRole as WorkspaceMemberRole }
-      : {}),
-  })
 }
 
 function presentMutation(
@@ -126,7 +109,7 @@ export function createApiClientAdministrationService(
       createdAt,
     })
     const issued = dependencies.credentialCrypto.issue(client.id, credential.id)
-    const audit = administrationAudit(request.actor)
+    const audit = materializeActorAuditContext(request.actor)
     const requestFingerprint = calculateVersionHash({
       operation: 'api-client.create',
       actorContextHash: audit.contextHash,
@@ -199,7 +182,7 @@ export function rotateApiCredentialService(
       request.targetClientId,
       credential.id,
     )
-    const audit = administrationAudit(request.actor)
+    const audit = materializeActorAuditContext(request.actor)
     const requestFingerprint = calculateVersionHash({
       operation: 'api-credential.rotate',
       actorContextHash: audit.contextHash,
@@ -260,7 +243,7 @@ export function revokeApiCredentialService(
     }
 
     const revokedAt = dependencies.clock().toISOString()
-    const audit = administrationAudit(request.actor)
+    const audit = materializeActorAuditContext(request.actor)
     const requestFingerprint = calculateVersionHash({
       operation: 'api-credential.revoke',
       actorContextHash: audit.contextHash,

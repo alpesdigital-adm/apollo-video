@@ -2,13 +2,11 @@ import type {
   WebhookSubscription,
   WebhookSubscriptionMutableStatus,
 } from '../../domain/webhook.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface SetWebhookSubscriptionStatusCommand {
-  workspaceId: string
-  subscriptionId: string
+  administration: Readonly<WebhookAdministrationCommand>
   targetStatus: WebhookSubscriptionMutableStatus
-  baseRevision: string
-  changedAt: string
 }
 
 export interface SetWebhookSubscriptionStatusResult {

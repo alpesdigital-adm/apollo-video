@@ -1,4 +1,4 @@
-import { assertDomain } from '../domain/errors.ts'
+import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createWebhookEndpoint, createWebhookSigningSecret } from '../domain/webhook.ts'
 import type {
   WebhookEndpointCreationRepository,
@@ -6,16 +6,23 @@ import type {
 } from './ports/webhook-endpoint-creation-repository.ts'
 import type { WebhookSigningSecretProtector } from './ports/webhook-signing-secret-protector.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
+import { createWebhookAdministrationCommand } from '../domain/webhook-administration-command.ts'
 
 export type WebhookEndpointCreationEntityKind =
   | 'webhook-endpoint'
   | 'webhook-secret'
+  | 'webhook-administration-command'
   | 'idempotency-record'
 
 export interface CreateWebhookEndpointRequest {
   workspaceId: string
   url: string
-  createdByClientId: string
+  actor: AuthenticatedExternalActor
   idempotencyKey: string
   idempotencyTtlSeconds?: number
 }
@@ -35,7 +42,11 @@ export function createWebhookEndpointService(dependencies: CreateWebhookEndpoint
     request: CreateWebhookEndpointRequest,
   ): Promise<Readonly<WebhookEndpointCreationResult>> {
     const workspaceId = request.workspaceId.trim()
-    const clientId = request.createdByClientId.trim()
+    requireScope(request.actor, 'webhooks:admin')
+    if (request.actor.workspaceId !== workspaceId) {
+      throw new DomainError('WORKSPACE_NOT_FOUND', 'Workspace was not found')
+    }
+    const clientId = request.actor.clientId
     const idempotencyKey = request.idempotencyKey.trim()
     const ttlSeconds = request.idempotencyTtlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS
     assertDomain(workspaceId.length > 0, 'INVALID_ARGUMENT', 'workspaceId is required')
@@ -43,7 +54,9 @@ export function createWebhookEndpointService(dependencies: CreateWebhookEndpoint
     assertDomain(idempotencyKey.length >= 1 && idempotencyKey.length <= 128 && VISIBLE_ASCII.test(idempotencyKey), 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 visible ASCII characters')
     assertDomain(Number.isInteger(ttlSeconds) && ttlSeconds >= 60 && ttlSeconds <= 7 * 24 * 60 * 60, 'INVALID_ARGUMENT', 'idempotency ttlSeconds must be between 60 seconds and 7 days')
 
+    const audit = materializeActorAuditContext(request.actor)
     const now = dependencies.clock()
+    assertDomain(!Number.isNaN(now.getTime()), 'INVALID_ARGUMENT', 'Webhook endpoint creation clock is invalid')
     const createdAt = now.toISOString()
     const endpointId = dependencies.createId('webhook-endpoint')
     const secretId = dependencies.createId('webhook-secret')
@@ -76,9 +89,21 @@ export function createWebhookEndpointService(dependencies: CreateWebhookEndpoint
     })
     const requestFingerprint = calculateVersionHash({
       action: 'webhook-endpoint-create/v1',
+      actorContextHash: audit.contextHash,
       url: endpoint.url,
     })
     return dependencies.repository.createOrReplay({
+      command: createWebhookAdministrationCommand({
+        id: dependencies.createId('webhook-administration-command'),
+        workspaceId,
+        action: 'webhook-endpoint.create',
+        targetType: 'webhook-endpoint',
+        targetId: endpoint.id,
+        audit,
+        idempotencyKey,
+        requestFingerprint,
+        occurredAt: createdAt,
+      }),
       endpoint,
       secret,
       secretPayload: protectedSecret.payload,

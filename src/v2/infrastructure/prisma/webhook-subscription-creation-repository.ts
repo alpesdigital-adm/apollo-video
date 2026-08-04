@@ -8,6 +8,11 @@ import type {
 } from '../../application/ports/webhook-subscription-creation-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createWebhookSubscription, type WebhookSubscription } from '../../domain/webhook.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 interface StoredWebhookSubscriptionCreationResponse {
   subscriptionId: string
@@ -82,13 +87,22 @@ export class PrismaWebhookSubscriptionCreationRepository
     bundle: Readonly<WebhookSubscriptionCreationBundle>,
     serializationAttempt = 1,
   ): Promise<Readonly<WebhookSubscriptionCreationResult>> {
-    const { subscription, idempotency } = bundle
+    const { command, subscription, idempotency } = bundle
     if (
       subscription.workspaceId !== idempotency.workspaceId ||
-      subscription.createdByClientId !== idempotency.clientId
+      subscription.createdByClientId !== idempotency.clientId ||
+      command.audit.clientId !== idempotency.clientId
     ) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook subscription creation bundle is inconsistent')
     }
+    assertWebhookAdministrationCommandTarget(command, {
+      action: 'webhook-subscription.create',
+      targetType: 'webhook-subscription',
+      targetId: subscription.id,
+      workspaceId: subscription.workspaceId,
+      requestFingerprint: idempotency.requestFingerprint,
+      idempotencyKey: idempotency.key,
+    })
 
     try {
       return await this.client.$transaction(async (transaction) => {
@@ -109,6 +123,15 @@ export class PrismaWebhookSubscriptionCreationRepository
             )
           }
           const stored = parseStoredResponse(existing)
+          const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: subscription.workspaceId,
+              targetType: 'webhook-subscription',
+              targetId: stored.subscriptionId,
+              action: 'webhook-subscription.create',
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, command)
           const row = await transaction.v2WebhookSubscription.findFirst({
             where: { id: stored.subscriptionId, workspaceId: subscription.workspaceId },
           })
@@ -195,6 +218,9 @@ export class PrismaWebhookSubscriptionCreationRepository
             updatedAt: new Date(persisted.updatedAt),
           },
         })
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(command),
+        })
         await transaction.v2IdempotencyRecord.update({
           where: { id: idempotency.id },
           data: {
@@ -230,6 +256,15 @@ export class PrismaWebhookSubscriptionCreationRepository
             )
           }
           const stored = parseStoredResponse(existing)
+          const auditCommand = await this.client.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: subscription.workspaceId,
+              targetType: 'webhook-subscription',
+              targetId: stored.subscriptionId,
+              action: 'webhook-subscription.create',
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, command)
           const row = await this.client.v2WebhookSubscription.findFirst({
             where: { id: stored.subscriptionId, workspaceId: subscription.workspaceId },
           })

@@ -13,6 +13,11 @@ import {
   webhookSubscriptionRevision,
   type WebhookSubscription,
 } from '../../domain/webhook.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 function parseStringArray(value: string | null, required: boolean): readonly string[] | undefined {
   if (value === null) {
@@ -61,22 +66,42 @@ export class PrismaWebhookSubscriptionCommandRepository
     command: Readonly<SetWebhookSubscriptionStatusCommand>,
     serializationAttempt = 1,
   ): Promise<Readonly<SetWebhookSubscriptionStatusResult> | null> {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-subscription.status.set',
+      targetType: 'webhook-subscription',
+      targetId: administration.targetId,
+      targetStatus: command.targetStatus,
+      workspaceId: administration.workspaceId,
+      requestFingerprint: administration.requestFingerprint,
+      baseRevision: administration.baseRevision,
+    })
     try {
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const row = await transaction.v2WebhookSubscription.findFirst({
-          where: { id: command.subscriptionId, workspaceId: command.workspaceId },
+          where: { id: administration.targetId, workspaceId: administration.workspaceId },
         })
         if (!row) return null
         const current = hydrate(row)
         const currentRevision = webhookSubscriptionRevision(current)
         if (current.status === command.targetStatus) {
+          const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: administration.workspaceId,
+              targetType: administration.targetType,
+              targetId: administration.targetId,
+              action: administration.action,
+              baseRevision: administration.baseRevision,
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, administration)
           return Object.freeze({
             subscription: current,
             revision: currentRevision,
             replayed: true,
           })
         }
-        if (currentRevision !== command.baseRevision) {
+        if (currentRevision !== administration.baseRevision) {
           throw new DomainError(
             'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
             'Webhook subscription revision does not match',
@@ -94,7 +119,7 @@ export class PrismaWebhookSubscriptionCommandRepository
             )
           }
         }
-        const next = transitionWebhookSubscription(current, command.targetStatus, command.changedAt)
+        const next = transitionWebhookSubscription(current, command.targetStatus, administration.occurredAt)
         const changed = await transaction.v2WebhookSubscription.updateMany({
           where: {
             id: current.id,
@@ -115,6 +140,9 @@ export class PrismaWebhookSubscriptionCommandRepository
             'Webhook subscription changed concurrently',
           )
         }
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         return Object.freeze({
           subscription: next,
           revision: webhookSubscriptionRevision(next),
@@ -122,7 +150,10 @@ export class PrismaWebhookSubscriptionCommandRepository
         })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
+      if (
+        typeof error === 'object' && error !== null && 'code' in error &&
+        (error.code === 'P2002' || error.code === 'P2034')
+      ) {
         if (serializationAttempt < 3) {
           return this.setStatus(command, serializationAttempt + 1)
         }

@@ -1,4 +1,5 @@
 import type { WebhookSubscription } from '../../domain/webhook.ts'
+import type { WebhookAdministrationCommand } from '../../domain/webhook-administration-command.ts'
 
 export interface WebhookSubscriptionCreationIdempotency {
   id: string
@@ -11,6 +12,7 @@ export interface WebhookSubscriptionCreationIdempotency {
 }
 
 export interface WebhookSubscriptionCreationBundle {
+  command: Readonly<WebhookAdministrationCommand>
   subscription: Readonly<WebhookSubscription>
   idempotency: Readonly<WebhookSubscriptionCreationIdempotency>
 }

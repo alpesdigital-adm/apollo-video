@@ -5,6 +5,11 @@ import { once } from 'node:events'
 import test from 'node:test'
 
 import { registerWebhookService } from '../../src/v2/application/register-webhook.ts'
+import {
+  createExternalAuditContext,
+  materializeActorAuditContext,
+} from '../../src/v2/application/authenticate-api-client.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
 import { createWebhookEndpointService } from '../../src/v2/application/create-webhook-endpoint.ts'
 import { createWebhookSubscriptionService } from '../../src/v2/application/create-webhook-subscription.ts'
 import { provisionWebhookSigningSecretService } from '../../src/v2/application/provision-webhook-signing-secret.ts'
@@ -55,6 +60,7 @@ import { replayWebhookEventService } from '../../src/v2/application/replay-webho
 import { setWebhookSubscriptionStatusService } from '../../src/v2/application/set-webhook-subscription-status.ts'
 import { setWebhookEndpointStatusService } from '../../src/v2/application/set-webhook-endpoint-status.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { createWebhookAdministrationCommand } from '../../src/v2/domain/webhook-administration-command.ts'
 import {
   createWebhookDelivery,
   createWebhookDeliveryAttempt,
@@ -98,12 +104,76 @@ import { PrismaWebhookDeliveryRepository } from '../../src/v2/infrastructure/pri
 import { PrismaWebhookEventReplayRepository } from '../../src/v2/infrastructure/prisma/webhook-event-replay-repository.ts'
 import { PrismaWebhookEndpointCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-endpoint-command-repository.ts'
 import { PrismaWebhookSubscriptionCommandRepository } from '../../src/v2/infrastructure/prisma/webhook-subscription-command-repository.ts'
+import {
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from '../../src/v2/infrastructure/prisma/webhook-administration-command-persistence.ts'
 import { PrismaWebhookSecurityRepository } from '../../src/v2/infrastructure/prisma/webhook-security-repository.ts'
 import { createAesRecipeParameterCipher } from '../../src/v2/infrastructure/security/recipe-parameter-cipher.ts'
 import {
   createWebhookSigningSecretProtector,
   webhookSigningSecretCipherContext,
 } from '../../src/v2/infrastructure/security/webhook-signing-secret-protector.ts'
+
+function webhookAdministratorActor(credentialId = 'credential-1') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-1', credentialId, workspaceId: 'workspace-1', environment: 'sandbox',
+  })
+  return Object.freeze({
+    ...auditContext,
+    scopes: new Set(['webhooks:admin']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+}
+
+const WEBHOOK_ADMINISTRATOR = webhookAdministratorActor()
+
+test('webhook administration commands fail closed on invalid intent and actor-bound replay', () => {
+  const audit = materializeActorAuditContext(WEBHOOK_ADMINISTRATOR)
+  const base = {
+    id: '00000000-0000-4000-8000-000000000119',
+    workspaceId: 'workspace-1',
+    action: 'webhook-endpoint.create',
+    targetType: 'webhook-endpoint',
+    targetId: '00000000-0000-4000-8000-000000000118',
+    audit,
+    idempotencyKey: 'endpoint-request-actor-bound',
+    requestFingerprint: 'a'.repeat(64),
+    occurredAt: '2026-07-15T19:59:00.000Z',
+  }
+  const command = createWebhookAdministrationCommand(base)
+  assert.throws(
+    () => createWebhookAdministrationCommand({ ...base, targetType: 'webhook-subscription' }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  assert.throws(
+    () => createWebhookAdministrationCommand({
+      ...base,
+      action: 'webhook-endpoint.status.set',
+      idempotencyKey: undefined,
+      baseRevision: 'b'.repeat(64),
+    }),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+  const otherActor = webhookAdministratorActor('credential-2')
+  const otherCommand = createWebhookAdministrationCommand({
+    ...base,
+    id: '00000000-0000-4000-8000-000000000117',
+    audit: materializeActorAuditContext(otherActor),
+  })
+  assert.throws(
+    () => assertWebhookAdministrationReplay(
+      webhookAdministrationCommandData(command),
+      otherCommand,
+    ),
+    (error) => error instanceof DomainError && error.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+  )
+})
 
 test('webhook endpoint creation generates only encrypted signing material and canonical intent', async () => {
   const rawSecret = Buffer.alloc(32, 17)
@@ -113,6 +183,7 @@ test('webhook endpoint creation generates only encrypted signing material and ca
   const ids = {
     'webhook-endpoint': '00000000-0000-4000-8000-000000000123',
     'webhook-secret': '00000000-0000-4000-8000-000000000124',
+    'webhook-administration-command': '00000000-0000-4000-8000-000000000125',
     'idempotency-record': 'idempotency-webhook-endpoint-1',
   }
   let captured
@@ -130,7 +201,7 @@ test('webhook endpoint creation generates only encrypted signing material and ca
   const result = await create({
     workspaceId: 'workspace-1',
     url: 'HTTPS://Hooks.Example.com:443/apollo',
-    createdByClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     idempotencyKey: 'endpoint-request-1',
   })
 
@@ -157,6 +228,15 @@ test('webhook endpoint creation generates only encrypted signing material and ca
   )
   assert.equal(createHash('sha256').update(Buffer.from(opened, 'base64url')).digest('hex'), expectedFingerprint)
   assert.match(captured.idempotency.requestFingerprint, /^[a-f0-9]{64}$/)
+  assert.equal(captured.command.action, 'webhook-endpoint.create')
+  assert.equal(captured.command.targetId, captured.endpoint.id)
+  assert.equal(captured.command.audit.credentialId, 'credential-1')
+  assert.equal(captured.command.audit.contextHash, materializeActorAuditContext(WEBHOOK_ADMINISTRATOR).contextHash)
+  assert.equal(captured.command.requestFingerprint, calculateVersionHash({
+    action: 'webhook-endpoint-create/v1',
+    actorContextHash: captured.command.audit.contextHash,
+    url: captured.endpoint.url,
+  }))
 })
 
 test('webhook endpoint creation rejects idempotency misuse before generating a secret', async () => {
@@ -171,7 +251,7 @@ test('webhook endpoint creation rejects idempotency misuse before generating a s
     () => create({
       workspaceId: 'workspace-1',
       url: 'https://hooks.example.com/apollo',
-      createdByClientId: 'client-1',
+      actor: WEBHOOK_ADMINISTRATOR,
       idempotencyKey: 'invalid key',
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
@@ -188,6 +268,7 @@ test('webhook endpoint creation retries serialization conflicts before failing e
   const ids = {
     'webhook-endpoint': '00000000-0000-4000-8000-000000000126',
     'webhook-secret': '00000000-0000-4000-8000-000000000127',
+    'webhook-administration-command': '00000000-0000-4000-8000-000000000128',
     'idempotency-record': 'idempotency-webhook-endpoint-retry-1',
   }
   let bundle
@@ -205,7 +286,7 @@ test('webhook endpoint creation retries serialization conflicts before failing e
   await create({
     workspaceId: 'workspace-1',
     url: 'https://retry-hooks.example.com/apollo',
-    createdByClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     idempotencyKey: 'endpoint-retry-request-1',
   })
   let attempts = 0
@@ -559,6 +640,7 @@ test('generated webhook signing secret must contain exactly 256 bits', async () 
 test('webhook subscription creation canonicalizes filters and persists idempotency intent', async () => {
   const ids = {
     'webhook-subscription': '00000000-0000-4000-8000-000000000120',
+    'webhook-administration-command': '00000000-0000-4000-8000-000000000121',
     'idempotency-record': 'idempotency-webhook-120',
   }
   let captured
@@ -577,7 +659,7 @@ test('webhook subscription creation canonicalizes filters and persists idempoten
     endpointId: '00000000-0000-4000-8000-000000000121',
     eventTypes: ['project.version.created', 'project.created'],
     resourceIds: ['project-2', 'project-1'],
-    createdByClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     idempotencyKey: 'subscription-request-1',
   })
 
@@ -586,6 +668,15 @@ test('webhook subscription creation canonicalizes filters and persists idempoten
   assert.equal(captured.idempotency.requestedAt, '2026-07-15T13:00:00.000Z')
   assert.equal(captured.idempotency.expiresAt, '2026-07-16T13:00:00.000Z')
   assert.match(captured.idempotency.requestFingerprint, /^[a-f0-9]{64}$/)
+  assert.equal(captured.command.action, 'webhook-subscription.create')
+  assert.equal(captured.command.targetId, captured.subscription.id)
+  assert.equal(captured.command.audit.credentialId, 'credential-1')
+  assert.equal(captured.command.requestFingerprint, calculateVersionHash({
+    action: 'webhook-subscription-create/v1',
+    actorContextHash: captured.command.audit.contextHash,
+    endpointId: captured.subscription.endpointId,
+    filterHash: captured.subscription.filter.hash,
+  }))
 })
 
 test('webhook subscription creation rejects unusable idempotency keys before persistence', async () => {
@@ -600,7 +691,7 @@ test('webhook subscription creation rejects unusable idempotency keys before per
       workspaceId: 'workspace-1',
       endpointId: '00000000-0000-4000-8000-000000000121',
       eventTypes: ['project.created'],
-      createdByClientId: 'client-1',
+      actor: WEBHOOK_ADMINISTRATOR,
       idempotencyKey: 'contains whitespace',
     }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
@@ -611,6 +702,7 @@ test('webhook subscription creation rejects unusable idempotency keys before per
 test('webhook subscription creation retries serialization conflicts before failing explicitly', async () => {
   const retryIds = {
     'webhook-subscription': '00000000-0000-4000-8000-000000000128',
+    'webhook-administration-command': '00000000-0000-4000-8000-000000000130',
     'idempotency-record': 'idempotency-webhook-subscription-retry-1',
   }
   let bundle
@@ -628,7 +720,7 @@ test('webhook subscription creation retries serialization conflicts before faili
     workspaceId: 'workspace-1',
     endpointId: '00000000-0000-4000-8000-000000000129',
     eventTypes: ['project.created'],
-    createdByClientId: 'client-1',
+    actor: WEBHOOK_ADMINISTRATOR,
     idempotencyKey: 'subscription-retry-request-1',
   })
   let attempts = 0
@@ -1686,25 +1778,27 @@ test('webhook endpoint status command validates revision and scopes repository i
     repository: {
       async setStatus(value) {
         command = value
-        const next = transitionWebhookEndpoint(endpoint, value.targetStatus, value.changedAt)
+        const next = transitionWebhookEndpoint(endpoint, value.targetStatus, value.administration.occurredAt)
         return {
           endpoint: { endpoint: next }, replayed: false,
           effects: { pausedSubscriptions: 1, revokedSubscriptions: 0, revokedSigningSecrets: 0 },
         }
       },
     },
+    createId: () => '00000000-0000-4000-8000-000000000927',
     clock: () => new Date('2026-07-15T11:25:01.000Z'),
   })
   const result = await setStatus({
-    workspaceId: 'workspace-1', endpointId: endpoint.id,
+    workspaceId: 'workspace-1', actor: WEBHOOK_ADMINISTRATOR, endpointId: endpoint.id,
     status: 'suspended', baseRevision,
   })
   assert.equal(result.endpoint.endpoint.status, 'suspended')
   assert.equal(result.effects.pausedSubscriptions, 1)
-  assert.equal(command.workspaceId, 'workspace-1')
-  assert.equal(command.baseRevision, baseRevision)
+  assert.equal(command.administration.workspaceId, 'workspace-1')
+  assert.equal(command.administration.baseRevision, baseRevision)
+  assert.equal(command.administration.audit.credentialId, 'credential-1')
   await assert.rejects(
-    () => setStatus({ workspaceId: 'workspace-1', endpointId: endpoint.id, status: 'pending-verification', baseRevision }),
+    () => setStatus({ workspaceId: 'workspace-1', actor: WEBHOOK_ADMINISTRATOR, endpointId: endpoint.id, status: 'pending-verification', baseRevision }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
@@ -1770,34 +1864,36 @@ test('webhook subscription status command validates revision and scopes reposito
     repository: {
       async setStatus(value) {
         command = value
-        const next = transitionWebhookSubscription(subscription, value.targetStatus, value.changedAt)
+        const next = transitionWebhookSubscription(subscription, value.targetStatus, value.administration.occurredAt)
         return { subscription: next, revision: webhookSubscriptionRevision(next), replayed: false }
       },
     },
+    createId: () => '00000000-0000-4000-8000-000000000928',
     clock: () => new Date('2026-07-15T11:23:01.000Z'),
   })
   const result = await setStatus({
-    workspaceId: 'workspace-1', subscriptionId: subscription.id,
+    workspaceId: 'workspace-1', actor: WEBHOOK_ADMINISTRATOR, subscriptionId: subscription.id,
     status: 'paused', baseRevision,
   })
   assert.equal(result.subscription.status, 'paused')
-  assert.equal(command.workspaceId, 'workspace-1')
-  assert.equal(command.baseRevision, baseRevision)
+  assert.equal(command.administration.workspaceId, 'workspace-1')
+  assert.equal(command.administration.baseRevision, baseRevision)
+  assert.equal(command.administration.audit.contextHash, materializeActorAuditContext(WEBHOOK_ADMINISTRATOR).contextHash)
   await assert.rejects(
-    () => setStatus({ workspaceId: 'workspace-1', subscriptionId: subscription.id, status: 'pending-verification', baseRevision }),
+    () => setStatus({ workspaceId: 'workspace-1', actor: WEBHOOK_ADMINISTRATOR, subscriptionId: subscription.id, status: 'pending-verification', baseRevision }),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 
-test('webhook status repositories retry serialization conflicts before returning revision mismatch', async () => {
-  const conflictingClient = () => {
+test('webhook status repositories retry serialization and unique conflicts before returning revision mismatch', async () => {
+  const conflictingClient = (code) => {
     let attempts = 0
     return {
       client: {
         async $transaction() {
           attempts += 1
           const error = new Error('serialization conflict')
-          error.code = 'P2034'
+          error.code = code
           throw error
         },
       },
@@ -1805,31 +1901,49 @@ test('webhook status repositories retry serialization conflicts before returning
     }
   }
 
-  const endpointConflict = conflictingClient()
+  const endpointConflict = conflictingClient('P2034')
   const endpointRepository = new PrismaWebhookEndpointCommandRepository(endpointConflict.client)
+  const endpointAdministration = createWebhookAdministrationCommand({
+    id: '00000000-0000-4000-8000-000000000929',
+    workspaceId: 'workspace-1',
+    action: 'webhook-endpoint.status.set',
+    targetType: 'webhook-endpoint',
+    targetId: '00000000-0000-4000-8000-000000000925',
+    targetStatus: 'suspended',
+    audit: materializeActorAuditContext(WEBHOOK_ADMINISTRATOR),
+    baseRevision: 'a'.repeat(64),
+    requestFingerprint: 'c'.repeat(64),
+    occurredAt: '2026-07-16T13:10:00.000Z',
+  })
   await assert.rejects(
     () => endpointRepository.setStatus({
-      workspaceId: 'workspace-1',
-      endpointId: '00000000-0000-4000-8000-000000000925',
+      administration: endpointAdministration,
       targetStatus: 'suspended',
-      baseRevision: 'a'.repeat(64),
-      changedAt: '2026-07-16T13:10:00.000Z',
     }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
   )
   assert.equal(endpointConflict.attempts(), 3)
 
-  const subscriptionConflict = conflictingClient()
+  const subscriptionConflict = conflictingClient('P2002')
   const subscriptionRepository = new PrismaWebhookSubscriptionCommandRepository(
     subscriptionConflict.client,
   )
+  const subscriptionAdministration = createWebhookAdministrationCommand({
+    id: '00000000-0000-4000-8000-000000000930',
+    workspaceId: 'workspace-1',
+    action: 'webhook-subscription.status.set',
+    targetType: 'webhook-subscription',
+    targetId: '00000000-0000-4000-8000-000000000926',
+    targetStatus: 'paused',
+    audit: materializeActorAuditContext(WEBHOOK_ADMINISTRATOR),
+    baseRevision: 'b'.repeat(64),
+    requestFingerprint: 'd'.repeat(64),
+    occurredAt: '2026-07-16T13:10:00.000Z',
+  })
   await assert.rejects(
     () => subscriptionRepository.setStatus({
-      workspaceId: 'workspace-1',
-      subscriptionId: '00000000-0000-4000-8000-000000000926',
+      administration: subscriptionAdministration,
       targetStatus: 'paused',
-      baseRevision: 'b'.repeat(64),
-      changedAt: '2026-07-16T13:10:00.000Z',
     }),
     (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
   )

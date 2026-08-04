@@ -17,6 +17,11 @@ import {
   webhookEndpointRevision,
   type WebhookEndpoint,
 } from '../../domain/webhook.ts'
+import {
+  assertWebhookAdministrationCommandTarget,
+  assertWebhookAdministrationReplay,
+  webhookAdministrationCommandData,
+} from './webhook-administration-command-persistence.ts'
 
 function hydrateEndpoint(row: V2WebhookEndpoint): Readonly<WebhookEndpoint> {
   return createWebhookEndpoint({
@@ -83,10 +88,20 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
     command: Readonly<SetWebhookEndpointStatusCommand>,
     serializationAttempt = 1,
   ): Promise<Readonly<SetWebhookEndpointStatusResult> | null> {
+    const administration = command.administration
+    assertWebhookAdministrationCommandTarget(administration, {
+      action: 'webhook-endpoint.status.set',
+      targetType: 'webhook-endpoint',
+      targetId: administration.targetId,
+      targetStatus: command.targetStatus,
+      workspaceId: administration.workspaceId,
+      requestFingerprint: administration.requestFingerprint,
+      baseRevision: administration.baseRevision,
+    })
     try {
       return await this.client.$transaction(async (transaction: Prisma.TransactionClient) => {
         const row = await transaction.v2WebhookEndpoint.findFirst({
-          where: { id: command.endpointId, workspaceId: command.workspaceId },
+          where: { id: administration.targetId, workspaceId: administration.workspaceId },
           include: {
             secrets: { select: secretSelect, orderBy: { version: 'desc' }, take: 1 },
           },
@@ -94,6 +109,16 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
         if (!row) return null
         const current = hydrateEndpoint(row)
         if (current.status === command.targetStatus) {
+          const auditCommand = await transaction.v2WebhookAdministrationCommand.findFirst({
+            where: {
+              workspaceId: administration.workspaceId,
+              targetType: administration.targetType,
+              targetId: administration.targetId,
+              action: administration.action,
+              baseRevision: administration.baseRevision,
+            },
+          })
+          assertWebhookAdministrationReplay(auditCommand, administration)
           return Object.freeze({
             endpoint: record(row),
             replayed: true,
@@ -104,7 +129,7 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
             }),
           })
         }
-        if (webhookEndpointRevision(current) !== command.baseRevision) {
+        if (webhookEndpointRevision(current) !== administration.baseRevision) {
           throw new DomainError(
             'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
             'Webhook endpoint revision does not match',
@@ -130,7 +155,7 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
             endpointId: current.id,
             workspaceId: current.workspaceId,
             status: { in: ['pending-verification', 'active', 'paused'] },
-            updatedAt: { gt: new Date(command.changedAt) },
+            updatedAt: { gt: new Date(administration.occurredAt) },
           },
           select: { id: true },
         })
@@ -140,7 +165,7 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
             'Webhook endpoint transition clock is stale for its subscriptions',
           )
         }
-        const next = transitionWebhookEndpoint(current, command.targetStatus, command.changedAt)
+        const next = transitionWebhookEndpoint(current, command.targetStatus, administration.occurredAt)
         const changed = await transaction.v2WebhookEndpoint.updateMany({
           where: {
             id: current.id,
@@ -202,6 +227,9 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
             data: { status: 'revoked', revokedAt: new Date(next.updatedAt) },
           })).count
         }
+        await transaction.v2WebhookAdministrationCommand.create({
+          data: webhookAdministrationCommandData(administration),
+        })
         const persisted = await transaction.v2WebhookEndpoint.findUniqueOrThrow({
           where: { id: current.id },
           include: {
@@ -219,7 +247,10 @@ export class PrismaWebhookEndpointCommandRepository implements WebhookEndpointCo
         })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034') {
+      if (
+        typeof error === 'object' && error !== null && 'code' in error &&
+        (error.code === 'P2002' || error.code === 'P2034')
+      ) {
         if (serializationAttempt < 3) {
           return this.setStatus(command, serializationAttempt + 1)
         }

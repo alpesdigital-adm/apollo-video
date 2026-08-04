@@ -5,10 +5,17 @@ import {
   type ApiEnvironment,
   type ApiScope,
 } from '../domain/api-client.ts'
-import type { ApiAccessStatus } from '../domain/api-access-control.ts'
+import {
+  createApiAccessAuditContext,
+  type ApiAccessAuditContext,
+  type ApiAccessStatus,
+} from '../domain/api-access-control.ts'
 import { isApiCredentialUsable } from '../domain/api-credential.ts'
 import { DomainError } from '../domain/errors.ts'
-import { WORKSPACE_MEMBER_ROLES } from '../domain/workspace-member.ts'
+import {
+  WORKSPACE_MEMBER_ROLES,
+  type WorkspaceMemberRole,
+} from '../domain/workspace-member.ts'
 import type { ApiClientRepository } from './ports/api-client-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
 
@@ -99,6 +106,28 @@ export function assertExternalAuditContextBinding(actor: AuthenticatedExternalAc
   ) {
     throw new DomainError('AUTH_INVALID', 'Authenticated audit context does not match the request actor')
   }
+}
+
+export function materializeActorAuditContext(
+  actor: AuthenticatedExternalActor,
+): Readonly<ApiAccessAuditContext> {
+  assertExternalAuditContextBinding(actor)
+  return createApiAccessAuditContext({
+    clientId: actor.auditContext.clientId,
+    credentialId: actor.auditContext.credentialId,
+    workspaceId: actor.auditContext.workspaceId,
+    environment: actor.auditContext.environment,
+    authenticationKind: actor.authenticationKind,
+    ...(actor.auditContext.delegatedUserId
+      ? { delegatedUserId: actor.auditContext.delegatedUserId }
+      : {}),
+    ...(actor.auditContext.delegatedIdentityId
+      ? { delegatedIdentityId: actor.auditContext.delegatedIdentityId }
+      : {}),
+    ...(actor.auditContext.workspaceRole
+      ? { workspaceRole: actor.auditContext.workspaceRole as WorkspaceMemberRole }
+      : {}),
+  })
 }
 
 export interface AuthenticateApiClientDependencies {

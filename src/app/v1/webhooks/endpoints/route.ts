@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     const result = await createEndpoint({
       workspaceId: actor.workspaceId,
       url: body.url,
-      createdByClientId: actor.clientId,
+      actor,
       idempotencyKey,
     })
     return NextResponse.json(

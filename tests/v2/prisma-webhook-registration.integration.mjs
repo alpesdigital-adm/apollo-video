@@ -6,6 +6,11 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 test('webhook registration is atomic, workspace-scoped and stores only a secret reference', async () => {
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const {
+    createExternalAuditContext,
+    materializeActorAuditContext,
+  } = await import('../../src/v2/application/authenticate-api-client.ts')
+  const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
   const { registerWebhookService } = await import('../../src/v2/application/register-webhook.ts')
   const { createWebhookEndpointService } = await import(
     '../../src/v2/application/create-webhook-endpoint.ts'
@@ -61,6 +66,8 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     verifyWebhookRequestService,
   } = await import('../../src/v2/application/secure-webhook.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
+  const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
+  const { createWebhookAdministrationCommand } = await import('../../src/v2/domain/webhook-administration-command.ts')
   const { createWebhookEndpoint, webhookEndpointRevision, webhookSubscriptionRevision } = await import('../../src/v2/domain/webhook.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
   const {
@@ -164,6 +171,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
         await transaction.v2WebhookVerificationChallenge.deleteMany({ where: { workspaceId } })
         await transaction.v2WebhookDeliveryAttempt.deleteMany({ where: { workspaceId } })
         await transaction.v2WebhookDelivery.deleteMany({ where: { workspaceId } })
+        await transaction.v2WebhookAdministrationCommand.deleteMany({ where: { workspaceId } })
         await transaction.v2WebhookSubscription.deleteMany({ where: { workspaceId } })
         await transaction.v2WebhookSigningSecretRotation.deleteMany({ where: { workspaceId } })
         await transaction.v2WebhookSigningSecretPayload.deleteMany({ where: { workspaceId } })
@@ -208,6 +216,53 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       environment: 'sandbox',
       scopes: ['webhooks:admin'],
     })
+    const auditContext = createExternalAuditContext({
+      clientId,
+      credentialId: clientId,
+      workspaceId,
+      environment: 'sandbox',
+    })
+    const webhookActor = Object.freeze({
+      ...auditContext,
+      scopes: new Set(['webhooks:admin']),
+      authenticationKind: 'bearer',
+      clientKillSwitchEngaged: false,
+      workspaceKillSwitchEngaged: false,
+      clientAccessStatus: 'active',
+      workspaceAccessStatus: 'active',
+      auditContext,
+    })
+    const actorAudit = materializeActorAuditContext(webhookActor)
+    let administrationCommandId = 900
+    const statusAdministration = ({
+      targetType, targetId, targetStatus, baseRevision, occurredAt,
+      commandWorkspaceId = workspaceId,
+    }) => {
+      const action = `${targetType}.status.set`
+      const audit = commandWorkspaceId === workspaceId
+        ? actorAudit
+        : createApiAccessAuditContext({
+            clientId,
+            credentialId: clientId,
+            workspaceId: commandWorkspaceId,
+            environment: 'sandbox',
+            authenticationKind: 'bearer',
+          })
+      return createWebhookAdministrationCommand({
+        id: `00000000-0000-4000-8000-${String(administrationCommandId++).padStart(12, '0')}`,
+        workspaceId: commandWorkspaceId,
+        action,
+        targetType,
+        targetId,
+        targetStatus,
+        audit,
+        baseRevision,
+        requestFingerprint: calculateVersionHash({
+          action, actorContextHash: audit.contextHash, targetId, targetStatus, baseRevision,
+        }),
+        occurredAt,
+      })
+    }
 
     const endpointCipher = createAesRecipeParameterCipher({
       keyId: 'webhook-integration-key',
@@ -225,7 +280,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const endpointCreationRequest = {
       workspaceId,
       url: 'https://generated-hooks.example.com/apollo',
-      createdByClientId: clientId,
+      actor: webhookActor,
       idempotencyKey: 'create-webhook-endpoint-1',
     }
     const createdEndpoint = await createEndpoint(endpointCreationRequest)
@@ -470,16 +525,16 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const createSubscription = createWebhookSubscriptionService({
       repository: new PrismaWebhookSubscriptionCreationRepository(client),
       clock: () => new Date(now.getTime() + 500),
-      createId: (kind) => kind === 'webhook-subscription'
-        ? `00000000-0000-4000-8000-${String(creationId++).padStart(12, '0')}`
-        : `webhook-idempotency-${creationId++}`,
+      createId: (kind) => kind === 'idempotency-record'
+        ? `webhook-idempotency-${creationId++}`
+        : `00000000-0000-4000-8000-${String(creationId++).padStart(12, '0')}`,
     })
     const creationRequest = {
       workspaceId,
       endpointId: endpoint.id,
       eventTypes: ['artifact.ready'],
       resourceIds: ['integration-artifact-1'],
-      createdByClientId: clientId,
+      actor: webhookActor,
       idempotencyKey: 'create-webhook-subscription-1',
     }
     const createdSubscription = await createSubscription(creationRequest)
@@ -1125,8 +1180,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activeRevision = webhookSubscriptionRevision(activeSubscription)
     const subscriptionChangedAt = new Date(activeSubscription.updatedAt)
     const paused = await subscriptionCommands.setStatus({
-      workspaceId, subscriptionId: subscription.id, targetStatus: 'paused',
-      baseRevision: activeRevision, changedAt: new Date(subscriptionChangedAt.getTime() + 1_000).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-subscription', targetId: subscription.id,
+        targetStatus: 'paused', baseRevision: activeRevision,
+        occurredAt: new Date(subscriptionChangedAt.getTime() + 1_000).toISOString(),
+      }),
+      targetStatus: 'paused',
     })
     assert.equal(paused.subscription.status, 'paused')
     assert.equal(paused.replayed, false)
@@ -1136,15 +1195,23 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       new Date(subscriptionChangedAt.getTime() + 1_000).toISOString(),
     )
     const pausedAgain = await subscriptionCommands.setStatus({
-      workspaceId, subscriptionId: subscription.id, targetStatus: 'paused',
-      baseRevision: activeRevision, changedAt: new Date(subscriptionChangedAt.getTime() + 1_500).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-subscription', targetId: subscription.id,
+        targetStatus: 'paused', baseRevision: activeRevision,
+        occurredAt: new Date(subscriptionChangedAt.getTime() + 1_500).toISOString(),
+      }),
+      targetStatus: 'paused',
     })
     assert.equal(pausedAgain.replayed, true)
     assert.equal(pausedAgain.revision, paused.revision)
     await assert.rejects(
       () => subscriptionCommands.setStatus({
-        workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
-        baseRevision: '0'.repeat(64), changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+        administration: statusAdministration({
+          targetType: 'webhook-subscription', targetId: subscription.id,
+          targetStatus: 'active', baseRevision: '0'.repeat(64),
+          occurredAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+        }),
+        targetStatus: 'active',
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
     )
@@ -1157,9 +1224,12 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     })
     await assert.rejects(
       () => subscriptionCommands.setStatus({
-        workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
-        baseRevision: paused.revision,
-        changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+        administration: statusAdministration({
+          targetType: 'webhook-subscription', targetId: subscription.id,
+          targetStatus: 'active', baseRevision: paused.revision,
+          occurredAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+        }),
+        targetStatus: 'active',
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
     )
@@ -1168,16 +1238,24 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       data: { status: 'active', suspendedAt: null },
     })
     const resumed = await subscriptionCommands.setStatus({
-      workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
-      baseRevision: paused.revision, changedAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-subscription', targetId: subscription.id,
+        targetStatus: 'active', baseRevision: paused.revision,
+        occurredAt: new Date(subscriptionChangedAt.getTime() + 2_000).toISOString(),
+      }),
+      targetStatus: 'active',
     })
     assert.equal(resumed.subscription.status, 'active')
     assert.equal(resumed.subscription.pausedAt, undefined)
     assert.equal(
       await subscriptionCommands.setStatus({
-        workspaceId: 'another-workspace', subscriptionId: subscription.id,
-        targetStatus: 'paused', baseRevision: resumed.revision,
-        changedAt: new Date(subscriptionChangedAt.getTime() + 3_000).toISOString(),
+        administration: statusAdministration({
+          targetType: 'webhook-subscription', targetId: subscription.id,
+          targetStatus: 'paused', baseRevision: resumed.revision,
+          occurredAt: new Date(subscriptionChangedAt.getTime() + 3_000).toISOString(),
+          commandWorkspaceId: 'another-workspace',
+        }),
+        targetStatus: 'paused',
       }),
       null,
     )
@@ -1189,58 +1267,80 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     ))
     const activeEndpointRevision = webhookEndpointRevision(activeEndpoint.endpoint)
     const suspendedEndpoint = await endpointCommands.setStatus({
-      workspaceId, endpointId: endpoint.id, targetStatus: 'suspended',
-      baseRevision: activeEndpointRevision,
-      changedAt: new Date(endpointChangedAt.getTime() + 1_000).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-endpoint', targetId: endpoint.id,
+        targetStatus: 'suspended', baseRevision: activeEndpointRevision,
+        occurredAt: new Date(endpointChangedAt.getTime() + 1_000).toISOString(),
+      }),
+      targetStatus: 'suspended',
     })
     assert.equal(suspendedEndpoint.endpoint.endpoint.status, 'suspended')
     assert.equal(suspendedEndpoint.effects.pausedSubscriptions, 1)
     assert.equal(suspendedEndpoint.effects.revokedSubscriptions, 0)
     const suspendedAgain = await endpointCommands.setStatus({
-      workspaceId, endpointId: endpoint.id, targetStatus: 'suspended',
-      baseRevision: activeEndpointRevision,
-      changedAt: new Date(endpointChangedAt.getTime() + 1_500).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-endpoint', targetId: endpoint.id,
+        targetStatus: 'suspended', baseRevision: activeEndpointRevision,
+        occurredAt: new Date(endpointChangedAt.getTime() + 1_500).toISOString(),
+      }),
+      targetStatus: 'suspended',
     })
     assert.equal(suspendedAgain.replayed, true)
     assert.equal(suspendedAgain.effects.pausedSubscriptions, 0)
     await assert.rejects(
       () => endpointCommands.setStatus({
-        workspaceId, endpointId: endpoint.id, targetStatus: 'active',
-        baseRevision: '0'.repeat(64),
-        changedAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+        administration: statusAdministration({
+          targetType: 'webhook-endpoint', targetId: endpoint.id,
+          targetStatus: 'active', baseRevision: '0'.repeat(64),
+          occurredAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+        }),
+        targetStatus: 'active',
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
     )
     const cascadePaused = await administration.findSubscriptionById(workspaceId, subscription.id)
     await assert.rejects(
       () => subscriptionCommands.setStatus({
-        workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
-        baseRevision: webhookSubscriptionRevision(cascadePaused),
-        changedAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+        administration: statusAdministration({
+          targetType: 'webhook-subscription', targetId: subscription.id,
+          targetStatus: 'active', baseRevision: webhookSubscriptionRevision(cascadePaused),
+          occurredAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+        }),
+        targetStatus: 'active',
       }),
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED',
     )
     const resumedEndpoint = await endpointCommands.setStatus({
-      workspaceId, endpointId: endpoint.id, targetStatus: 'active',
-      baseRevision: webhookEndpointRevision(suspendedEndpoint.endpoint.endpoint),
-      changedAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-endpoint', targetId: endpoint.id,
+        targetStatus: 'active', baseRevision: webhookEndpointRevision(suspendedEndpoint.endpoint.endpoint),
+        occurredAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+      }),
+      targetStatus: 'active',
     })
     assert.equal(resumedEndpoint.endpoint.endpoint.status, 'active')
     assert.equal(resumedEndpoint.effects.pausedSubscriptions, 0)
     const stillPaused = await administration.findSubscriptionById(workspaceId, subscription.id)
     assert.equal(stillPaused.status, 'paused')
     const resumedAfterEndpoint = await subscriptionCommands.setStatus({
-      workspaceId, subscriptionId: subscription.id, targetStatus: 'active',
-      baseRevision: webhookSubscriptionRevision(stillPaused),
-      changedAt: new Date(endpointChangedAt.getTime() + 3_000).toISOString(),
+      administration: statusAdministration({
+        targetType: 'webhook-subscription', targetId: subscription.id,
+        targetStatus: 'active', baseRevision: webhookSubscriptionRevision(stillPaused),
+        occurredAt: new Date(endpointChangedAt.getTime() + 3_000).toISOString(),
+      }),
+      targetStatus: 'active',
     })
     assert.equal(resumedAfterEndpoint.subscription.status, 'active')
     assert.equal(
       await endpointCommands.setStatus({
-        workspaceId: 'another-workspace', endpointId: endpoint.id,
+        administration: statusAdministration({
+          targetType: 'webhook-endpoint', targetId: endpoint.id,
+          targetStatus: 'suspended',
+          baseRevision: webhookEndpointRevision(resumedEndpoint.endpoint.endpoint),
+          occurredAt: new Date(endpointChangedAt.getTime() + 4_000).toISOString(),
+          commandWorkspaceId: 'another-workspace',
+        }),
         targetStatus: 'suspended',
-        baseRevision: webhookEndpointRevision(resumedEndpoint.endpoint.endpoint),
-        changedAt: new Date(endpointChangedAt.getTime() + 4_000).toISOString(),
       }),
       null,
     )
