@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { revokeApiCredentialService } from '@/v2/application/administer-api-clients'
@@ -26,6 +27,7 @@ export async function DELETE(request: NextRequest, props: RouteContext) {
     const execute = revokeApiCredentialService({
       repository: createApiClientAdministrationRepository(),
       clock: () => new Date(),
+      createId: (kind) => `${kind}-${randomUUID()}`,
     })
     const credential = await execute({
       actor,

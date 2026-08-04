@@ -4,14 +4,18 @@ import type {
   ApiCredentialMutationResult,
 } from './ports/api-client-administration-repository.ts'
 import type { ApiCredentialCrypto } from './ports/api-credential-crypto.ts'
+import { createApiAdministrationCommand } from '../domain/api-administration-command.ts'
+import { createApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { createServiceAccount, isApiScope, type ApiEnvironment } from '../domain/api-client.ts'
 import { createApiCredential } from '../domain/api-credential.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import type { WorkspaceMemberRole } from '../domain/workspace-member.ts'
 
 export type ApiAdministrationEntityKind =
   | 'api-client'
   | 'api-credential'
+  | 'api-administration-command'
   | 'idempotency-record'
 
 export interface ApiClientAdministrationDependencies {
@@ -40,6 +44,25 @@ function assertIdempotencyKey(key: string): string {
   assertDomain(normalized.length > 0, 'INVALID_ARGUMENT', 'Idempotency-Key is required')
   assertDomain(normalized.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key is too long')
   return normalized
+}
+
+function administrationAudit(actor: AuthenticatedExternalActor) {
+  return createApiAccessAuditContext({
+    clientId: actor.auditContext.clientId,
+    credentialId: actor.auditContext.credentialId,
+    workspaceId: actor.auditContext.workspaceId,
+    environment: actor.auditContext.environment,
+    authenticationKind: actor.authenticationKind,
+    ...(actor.auditContext.delegatedUserId
+      ? { delegatedUserId: actor.auditContext.delegatedUserId }
+      : {}),
+    ...(actor.auditContext.delegatedIdentityId
+      ? { delegatedIdentityId: actor.auditContext.delegatedIdentityId }
+      : {}),
+    ...(actor.auditContext.workspaceRole
+      ? { workspaceRole: actor.auditContext.workspaceRole as WorkspaceMemberRole }
+      : {}),
+  })
 }
 
 function presentMutation(
@@ -103,7 +126,27 @@ export function createApiClientAdministrationService(
       createdAt,
     })
     const issued = dependencies.credentialCrypto.issue(client.id, credential.id)
+    const audit = administrationAudit(request.actor)
+    const requestFingerprint = calculateVersionHash({
+      operation: 'api-client.create',
+      actorContextHash: audit.contextHash,
+      name: client.name,
+      environment,
+      scopeGrants: client.scopeGrants,
+      allowedEnvironments: client.allowedEnvironments,
+    })
     const result = await dependencies.repository.createOrReplay({
+      command: createApiAdministrationCommand({
+        id: dependencies.createId('api-administration-command'),
+        workspaceId: request.workspaceId,
+        action: 'api-client.create',
+        targetClientId: client.id,
+        targetCredentialId: credential.id,
+        audit,
+        idempotencyKey: key,
+        requestFingerprint,
+        occurredAt: createdAt,
+      }),
       client,
       credential,
       secret: { secretSalt: issued.secretSalt, secretHash: issued.secretHash },
@@ -112,13 +155,7 @@ export function createApiClientAdministrationService(
         workspaceId: request.workspaceId,
         actorClientId: request.actor.clientId,
         key,
-        requestFingerprint: calculateVersionHash({
-          operation: 'api-client.create',
-          name: client.name,
-          environment,
-          scopeGrants: client.scopeGrants,
-          allowedEnvironments: client.allowedEnvironments,
-        }),
+        requestFingerprint,
         createdAt,
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
       },
@@ -162,7 +199,25 @@ export function rotateApiCredentialService(
       request.targetClientId,
       credential.id,
     )
+    const audit = administrationAudit(request.actor)
+    const requestFingerprint = calculateVersionHash({
+      operation: 'api-credential.rotate',
+      actorContextHash: audit.contextHash,
+      targetClientId: request.targetClientId,
+      overlapSeconds,
+    })
     const result = await dependencies.repository.rotateOrReplay({
+      command: createApiAdministrationCommand({
+        id: dependencies.createId('api-administration-command'),
+        workspaceId: request.workspaceId,
+        action: 'api-credential.rotate',
+        targetClientId: request.targetClientId,
+        targetCredentialId: credential.id,
+        audit,
+        idempotencyKey: key,
+        requestFingerprint,
+        occurredAt: now.toISOString(),
+      }),
       workspaceId: request.workspaceId,
       targetClientId: request.targetClientId,
       credential,
@@ -173,11 +228,7 @@ export function rotateApiCredentialService(
         workspaceId: request.workspaceId,
         actorClientId: request.actor.clientId,
         key,
-        requestFingerprint: calculateVersionHash({
-          operation: 'api-credential.rotate',
-          targetClientId: request.targetClientId,
-          overlapSeconds,
-        }),
+        requestFingerprint,
         createdAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
       },
@@ -188,7 +239,7 @@ export function rotateApiCredentialService(
 }
 
 export function revokeApiCredentialService(
-  dependencies: Pick<ApiClientAdministrationDependencies, 'repository' | 'clock'>,
+  dependencies: Pick<ApiClientAdministrationDependencies, 'repository' | 'clock' | 'createId'>,
 ) {
   return async function execute(request: {
     actor: AuthenticatedExternalActor
@@ -208,11 +259,29 @@ export function revokeApiCredentialService(
       )
     }
 
+    const revokedAt = dependencies.clock().toISOString()
+    const audit = administrationAudit(request.actor)
+    const requestFingerprint = calculateVersionHash({
+      operation: 'api-credential.revoke',
+      actorContextHash: audit.contextHash,
+      targetClientId: request.targetClientId,
+      credentialId: request.credentialId,
+    })
     return dependencies.repository.revokeCredential({
+      command: createApiAdministrationCommand({
+        id: dependencies.createId('api-administration-command'),
+        workspaceId: request.workspaceId,
+        action: 'api-credential.revoke',
+        targetClientId: request.targetClientId,
+        targetCredentialId: request.credentialId,
+        audit,
+        requestFingerprint,
+        occurredAt: revokedAt,
+      }),
       workspaceId: request.workspaceId,
       clientId: request.targetClientId,
       credentialId: request.credentialId,
-      revokedAt: dependencies.clock().toISOString(),
+      revokedAt,
     })
   }
 }

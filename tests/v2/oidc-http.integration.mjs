@@ -111,6 +111,7 @@ test('OIDC HTTP journey verifies provider evidence and creates only authorized o
     await client.v2OidcAuthorization.deleteMany({ where: { issuer } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId } })
+    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId } })
     await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2HumanIdentity.deleteMany({ where: { id: identityId } })

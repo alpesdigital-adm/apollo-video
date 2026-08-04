@@ -1,6 +1,7 @@
 import {
   Prisma,
   type PrismaClient,
+  type V2ApiAdministrationCommand,
   type V2ApiClient,
   type V2ApiCredential,
   type V2IdempotencyRecord,
@@ -32,6 +33,12 @@ import type {
   RotateApiCredentialBundle,
 } from '../../application/ports/api-client-administration-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  createApiAdministrationCommand,
+  type ApiAdministrationCommand,
+} from '../../domain/api-administration-command.ts'
+import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 
 interface StoredAdministrationResponse {
   operation: 'api-client.create' | 'api-credential.rotate'
@@ -110,6 +117,99 @@ function assertIdempotencyFingerprint(
       'Idempotency key was already used with a different request',
       { idempotencyRecordId: record.id },
     )
+  }
+}
+
+function hydrateAdministrationCommand(row: V2ApiAdministrationCommand): Readonly<ApiAdministrationCommand> {
+  try {
+    return createApiAdministrationCommand({
+      id: row.id,
+      workspaceId: row.workspaceId,
+      action: row.action as ApiAdministrationCommand['action'],
+      targetClientId: row.targetClientId,
+      targetCredentialId: row.targetCredentialId,
+      audit: createApiAccessAuditContext({
+        clientId: row.actorClientId,
+        credentialId: row.actorCredentialId,
+        workspaceId: row.workspaceId,
+        environment: row.actorEnvironment as ApiEnvironment,
+        authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+        ...(row.delegatedUserId ? { delegatedUserId: row.delegatedUserId } : {}),
+        ...(row.delegatedIdentityId ? { delegatedIdentityId: row.delegatedIdentityId } : {}),
+        ...(row.workspaceRole ? { workspaceRole: row.workspaceRole as WorkspaceMemberRole } : {}),
+      }),
+      ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
+      requestFingerprint: row.requestFingerprint,
+      occurredAt: row.occurredAt.toISOString(),
+    })
+  } catch {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored API administration audit command is invalid',
+      { commandId: row.id },
+    )
+  }
+}
+
+function administrationCommandData(command: ApiAdministrationCommand) {
+  return {
+    id: command.id,
+    workspaceId: command.workspaceId,
+    action: command.action,
+    targetClientId: command.targetClientId,
+    targetCredentialId: command.targetCredentialId,
+    actorClientId: command.audit.clientId,
+    actorCredentialId: command.audit.credentialId,
+    actorEnvironment: command.audit.environment,
+    actorAuthenticationKind: command.audit.authenticationKind,
+    actorContextHash: command.audit.contextHash,
+    delegatedUserId: command.audit.delegatedUserId,
+    delegatedIdentityId: command.audit.delegatedIdentityId,
+    workspaceRole: command.audit.workspaceRole,
+    idempotencyKey: command.idempotencyKey,
+    requestFingerprint: command.requestFingerprint,
+    occurredAt: new Date(command.occurredAt),
+  }
+}
+
+function assertAdministrationReplay(
+  row: V2ApiAdministrationCommand | null,
+  requested: ApiAdministrationCommand,
+): void {
+  if (!row) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent API administration audit is missing')
+  const stored = hydrateAdministrationCommand(row)
+  if (
+    stored.action !== requested.action ||
+    stored.audit.contextHash !== requested.audit.contextHash ||
+    stored.idempotencyKey !== requested.idempotencyKey ||
+    stored.requestFingerprint !== requested.requestFingerprint
+  ) {
+    throw new DomainError(
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'Idempotency key was already used by a different administrative actor or request',
+    )
+  }
+}
+
+function assertAdministrationCommandTarget(
+  command: ApiAdministrationCommand,
+  expected: {
+    action: ApiAdministrationCommand['action']
+    workspaceId: string
+    clientId: string
+    credentialId: string
+    requestFingerprint?: string
+    idempotencyKey?: string
+  },
+): void {
+  if (
+    command.action !== expected.action || command.workspaceId !== expected.workspaceId ||
+    command.targetClientId !== expected.clientId ||
+    command.targetCredentialId !== expected.credentialId ||
+    (expected.requestFingerprint !== undefined && command.requestFingerprint !== expected.requestFingerprint) ||
+    command.idempotencyKey !== expected.idempotencyKey
+  ) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'API administration command does not match its mutation')
   }
 }
 
@@ -273,6 +373,12 @@ export class PrismaApiClientRepository
     bundle: CreateApiClientBundle,
     concurrentWriteAttempt = 1,
   ): Promise<ApiCredentialMutationResult> {
+    assertAdministrationCommandTarget(bundle.command, {
+      action: 'api-client.create', workspaceId: bundle.client.workspaceId,
+      clientId: bundle.client.id, credentialId: bundle.credential.id,
+      requestFingerprint: bundle.idempotency.requestFingerprint,
+      idempotencyKey: bundle.idempotency.key,
+    })
     const result = this.client.$transaction(async (transaction) => {
       const key = {
         workspaceId_clientId_key: {
@@ -285,17 +391,26 @@ export class PrismaApiClientRepository
       if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
         assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
         const stored = parseAdministrationResponse(existing, 'api-client.create')
-        const [clientRow, credentialRow] = await Promise.all([
+        const [clientRow, credentialRow, commandRow] = await Promise.all([
           transaction.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
           transaction.v2ApiCredential.findUnique({
             where: {
               id_clientId: { id: stored.credentialId, clientId: stored.clientId },
             },
           }),
+          transaction.v2ApiAdministrationCommand.findUnique({
+            where: { workspaceId_action_targetClientId_targetCredentialId: {
+              workspaceId: bundle.idempotency.workspaceId,
+              action: 'api-client.create',
+              targetClientId: stored.clientId,
+              targetCredentialId: stored.credentialId,
+            } },
+          }),
         ])
         if (!clientRow || !credentialRow || clientRow.workspaceId !== bundle.client.workspaceId) {
           throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotency result is missing')
         }
+        assertAdministrationReplay(commandRow, bundle.command)
         return {
           client: hydrateClient(clientRow),
           credential: hydrateCredential(credentialRow),
@@ -350,6 +465,9 @@ export class PrismaApiClientRepository
           createdAt: new Date(bundle.credential.createdAt),
         },
       })
+      await transaction.v2ApiAdministrationCommand.create({
+        data: administrationCommandData(bundle.command),
+      })
       const response: StoredAdministrationResponse = {
         operation: 'api-client.create',
         clientId: clientRow.id,
@@ -387,6 +505,12 @@ export class PrismaApiClientRepository
     bundle: RotateApiCredentialBundle,
     concurrentWriteAttempt = 1,
   ): Promise<ApiCredentialMutationResult> {
+    assertAdministrationCommandTarget(bundle.command, {
+      action: 'api-credential.rotate', workspaceId: bundle.workspaceId,
+      clientId: bundle.targetClientId, credentialId: bundle.credential.id,
+      requestFingerprint: bundle.idempotency.requestFingerprint,
+      idempotencyKey: bundle.idempotency.key,
+    })
     const result = this.client.$transaction(async (transaction) => {
       const key = {
         workspaceId_clientId_key: {
@@ -399,17 +523,26 @@ export class PrismaApiClientRepository
       if (existing && existing.expiresAt > new Date(bundle.idempotency.createdAt)) {
         assertIdempotencyFingerprint(existing, bundle.idempotency.requestFingerprint)
         const stored = parseAdministrationResponse(existing, 'api-credential.rotate')
-        const [clientRow, credentialRow] = await Promise.all([
+        const [clientRow, credentialRow, commandRow] = await Promise.all([
           transaction.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
           transaction.v2ApiCredential.findUnique({
             where: {
               id_clientId: { id: stored.credentialId, clientId: stored.clientId },
             },
           }),
+          transaction.v2ApiAdministrationCommand.findUnique({
+            where: { workspaceId_action_targetClientId_targetCredentialId: {
+              workspaceId: bundle.idempotency.workspaceId,
+              action: 'api-credential.rotate',
+              targetClientId: stored.clientId,
+              targetCredentialId: stored.credentialId,
+            } },
+          }),
         ])
         if (!clientRow || !credentialRow || clientRow.workspaceId !== bundle.workspaceId) {
           throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotency result is missing')
         }
+        assertAdministrationReplay(commandRow, bundle.command)
         return {
           client: hydrateClient(clientRow),
           credential: hydrateCredential(credentialRow),
@@ -463,6 +596,9 @@ export class PrismaApiClientRepository
           createdAt: new Date(bundle.credential.createdAt),
         },
       })
+      await transaction.v2ApiAdministrationCommand.create({
+        data: administrationCommandData(bundle.command),
+      })
       const response: StoredAdministrationResponse = {
         operation: 'api-credential.rotate',
         clientId: clientRow.id,
@@ -497,43 +633,71 @@ export class PrismaApiClientRepository
   }
 
   async revokeCredential(input: {
+    command: ApiAdministrationCommand
     workspaceId: string
     clientId: string
     credentialId: string
     revokedAt: string
   }, concurrentWriteAttempt = 1): Promise<ApiCredential> {
+    assertAdministrationCommandTarget(input.command, {
+      action: 'api-credential.revoke', workspaceId: input.workspaceId,
+      clientId: input.clientId, credentialId: input.credentialId,
+    })
     try {
-      await this.client.v2ApiCredential.updateMany({
-        where: {
-          id: input.credentialId,
-          clientId: input.clientId,
+      return await this.client.$transaction(async (transaction) => {
+        const persisted = await transaction.v2ApiCredential.findFirst({
+          where: {
+            id: input.credentialId,
+            clientId: input.clientId,
+            workspaceId: input.workspaceId,
+          },
+        })
+        if (!persisted) {
+          throw new DomainError('API_CREDENTIAL_NOT_FOUND', 'API credential was not found')
+        }
+        const commandKey = { workspaceId_action_targetClientId_targetCredentialId: {
           workspaceId: input.workspaceId,
-          status: 'active',
-        },
-        data: { status: 'revoked', revokedAt: new Date(input.revokedAt) },
-      })
-      const persisted = await this.client.v2ApiCredential.findFirst({
-        where: {
-          id: input.credentialId,
-          clientId: input.clientId,
-          workspaceId: input.workspaceId,
-        },
-      })
-      if (!persisted) {
-        throw new DomainError('API_CREDENTIAL_NOT_FOUND', 'API credential was not found')
-      }
-      if (persisted.status === 'revoked') return hydrateCredential(persisted)
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'API credential revocation collided with another write',
-      )
+          action: 'api-credential.revoke',
+          targetClientId: input.clientId,
+          targetCredentialId: input.credentialId,
+        } }
+        const existingCommand = await transaction.v2ApiAdministrationCommand.findUnique({
+          where: commandKey,
+        })
+        if (persisted.status === 'revoked') {
+          if (!existingCommand) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Revoked API credential audit is missing')
+          }
+          hydrateAdministrationCommand(existingCommand)
+          return hydrateCredential(persisted)
+        }
+        if (persisted.status !== 'active' || existingCommand) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'API credential revocation state is invalid')
+        }
+        const updated = await transaction.v2ApiCredential.updateMany({
+          where: {
+            id: input.credentialId,
+            clientId: input.clientId,
+            workspaceId: input.workspaceId,
+            status: 'active',
+          },
+          data: { status: 'revoked', revokedAt: new Date(input.revokedAt) },
+        })
+        if (updated.count !== 1) {
+          throw new DomainError('PERSISTENCE_CONFLICT', 'API credential revocation collided with another write')
+        }
+        const command = await transaction.v2ApiAdministrationCommand.create({
+          data: administrationCommandData(input.command),
+        })
+        hydrateAdministrationCommand(command)
+        return hydrateCredential({
+          ...persisted,
+          status: 'revoked',
+          revokedAt: new Date(input.revokedAt),
+        })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'P2034'
-      ) {
+      if (isConcurrentWriteConflict(error)) {
         if (concurrentWriteAttempt < 3) {
           return this.revokeCredential(input, concurrentWriteAttempt + 1)
         }

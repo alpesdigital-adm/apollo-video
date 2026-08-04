@@ -1,4 +1,5 @@
 import type { ApiClient } from '../../domain/api-client.ts'
+import type { ApiAdministrationCommand } from '../../domain/api-administration-command.ts'
 import type { ApiCredential } from '../../domain/api-credential.ts'
 
 export interface ApiAdministrationIdempotency {
@@ -17,6 +18,7 @@ export interface ApiClientCredentialSecret {
 }
 
 export interface CreateApiClientBundle {
+  command: ApiAdministrationCommand
   client: ApiClient
   credential: ApiCredential
   secret: ApiClientCredentialSecret
@@ -24,6 +26,7 @@ export interface CreateApiClientBundle {
 }
 
 export interface RotateApiCredentialBundle {
+  command: ApiAdministrationCommand
   workspaceId: string
   targetClientId: string
   credential: ApiCredential
@@ -43,6 +46,7 @@ export interface ApiClientAdministrationRepository {
   createOrReplay(bundle: CreateApiClientBundle): Promise<ApiCredentialMutationResult>
   rotateOrReplay(bundle: RotateApiCredentialBundle): Promise<ApiCredentialMutationResult>
   revokeCredential(input: {
+    command: ApiAdministrationCommand
     workspaceId: string
     clientId: string
     credentialId: string

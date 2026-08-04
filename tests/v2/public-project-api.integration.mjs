@@ -232,6 +232,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2Project.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2HumanIdentity.deleteMany({ where: { issuer: 'urn:apollo:bootstrap', subjectHash: uiSessionSubjectHash(uiUsername, uiEnvironment) } })
@@ -2939,6 +2940,20 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(childReplay.data.secretAvailable, false)
     assert.equal('token' in childReplay.data, false)
     assert.equal(childReplay.data.client.id, childCreated.data.client.id)
+    const storedClientCreateCommand = await client.v2ApiAdministrationCommand.findUniqueOrThrow({
+      where: { workspaceId_action_targetClientId_targetCredentialId: {
+        workspaceId,
+        action: 'api-client.create',
+        targetClientId: childCreated.data.client.id,
+        targetCredentialId: childCreated.data.credential.id,
+      } },
+    })
+    assert.equal(storedClientCreateCommand.actorClientId, apiClientId)
+    assert.equal(storedClientCreateCommand.actorCredentialId, issued.credential.id)
+    assert.equal(storedClientCreateCommand.actorAuthenticationKind, 'bearer')
+    assert.equal(storedClientCreateCommand.idempotencyKey, 'public-create-child-client-1')
+    assert.match(storedClientCreateCommand.actorContextHash, /^[a-f0-9]{64}$/)
+    assert.equal(JSON.stringify(storedClientCreateCommand).includes('apollo_v2.'), false)
 
     const listedClientsResponse = await fetch(
       `${baseUrl}/v1/workspaces/${workspaceId}/clients`,
@@ -4340,6 +4355,20 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(rotateReplay.data.secretAvailable, false)
     assert.equal('token' in rotateReplay.data, false)
     assert.equal(rotateReplay.data.credential.id, rotated.data.credential.id)
+    const storedRotationCommand = await client.v2ApiAdministrationCommand.findUniqueOrThrow({
+      where: { workspaceId_action_targetClientId_targetCredentialId: {
+        workspaceId,
+        action: 'api-credential.rotate',
+        targetClientId: childCreated.data.client.id,
+        targetCredentialId: rotated.data.credential.id,
+      } },
+    })
+    assert.equal(storedRotationCommand.actorCredentialId, issued.credential.id)
+    assert.equal(storedRotationCommand.idempotencyKey, 'rotate-child-client-1')
+    assert.equal(
+      storedRotationCommand.actorContextHash,
+      storedClientCreateCommand.actorContextHash,
+    )
 
     const expiredOldTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
@@ -4446,6 +4475,21 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     })
     assert.equal(storedRevokedCredential.revokedAt.toISOString(), revoked.data.credential.revokedAt)
+    const storedRevocationCommands = await client.v2ApiAdministrationCommand.findMany({
+      where: {
+        workspaceId,
+        action: 'api-credential.revoke',
+        targetClientId: childCreated.data.client.id,
+        targetCredentialId: rotated.data.credential.id,
+      },
+    })
+    assert.equal(storedRevocationCommands.length, 1)
+    assert.equal(storedRevocationCommands[0].actorCredentialId, issued.credential.id)
+    assert.equal(storedRevocationCommands[0].idempotencyKey, null)
+    assert.equal(
+      storedRevocationCommands[0].actorContextHash,
+      storedClientCreateCommand.actorContextHash,
+    )
 
     const revokedTokenResponse = await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: rotatedAuthorization },

@@ -48,6 +48,7 @@ test('PublicOperation persistence is idempotent, workspace-scoped and integrity 
     await client.v2MaterializationAuthorization.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
+    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId } })
     await client.v2ApiCredential.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })

@@ -58,6 +58,7 @@ assert.match(
 const apiClientModel = schema.match(/model V2ApiClient \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiCredentialModel = schema.match(/model V2ApiCredential \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const apiAccessCommandModel = schema.match(/model V2ApiAccessCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const apiAdministrationCommandModel = schema.match(/model V2ApiAdministrationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -69,6 +70,24 @@ assert.match(
   committed,
   /ALTER TABLE "api_clients"[\s\S]*DROP COLUMN "secretSalt"[\s\S]*DROP COLUMN "secretHash"/,
   'the credential contract migration must remove verifier copies from api_clients',
+)
+for (const field of [
+  'action', 'targetClientId', 'targetCredentialId', 'actorClientId',
+  'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+  'actorContextHash', 'delegatedUserId', 'delegatedIdentityId', 'workspaceRole',
+  'requestFingerprint', 'occurredAt',
+]) {
+  assert.match(apiAdministrationCommandModel, new RegExp(`\\b${field}\\b`), `ApiAdministrationCommand must persist ${field}`)
+}
+assert.match(
+  committed,
+  /DELETE FROM "idempotency_records"[\s\S]*'api-client\.create'[\s\S]*'api-credential\.rotate'/,
+  'pre-contract administrative replays without audit identity must be removed',
+)
+assert.match(
+  committed,
+  /DELETE FROM "api_credentials" WHERE "status" = 'revoked'/,
+  'pre-contract revoked credentials without immutable commands must be removed',
 )
 for (const field of [
   'actorCredentialId',
@@ -119,6 +138,13 @@ const requiredChecks = [
   'api_access_commands_actor_authentication_kind_check',
   'api_access_commands_actor_context_hash_check',
   'api_access_commands_delegation_check',
+  'api_admin_commands_action_check',
+  'api_admin_commands_environment_check',
+  'api_admin_commands_authentication_kind_check',
+  'api_admin_commands_context_hash_check',
+  'api_admin_commands_fingerprint_check',
+  'api_admin_commands_idempotency_check',
+  'api_admin_commands_delegation_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

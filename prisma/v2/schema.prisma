@@ -24,6 +24,7 @@ model V2Workspace {
   snapshots                              V2ProjectSnapshot[]
   apiClients                             V2ApiClient[]
   apiAccessCommands                      V2ApiAccessCommand[]
+  apiAdministrationCommands              V2ApiAdministrationCommand[]
   idempotencyRecords                     V2IdempotencyRecord[]
   mediaArtifacts                         V2MediaArtifact[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
@@ -168,6 +169,8 @@ model V2ApiClient {
   workspace                       V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   credentials                     V2ApiCredential[]
   apiAccessCommands                V2ApiAccessCommand[]              @relation("ApiAccessCommandActor")
+  authoredApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandActor")
+  targetedApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandTarget")
   operations                      V2PublicOperation[]
   uiSessions                      V2UiSession[]
   workspaceUiPrincipal            V2WorkspaceUiPrincipal?
@@ -237,12 +240,43 @@ model V2ApiCredential {
   revokedAt   DateTime? @db.Timestamptz(3)
 
   client V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  administrationCommands V2ApiAdministrationCommand[]
 
   @@unique([id, clientId])
   @@index([clientId, status])
   @@index([workspaceId, status])
   @@index([expiresAt])
   @@map("api_credentials")
+}
+
+model V2ApiAdministrationCommand {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  action                  String   @db.VarChar(32)
+  targetClientId          String   @db.VarChar(80)
+  targetCredentialId      String   @db.VarChar(80)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  idempotencyKey          String?  @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  occurredAt              DateTime @db.Timestamptz(3)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace       V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "api_admin_commands_workspace_fkey")
+  actorClient     V2ApiClient   @relation("ApiAdministrationCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "api_admin_commands_actor_fkey")
+  targetClient    V2ApiClient   @relation("ApiAdministrationCommandTarget", fields: [targetClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "api_admin_commands_target_client_fkey")
+  targetCredential V2ApiCredential @relation(fields: [targetCredentialId, targetClientId], references: [id, clientId], onDelete: Restrict, map: "api_admin_commands_target_credential_fkey")
+
+  @@unique([workspaceId, action, targetClientId, targetCredentialId], map: "api_admin_commands_target_action_key")
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)], map: "api_admin_commands_actor_context_idx")
+  @@index([workspaceId, targetClientId, occurredAt(sort: Desc)], map: "api_admin_commands_target_history_idx")
+  @@map("api_administration_commands")
 }
 
 model V2ApiAccessCommand {

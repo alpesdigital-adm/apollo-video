@@ -29,6 +29,7 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     await client.v2UiLoginAttempt.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
     await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: { in: [keyHash, resetKeyHash] } } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
+    await client.v2ApiAdministrationCommand.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ApiCredential.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2WorkspaceMember.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId: { in: workspaceIds } } })
