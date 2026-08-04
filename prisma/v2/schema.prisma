@@ -1355,6 +1355,13 @@ model V2WorkspaceLutStatusCommand {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   createdByClientId  String   @db.VarChar(80)
+  actorCredentialId        String  @db.VarChar(128)
+  actorEnvironment         String  @db.VarChar(16)
+  actorAuthenticationKind  String  @db.VarChar(16)
+  actorContextHash         String  @db.Char(64)
+  actorDelegatedUserId     String? @db.VarChar(128)
+  actorDelegatedIdentityId String? @db.VarChar(128)
+  actorWorkspaceRole       String? @db.VarChar(32)
   createdAt          DateTime @db.Timestamptz(3)
 
   workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -1365,6 +1372,7 @@ model V2WorkspaceLutStatusCommand {
   @@unique([workspaceId, lutId, resultRevision])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
   @@index([workspaceId, lutId, createdAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("workspace_lut_status_commands")
 }
 
@@ -1395,6 +1403,13 @@ model V2WorkspaceLutVersion {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   createdByClientId  String   @db.VarChar(80)
+  actorCredentialId        String  @db.VarChar(128)
+  actorEnvironment         String  @db.VarChar(16)
+  actorAuthenticationKind  String  @db.VarChar(16)
+  actorContextHash         String  @db.Char(64)
+  actorDelegatedUserId     String? @db.VarChar(128)
+  actorDelegatedIdentityId String? @db.VarChar(128)
+  actorWorkspaceRole       String? @db.VarChar(32)
   createdAt          DateTime @db.Timestamptz(3)
 
   workspace         V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -1409,6 +1424,7 @@ model V2WorkspaceLutVersion {
   @@unique([workspaceId, createdByClientId, idempotencyKey])
   @@index([workspaceId, lutId, createdAt(sort: Desc)])
   @@index([workspaceId, cubeContentHash])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("workspace_lut_versions")
 }
 
@@ -1434,6 +1450,13 @@ model V2WorkspaceLutDefaultVersion {
   requestFingerprint String   @db.Char(64)
   idempotencyKey     String   @db.VarChar(128)
   createdByClientId  String   @db.VarChar(80)
+  actorCredentialId        String  @db.VarChar(128)
+  actorEnvironment         String  @db.VarChar(16)
+  actorAuthenticationKind  String  @db.VarChar(16)
+  actorContextHash         String  @db.Char(64)
+  actorDelegatedUserId     String? @db.VarChar(128)
+  actorDelegatedIdentityId String? @db.VarChar(128)
+  actorWorkspaceRole       String? @db.VarChar(32)
   createdAt          DateTime @db.Timestamptz(3)
 
   workspace  V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -1445,6 +1468,7 @@ model V2WorkspaceLutDefaultVersion {
   @@unique([workspaceId, createdByClientId, idempotencyKey])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, lutVersionId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("workspace_lut_default_versions")
 }
 

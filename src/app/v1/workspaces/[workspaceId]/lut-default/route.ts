@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     const { workspaceId } = await context.params; workspace(workspaceId, actor.workspaceId)
     const body = parseSetWorkspaceLutDefaultBody(await request.json())
     const result = await setWorkspaceLutDefaultService({ repository: createWorkspaceLutRepository(), createVersionId: () => `lut-default-${randomUUID()}` })({
-      ...body, workspaceId, actor: actor.auditContext.actor, idempotencyKey: request.headers.get('idempotency-key') ?? '',
+      ...body, workspaceId, actor: actor, idempotencyKey: request.headers.get('idempotency-key') ?? '',
     })
     return NextResponse.json(presentSuccess({ defaultVersion: presentWorkspaceLutDefaultVersion(result.value), replayed: result.replayed }), { status: 201, headers: publicApiHeaders(requestId) })
   } catch (error) { return respondPublicError(error, requestId) }

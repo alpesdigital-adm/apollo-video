@@ -1760,6 +1760,49 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(deactivated.data.lifecycle.revision, 2)
     assert.equal((await deactivate()).status, 200)
     assert.equal(await client.v2WorkspaceLutStatusCommand.count({ where: { workspaceId, lutId: lutBody.lutId } }), 1)
+    const lutMutationAudits = [
+      ...await client.v2WorkspaceLutVersion.findMany({
+        where: { workspaceId, lutId: lutBody.lutId },
+        select: {
+          createdByClientId: true, actorCredentialId: true,
+          actorEnvironment: true, actorAuthenticationKind: true,
+          actorContextHash: true, actorDelegatedUserId: true,
+          actorDelegatedIdentityId: true, actorWorkspaceRole: true,
+        },
+      }),
+      ...await client.v2WorkspaceLutDefaultVersion.findMany({
+        where: { workspaceId },
+        select: {
+          createdByClientId: true, actorCredentialId: true,
+          actorEnvironment: true, actorAuthenticationKind: true,
+          actorContextHash: true, actorDelegatedUserId: true,
+          actorDelegatedIdentityId: true, actorWorkspaceRole: true,
+        },
+      }),
+      ...await client.v2WorkspaceLutStatusCommand.findMany({
+        where: { workspaceId, lutId: lutBody.lutId },
+        select: {
+          createdByClientId: true, actorCredentialId: true,
+          actorEnvironment: true, actorAuthenticationKind: true,
+          actorContextHash: true, actorDelegatedUserId: true,
+          actorDelegatedIdentityId: true, actorWorkspaceRole: true,
+        },
+      }),
+    ]
+    assert.equal(lutMutationAudits.length, 5)
+    for (const audit of lutMutationAudits) {
+      assert.equal(audit.createdByClientId, apiClientId)
+      assert.equal(audit.actorCredentialId, issued.credential.id)
+      assert.equal(audit.actorEnvironment, apiEnvironment)
+      assert.equal(audit.actorAuthenticationKind, 'bearer')
+      assert.match(audit.actorContextHash, /^[a-f0-9]{64}$/)
+      assert.equal(audit.actorDelegatedUserId, null)
+      assert.equal(audit.actorDelegatedIdentityId, null)
+      assert.equal(audit.actorWorkspaceRole, null)
+    }
+    assert.equal(new Set(lutMutationAudits.map((audit) => audit.actorContextHash)).size, 1)
+    assert.equal(JSON.stringify({ importedLut, versionResult, selectedDefault, clearedDefault, deactivated }).includes(issued.credential.id), false)
+    assert.equal(JSON.stringify({ importedLut, versionResult, selectedDefault, clearedDefault, deactivated }).includes(issued.token), false)
     const staleStatus = await fetch(`${baseUrl}/v1/workspaces/${workspaceId}/luts/${lutBody.lutId}/status`, {
       method: 'POST', headers: { authorization, 'content-type': 'application/json', 'idempotency-key': 'public-api-lut-status-stale' }, body: JSON.stringify({ baseRevision: 1, status: 'active' }),
     })

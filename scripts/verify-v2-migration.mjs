@@ -65,6 +65,9 @@ const mediaDownloadGrantModel = schema.match(/model V2MediaDownloadGrant \{([\s\
 const mediaUploadAuditEntryModel = schema.match(/model V2MediaUploadAuditEntry \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const assetRightsChangeModel = schema.match(/model V2AssetRightsChange \{([\s\S]*?)\n\}/)?.[1] ?? ''
 const projectCreationCommandModel = schema.match(/model V2ProjectCreationCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const workspaceLutVersionModel = schema.match(/model V2WorkspaceLutVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const workspaceLutStatusCommandModel = schema.match(/model V2WorkspaceLutStatusCommand \{([\s\S]*?)\n\}/)?.[1] ?? ''
+const workspaceLutDefaultVersionModel = schema.match(/model V2WorkspaceLutDefaultVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
 assert.doesNotMatch(
   apiClientModel,
   /secretSalt|secretHash/,
@@ -151,6 +154,29 @@ assert.doesNotMatch(
   committed,
   /(?:UPDATE|INSERT INTO) "project_creation_commands"[\s\S]*projects/,
   'pre-contract project creation authorship must never be fabricated by backfill',
+)
+for (const [model, label] of [
+  [workspaceLutVersionModel, 'WorkspaceLutVersion'],
+  [workspaceLutStatusCommandModel, 'WorkspaceLutStatusCommand'],
+  [workspaceLutDefaultVersionModel, 'WorkspaceLutDefaultVersion'],
+]) {
+  for (const field of [
+    'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
+    'actorContextHash', 'actorDelegatedUserId', 'actorDelegatedIdentityId',
+    'actorWorkspaceRole',
+  ]) {
+    assert.match(model, new RegExp(`\\b${field}\\b`), `${label} must persist ${field}`)
+  }
+}
+assert.match(
+  committed,
+  /TRUNCATE TABLE[\s\S]*"workspace_lut_default_versions"[\s\S]*"workspace_lut_versions"[\s\S]*ADD COLUMN "actorCredentialId"[\s\S]*ADD COLUMN "actorContextHash"/,
+  'unattributable pre-contract LUT mutations must be reset before audit fields become required',
+)
+assert.doesNotMatch(
+  committed,
+  /(?:UPDATE|INSERT INTO) "workspace_lut_(?:versions|status_commands|default_versions)"[\s\S]*(?:api_clients|api_credentials)/,
+  'pre-contract LUT actor identity must never be fabricated by backfill',
 )
 for (const field of [
   'actorCredentialId', 'actorEnvironment', 'actorAuthenticationKind',
@@ -284,6 +310,9 @@ const requiredChecks = [
   'project_creation_commands_action_check',
   'project_creation_commands_actor_check',
   'project_creation_commands_hash_check',
+  'workspace_lut_versions_actor_audit_check',
+  'workspace_lut_status_commands_actor_audit_check',
+  'workspace_lut_default_versions_actor_audit_check',
   'projects_status_check',
   'projects_creator_type_check',
   'project_snapshots_kind_check',

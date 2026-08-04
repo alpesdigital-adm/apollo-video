@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto'
 import { Prisma, type PrismaClient, type V2WorkspaceLut, type V2WorkspaceLutDefaultVersion, type V2WorkspaceLutStatusCommand, type V2WorkspaceLutVersion } from '../../../../generated/prisma-v2/index.js'
 
 import type { PersistedWorkspaceLutImport, WorkspaceLutDefaultVersion, WorkspaceLutRecord, WorkspaceLutRepository, WorkspaceLutStatusCommand } from '../../application/ports/workspace-lut-repository.ts'
+import { createApiAccessAuditContext, type ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createWorkspaceLutVersion, type LutColorSpace, type LutLicensePolicy } from '../../domain/workspace-lut.ts'
+import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 function json<T>(value: string, field: string): T {
@@ -17,7 +19,79 @@ function json<T>(value: string, field: string): T {
   }
 }
 
+interface StoredLutAudit {
+  workspaceId: string
+  createdByClientId: string
+  actorCredentialId: string
+  actorEnvironment: string
+  actorAuthenticationKind: string
+  actorContextHash: string
+  actorDelegatedUserId: string | null
+  actorDelegatedIdentityId: string | null
+  actorWorkspaceRole: string | null
+}
+
+function auditData(audit: Readonly<ApiAccessAuditContext>) {
+  return {
+    actorCredentialId: audit.credentialId,
+    actorEnvironment: audit.environment,
+    actorAuthenticationKind: audit.authenticationKind,
+    actorContextHash: audit.contextHash,
+    actorDelegatedUserId: audit.delegatedUserId,
+    actorDelegatedIdentityId: audit.delegatedIdentityId,
+    actorWorkspaceRole: audit.workspaceRole,
+  }
+}
+
+function assertAuditBinding(input: {
+  workspaceId: string
+  createdByClientId: string
+  audit: Readonly<ApiAccessAuditContext>
+}): void {
+  const canonical = hydrateAudit({
+    workspaceId: input.workspaceId,
+    createdByClientId: input.createdByClientId,
+    actorCredentialId: input.audit.credentialId,
+    actorEnvironment: input.audit.environment,
+    actorAuthenticationKind: input.audit.authenticationKind,
+    actorContextHash: input.audit.contextHash,
+    actorDelegatedUserId: input.audit.delegatedUserId ?? null,
+    actorDelegatedIdentityId: input.audit.delegatedIdentityId ?? null,
+    actorWorkspaceRole: input.audit.workspaceRole ?? null,
+  })
+  if (
+    canonical.clientId !== input.createdByClientId ||
+    canonical.workspaceId !== input.workspaceId
+  ) {
+    throw new DomainError('AUTH_INVALID', 'LUT actor audit does not match its mutation')
+  }
+}
+
+function hydrateAudit(row: StoredLutAudit): Readonly<ApiAccessAuditContext> {
+  try {
+    const audit = createApiAccessAuditContext({
+      clientId: row.createdByClientId,
+      credentialId: row.actorCredentialId,
+      workspaceId: row.workspaceId,
+      environment: row.actorEnvironment as 'sandbox' | 'production',
+      authenticationKind: row.actorAuthenticationKind as 'bearer' | 'ui-session',
+      ...(row.actorDelegatedUserId ? { delegatedUserId: row.actorDelegatedUserId } : {}),
+      ...(row.actorDelegatedIdentityId
+        ? { delegatedIdentityId: row.actorDelegatedIdentityId }
+        : {}),
+      ...(row.actorWorkspaceRole
+        ? { workspaceRole: row.actorWorkspaceRole as WorkspaceMemberRole }
+        : {}),
+    })
+    if (audit.contextHash !== row.actorContextHash) throw new Error('context hash mismatch')
+    return audit
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT actor audit is invalid')
+  }
+}
+
 function hydrateVersion(row: V2WorkspaceLutVersion) {
+  hydrateAudit(row)
   const preview = Buffer.from(row.previewPng)
   if (preview.length !== row.previewByteSize || createHash('sha256').update(preview).digest('hex') !== row.previewSha256) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT preview failed integrity validation')
@@ -53,7 +127,8 @@ function statusCommand(row: V2WorkspaceLutStatusCommand): Readonly<WorkspaceLutS
   return Object.freeze({
     id: row.id, workspaceId: row.workspaceId, lutId: row.lutId, baseRevision: row.baseRevision, resultRevision: row.resultRevision,
     status: row.status as 'active' | 'inactive', resultVersionId: row.resultVersionId, requestFingerprint: row.requestFingerprint, idempotencyKey: row.idempotencyKey,
-    createdByClientId: row.createdByClientId, createdAt: row.createdAt.toISOString(),
+    createdByClientId: row.createdByClientId, audit: hydrateAudit(row),
+    createdAt: row.createdAt.toISOString(),
   })
 }
 
@@ -68,7 +143,8 @@ function defaultVersion(row: V2WorkspaceLutDefaultVersion, lutRow: V2WorkspaceLu
   return Object.freeze({
     id: row.id, workspaceId: row.workspaceId, revision: row.revision, mode: row.mode as 'none' | 'lut-version',
     ...(lutVersion ? { lutVersion } : {}), selectionHash: row.selectionHash, requestFingerprint: row.requestFingerprint,
-    idempotencyKey: row.idempotencyKey, createdByClientId: row.createdByClientId, createdAt: row.createdAt.toISOString(),
+    idempotencyKey: row.idempotencyKey, createdByClientId: row.createdByClientId,
+    audit: hydrateAudit(row), createdAt: row.createdAt.toISOString(),
   })
 }
 
@@ -83,7 +159,10 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
     if (!version) return null
     const head = await this.client.v2WorkspaceLut.findUnique({ where: { id_workspaceId: { id: version.lutId, workspaceId: input.workspaceId } } })
     if (!head) throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotent LUT head disappeared')
-    return Object.freeze({ record: record(head, version), idempotencyKey: version.idempotencyKey, requestFingerprint: version.requestFingerprint })
+    return Object.freeze({
+      record: record(head, version), audit: hydrateAudit(version),
+      idempotencyKey: version.idempotencyKey, requestFingerprint: version.requestFingerprint,
+    })
   }
 
   async import(
@@ -91,6 +170,11 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
     serializationAttempt = 1,
   ): Promise<Readonly<{ value: Readonly<PersistedWorkspaceLutImport>; replayed: boolean }>> {
     const item = input.value.record.currentVersion
+    assertAuditBinding({
+      workspaceId: item.workspaceId,
+      createdByClientId: item.createdByClientId,
+      audit: input.value.audit,
+    })
     try {
       return await this.client.$transaction(async (transaction) => {
         const [workspace, client, existingHead] = await Promise.all([
@@ -111,10 +195,15 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
           cubeContent: item.cube.canonicalContent, cubeContentHash: item.cube.contentHash,
           previewPng: Buffer.from(input.previewPng), previewSha256: item.preview.sha256, previewByteSize: item.preview.byteSize,
           recordHash: item.recordHash, requestFingerprint: input.value.requestFingerprint, idempotencyKey: input.value.idempotencyKey,
-          createdByClientId: item.createdByClientId, createdAt: new Date(item.createdAt),
+          createdByClientId: item.createdByClientId, ...auditData(input.value.audit),
+          createdAt: new Date(item.createdAt),
         } })
         const updated = await transaction.v2WorkspaceLut.update({ where: { id_workspaceId: { id: item.lutId, workspaceId: item.workspaceId } }, data: { currentVersionId: item.id, updatedAt: new Date(item.createdAt) } })
-        return Object.freeze({ value: Object.freeze({ record: record(updated, version), idempotencyKey: input.value.idempotencyKey, requestFingerprint: input.value.requestFingerprint }), replayed: false })
+        return Object.freeze({ value: Object.freeze({
+          record: record(updated, version), audit: input.value.audit,
+          idempotencyKey: input.value.idempotencyKey,
+          requestFingerprint: input.value.requestFingerprint,
+        }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -129,6 +218,11 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
 
   async createVersion(input: { value: Readonly<PersistedWorkspaceLutImport>; previewPng: Uint8Array; expectedCurrentVersionId: string }, serializationAttempt = 1): Promise<Readonly<{ value: Readonly<PersistedWorkspaceLutImport>; replayed: boolean }>> {
     const item = input.value.record.currentVersion
+    assertAuditBinding({
+      workspaceId: item.workspaceId,
+      createdByClientId: item.createdByClientId,
+      audit: input.value.audit,
+    })
     try {
       return await this.client.$transaction(async (transaction) => {
         const [head, client] = await Promise.all([
@@ -149,13 +243,18 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
           cubeDomainMaxJson: stableSerialize(item.cube.domainMax), cubeContent: item.cube.canonicalContent, cubeContentHash: item.cube.contentHash,
           previewPng: Buffer.from(input.previewPng), previewSha256: item.preview.sha256, previewByteSize: item.preview.byteSize,
           recordHash: item.recordHash, requestFingerprint: input.value.requestFingerprint, idempotencyKey: input.value.idempotencyKey,
-          createdByClientId: item.createdByClientId, createdAt: new Date(item.createdAt),
+          createdByClientId: item.createdByClientId, ...auditData(input.value.audit),
+          createdAt: new Date(item.createdAt),
         } })
         const updated = await transaction.v2WorkspaceLut.update({
           where: { id_workspaceId: { id: item.lutId, workspaceId: item.workspaceId } },
           data: { currentVersionId: item.id, updatedAt: new Date(item.createdAt) },
         })
-        return Object.freeze({ value: Object.freeze({ record: record(updated, version), idempotencyKey: input.value.idempotencyKey, requestFingerprint: input.value.requestFingerprint }), replayed: false })
+        return Object.freeze({ value: Object.freeze({
+          record: record(updated, version), audit: input.value.audit,
+          idempotencyKey: input.value.idempotencyKey,
+          requestFingerprint: input.value.requestFingerprint,
+        }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -193,10 +292,32 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
   }
 
   async readPreview(input: { workspaceId: string; lutId: string; version: number }) {
-    const row = await this.client.v2WorkspaceLutVersion.findUnique({ where: { workspaceId_lutId_version: input }, select: { previewPng: true, previewSha256: true } })
+    const row = await this.client.v2WorkspaceLutVersion.findUnique({
+      where: { workspaceId_lutId_version: input },
+      select: {
+        workspaceId: true,
+        createdByClientId: true,
+        actorCredentialId: true,
+        actorEnvironment: true,
+        actorAuthenticationKind: true,
+        actorContextHash: true,
+        actorDelegatedUserId: true,
+        actorDelegatedIdentityId: true,
+        actorWorkspaceRole: true,
+        previewPng: true,
+        previewSha256: true,
+        previewByteSize: true,
+      },
+    })
     if (!row) return null
+    hydrateAudit(row)
     const png = new Uint8Array(row.previewPng)
-    if (createHash('sha256').update(png).digest('hex') !== row.previewSha256) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT preview failed integrity validation')
+    if (
+      png.byteLength !== row.previewByteSize ||
+      createHash('sha256').update(png).digest('hex') !== row.previewSha256
+    ) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored LUT preview failed integrity validation')
+    }
     return Object.freeze({ png, sha256: row.previewSha256 })
   }
 
@@ -212,6 +333,11 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
 
   async setStatus(input: { command: Readonly<WorkspaceLutStatusCommand> }, serializationAttempt = 1): Promise<Readonly<{ command: Readonly<WorkspaceLutStatusCommand>; record: Readonly<WorkspaceLutRecord>; replayed: boolean }>> {
     const command = input.command
+    assertAuditBinding({
+      workspaceId: command.workspaceId,
+      createdByClientId: command.createdByClientId,
+      audit: command.audit,
+    })
     try {
       return await this.client.$transaction(async (transaction) => {
         const [head, client] = await Promise.all([
@@ -226,7 +352,8 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         const persisted = await transaction.v2WorkspaceLutStatusCommand.create({ data: {
           id: command.id, workspaceId: command.workspaceId, lutId: command.lutId, baseRevision: command.baseRevision,
           resultRevision: command.resultRevision, status: command.status, resultVersionId: command.resultVersionId, requestFingerprint: command.requestFingerprint,
-          idempotencyKey: command.idempotencyKey, createdByClientId: command.createdByClientId, createdAt: new Date(command.createdAt),
+          idempotencyKey: command.idempotencyKey, createdByClientId: command.createdByClientId,
+          ...auditData(command.audit), createdAt: new Date(command.createdAt),
         } })
         const updated = await transaction.v2WorkspaceLut.update({
           where: { id_workspaceId: { id: command.lutId, workspaceId: command.workspaceId } },
@@ -264,6 +391,11 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
 
   async setDefault(input: { value: Readonly<WorkspaceLutDefaultVersion>; expectedRevision: number }, serializationAttempt = 1): Promise<Readonly<{ value: Readonly<WorkspaceLutDefaultVersion>; replayed: boolean }>> {
     const value = input.value
+    assertAuditBinding({
+      workspaceId: value.workspaceId,
+      createdByClientId: value.createdByClientId,
+      audit: value.audit,
+    })
     try {
       return await this.client.$transaction(async (transaction) => {
         const [workspace, client, head] = await Promise.all([
@@ -289,7 +421,8 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
         const row = await transaction.v2WorkspaceLutDefaultVersion.create({ data: {
           id: value.id, workspaceId: value.workspaceId, revision: value.revision, mode: value.mode,
           lutVersionId: value.lutVersion?.id, selectionHash: value.selectionHash, requestFingerprint: value.requestFingerprint,
-          idempotencyKey: value.idempotencyKey, createdByClientId: value.createdByClientId, createdAt: new Date(value.createdAt),
+          idempotencyKey: value.idempotencyKey, createdByClientId: value.createdByClientId,
+          ...auditData(value.audit), createdAt: new Date(value.createdAt),
         } })
         if (head) {
           await transaction.v2WorkspaceLutDefault.update({ where: { workspaceId: value.workspaceId }, data: { revision: value.revision, currentVersionId: value.id, updatedAt: new Date(value.createdAt) } })

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createWorkspaceLutVersionService, importWorkspaceLutService, setWorkspaceLutDefaultService, setWorkspaceLutStatusService } from '../../src/v2/application/workspace-luts.ts'
 import { createWorkspaceLutVersion, parseCube3d } from '../../src/v2/domain/workspace-lut.ts'
 import { parseCreateWorkspaceLutVersionBody, parseImportWorkspaceLutBody, parseSetWorkspaceLutDefaultBody, parseSetWorkspaceLutStatusBody, presentWorkspaceLut } from '../../src/v2/public-api/workspace-lut-contract.ts'
@@ -22,12 +23,31 @@ DOMAIN_MAX 1 1 1
 1 1 1
 `
 
+function actor(credentialId = 'credential-lut-test') {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-lut-test',
+    credentialId,
+    workspaceId: 'workspace-lut-test',
+    environment: 'sandbox',
+  })
+  return Object.freeze({
+    ...auditContext,
+    scopes: new Set(['projects:write']),
+    authenticationKind: 'bearer',
+    clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false,
+    clientAccessStatus: 'active',
+    workspaceAccessStatus: 'active',
+    auditContext,
+  })
+}
+
 function request(overrides = {}) {
   return {
     workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', name: 'Coração 🎞️', owner: 'Apollo Studio',
     license: { policy: 'owned', name: 'Propriedade do workspace' }, tags: ['Cinema', 'coração'],
     compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.75,
-    cubeContent: identityCube, actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-import-1',
+    cubeContent: identityCube, actor: actor(), idempotencyKey: 'workspace-lut-import-1',
     ...overrides,
   }
 }
@@ -70,11 +90,18 @@ test('T-FR-181 imports one immutable licensed version, generates preview once an
   assert.equal(first.value.record.currentVersion.name, 'Coração 🎞️')
   assert.deepEqual(first.value.record.currentVersion.tags, ['cinema', 'coração'])
   assert.equal(first.value.record.currentVersion.preview.sha256, previewSha)
+  assert.equal(first.value.audit.credentialId, 'credential-lut-test')
+  assert.equal(first.value.audit.workspaceId, 'workspace-lut-test')
+  assert.match(first.value.audit.contextHash, /^[a-f0-9]{64}$/)
   assert.equal(persisted.previewPng, png)
   const publicValue = presentWorkspaceLut(first.value.record)
   assert.equal('canonicalContent' in publicValue.currentVersion.cube, false)
   assert.match(publicValue.currentVersion.preview.path, /\/preview$/)
   await assert.rejects(service(request({ name: 'Outra LUT' })), /another LUT import/)
+  await assert.rejects(
+    service(request({ actor: actor('credential-lut-other') })),
+    /another LUT import/,
+  )
 })
 
 test('T-FR-181 public import contract rejects hidden fields and aggregate binds license and preview', () => {
@@ -140,12 +167,16 @@ test('T-FR-181 lifecycle command is revision-bound, replayable and preserves his
     },
   }
   const service = setWorkspaceLutStatusService({ repository, createCommandId: () => 'lut-status-test-1', clock: () => new Date('2026-07-31T12:11:00.000Z') })
-  const input = { workspaceId: first.workspaceId, lutId: first.lutId, baseRevision: 1, status: 'inactive', actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-status-1' }
+  const input = { workspaceId: first.workspaceId, lutId: first.lutId, baseRevision: 1, status: 'inactive', actor: actor(), idempotencyKey: 'workspace-lut-status-1' }
   const applied = await service(input)
   assert.equal(applied.record.status, 'inactive')
   assert.equal(applied.record.revision, 2)
   assert.equal(applied.record.currentVersion.recordHash, first.recordHash)
   assert.equal((await service(input)).replayed, true)
+  await assert.rejects(
+    service({ ...input, actor: actor('credential-lut-other') }),
+    /another LUT status command/,
+  )
   assert.deepEqual(parseSetWorkspaceLutStatusBody({ baseRevision: 2, status: 'active' }), { baseRevision: 2, status: 'active' })
   assert.throws(() => parseSetWorkspaceLutStatusBody({ baseRevision: 1, status: 'deleted' }), /status/)
 })
@@ -170,11 +201,15 @@ test('T-FR-181 workspace default versions active current LUT or explicit none wi
   }
   let ids = 0
   const service = setWorkspaceLutDefaultService({ repository, createVersionId: () => `lut-default-test-${++ids}`, clock: () => new Date('2026-07-31T12:21:00.000Z') })
-  const select = { workspaceId: version.workspaceId, baseRevision: 0, selection: { mode: 'lut-version', lutId: version.lutId, version: 1 }, actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-default-1' }
+  const select = { workspaceId: version.workspaceId, baseRevision: 0, selection: { mode: 'lut-version', lutId: version.lutId, version: 1 }, actor: actor(), idempotencyKey: 'workspace-lut-default-1' }
   const selected = await service(select)
   assert.equal(selected.value.mode, 'lut-version')
   assert.equal(selected.value.lutVersion.id, version.id)
   assert.equal((await service(select)).replayed, true)
+  await assert.rejects(
+    service({ ...select, actor: actor('credential-lut-other') }),
+    /another workspace LUT default/,
+  )
   await assert.rejects(service({ ...select, idempotencyKey: 'workspace-lut-default-stale', selection: { mode: 'none' } }), /revision changed/)
   const none = await service({ ...select, baseRevision: 1, selection: { mode: 'none' }, idempotencyKey: 'workspace-lut-default-none' })
   assert.equal(none.value.mode, 'none')
@@ -245,7 +280,7 @@ test('T-FR-181 Prisma adapter commits head/version/preview atomically and detect
   assert.equal(versions.length, 2)
   const statusService = setWorkspaceLutStatusService({ repository, createCommandId: () => 'lut-status-prisma-1', clock: () => new Date('2026-07-31T11:04:00.000Z') })
   const statusInput = {
-    workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', baseRevision: 1, status: 'inactive', actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-prisma-status-1',
+    workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', baseRevision: 1, status: 'inactive', actor: actor(), idempotencyKey: 'workspace-lut-prisma-status-1',
   }
   const status = await statusService(statusInput)
   assert.equal(status.record.revision, 2)
@@ -256,11 +291,23 @@ test('T-FR-181 Prisma adapter commits head/version/preview atomically and detect
   assert.equal(exactReplay.record.revision, 2)
   assert.equal(exactReplay.record.currentVersion.id, 'lut-version-prisma-2')
   const defaultResult = await setWorkspaceLutDefaultService({ repository, createVersionId: () => 'lut-default-prisma-1', clock: () => new Date('2026-07-31T11:05:00.000Z') })({
-    workspaceId: 'workspace-lut-test', baseRevision: 0, selection: { mode: 'lut-version', lutId: 'lut-cinema-test', version: 2 }, actor: { type: 'api-client', id: 'client-lut-test' }, idempotencyKey: 'workspace-lut-default-prisma-1',
+    workspaceId: 'workspace-lut-test', baseRevision: 0, selection: { mode: 'lut-version', lutId: 'lut-cinema-test', version: 2 }, actor: actor(), idempotencyKey: 'workspace-lut-default-prisma-1',
   })
   assert.equal(defaultResult.value.lutVersion.id, 'lut-version-prisma-2')
+  for (const row of [versions[0], versions[1], statusCommands[0], defaultVersions[0]]) {
+    assert.equal(row.actorCredentialId, 'credential-lut-test')
+    assert.equal(row.actorEnvironment, 'sandbox')
+    assert.equal(row.actorAuthenticationKind, 'bearer')
+    assert.match(row.actorContextHash, /^[a-f0-9]{64}$/)
+  }
   assert.equal((await repository.readDefault({ workspaceId: 'workspace-lut-test' })).revision, 1)
   assert.equal((await repository.readVersion({ workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1 })).version, 1)
+  versions[0].actorCredentialId = 'credential-lut-tampered'
+  await assert.rejects(
+    repository.readVersion({ workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1 }),
+    /actor audit/,
+  )
+  versions[0].actorCredentialId = 'credential-lut-test'
   versions[0].previewPng = Buffer.from([0])
   await assert.rejects(repository.readPreview({ workspaceId: 'workspace-lut-test', lutId: 'lut-cinema-test', version: 1 }), /integrity/)
 })

@@ -1,6 +1,11 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createWorkspaceLutVersion, parseCube3d, type LutColorSpace, type LutLicensePolicy } from '../domain/workspace-lut.ts'
+import {
+  materializeActorAuditContext,
+  requireScope,
+  type AuthenticatedExternalActor,
+} from './authenticate-api-client.ts'
 import type { LutPreviewGenerator } from './ports/lut-preview-generator.ts'
 import type { WorkspaceLutDefaultVersion, WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
 
@@ -9,6 +14,15 @@ function id(value: string, field: string) {
   const normalized = value?.trim()
   if (!ID.test(normalized)) throw new DomainError('INVALID_ARGUMENT', `${field} is invalid`)
   return normalized
+}
+
+function auditActor(actor: AuthenticatedExternalActor, workspaceId: string) {
+  requireScope(actor, 'projects:write')
+  const audit = materializeActorAuditContext(actor)
+  if (audit.workspaceId !== workspaceId) {
+    throw new DomainError('AUTH_INVALID', 'LUT actor does not match the workspace')
+  }
+  return audit
 }
 
 export function importWorkspaceLutService(dependencies: {
@@ -24,12 +38,12 @@ export function importWorkspaceLutService(dependencies: {
     tags?: readonly string[]
     compatibility: { inputColorSpace: LutColorSpace; outputColorSpace: LutColorSpace }
     intensity?: number; cubeContent: string
-    actor: { type: 'api-client'; id: string }; idempotencyKey: string
+    actor: AuthenticatedExternalActor; idempotencyKey: string
   }) {
     const workspaceId = id(request.workspaceId, 'workspaceId')
     const lutId = id(request.lutId, 'lutId')
-    if (request.actor?.type !== 'api-client') throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
-    const createdByClientId = id(request.actor.id, 'actor.id')
+    const audit = auditActor(request.actor, workspaceId)
+    const createdByClientId = id(audit.clientId, 'actor.clientId')
     const idempotencyKey = (request.idempotencyKey ?? '').trim()
     if (idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new DomainError('INVALID_ARGUMENT', 'Idempotency-Key is invalid')
     const cube = parseCube3d(request.cubeContent)
@@ -37,7 +51,8 @@ export function importWorkspaceLutService(dependencies: {
       schemaVersion: 'workspace-lut-import-request/v1', workspaceId, lutId,
       name: request.name, owner: request.owner, license: request.license,
       tags: request.tags ?? [], compatibility: request.compatibility,
-      intensity: request.intensity ?? 1, cubeContentHash: cube.contentHash, createdByClientId,
+      intensity: request.intensity ?? 1, cubeContentHash: cube.contentHash,
+      actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({ workspaceId, createdByClientId, idempotencyKey })
     if (replay) {
@@ -55,7 +70,10 @@ export function importWorkspaceLutService(dependencies: {
       createdByClientId, createdAt,
     })
     return dependencies.repository.import({
-      value: { record: { lutId, workspaceId, status: 'active', revision: 1, currentVersion: version }, idempotencyKey, requestFingerprint },
+      value: {
+        record: { lutId, workspaceId, status: 'active', revision: 1, currentVersion: version },
+        audit, idempotencyKey, requestFingerprint,
+      },
       previewPng: preview.png,
     })
   }
@@ -72,12 +90,12 @@ export function createWorkspaceLutVersionService(dependencies: {
     workspaceId: string; lutId: string; baseVersion: number; name: string; owner: string
     license: { policy: LutLicensePolicy; name: string; usageNotes?: string }; tags?: readonly string[]
     compatibility: { inputColorSpace: LutColorSpace; outputColorSpace: LutColorSpace }
-    intensity?: number; cubeContent: string; actor: { type: 'api-client'; id: string }; idempotencyKey: string
+    intensity?: number; cubeContent: string; actor: AuthenticatedExternalActor; idempotencyKey: string
   }) {
     const workspaceId = id(request.workspaceId, 'workspaceId')
     const lutId = id(request.lutId, 'lutId')
-    const createdByClientId = request.actor?.type === 'api-client' ? id(request.actor.id, 'actor.id') : ''
-    if (!createdByClientId) throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
+    const audit = auditActor(request.actor, workspaceId)
+    const createdByClientId = id(audit.clientId, 'actor.clientId')
     if (!Number.isSafeInteger(request.baseVersion) || request.baseVersion < 1) throw new DomainError('INVALID_ARGUMENT', 'baseVersion is invalid')
     const idempotencyKey = (request.idempotencyKey ?? '').trim()
     if (idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new DomainError('INVALID_ARGUMENT', 'Idempotency-Key is invalid')
@@ -85,7 +103,8 @@ export function createWorkspaceLutVersionService(dependencies: {
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'workspace-lut-version-create-request/v1', workspaceId, lutId, baseVersion: request.baseVersion,
       name: request.name, owner: request.owner, license: request.license, tags: request.tags ?? [],
-      compatibility: request.compatibility, intensity: request.intensity ?? 1, cubeContentHash: cube.contentHash, createdByClientId,
+      compatibility: request.compatibility, intensity: request.intensity ?? 1,
+      cubeContentHash: cube.contentHash, actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.repository.findIdempotent({ workspaceId, createdByClientId, idempotencyKey })
     if (replay) {
@@ -103,7 +122,7 @@ export function createWorkspaceLutVersionService(dependencies: {
       preview: { byteSize: preview.png.byteLength, sha256: preview.sha256 }, createdByClientId, createdAt: clock().toISOString(),
     })
     return dependencies.repository.createVersion({
-      value: { record: { ...current, currentVersion: version }, idempotencyKey, requestFingerprint },
+      value: { record: { ...current, currentVersion: version }, audit, idempotencyKey, requestFingerprint },
       previewPng: preview.png, expectedCurrentVersionId: current.currentVersion.id,
     })
   }
@@ -113,15 +132,15 @@ export function setWorkspaceLutStatusService(dependencies: {
   repository: WorkspaceLutRepository; createCommandId: () => string; clock?: () => Date
 }) {
   const clock = dependencies.clock ?? (() => new Date())
-  return async (request: { workspaceId: string; lutId: string; baseRevision: number; status: 'active' | 'inactive'; actor: { type: 'api-client'; id: string }; idempotencyKey: string }) => {
+  return async (request: { workspaceId: string; lutId: string; baseRevision: number; status: 'active' | 'inactive'; actor: AuthenticatedExternalActor; idempotencyKey: string }) => {
     const workspaceId = id(request.workspaceId, 'workspaceId'); const lutId = id(request.lutId, 'lutId')
-    const createdByClientId = request.actor?.type === 'api-client' ? id(request.actor.id, 'actor.id') : ''
-    if (!createdByClientId) throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
+    const audit = auditActor(request.actor, workspaceId)
+    const createdByClientId = id(audit.clientId, 'actor.clientId')
     if (!Number.isSafeInteger(request.baseRevision) || request.baseRevision < 1) throw new DomainError('INVALID_ARGUMENT', 'baseRevision is invalid')
     if (!['active', 'inactive'].includes(request.status)) throw new DomainError('INVALID_ARGUMENT', 'status is invalid')
     const idempotencyKey = (request.idempotencyKey ?? '').trim()
     if (idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new DomainError('INVALID_ARGUMENT', 'Idempotency-Key is invalid')
-    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'workspace-lut-status-command/v1', workspaceId, lutId, baseRevision: request.baseRevision, status: request.status, createdByClientId })
+    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'workspace-lut-status-command/v1', workspaceId, lutId, baseRevision: request.baseRevision, status: request.status, actorContextHash: audit.contextHash })
     const replay = await dependencies.repository.findStatusIdempotent({ workspaceId, createdByClientId, idempotencyKey })
     if (replay) {
       if (replay.command.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another LUT status command')
@@ -133,7 +152,7 @@ export function setWorkspaceLutStatusService(dependencies: {
     return dependencies.repository.setStatus({ command: Object.freeze({
       id: id(dependencies.createCommandId(), 'commandId'), workspaceId, lutId, baseRevision: request.baseRevision,
       resultRevision: request.baseRevision + 1, status: request.status, resultVersionId: current.currentVersion.id, requestFingerprint, idempotencyKey,
-      createdByClientId, createdAt: clock().toISOString(),
+      createdByClientId, audit, createdAt: clock().toISOString(),
     }) })
   }
 }
@@ -184,11 +203,11 @@ export function setWorkspaceLutDefaultService(dependencies: {
   return async (request: {
     workspaceId: string; baseRevision: number
     selection: { mode: 'none' } | { mode: 'lut-version'; lutId: string; version: number }
-    actor: { type: 'api-client'; id: string }; idempotencyKey: string
+    actor: AuthenticatedExternalActor; idempotencyKey: string
   }) => {
     const workspaceId = id(request.workspaceId, 'workspaceId')
-    const createdByClientId = request.actor?.type === 'api-client' ? id(request.actor.id, 'actor.id') : ''
-    if (!createdByClientId) throw new DomainError('INVALID_ARGUMENT', 'actor is invalid')
+    const audit = auditActor(request.actor, workspaceId)
+    const createdByClientId = id(audit.clientId, 'actor.clientId')
     if (!Number.isSafeInteger(request.baseRevision) || request.baseRevision < 0) throw new DomainError('INVALID_ARGUMENT', 'baseRevision is invalid')
     if (!request.selection || !['none', 'lut-version'].includes(request.selection.mode)) throw new DomainError('INVALID_ARGUMENT', 'selection.mode is invalid')
     const idempotencyKey = (request.idempotencyKey ?? '').trim()
@@ -197,7 +216,7 @@ export function setWorkspaceLutDefaultService(dependencies: {
       ? Object.freeze({ mode: 'none' as const })
       : Object.freeze({ mode: 'lut-version' as const, lutId: id(request.selection.lutId, 'selection.lutId'), version: request.selection.version })
     if (normalizedSelection.mode === 'lut-version' && (!Number.isSafeInteger(normalizedSelection.version) || normalizedSelection.version < 1)) throw new DomainError('INVALID_ARGUMENT', 'selection.version is invalid')
-    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-set-request/v1', workspaceId, baseRevision: request.baseRevision, selection: normalizedSelection, createdByClientId })
+    const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-set-request/v1', workspaceId, baseRevision: request.baseRevision, selection: normalizedSelection, actorContextHash: audit.contextHash })
     const replay = await dependencies.repository.findDefaultIdempotent({ workspaceId, createdByClientId, idempotencyKey })
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another workspace LUT default')
@@ -216,7 +235,8 @@ export function setWorkspaceLutDefaultService(dependencies: {
     const selectionHash = calculateCanonicalHash({ schemaVersion: 'workspace-lut-default-version/v1', workspaceId, revision, mode: normalizedSelection.mode, lutVersionId: lutVersion?.id ?? null, lutRecordHash: lutVersion?.recordHash ?? null })
     const value: Readonly<WorkspaceLutDefaultVersion> = Object.freeze({
       id: id(dependencies.createVersionId(), 'defaultVersionId'), workspaceId, revision, mode: normalizedSelection.mode,
-      ...(lutVersion ? { lutVersion } : {}), selectionHash, requestFingerprint, idempotencyKey, createdByClientId, createdAt: clock().toISOString(),
+      ...(lutVersion ? { lutVersion } : {}), selectionHash, requestFingerprint,
+      idempotencyKey, createdByClientId, audit, createdAt: clock().toISOString(),
     })
     return dependencies.repository.setDefault({ value, expectedRevision: request.baseRevision })
   }

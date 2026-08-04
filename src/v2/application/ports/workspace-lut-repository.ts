@@ -1,4 +1,5 @@
 import type { WorkspaceLutVersion } from '../../domain/workspace-lut.ts'
+import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 
 export interface WorkspaceLutRecord {
   lutId: string
@@ -9,6 +10,7 @@ export interface WorkspaceLutRecord {
 }
 export interface PersistedWorkspaceLutImport {
   record: Readonly<WorkspaceLutRecord>
+  audit: Readonly<ApiAccessAuditContext>
   idempotencyKey: string
   requestFingerprint: string
 }
@@ -23,6 +25,7 @@ export interface WorkspaceLutStatusCommand {
   requestFingerprint: string
   idempotencyKey: string
   createdByClientId: string
+  audit: Readonly<ApiAccessAuditContext>
   createdAt: string
 }
 export interface WorkspaceLutDefaultVersion {
@@ -35,6 +38,7 @@ export interface WorkspaceLutDefaultVersion {
   requestFingerprint: string
   idempotencyKey: string
   createdByClientId: string
+  audit: Readonly<ApiAccessAuditContext>
   createdAt: string
 }
 export interface WorkspaceLutDefault {

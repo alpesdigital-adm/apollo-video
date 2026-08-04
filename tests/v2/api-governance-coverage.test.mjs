@@ -40,14 +40,17 @@ test('T-FR-242 every route uses the authenticated audit actor instead of rebuild
   const manualActor = /actor\s*:\s*\{(?:(?!\}).){0,200}type\s*:\s*['"]api-client['"](?:(?!\}).){0,200}id\s*:\s*actor\.clientId/gs
   const offenders = []
   let canonicalBindings = 0
+  let fullActorBindings = 0
   for (const relative of routeFiles) {
     const source = readFileSync(join(routesRoot, relative), 'utf8')
     if (manualActor.test(source)) offenders.push(relative)
     manualActor.lastIndex = 0
-    canonicalBindings += source.match(/actor\s*:\s*actor\.auditContext\.actor/g)?.length ?? 0
+    canonicalBindings += source.match(/actor\s*:\s*actor(?:\.auditContext\.actor)?/g)?.length ?? 0
+    fullActorBindings += source.match(/actor\s*:\s*actor(?!\.)/g)?.length ?? 0
   }
   assert.deepEqual(offenders, [])
   assert.ok(canonicalBindings >= 60, `expected broad audit propagation, found ${canonicalBindings}`)
+  assert.ok(fullActorBindings >= 4, `expected full authenticated actors, found ${fullActorBindings}`)
 })
 
 test('T-FR-242 capability grants and route enforcement share one closed resource:action matrix', () => {

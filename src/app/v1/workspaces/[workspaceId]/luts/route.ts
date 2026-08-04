@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     const result = await importWorkspaceLutService({
       repository: createWorkspaceLutRepository(), preview: new FfmpegLutPreviewGenerator(),
       createVersionId: () => `lut-version-${randomUUID()}`,
-    })({ ...body, workspaceId, actor: actor.auditContext.actor, idempotencyKey: request.headers.get('idempotency-key') ?? '' })
+    })({ ...body, workspaceId, actor: actor, idempotencyKey: request.headers.get('idempotency-key') ?? '' })
     return NextResponse.json(presentSuccess({ lut: presentWorkspaceLut(result.value.record), replayed: result.replayed }), { status: 201, headers: publicApiHeaders(requestId) })
   } catch (error) { return respondPublicError(error, requestId) }
 }
