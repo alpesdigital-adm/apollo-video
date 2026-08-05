@@ -4903,6 +4903,7 @@ model V2BatchEditInvalidation {
 
 model V2ProductionBatchItem {
   id            String   @id @db.VarChar(128)
+  operationId   String   @unique @db.VarChar(128)
   workspaceId   String   @db.VarChar(128)
   batchId       String   @db.VarChar(128)
   sequence      Int

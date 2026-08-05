@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { readPublicOperationService } from '@/v2/application/read-public-operation'
-import { createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
+import {
+  createProductionBatchRepository,
+  createPublicOperationRepository,
+} from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import {
   publicApiHeaders,
@@ -24,6 +27,7 @@ export async function GET(
     const { operationId } = await context.params
     const read = readPublicOperationService({
       operations: createPublicOperationRepository(),
+      productionBatches: createProductionBatchRepository(),
     })
     const operation = await read({ workspaceId: actor.workspaceId, operationId })
     return NextResponse.json(

@@ -563,6 +563,9 @@ O payload HMAC v1 usa JSON canônico e sete claims exatas (`v`, client, workspac
 - operation agregada contém items e contagens reais;
 - cada item possui status/error/artifact;
 - retry parcial não reabre item concluído;
+- `GET /v1/batches/{batchId}/items` retorna até 100 itens com `operationId` estável e cursor vinculado ao definition hash;
+- `operations.read` projeta a operação do item diretamente do production batch persistido, sem estado duplicado;
+- `operations.retry` exige também `projects:write` para itens de lote e cria o mesmo manifest de partial retry da ação explícita de batch;
 - cancel informa jobs irreversíveis ou provider costs já incorridos;
 - paginação evita response gigante.
 

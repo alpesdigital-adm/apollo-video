@@ -3,6 +3,7 @@ import type {
 } from '../../domain/batch-partial-retry.ts'
 import type {
   BatchItemAction,
+  BatchItem,
   ProductionBatch,
   ProductionBatchStatus,
   ProductionBatchStep,
@@ -55,6 +56,11 @@ export interface ProductionBatchPage {
   nextCursor?: string
 }
 
+export interface ProductionBatchItemOperationRecord {
+  batch: Readonly<ProductionBatch>
+  item: Readonly<BatchItem>
+}
+
 export interface ProductionBatchRepository {
   findCreateReplay(input: {
     workspaceId: string
@@ -72,6 +78,10 @@ export interface ProductionBatchRepository {
     workspaceId: string
     batchId: string
   }): Promise<Readonly<ProductionBatch> | null>
+  findItemOperation(input: {
+    workspaceId: string
+    operationId: string
+  }): Promise<Readonly<ProductionBatchItemOperationRecord> | null>
   list(input: {
     workspaceId: string
     projectId?: string

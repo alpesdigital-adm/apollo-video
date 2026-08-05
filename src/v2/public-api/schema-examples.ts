@@ -325,6 +325,35 @@ const queuedProjectDirectorOperationVisibleExample = {
     terminal: false,
   },
 }
+const queuedProductionBatchItemOperationVisibleExample = {
+  schemaVersion: 'public-operation/v1',
+  id: `production-batch-item-operation-${'b'.repeat(64)}`,
+  projectId,
+  type: 'production-batch-item',
+  status: 'queued',
+  phase: 'queued',
+  progress: { completed: 2, total: 4, unit: 'batch-step' },
+  cancelable: true,
+  retryable: false,
+  target: {
+    type: 'production-batch-item',
+    id: 'production-batch-item-example-1',
+    batchId: 'production-batch-example-1',
+  },
+  attempt: 1,
+  maxAttempts: 3,
+  createdAt,
+  updatedAt: createdAt,
+  visibleState: {
+    schemaVersion: 'visible-state/v1',
+    label: 'queued',
+    tone: 'neutral',
+    progress: { mode: 'not-started', percent: 0 },
+    primaryAction: 'view-progress',
+    availableActions: ['view-progress', 'cancel'],
+    terminal: false,
+  },
+}
 const longFormStageVersionsExample = Object.fromEntries(
   ['probe', 'transcript', 'diarization', 'chunks', 'moments']
     .map((stage) => [
@@ -5617,6 +5646,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/public-operation-detail/v10': [
       { data: { operation: queuedLongFormIndexCostOperationExample }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/public-operation-detail/v11': [
+      { data: { operation: queuedProductionBatchItemOperationVisibleExample }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/public-operation-list/v1': [
       {

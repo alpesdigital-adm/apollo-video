@@ -1,4 +1,11 @@
-import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import {
+  calculateCanonicalHash,
+  stableSerialize,
+} from '../domain/canonical-hash.ts'
+import {
+  createProductionBatchItemResult,
+  projectProductionBatchItemOperation,
+} from '../domain/batch-item-result.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   batchProgress,
@@ -37,6 +44,7 @@ const BATCH_STATUSES = new Set<ProductionBatchStatus>([
   'failed',
   'cancelled',
 ])
+const ITEM_PAGE_CURSOR = /^[A-Za-z0-9_-]{16,4096}$/
 
 function identity(value: unknown, field: string): string {
   assertDomain(
@@ -86,6 +94,60 @@ function assertReplayFingerprint(
       'IDEMPOTENCY_PAYLOAD_MISMATCH',
       'Idempotency key was used with a different production batch request',
     )
+  }
+}
+
+interface BatchItemPageCursor {
+  v: 1
+  workspaceId: string
+  batchId: string
+  definitionHash: string
+  afterItemId: string
+}
+
+function encodeBatchItemPageCursor(cursor: BatchItemPageCursor): string {
+  return Buffer.from(stableSerialize(cursor), 'utf8').toString('base64url')
+}
+
+function decodeBatchItemPageCursor(
+  value: string,
+  expected: Omit<BatchItemPageCursor, 'v' | 'afterItemId'>,
+): BatchItemPageCursor {
+  assertDomain(
+    ITEM_PAGE_CURSOR.test(value),
+    'INVALID_ARGUMENT',
+    'cursor is invalid',
+  )
+  try {
+    const decoded = Buffer.from(value, 'base64url')
+    assertDomain(
+      decoded.toString('base64url') === value,
+      'INVALID_ARGUMENT',
+      'cursor is invalid',
+    )
+    const parsed = JSON.parse(decoded.toString('utf8')) as unknown
+    assertDomain(
+      typeof parsed === 'object' && parsed !== null &&
+        !Array.isArray(parsed) &&
+        Object.keys(parsed).toSorted().join(',') ===
+          'afterItemId,batchId,definitionHash,v,workspaceId',
+      'INVALID_ARGUMENT',
+      'cursor is invalid',
+    )
+    const cursor = parsed as BatchItemPageCursor
+    assertDomain(
+      cursor.v === 1 &&
+        cursor.workspaceId === expected.workspaceId &&
+        cursor.batchId === expected.batchId &&
+        cursor.definitionHash === expected.definitionHash &&
+        ID.test(cursor.afterItemId),
+      'INVALID_ARGUMENT',
+      'cursor does not match this batch item query',
+    )
+    return cursor
+  } catch (error) {
+    if (error instanceof DomainError) throw error
+    throw new DomainError('INVALID_ARGUMENT', 'cursor is invalid')
   }
 }
 
@@ -254,6 +316,95 @@ export function listProductionBatchesService(dependencies: {
         ? { cursor: identity(request.cursor, 'cursor') }
         : {}),
     })
+  }
+}
+
+export function listProductionBatchItemOperationsService(dependencies: {
+  repository: ProductionBatchRepository
+}) {
+  return async function execute(request: {
+    workspaceId: string
+    batchId: string
+    actor: AuthenticatedExternalActor
+    limit?: number
+    cursor?: string
+  }) {
+    requireScope(request.actor, 'operations:read')
+    const authenticationAudit = materializeActorAuditContext(request.actor)
+    const workspaceId = identity(request.workspaceId, 'workspaceId')
+    const batchId = identity(request.batchId, 'batchId')
+    assertDomain(
+      authenticationAudit.workspaceId === workspaceId,
+      'AUTH_INVALID',
+      'Production batch item query actor does not belong to the workspace',
+    )
+    const limit = request.limit ?? 20
+    assertDomain(
+      Number.isSafeInteger(limit) && limit >= 1 && limit <= 100,
+      'INVALID_ARGUMENT',
+      'limit must be an integer between 1 and 100',
+    )
+    const batch = await dependencies.repository.read({
+      workspaceId,
+      batchId,
+    })
+    if (!batch) {
+      throw new DomainError(
+        'PRODUCTION_BATCH_NOT_FOUND',
+        'Production batch was not found',
+      )
+    }
+    const cursor = request.cursor
+      ? decodeBatchItemPageCursor(request.cursor, {
+          workspaceId,
+          batchId,
+          definitionHash: batch.definitionHash,
+        })
+      : undefined
+    const start = cursor
+      ? batch.items.findIndex((item) => item.id === cursor.afterItemId) + 1
+      : 0
+    assertDomain(
+      !cursor || start > 0,
+      'INVALID_ARGUMENT',
+      'cursor item no longer belongs to this batch',
+    )
+    const page = batch.items.slice(start, start + limit)
+    const hasNextPage = start + page.length < batch.items.length
+    const last = page.at(-1)
+    return Object.freeze({
+      batchId: batch.id,
+      items: Object.freeze(page.map((item) =>
+        createProductionBatchItemResult({ batch, item }))),
+      ...(hasNextPage && last
+        ? {
+            nextCursor: encodeBatchItemPageCursor({
+              v: 1,
+              workspaceId,
+              batchId,
+              definitionHash: batch.definitionHash,
+              afterItemId: last.id,
+            }),
+          }
+        : {}),
+    })
+  }
+}
+
+export function readProductionBatchItemOperationService(dependencies: {
+  repository: ProductionBatchRepository
+}) {
+  return async function execute(request: {
+    workspaceId: string
+    operationId: string
+  }) {
+    const record = await dependencies.repository.findItemOperation({
+      workspaceId: identity(request.workspaceId, 'workspaceId'),
+      operationId: identity(request.operationId, 'operationId'),
+    })
+    return record
+      ? projectProductionBatchItemOperation(record)
+      : null
   }
 }
 

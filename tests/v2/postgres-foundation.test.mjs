@@ -4,8 +4,8 @@ import test from 'node:test'
 
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import {
-  PUBLIC_OPERATION_PHASES,
-  PUBLIC_OPERATION_TYPES,
+  PERSISTED_PUBLIC_OPERATION_PHASES,
+  PERSISTED_PUBLIC_OPERATION_TYPES,
 } from '../../src/v2/domain/public-operation.ts'
 import { createV2PostgresClient } from '../../src/v2/infrastructure/prisma-postgres/client.ts'
 
@@ -83,11 +83,11 @@ test('latest PostgreSQL operation constraints cover every V2 operation type and 
     definitions.filter((entry) => entry.kind === kind).at(-1)
   assert.deepEqual(
     latest('type')?.values,
-    [...PUBLIC_OPERATION_TYPES],
+    [...PERSISTED_PUBLIC_OPERATION_TYPES],
   )
   assert.deepEqual(
     latest('phase')?.values,
-    [...PUBLIC_OPERATION_PHASES],
+    [...PERSISTED_PUBLIC_OPERATION_PHASES],
   )
   assert.equal(
     latest('type')?.migration,

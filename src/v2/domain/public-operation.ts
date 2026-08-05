@@ -20,8 +20,12 @@ export const PUBLIC_OPERATION_TYPES = [
   'source-cleanup',
   'long-form-index',
   'project-director-run',
+  'production-batch-item',
 ] as const
 export type PublicOperationType = (typeof PUBLIC_OPERATION_TYPES)[number]
+export const PERSISTED_PUBLIC_OPERATION_TYPES = PUBLIC_OPERATION_TYPES.filter(
+  (type) => type !== 'production-batch-item',
+)
 
 export function requiresArtifactRenderCheckpoint(type: PublicOperationType): boolean {
   return type === 'artifact-render'
@@ -56,6 +60,8 @@ export const PUBLIC_OPERATION_PHASES = [
   'chunking',
   'indexing',
   'directing',
+  'planning',
+  'reviewing',
   'verifying',
   'persisting',
   'waiting',
@@ -66,6 +72,9 @@ export const PUBLIC_OPERATION_PHASES = [
 ] as const
 
 export type PublicOperationPhase = (typeof PUBLIC_OPERATION_PHASES)[number]
+export const PERSISTED_PUBLIC_OPERATION_PHASES = PUBLIC_OPERATION_PHASES.filter(
+  (phase) => phase !== 'planning' && phase !== 'reviewing',
+)
 
 export interface PublicOperationProgress {
   completed: number
@@ -82,6 +91,11 @@ export type PublicOperationTarget =
   | Readonly<{
       type: 'project-version'
       id: string
+    }>
+  | Readonly<{
+      type: 'production-batch-item'
+      id: string
+      batchId: string
     }>
 
 export interface PublicOperationResult {
@@ -170,13 +184,24 @@ const DIRECTOR_PHASE_ORDER = [
   'persisting',
 ] as const
 
+const PRODUCTION_BATCH_ITEM_PHASE_ORDER = [
+  'planning',
+  'materializing',
+  'rendering',
+  'reviewing',
+] as const
+
 export type PublicOperationRunningPhase =
   | (typeof RENDER_PHASE_ORDER)[number]
   | (typeof INGEST_PHASE_ORDER)[number]
   | (typeof LONG_FORM_INDEX_PHASE_ORDER)[number]
   | (typeof DIRECTOR_PHASE_ORDER)[number]
+  | (typeof PRODUCTION_BATCH_ITEM_PHASE_ORDER)[number]
 
 function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRunningPhase[] {
+  if (type === 'production-batch-item') {
+    return PRODUCTION_BATCH_ITEM_PHASE_ORDER
+  }
   if (isRenderOperation(type)) return RENDER_PHASE_ORDER
   if (isLongFormIndexOperation(type)) {
     return LONG_FORM_INDEX_PHASE_ORDER
@@ -186,6 +211,7 @@ function runningPhasesFor(type: PublicOperationType): readonly PublicOperationRu
 }
 
 function progressUnit(type: PublicOperationType): string {
+  if (type === 'production-batch-item') return 'batch-step'
   return isRenderOperation(type) ? 'render' : 'stage'
 }
 
@@ -200,7 +226,11 @@ function canonicalProgressFor(
     progress.unit !== progressUnit(operation.type)
   ) return false
 
-  if (operation.status === 'queued') return progress.completed === 0
+  if (operation.status === 'queued') {
+    return operation.type === 'production-batch-item'
+      ? progress.completed >= 0 && progress.completed < phases.length
+      : progress.completed === 0
+  }
   if (operation.status === 'succeeded') return progress.completed === phases.length
   if (operation.status === 'running') {
     return progress.completed === phases.indexOf(
@@ -281,13 +311,22 @@ function validateError(error: PublicOperationError): PublicOperationError {
 
 function validateTarget(target: PublicOperationTarget, field: string): void {
   assertDomain(
-    target.type === 'media-artifact' || target.type === 'project-version',
+    target.type === 'media-artifact' ||
+      target.type === 'project-version' ||
+      target.type === 'production-batch-item',
     'INVALID_PUBLIC_OPERATION',
     `${field}.type is invalid`,
   )
   validateId(target.id, `${field}.id`)
   if (target.type === 'media-artifact') {
     validateId(target.manifestId, `${field}.manifestId`)
+  } else if (target.type === 'production-batch-item') {
+    validateId(target.batchId, `${field}.batchId`)
+    assertDomain(
+      !('manifestId' in target),
+      'INVALID_PUBLIC_OPERATION',
+      `${field}.manifestId is not valid for a production batch item`,
+    )
   } else {
     assertDomain(
       !('manifestId' in target),
@@ -304,7 +343,9 @@ function sameTarget(
   return left.type === right.type &&
     left.id === right.id &&
     (left.type !== 'media-artifact' ||
-      (right.type === 'media-artifact' && left.manifestId === right.manifestId))
+      (right.type === 'media-artifact' && left.manifestId === right.manifestId)) &&
+    (left.type !== 'production-batch-item' ||
+      (right.type === 'production-batch-item' && left.batchId === right.batchId))
 }
 
 function validateEstimatedCost(
@@ -384,7 +425,9 @@ export function assertPublicOperation(operation: PublicOperation): void {
   assertDomain(
     operation.type === 'project-director-run'
       ? operation.target.type === 'project-version'
-      : operation.target.type === 'media-artifact',
+      : operation.type === 'production-batch-item'
+        ? operation.target.type === 'production-batch-item'
+        : operation.target.type === 'media-artifact',
     'INVALID_PUBLIC_OPERATION',
     'PublicOperation type and target are incompatible',
   )
@@ -476,9 +519,12 @@ export function assertPublicOperation(operation: PublicOperation): void {
   }
 
   if (operation.status === 'queued') {
+    const batchItemQueue = operation.type === 'production-batch-item'
     assertDomain(
       operation.phase === 'queued' &&
-        operation.attempt === 0 &&
+        (batchItemQueue
+          ? operation.attempt >= 0
+          : operation.attempt === 0) &&
         !operation.startedAt &&
         !operation.completedAt &&
         !operation.result &&
@@ -492,10 +538,11 @@ export function assertPublicOperation(operation: PublicOperation): void {
     )
   }
   if (operation.status === 'running') {
+    const batchItemOperation = operation.type === 'production-batch-item'
     assertDomain(
       runningPhasesFor(operation.type).includes(operation.phase as PublicOperationRunningPhase) &&
         operation.attempt > 0 &&
-        Boolean(operation.startedAt) &&
+        (batchItemOperation || Boolean(operation.startedAt)) &&
         !operation.completedAt &&
         !operation.result &&
         !operation.error &&
@@ -539,9 +586,10 @@ export function assertPublicOperation(operation: PublicOperation): void {
     )
   }
   if (operation.status === 'succeeded') {
+    const batchItemOperation = operation.type === 'production-batch-item'
     assertDomain(
       operation.phase === 'completed' &&
-        Boolean(operation.startedAt) &&
+        (batchItemOperation || Boolean(operation.startedAt)) &&
         Boolean(operation.completedAt) &&
         Boolean(operation.result) &&
         !operation.error &&
@@ -560,10 +608,11 @@ export function assertPublicOperation(operation: PublicOperation): void {
     )
   }
   if (operation.status === 'failed') {
+    const batchItemOperation = operation.type === 'production-batch-item'
     const error = operation.error ? validateError(operation.error) : undefined
     assertDomain(
       operation.phase === 'failed' &&
-        Boolean(operation.startedAt) &&
+        (batchItemOperation || Boolean(operation.startedAt)) &&
         Boolean(operation.completedAt) &&
         Boolean(error) &&
         !operation.result &&
@@ -659,10 +708,16 @@ export function createQueuedPublicOperation(input: {
           id: validateId(input.target.id, 'target.id'),
           manifestId: validateId(input.target.manifestId, 'target.manifestId'),
         }
-      : {
-          type: 'project-version',
-          id: validateId(input.target.id, 'target.id'),
-        },
+      : input.target.type === 'production-batch-item'
+        ? {
+            type: 'production-batch-item',
+            id: validateId(input.target.id, 'target.id'),
+            batchId: validateId(input.target.batchId, 'target.batchId'),
+          }
+        : {
+            type: 'project-version',
+            id: validateId(input.target.id, 'target.id'),
+          },
     ...(input.estimatedCost
       ? { estimatedCost: validateEstimatedCost(input.estimatedCost) }
       : {}),
@@ -819,7 +874,12 @@ export function succeedPublicOperation(
 ): Readonly<PublicOperation> {
   assertPublicOperation(operation)
   assertDomain(
-    operation.status === 'running' && operation.phase === 'persisting',
+    operation.status === 'running' &&
+      operation.phase === (
+        operation.type === 'production-batch-item'
+          ? 'reviewing'
+          : 'persisting'
+      ),
     'INVALID_PUBLIC_OPERATION',
     'PublicOperation can only succeed after persistence',
   )

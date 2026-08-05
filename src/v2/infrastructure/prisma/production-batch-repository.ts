@@ -19,6 +19,9 @@ import type {
   ProductionBatchRepository,
 } from '../../application/ports/production-batch-repository.ts'
 import {
+  productionBatchItemOperationId,
+} from '../../domain/batch-item-result.ts'
+import {
   createBatchPartialRetry,
   hydrateBatchPartialRetry,
   type BatchPartialRetryJob,
@@ -126,6 +129,16 @@ function hydrateStep(
 }
 
 function hydrateItem(row: ItemRow): Readonly<BatchItem> {
+  if (row.operationId !== productionBatchItemOperationId({
+    workspaceId: row.workspaceId,
+    batchId: row.batchId,
+    itemId: row.id,
+  })) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      'Stored production batch item operation identity is invalid',
+    )
+  }
   return Object.freeze({
     id: row.id,
     key: row.key,
@@ -425,6 +438,11 @@ function itemData(
 ) {
   return {
     id: item.id,
+    operationId: productionBatchItemOperationId({
+      workspaceId: batch.workspaceId,
+      batchId: batch.id,
+      itemId: item.id,
+    }),
     workspaceId: batch.workspaceId,
     batchId: batch.id,
     sequence,
@@ -678,6 +696,33 @@ implements ProductionBatchRepository {
       include: batchInclude,
     })
     return row ? hydrateBatch(row) : null
+  }
+
+  async findItemOperation(input: {
+    workspaceId: string
+    operationId: string
+  }) {
+    const pointer = await this.prisma.v2ProductionBatchItem.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        operationId: input.operationId,
+      },
+      select: { id: true, batchId: true },
+    })
+    if (!pointer) return null
+    const batch = await this.read({
+      workspaceId: input.workspaceId,
+      batchId: pointer.batchId,
+    })
+    const item = batch?.items.find((candidate) =>
+      candidate.id === pointer.id)
+    if (!batch || !item) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'Stored production batch item operation target is missing',
+      )
+    }
+    return Object.freeze({ batch, item })
   }
 
   async list(input: {

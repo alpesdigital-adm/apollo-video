@@ -2,8 +2,6 @@ import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { ScriptBlockRole } from './script-alignment.ts'
 
-const stableOperationId = (value: unknown) => { const text = JSON.stringify(value); let hash = 2166136261; for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619); return (hash >>> 0).toString(16).padStart(8, '0') }
-
 export const PRODUCTION_BATCH_POLICY_VERSION =
   'production-batch/v1' as const
 export const PRODUCTION_BATCH_SCHEMA_VERSION =

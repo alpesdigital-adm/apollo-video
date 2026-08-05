@@ -1936,6 +1936,8 @@ Incremento local F0.092: batch edit e variant portfolio agora projetam seus runs
 
 Incremento local F0.093–F0.095: o commit token mantém wire format HMAC v1, mas emissão e leitura agora são canônicas, limitadas e estritas, com compatibilidade comprovada para tokens v1 válidos. A classificação preflight é server-owned por action ID: batch edit e confirmação de expansão variável usam o gate central; final export unitário é bounded explícito e não equivale a uma matriz final. Matrix/destructive reais, PostgreSQL E2E, deploy e aceite continuam pendentes.
 
+Incremento local F0.096–F0.097: production batch persiste uma identidade operacional content-addressed por item e publica página bounded independente do payload agregado. A `PublicOperation` do item é uma projeção do mesmo aggregate, portanto leitura e retry não criam uma segunda fonte de estado; retry delega ao partial retry canônico com CAS, lineage, custo preservado e escopos de operação+projeto. Testes de aplicação cobrem dry-run, expiry, budget e seleção isolada, e a jornada PostgreSQL/HTTP foi preparada. Execução hospedada, deploy e aceite continuam pendentes.
+
 ### FR-249 — Governança da API
 
 O workspace deve administrar clients, secrets, scopes, rate limits, quotas, webhooks, usage e audit log. Deve existir ambiente ou modo de teste com provider fakes para integrações sem custo externo involuntário.

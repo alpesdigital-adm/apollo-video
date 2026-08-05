@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { retryPublicOperationService } from '@/v2/application/retry-public-operation'
-import { createPublicOperationRepository } from '@/v2/infrastructure/repository-factory'
+import {
+  createProductionBatchRepository,
+  createPublicOperationRepository,
+} from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import {
   publicApiHeaders,
@@ -24,6 +27,7 @@ export async function POST(
     const { operationId } = await context.params
     const retry = retryPublicOperationService({
       operations: createPublicOperationRepository(),
+      productionBatches: createProductionBatchRepository(),
     })
     const operation = await retry({ workspaceId: actor.workspaceId, operationId, actor })
     return NextResponse.json(

@@ -6772,6 +6772,22 @@ const publicOperationTargetSchemaV2 = {
   ],
 }
 
+const publicOperationTargetSchemaV3 = {
+  oneOf: [
+    ...publicOperationTargetSchemaV2.oneOf,
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id', 'batchId'],
+      properties: {
+        type: { const: 'production-batch-item' },
+        id: idSchema,
+        batchId: idSchema,
+      },
+    },
+  ],
+}
+
 const apiClientV2Schema = {
   ...apiClientSchema,
   required: [
@@ -7658,6 +7674,33 @@ const publicOperationSchemaV10 = {
       },
     },
   ],
+}
+
+const publicOperationSchemaV11 = {
+  ...publicOperationSchemaV10,
+  properties: {
+    ...publicOperationSchemaV10.properties,
+    type: {
+      enum: [
+        ...publicOperationSchemaV9.properties.type.enum,
+        'production-batch-item',
+      ],
+    },
+    phase: {
+      enum: [
+        ...publicOperationSchemaV9.properties.phase.enum,
+        'planning',
+        'reviewing',
+      ],
+    },
+    target: publicOperationTargetSchemaV3,
+    result: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['resource'],
+      properties: { resource: publicOperationTargetSchemaV3 },
+    },
+  },
 }
 
 const longFormStageNames = [
@@ -13044,6 +13087,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['operation'],
       properties: { operation: publicOperationSchemaV10 },
+    }),
+  ),
+  defineSchema('public-operation-detail', 11, 'Public operation detail including durable production batch item projections',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['operation'],
+      properties: { operation: publicOperationSchemaV11 },
     }),
   ),
   defineSchema('project-final-export-attempt-history', 1, 'Immutable project final export attempt history',

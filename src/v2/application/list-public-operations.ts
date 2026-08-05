@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import {
   PUBLIC_OPERATION_STATUSES,
-  PUBLIC_OPERATION_TYPES,
+  PERSISTED_PUBLIC_OPERATION_TYPES,
   type PublicOperation,
   type PublicOperationStatus,
 } from '../domain/public-operation.ts'
@@ -126,7 +126,9 @@ export function listPublicOperationsService(dependencies: {
 
     const typeValue = normalizeOptional(request.type)
     assertDomain(
-      !typeValue || PUBLIC_OPERATION_TYPES.includes(typeValue as PublicOperation['type']),
+      !typeValue || PERSISTED_PUBLIC_OPERATION_TYPES.includes(
+        typeValue as typeof PERSISTED_PUBLIC_OPERATION_TYPES[number],
+      ),
       'INVALID_ARGUMENT',
       'type is not supported',
     )

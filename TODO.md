@@ -648,6 +648,8 @@ Incremento local F0.092: `preflight-result/v1` deixou de ser schema órfão e ag
 
 Incremento local F0.093–F0.095: o token v1 agora usa payload canônico, codec base64url estrito, limites antes do decode, claims exatas e secret com limite em bytes, preservando tokens v1 válidos emitidos anteriormente. O gate central deixou de aceitar `actionClass` do caller e resolve somente action IDs registrados; batch edit commit e confirmação de variant portfolio atravessam esse gate, enquanto final export de um único formato é explicitamente bounded. As quatro classes possuem política fail-closed, mas matriz final e commit destrutivo reais ainda não estão integrados; PostgreSQL E2E, deploy e aceite seguem pendentes.
 
+Incremento local F0.096–F0.097: cada item de production batch ganhou `operationId` content-addressed persistido e uma projeção `production-batch-item` lida pela API canônica de operações, sem duplicar estado fora do aggregate. `GET /v1/batches/{batchId}/items` pagina até 100 resultados com cursor estritamente vinculado ao workspace/batch/definition; `operations.read` resolve o item e `operations.retry` exige também `projects:write` e cria exatamente um partial retry canônico para o step falho. A regressão de aplicação agora atravessa os services reais de dry-run, token expirado, budget block e retry parcial; a jornada PostgreSQL/HTTP foi ampliada, mas não executada neste host. Deploy e aceite seguem pendentes.
+
 - [ ] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
 - [ ] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
 - [ ] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
@@ -5463,3 +5465,16 @@ Regressões locais desta slice:
 - `commitBatchEditService` e a confirmação de `createVariantPortfolioPreflightService` usam o gate central, sem chamada direta ao validador; o fingerprint/snapshot/custo continuam revalidados contra estado atual;
 - `enqueueProjectFinalExportService` passa pelo mesmo registry como bounded apenas para um formato aprovado; uma matriz multi-formato permanece classe distinta com preflight obrigatório;
 - matriz final e commit destrutivo ainda não possuem application services integrados a esse gate; PostgreSQL/HTTP E2E, deploy e aceite faltam, portanto F0.093–F0.095 permanecem abertas.
+
+### Incremento operacional F0.096–F0.097 — operações independentes por item
+
+**Status:** implementado e testado localmente em 4 de agosto de 2026; E2E PostgreSQL/HTTP preparado, sem execução, deploy ou aceite.
+
+- migration adiciona `operationId` único e content-addressed a cada `production_batch_items`; hidratação recalcula e rejeita identidade adulterada;
+- `GET /v1/batches/{batchId}/items` usa o application service compartilhado, limite máximo 100 e cursor base64url canônico vinculado a workspace, batch, definition hash e último item;
+- a projeção `PublicOperation` nova possui target `production-batch-item`, fases planning/materializing/rendering/reviewing e deriva status/progresso apenas do aggregate persistido, sem segunda máquina de estado;
+- `GET /v1/operations/{operationId}` consulta tanto operações executáveis quanto itens de lote e falha fechado se uma identidade for ambígua;
+- `POST /v1/operations/{operationId}/retry` exige `operations:retry` e `projects:write`; para item falho, chama o mesmo `createBatchPartialRetryService`, preserva outputs/custo e converge por idempotency key derivada da revisão;
+- testes de aplicação cobrem paginação, cursor cross-batch, read, erro redigido, retry isolado, replay natural, preservação do item concluído, escopos, dry-run sem commit, expiry e budget block;
+- o E2E PostgreSQL skip-gated foi ampliado para item page → operation read → operation retry → partial retry persistido, mas não rodou por ausência de PostgreSQL local isolado;
+- contratos evoluíram `operations.read/retry` para v11 e adicionaram `apollo.batches.items.list`; contratos anteriores permanecem publicados. PostgreSQL não foi executado; deploy e aceite ainda faltam, portanto F0.096–F0.097 permanecem abertas.

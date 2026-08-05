@@ -122,7 +122,12 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       workspaceId,
       name: 'Production batch E2E',
       environment: 'production',
-      scopes: ['projects:read', 'projects:write'],
+      scopes: [
+        'operations:read',
+        'operations:retry',
+        'projects:read',
+        'projects:write',
+      ],
     })
     const auditContext = createExternalAuditContext({
       clientId: issued.client.id,
@@ -135,7 +140,12 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       credentialId: issued.credential.id,
       workspaceId,
       environment: 'production',
-      scopes: new Set(['projects:read', 'projects:write']),
+      scopes: new Set([
+        'operations:read',
+        'operations:retry',
+        'projects:read',
+        'projects:write',
+      ]),
       authenticationKind: 'bearer',
       clientKillSwitchEngaged: false,
       workspaceKillSwitchEngaged: false,
@@ -1504,35 +1514,67 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
       'RENDER_PROCESS_EXITED_AGAIN',
       4,
     )
-    const secondRendererTarget =
-      failedTarget('retry/renderer', 'rendering')
+    failedTarget('retry/renderer', 'rendering')
     const spentBeforeSecondRetry =
       retryBatch.progress.spentMinorUnits
+    const itemPageResponse = await fetch(
+      `${endpoint}/${retryBatch.id}/items?limit=100`,
+      { headers: { authorization } },
+    )
+    const itemPagePayload = await itemPageResponse.json()
+    assert.equal(
+      itemPageResponse.status,
+      200,
+      JSON.stringify(itemPagePayload),
+    )
+    const rendererItemOperation = itemPagePayload.data.items.find((item) =>
+      item.itemId === retryItems['retry/renderer'])
+    assert.equal(rendererItemOperation.status, 'failed')
+    assert.equal(rendererItemOperation.retryable, true)
+    const readItemOperationResponse = await fetch(
+      `${baseUrl}/v1/operations/${rendererItemOperation.operationId}`,
+      { headers: { authorization } },
+    )
+    const readItemOperationPayload = await readItemOperationResponse.json()
+    assert.equal(readItemOperationResponse.status, 200)
+    assert.equal(
+      readItemOperationPayload.data.operation.target.id,
+      retryItems['retry/renderer'],
+    )
     const secondRendererRetryResponse = await fetch(
-      partialRetryEndpoint,
-      {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'idempotency-key':
-            `batch-partial-retry-renderer-2-${suffix}`,
-        },
-        body: JSON.stringify({
-          expectedBatchRevision: retryBatch.revision,
-          targets: [secondRendererTarget],
-        }),
-      },
+      `${baseUrl}/v1/operations/${rendererItemOperation.operationId}/retry`,
+      { method: 'POST', headers: { authorization } },
     )
     const secondRendererRetryPayload =
       await secondRendererRetryResponse.json()
     assert.equal(
       secondRendererRetryResponse.status,
-      201,
+      200,
       JSON.stringify(secondRendererRetryPayload),
     )
-    retryBatch = secondRendererRetryPayload.data.batch
+    assert.equal(
+      secondRendererRetryPayload.data.operation.status,
+      'queued',
+    )
+    const refreshedBatchResponse = await fetch(
+      `${endpoint}/${retryBatch.id}`,
+      { headers: { authorization } },
+    )
+    const refreshedBatchPayload = await refreshedBatchResponse.json()
+    assert.equal(refreshedBatchResponse.status, 200)
+    retryBatch = refreshedBatchPayload.data.batch
+    const retriesAfterOperationResponse = await fetch(
+      `${partialRetryEndpoint}?limit=100`,
+      { headers: { authorization } },
+    )
+    const retriesAfterOperationPayload =
+      await retriesAfterOperationResponse.json()
+    assert.equal(retriesAfterOperationResponse.status, 200)
     const secondRendererRetry =
-      secondRendererRetryPayload.data.partialRetry
+      retriesAfterOperationPayload.data.partialRetries.find((retry) =>
+        retry.id !== mixedRetry.id && retry.jobs.some((job) =>
+          job.itemId === retryItems['retry/renderer']))
+    assert.ok(secondRendererRetry)
     const firstRendererJob = mixedRetry.jobs.find((job) =>
       job.itemId === retryItems['retry/renderer'])
     assert.equal(

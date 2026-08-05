@@ -4,9 +4,9 @@
     "uiActions": 88,
     "capabilities": 81,
     "endpoints": 81,
-    "registeredCapabilities": 194,
-    "operableCapabilities": 194,
-    "publicContractCapabilities": 194,
+    "registeredCapabilities": 195,
+    "operableCapabilities": 195,
+    "publicContractCapabilities": 195,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1931,7 +1931,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/operations/{operationId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v10",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v11",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -1964,7 +1964,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/operations/{operationId}/retry",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/public-operation-detail/v10",
+      "outputSchemaRef": "apollo://schemas/public-operation-detail/v11",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3109,6 +3109,17 @@
       "endpoint": "POST /v1/batches/{batchId}/actions",
       "inputSchemaRef": "apollo://schemas/production-batch-action-request/v1",
       "outputSchemaRef": "apollo://schemas/production-batch-mutated/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.batches.items.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/batches/{batchId}/items",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/batch-item-page/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
