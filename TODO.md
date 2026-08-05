@@ -644,6 +644,8 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 ### F0.042 — Preflight e lote externo [FR-248]
 
+Incremento local F0.092: `preflight-result/v1` deixou de ser schema órfão e agora é materializado pelos application services reais de batch edit e variant portfolio. As duas rotas de criação publicam `result` obrigatório em outputs v2, com o mesmo fingerprint assinado no commit/confirmation token, targets, bloqueios, invalidações, jobs, custo, quota e warnings derivados do run persistido. Os contratos v1 permanecem publicados; PostgreSQL E2E, deploy e aceite continuam pendentes, portanto a caixa permanece aberta.
+
 - [ ] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
 - [ ] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
 - [ ] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
@@ -5435,3 +5437,15 @@ Regressões locais desta slice:
 - 185/185 testes gerais aprovados;
 - contratos aprovados com 55 capabilities, 76 schemas, 97 examples e 49 paths;
 - schema v2, typecheck e regressão geral aprovados.
+
+### Incremento operacional F0.092 — PreflightResult nos preflights reais
+
+**Status:** implementado e testado localmente em 4 de agosto de 2026; sem PostgreSQL E2E, deploy ou aceite.
+
+- batch edit deriva targets versionados, conflitos bloqueantes, invalidações por etapa, jobs agrupados, custo e quota do mesmo `BatchEditPreflightRun` persistido;
+- `skip-failures` mantém elegibilidade quando existem alvos aplicáveis e converte conflitos protegidos não bloqueantes em warnings; all-or-nothing, no-change e budget insuficiente falham fechado;
+- variant portfolio deriva candidatos, confirmação pendente/no-eligible como conflitos, jobs planejados, custo, quota e warnings do mesmo `VariantPortfolioPreflightRun`;
+- o fingerprint público do resultado é exatamente o fingerprint assinado pelo commit/confirmation token, comprovado nos application services e em replay idempotente;
+- `POST` das duas capacidades passou para `2.0.0` e outputs `...-preflight-mutated/v2`, preservando os schemas v1 publicados; o baseline mudou somente nessas duas capacidades e nos dois schemas novos;
+- regressões validam os outputs v2 com JSON Schema e provam que payload v1 sem `result` é rejeitado pelo contrato major novo;
+- persistência PostgreSQL real, E2E HTTP implantado e aceite ainda faltam; nenhuma caixa foi marcada.

@@ -531,23 +531,27 @@ Obrigatório para:
 
 ```ts
 interface PreflightResult {
-  id: string
-  capabilityId: string
-  inputFingerprint: string
-  snapshotVersion: string
-  targets: Array<{ type: string; id: string }>
-  conflicts: PublicIssue[]
-  invalidations: string[]
-  estimatedJobs: number
-  estimatedCost: MoneyRange
-  quotaImpact: Record<string, number>
-  warnings: PublicIssue[]
-  commitToken?: string
-  expiresAt: string
+  schemaVersion: 'preflight-result/v1'
+  eligible: boolean
+  fingerprint: string
+  evaluatedAt: string
+  targets: Array<{ kind: string; id: string; version?: string }>
+  conflicts: Array<{ code: string; target: string; message: string }>
+  invalidations: Array<{
+    kind: 'artifact' | 'analysis' | 'proxy' | 'render'
+    id: string
+    reason: string
+  }>
+  jobs: Array<{ kind: string; count: number; estimatedDurationMs?: number }>
+  cost: { currency: 'USD'; estimatedMinorUnits: number; maximumMinorUnits: number }
+  quota: { unit: string; required: number; remaining: number; allowed: boolean; resetsAt?: string }
+  warnings: Array<{ code: string; message: string; target?: string }>
 }
 ```
 
 Token é assinado, de uso único ou idempotentemente reutilizável para o mesmo commit, e vinculado a client, workspace, input fingerprint, snapshot e expiry. Mudança de versão/custo material invalida o token e exige novo preflight.
+
+O token continua fora do `PreflightResult` e aparece ao lado dele quando o fluxo exige commit ou confirmação. Batch edit e variant portfolio publicam esse resultado em outputs major v2; o fingerprint é materializado na Application e coincide com o claim assinado, inclusive em replay.
 
 ## 18. Batch externo
 

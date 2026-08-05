@@ -1932,6 +1932,8 @@ Incremento local F0.041: depois de autorizar o grant, o application service entr
 
 Operações de alto alcance ou custo devem oferecer preflight/dry-run com targets, conflicts, invalidations, jobs, custo e quota antes do commit. Lotes retornam resultado por item e suportam retry parcial segundo a mesma política da interface.
 
+Incremento local F0.092: batch edit e variant portfolio agora projetam seus runs persistidos no mesmo `preflight-result/v1` durante a criação. O resultado carrega o fingerprint exato assinado pelo token, e os outputs públicos v2 exigem essa evidência sem remover os contratos v1. A jornada PostgreSQL/HTTP implantada e o aceite permanecem pendentes.
+
 ### FR-249 — Governança da API
 
 O workspace deve administrar clients, secrets, scopes, rate limits, quotas, webhooks, usage e audit log. Deve existir ambiente ou modo de teste com provider fakes para integrações sem custo externo involuntário.

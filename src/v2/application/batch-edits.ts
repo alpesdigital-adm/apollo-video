@@ -9,6 +9,9 @@ import {
   type BatchEditPreflightRun,
 } from '../domain/batch-edit.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import {
+  createBatchEditPreflightResult,
+} from '../domain/preflight-result.ts'
 import type {
   BatchEditRepository,
 } from './ports/batch-edit-repository.ts'
@@ -252,6 +255,10 @@ export function createBatchEditPreflightService(dependencies: {
       return Object.freeze({
         run: replay.run,
         replayed: true,
+        preflightResult: createBatchEditPreflightResult({
+          run: replay.run,
+          requestFingerprint: fingerprint,
+        }),
         commitToken: commitToken(
           dependencies.tokenIssuer,
           replay.run,
@@ -312,6 +319,10 @@ export function createBatchEditPreflightService(dependencies: {
     })
     return Object.freeze({
       ...created,
+      preflightResult: createBatchEditPreflightResult({
+        run: created.run,
+        requestFingerprint: fingerprint,
+      }),
       commitToken: commitToken(
         dependencies.tokenIssuer,
         created.run,

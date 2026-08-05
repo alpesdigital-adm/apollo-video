@@ -9,6 +9,9 @@
 O commit token v1 é HMAC e vincula client, workspace, fingerprint do input,
 snapshot, fingerprint de custo e expiração. A assinatura é comparada em tempo
 constante, claims inválidas falham fechadas e o token não é autorização genérica.
+Quando a criação publica `PreflightResult`, seu `fingerprint` é exatamente o
+claim assinado, permitindo auditoria sem expor client, workspace, snapshot ou
+fingerprint de custo.
 
 ## Consequências
 

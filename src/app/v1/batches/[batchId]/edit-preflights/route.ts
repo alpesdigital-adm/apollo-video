@@ -93,6 +93,7 @@ export async function POST(
     return NextResponse.json(
       presentSuccess({
         preflight: presentBatchEditPreflight(result.run),
+        result: result.preflightResult,
         replayed: result.replayed,
         ...(result.commitToken
           ? { commitToken: result.commitToken }

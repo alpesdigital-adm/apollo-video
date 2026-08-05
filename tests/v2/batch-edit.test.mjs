@@ -15,6 +15,9 @@ import {
   hydrateBatchEditPreflight,
 } from '../../src/v2/domain/batch-edit.ts'
 import {
+  createBatchEditPreflightResult,
+} from '../../src/v2/domain/preflight-result.ts'
+import {
   HmacPreflightCommitTokenIssuer,
 } from '../../src/v2/infrastructure/security/preflight-commit-token.ts'
 import { batchActorAuditData, hydrateBatchActorAudit } from '../../src/v2/infrastructure/prisma/batch-actor-audit.ts'
@@ -198,6 +201,12 @@ test('T-FR-086 blocks atomic protected edits and makes skip-failures explicit', 
   assert.equal(atomic.status, 'blocked')
   assert.equal(atomic.protectedConflictCount, 1)
   assert.equal(atomic.confirmationExpiresAt, undefined)
+  const atomicResult = createBatchEditPreflightResult({
+    run: atomic,
+    requestFingerprint: 'f'.repeat(64),
+  })
+  assert.equal(atomicResult.eligible, false)
+  assert.equal(atomicResult.conflicts[0].code, 'PROTECTED_TARGET')
   assert.throws(
     () => createBatchEditCommand({
       id: 'batch-edit-command-blocked',
@@ -215,6 +224,10 @@ test('T-FR-086 blocks atomic protected edits and makes skip-failures explicit', 
     mode: 'skip-failures',
   }))
   assert.equal(partial.status, 'partial-ready')
+  assert.equal(createBatchEditPreflightResult({
+    run: partial,
+    requestFingerprint: 'e'.repeat(64),
+  }).eligible, true)
   assert.equal(partial.applicableItemCount, 2)
   assert.equal(partial.estimatedCostMinorUnits, 250)
   assert.equal(
@@ -272,6 +285,10 @@ test('T-FR-086 exposes sampled diff, no-change and budget failures without commi
     valueRef: 'subtitle-bold-v2',
   })
   assert.ok(noChange.warningCodes.includes('NO_EFFECTIVE_CHANGE'))
+  assert.equal(createBatchEditPreflightResult({
+    run: noChange,
+    requestFingerprint: 'd'.repeat(64),
+  }).conflicts[0].code, 'NO_EFFECTIVE_CHANGE')
 
   const budget = createBatchEditPreflight(preflightInput({
     id: 'batch-edit-preflight-budget',
@@ -284,6 +301,10 @@ test('T-FR-086 exposes sampled diff, no-change and budget failures without commi
   assert.equal(budget.status, 'blocked')
   assert.equal(budget.budgetExceeded, true)
   assert.equal(budget.estimatedCostMinorUnits, 225)
+  assert.equal(createBatchEditPreflightResult({
+    run: budget,
+    requestFingerprint: 'c'.repeat(64),
+  }).quota.allowed, false)
   assert.ok(budget.warningCodes.includes('BUDGET_EXCEEDED'))
   assert.equal(budget.confirmationExpiresAt, undefined)
 })
@@ -446,7 +467,22 @@ test('T-FR-086 application service binds signed commit, actor, scope and idempot
   const preview = await createPreflight(request)
   assert.equal(preview.replayed, false)
   assert.equal(preview.run.status, 'ready')
+  assert.equal(preview.preflightResult.schemaVersion, 'preflight-result/v1')
+  assert.equal(preview.preflightResult.eligible, true)
+  assert.equal(preview.preflightResult.targets.length, 3)
+  assert.equal(preview.preflightResult.invalidations.length, 6)
+  assert.deepEqual(
+    preview.preflightResult.jobs.map(({ kind, count }) => ({ kind, count })),
+    [
+      { kind: 'batch-rendering', count: 3 },
+      { kind: 'batch-reviewing', count: 3 },
+    ],
+  )
   assert.ok(preview.commitToken)
+  assert.equal(
+    preview.preflightResult.fingerprint,
+    issuer.verify(preview.commitToken).fingerprint,
+  )
   assert.equal(
     preflights.get(preview.run.id).authenticationAudit.credentialId,
     'batch-edit-credential',
@@ -460,6 +496,7 @@ test('T-FR-086 application service binds signed commit, actor, scope and idempot
   const previewReplay = await createPreflight(request)
   assert.equal(previewReplay.replayed, true)
   assert.equal(previewReplay.run.preflightHash, preview.run.preflightHash)
+  assert.deepEqual(previewReplay.preflightResult, preview.preflightResult)
   assert.equal(previewReplay.commitToken, preview.commitToken)
   await assert.rejects(
     () => createPreflight({

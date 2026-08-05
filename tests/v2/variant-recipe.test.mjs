@@ -430,7 +430,17 @@ test('T-FR-085 application binds signed expansion confirmation to graph, policy,
     idempotencyKey: 'portfolio-initial-key',
   })
   assert.equal(initial.run.confirmation.required, true)
+  assert.equal(initial.preflightResult.schemaVersion, 'preflight-result/v1')
+  assert.equal(initial.preflightResult.eligible, false)
+  assert.equal(
+    initial.preflightResult.conflicts[0].code,
+    'CONFIRMATION_REQUIRED',
+  )
   assert.ok(initial.confirmationToken)
+  assert.equal(
+    initial.preflightResult.fingerprint,
+    issuer.verify(initial.confirmationToken).fingerprint,
+  )
   assert.equal(initial.run.estimates.jobsCreated, 0)
 
   const confirmed = await service({
@@ -441,6 +451,12 @@ test('T-FR-085 application binds signed expansion confirmation to graph, policy,
   assert.equal(confirmed.run.confirmation.required, false)
   assert.equal(confirmed.run.confirmation.satisfied, true)
   assert.equal(confirmed.run.effectiveRecipeLimit, 2)
+  assert.equal(confirmed.preflightResult.eligible, true)
+  assert.equal(confirmed.preflightResult.conflicts.length, 0)
+  assert.equal(
+    confirmed.preflightResult.quota.required,
+    confirmed.run.estimates.estimatedCostMinorUnits,
+  )
 
   await assert.rejects(
     () => service({

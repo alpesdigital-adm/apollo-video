@@ -4122,7 +4122,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.variant-portfolio-preflights.create',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Preflight bounded variant portfolio',
     description: 'Counts the theoretical and hard-filtered variant space without materializing its Cartesian product, selects a quality-bounded diverse top-N with minimum role coverage, calculates cost, time, storage and reuse, and returns a signed confirmation token above the workspace default.',
     exposure: 'public',
@@ -4132,7 +4132,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-variant-portfolio-preflight-request/v1',
     outputSchemaRef:
-      'apollo://schemas/variant-portfolio-preflight-mutated/v1',
+      'apollo://schemas/variant-portfolio-preflight-mutated/v2',
     endpoint: {
       method: 'POST',
       path:
@@ -4210,7 +4210,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.batches.edit-preflights.create',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'Preview explicit batch edit',
     description: 'Persists an immutable impact preview for one exact recipe, output-format and item selection, including sampled before/after values, protected conflicts, invalidations, budget and a signed short-lived commit token.',
     exposure: 'public',
@@ -4220,7 +4220,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-batch-edit-preflight-request/v1',
     outputSchemaRef:
-      'apollo://schemas/batch-edit-preflight-mutated/v1',
+      'apollo://schemas/batch-edit-preflight-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/batches/{batchId}/edit-preflights',

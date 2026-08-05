@@ -25,11 +25,16 @@ Elegibilidade é derivada: somente ausência de conflicts e quota suficiente pro
 `eligible: true`. Todas as coleções e textos possuem limites. O schema e exemplo
 são publicados pela API versionada de contratos.
 
+Batch edit e variant portfolio devem projetar seus runs persistidos nesse
+envelope no application service. O `fingerprint` do resultado é o mesmo valor
+assinado no commit/confirmation token; a rota não pode reconstruí-lo a partir
+de campos públicos nem criar estimativas próprias.
+
 ## Consequências
 
 - UI, ferramentas externas e agentes podem interpretar o mesmo impacto.
 - Custo evita ambiguidade de ponto flutuante usando minor units.
-- Commit token, snapshot e expiry entram nas próximas tarefas sem alterar v1.
+- Commit token, snapshot e expiry permanecem fora do envelope canônico; respostas operacionais os combinam em outputs próprios versionados.
 - Novas dimensões exigem nova versão do schema.
 
 ## Evidências exigidas
@@ -38,4 +43,6 @@ são publicados pela API versionada de contratos.
 - elegibilidade inconsistente falha fechada;
 - quota e custo inconsistentes são rejeitados;
 - schema é descoberto pela Public API;
+- outputs operacionais exigem o resultado canônico em nova versão major;
+- fingerprint do resultado e do token coincidem também em replay;
 - contratos, typecheck e regressão permanecem verdes.

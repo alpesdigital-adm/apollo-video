@@ -4330,6 +4330,48 @@ const variantPortfolioPreflightRunExample = {
   createdAt,
   runHash: '8'.repeat(64),
 }
+const variantPortfolioPreflightResultExample = {
+  schemaVersion: 'preflight-result/v1',
+  eligible: false,
+  fingerprint: '9'.repeat(64),
+  evaluatedAt: createdAt,
+  targets: [
+    {
+      kind: 'variant-recipe-candidate',
+      id: variantPortfolioPreflightRunExample.selected[0].candidateHash,
+      version:
+        variantPortfolioPreflightRunExample.selected[0]
+          .reusableRecipeRunHash,
+    },
+  ],
+  conflicts: [
+    {
+      code: 'CONFIRMATION_REQUIRED',
+      target: variantPortfolioPreflightRunExample.id,
+      message: 'Variant portfolio expansion requires confirmation',
+    },
+  ],
+  invalidations: [],
+  jobs: [],
+  cost: {
+    currency: 'USD',
+    estimatedMinorUnits: 0,
+    maximumMinorUnits: 0,
+  },
+  quota: {
+    unit: 'USD-minor-unit',
+    required: 0,
+    remaining:
+      variantPortfolioPreflightRunExample.budgetRemainingMinorUnits,
+    allowed: true,
+  },
+  warnings: variantPortfolioPreflightRunExample.warningCodes.map(
+    (code) => ({
+      code,
+      message: code.toLowerCase().replaceAll('_', ' '),
+    }),
+  ),
+}
 const batchEditPolicyExample = {
   schemaVersion: 'batch-edit-policy/v1',
   workspaceId,
@@ -4435,6 +4477,51 @@ const batchEditPreflightExample = {
   createdByClientId: clientId,
   createdAt,
   preflightHash: 'f'.repeat(64),
+}
+const batchEditPreflightResultExample = {
+  schemaVersion: 'preflight-result/v1',
+  eligible: true,
+  fingerprint: '0'.repeat(64),
+  evaluatedAt: createdAt,
+  targets: [
+    {
+      kind: 'batch-item',
+      id: productionBatchExample.items[0].id,
+      version: '1',
+    },
+  ],
+  conflicts: [],
+  invalidations: [
+    {
+      kind: 'render',
+      id: `${batchEditTargetRef}:rendering`,
+      reason: 'subtitle-style invalidates rendering',
+    },
+    {
+      kind: 'proxy',
+      id: `${batchEditTargetRef}:reviewing`,
+      reason: 'subtitle-style invalidates reviewing',
+    },
+  ],
+  jobs: [
+    { kind: 'batch-rendering', count: 1 },
+    { kind: 'batch-reviewing', count: 1 },
+  ],
+  cost: {
+    currency: 'USD',
+    estimatedMinorUnits: 25,
+    maximumMinorUnits: 25,
+  },
+  quota: {
+    unit: 'USD-minor-unit',
+    required: 25,
+    remaining: 3200,
+    allowed: true,
+  },
+  warnings: batchEditPreflightExample.warningCodes.map((code) => ({
+    code,
+    message: code.toLowerCase().replaceAll('_', ' '),
+  })),
 }
 const batchEditAfterStateExample = {
   ...batchEditBeforeStateExample,
@@ -8192,6 +8279,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/variant-portfolio-preflight-mutated/v2': [
+      {
+        data: {
+          preflight: variantPortfolioPreflightRunExample,
+          result: variantPortfolioPreflightResultExample,
+          replayed: false,
+          confirmationToken:
+            `${'a'.repeat(48)}.${'b'.repeat(43)}`,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/variant-portfolio-preflight-read/v1': [
       {
         data: { preflight: variantPortfolioPreflightRunExample },
@@ -8226,6 +8325,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           preflight: batchEditPreflightExample,
+          replayed: false,
+          commitToken: `${'c'.repeat(48)}.${'d'.repeat(43)}`,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/batch-edit-preflight-mutated/v2': [
+      {
+        data: {
+          preflight: batchEditPreflightExample,
+          result: batchEditPreflightResultExample,
           replayed: false,
           commitToken: `${'c'.repeat(48)}.${'d'.repeat(43)}`,
         },

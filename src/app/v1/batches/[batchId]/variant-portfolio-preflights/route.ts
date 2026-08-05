@@ -96,6 +96,7 @@ export async function POST(
     return NextResponse.json(
       presentSuccess({
         preflight: presentVariantPortfolioPreflight(result.run),
+        result: result.preflightResult,
         replayed: result.replayed,
         ...(result.confirmationToken
           ? { confirmationToken: result.confirmationToken }

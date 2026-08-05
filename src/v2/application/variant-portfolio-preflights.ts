@@ -1,6 +1,9 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
+  createVariantPortfolioPreflightResult,
+} from '../domain/preflight-result.ts'
+import {
   createVariantPortfolioPolicy,
   createVariantPortfolioPreflight,
   type VariantPortfolioPreflightRun,
@@ -174,6 +177,10 @@ export function createVariantPortfolioPreflightService(dependencies: {
       return Object.freeze({
         run: replay.run,
         replayed: true,
+        preflightResult: createVariantPortfolioPreflightResult({
+          run: replay.run,
+          requestFingerprint: fingerprint,
+        }),
         confirmationToken: confirmationToken(
           dependencies.tokenIssuer,
           replay.run,
@@ -264,6 +271,10 @@ export function createVariantPortfolioPreflightService(dependencies: {
     })
     return Object.freeze({
       ...created,
+      preflightResult: createVariantPortfolioPreflightResult({
+        run: created.run,
+        requestFingerprint: fingerprint,
+      }),
       confirmationToken: confirmationToken(
         dependencies.tokenIssuer,
         created.run,

@@ -390,7 +390,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:2481",
       "capabilityId": "apollo.batches.variant-portfolio-preflights.create",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/variant-portfolio-preflights",
       "applicationServices": [
         "authenticateApiClientService",
@@ -407,7 +407,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:2622",
       "capabilityId": "apollo.batches.edit-preflights.create",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights",
       "applicationServices": [
         "authenticateApiClientService",
@@ -2987,7 +2987,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/batches/{batchId}/variant-portfolio-preflights",
       "inputSchemaRef": "apollo://schemas/create-variant-portfolio-preflight-request/v1",
-      "outputSchemaRef": "apollo://schemas/variant-portfolio-preflight-mutated/v1",
+      "outputSchemaRef": "apollo://schemas/variant-portfolio-preflight-mutated/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3020,7 +3020,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights",
       "inputSchemaRef": "apollo://schemas/create-batch-edit-preflight-request/v1",
-      "outputSchemaRef": "apollo://schemas/batch-edit-preflight-mutated/v1",
+      "outputSchemaRef": "apollo://schemas/batch-edit-preflight-mutated/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
