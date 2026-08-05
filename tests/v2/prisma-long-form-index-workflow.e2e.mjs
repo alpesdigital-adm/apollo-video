@@ -390,43 +390,62 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       const transcriptProcessor =
         createLongFormTranscriptStageProcessor({
         repository: workflows,
-        transcriber: {
-          async transcribe() {
-            transcriptCalls += 1
-            return transcript
+        providers: {
+          resolveTranscription() {
+            return {
+              identity: {
+                provider: 'groq', model: 'whisper-large-v3',
+                version: 'groq-audio-transcriptions/v1',
+              },
+              pricingMinorUnitsPerHour: 1,
+              create() {
+                return { async transcribe() {
+                  transcriptCalls += 1
+                  return transcript
+                } }
+              },
+            }
           },
         },
         audio,
         createTranscriptId: (hash) => `transcript-${hash}`,
-        providerVersion: 'groq-audio-transcriptions/v1',
-        pricingMinorUnitsPerHour: 1,
       })
       const diarizationProcessor =
         createSpeakerDiarizationStageProcessor({
         repository: speaker,
-        provider: {
-          async diarize() {
-            diarizationCalls += 1
+        providers: {
+          resolveDiarization() {
             return {
-              provider: {
-                id: 'openai',
-                model: 'gpt-4o-transcribe-diarize',
+              identity: {
+                provider: 'openai', model: 'gpt-4o-transcribe-diarize',
                 version: 'diarized-json/v1',
               },
-              segments: transcriptSegments.map((segment, index) => ({
-                providerSegmentId: `segment-${index}`,
-                providerLabel: index % 2 === 0 ? 'A' : 'B',
-                startMs: segment.start * 1_000,
-                endMs: segment.end * 1_000,
-                text: segment.text,
-              })),
-              usageSeconds: 7_200,
+              pricingMinorUnitsPerHour: 1,
+              create() {
+                return { async diarize() {
+                  diarizationCalls += 1
+                  return {
+                    provider: {
+                      id: 'openai',
+                      model: 'gpt-4o-transcribe-diarize',
+                      version: 'diarized-json/v1',
+                    },
+                    segments: transcriptSegments.map((segment, index) => ({
+                      providerSegmentId: `segment-${index}`,
+                      providerLabel: index % 2 === 0 ? 'A' : 'B',
+                      startMs: segment.start * 1_000,
+                      endMs: segment.end * 1_000,
+                      text: segment.text,
+                    })),
+                    usageSeconds: 7_200,
+                  }
+                } }
+              },
             }
           },
         },
         audio,
         createRunId: () => `diarization-run-${suffix}`,
-        pricingMinorUnitsPerHour: 1,
       })
       const derived = createLongFormDerivedStageProcessor({
         hierarchical:

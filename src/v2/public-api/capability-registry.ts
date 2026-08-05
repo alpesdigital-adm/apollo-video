@@ -5234,9 +5234,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef: 'apollo://schemas/delete-governance-policy-request/v1', outputSchemaRef: 'apollo://schemas/governance-policy-command-result/v1', endpoint: { method: 'DELETE', path: '/v1/workspaces/{workspaceId}/governance/policies/{policyId}' }, toolName: 'apollo.governance.policies.delete', supportsDryRun: false, costClass: 'free', confirmation: 'human-approval', successStatuses: [200], idempotency: 'required',
   },
   {
-    id: 'apollo.governance.sandbox-executions.list', version: '1.0.0', title: 'List sandbox provider executions',
-    description: 'Returns redacted content-addressed receipts proving simulated provider cost and zero external calls in sandbox.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
-    outputSchemaRef: 'apollo://schemas/sandbox-provider-execution-page/v1', endpoint: { method: 'GET', path: '/v1/governance/sandbox-executions' }, toolName: 'apollo.governance.sandbox-executions.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    id: 'apollo.governance.sandbox-executions.list', version: '2.0.0', title: 'List sandbox provider executions',
+    description: 'Returns redacted content-addressed receipts proving simulated semantic and media provider cost with zero external calls in sandbox.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
+    outputSchemaRef: 'apollo://schemas/sandbox-provider-execution-page/v2', endpoint: { method: 'GET', path: '/v1/governance/sandbox-executions' }, toolName: 'apollo.governance.sandbox-executions.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
     queryParameters: [
       { name: 'limit', description: 'Maximum receipts per page.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
       { name: 'after', description: 'Opaque cursor from the previous page.', required: false, schema: { type: 'string', minLength: 16, maxLength: 1024 } },

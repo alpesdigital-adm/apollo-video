@@ -9,6 +9,9 @@ import type {
   SpeakerDiarizationProvider,
 } from './ports/speaker-diarization-provider.ts'
 import type {
+  ProviderRuntimeRouter,
+} from './ports/provider-runtime-router.ts'
+import type {
   SpeakerDiarizationRepository,
 } from './ports/speaker-diarization-repository.ts'
 import {
@@ -67,29 +70,16 @@ function transcriptOutput(
 export function createSpeakerDiarizationStageProcessor(
   dependencies: {
     repository: SpeakerDiarizationRepository
-    provider: SpeakerDiarizationProvider
+    providers: Pick<ProviderRuntimeRouter, 'resolveDiarization'>
     audio: SpeakerDiarizationAudioPreparer
     createRunId: () => string
     clock?: () => Date
     monotonicClock?: () => number
-    pricingMinorUnitsPerHour: number
   },
 ): LongFormIndexStageProcessor {
   const clock = dependencies.clock ?? (() => new Date())
   const monotonicClock =
     dependencies.monotonicClock ?? (() => performance.now())
-  if (
-    !Number.isSafeInteger(
-      dependencies.pricingMinorUnitsPerHour,
-    ) ||
-    dependencies.pricingMinorUnitsPerHour < 1 ||
-    dependencies.pricingMinorUnitsPerHour > 10_000_000
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_NOT_CONFIGURED',
-      'Diarization provider pricing is not configured',
-    )
-  }
   const persist = persistSpeakerDiarizationService({
     repository: dependencies.repository,
     createRunId: dependencies.createRunId,
@@ -111,6 +101,19 @@ export function createSpeakerDiarizationStageProcessor(
         throw new DomainError(
           'PRECONDITION_REQUIRED',
           'Speaker diarization processor requires a running diarization stage',
+        )
+      }
+      const runtime = dependencies.providers.resolveDiarization(
+        input.authenticationAudit,
+      )
+      if (
+        checkpoint.version.provider !== runtime.identity.provider ||
+        checkpoint.version.model !== runtime.identity.model ||
+        checkpoint.version.version !== runtime.identity.version
+      ) {
+        throw new DomainError(
+          'PERSISTENCE_NOT_CONFIGURED',
+          'Diarization provider does not match the authenticated environment',
         )
       }
       const transcript = transcriptOutput(workflow)
@@ -170,7 +173,7 @@ export function createSpeakerDiarizationStageProcessor(
       }
       const maximumExpectedCost = stageCost(
         Math.ceil(context.durationMs / 1_000),
-        dependencies.pricingMinorUnitsPerHour,
+        runtime.pricingMinorUnitsPerHour,
       )
       const remainingWorkflowBudget =
         workflow.budget.maximumCostMinorUnits -
@@ -215,7 +218,7 @@ export function createSpeakerDiarizationStageProcessor(
             'Speaker diarization lease was lost after audio preparation',
           )
         }
-        result = await dependencies.provider.diarize({
+        result = await runtime.create().diarize({
           audioPath: prepared.audioPath,
           language: context.language,
           expectedDurationMs: prepared.durationMs,
@@ -248,7 +251,7 @@ export function createSpeakerDiarizationStageProcessor(
       }
       const costMinorUnits = stageCost(
         result.usageSeconds,
-        dependencies.pricingMinorUnitsPerHour,
+        runtime.pricingMinorUnitsPerHour,
       )
       const elapsedMs = Math.max(
         0,

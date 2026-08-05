@@ -316,7 +316,7 @@ export function runNextLongFormIndexOperationService(
           stage === 'transcript'
             ? 'long-form-transcript'
             : stage === 'diarization'
-              ? 'openai-diarization'
+              ? 'speaker-diarization'
               : 'long-form-derived-analysis'
         const result = dependencies.telemetry
           ? await runPublicOperationSpan({

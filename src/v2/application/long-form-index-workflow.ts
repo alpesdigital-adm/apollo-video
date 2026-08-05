@@ -15,6 +15,9 @@ import {
 import type {
   LongFormIndexWorkflowRepository,
 } from './ports/long-form-index-workflow-repository.ts'
+import type {
+  ProviderRuntimeRouter,
+} from './ports/provider-runtime-router.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
@@ -123,6 +126,10 @@ function rightsAllowIndexing(
 
 export function createLongFormIndexWorkflowService(dependencies: {
   repository: LongFormIndexWorkflowRepository
+  providers: Pick<
+    ProviderRuntimeRouter,
+    'resolveTranscription' | 'resolveDiarization'
+  >
   clock: () => Date
   createWorkflowId: () => string
   createOperationId: () => string
@@ -195,6 +202,21 @@ export function createLongFormIndexWorkflowService(dependencies: {
     requireScope(request.actor, 'projects:write')
     const audit = materializeActorAuditContext(request.actor)
     assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Authenticated workspace does not match long-form workflow')
+    const expectedProviderVersions = Object.freeze({
+      transcript: dependencies.providers.resolveTranscription(audit).identity,
+      diarization: dependencies.providers.resolveDiarization(audit).identity,
+    })
+    for (const stage of ['transcript', 'diarization'] as const) {
+      const supplied = versions[stage]
+      const expected = expectedProviderVersions[stage]
+      assertDomain(
+        supplied.provider === expected.provider &&
+          supplied.model === expected.model &&
+          supplied.version === expected.version,
+        'INVALID_CAPABILITY',
+        `${stage} provider version is not allowed for the authenticated environment`,
+      )
+    }
     const createdByClientId = identity(audit.clientId, 'actor.id')
     const key = idempotencyKey(request.idempotencyKey)
     const requestFingerprint = calculateCanonicalHash({

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   createExternalAuditContext,
+  materializeActorAuditContext,
 } from '../../src/v2/application/authenticate-api-client.ts'
 import {
   listSandboxProviderExecutionsService,
@@ -10,6 +14,9 @@ import {
   createSandboxProviderReceipt,
 } from '../../src/v2/domain/sandbox-provider-execution.ts'
 import { SimulatedSandboxProvider } from '../../src/v2/infrastructure/sandbox/simulated-provider.ts'
+import {
+  EnvironmentProviderRuntimeRouter,
+} from '../../src/v2/infrastructure/provider-runtime-router.ts'
 import {
   PrismaSandboxProviderExecutionRepository,
 } from '../../src/v2/infrastructure/prisma/sandbox-provider-execution-repository.ts'
@@ -118,4 +125,68 @@ test('Prisma sandbox execution repository converges replay and rejects tampered 
     repository.list({ workspaceId: 'workspace-1', limit: 20 }),
     /Stored sandbox provider receipt is invalid/,
   )
+})
+
+test('authenticated sandbox routes transcription and diarization without external providers', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'apollo-sandbox-provider-'))
+  const audioPath = join(directory, 'controlled-audio.flac')
+  const receipts = []
+  const repository = {
+    async record(receipt) {
+      receipts.push(receipt)
+      return { receipt, createdAt: '2026-08-05T04:00:00.000Z' }
+    },
+  }
+  try {
+    await writeFile(audioPath, Buffer.from('controlled sandbox audio bytes'))
+    const router = new EnvironmentProviderRuntimeRouter({
+      GROQ_API_KEY: 'must-never-be-used-in-sandbox',
+      OPENAI_API_KEY: 'must-never-be-used-in-sandbox',
+      TRANSCRIBE_PROVIDER: 'unsupported-production-provider',
+    }, repository)
+    const audit = materializeActorAuditContext(actor())
+    const transcription = router.resolveTranscription(audit)
+    const transcript = await transcription.create().transcribe({
+      audioPath, language: 'pt-BR',
+    })
+    assert.equal(transcript.provider, 'apollo-sandbox-fake')
+    assert.equal(transcription.identity.version, 'sandbox-transcription/v1')
+    const diarization = router.resolveDiarization(audit)
+    const diarized = await diarization.create().diarize({
+      audioPath, language: 'pt-BR', expectedDurationMs: 3_000,
+      signal: new AbortController().signal,
+    })
+    assert.equal(diarized.provider.id, 'apollo-sandbox-fake')
+    assert.equal(diarization.identity.version, 'sandbox-diarization/v1')
+    assert.deepEqual(receipts.map((receipt) => receipt.operation), [
+      'transcription', 'speaker-diarization',
+    ])
+    assert.ok(receipts.every((receipt) =>
+      receipt.schemaVersion === 'sandbox-provider-receipt/v2' &&
+      receipt.externalCalls === 0 && receipt.cost.minorUnits > 0))
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('production provider routing never falls back to a sandbox fake', () => {
+  const repository = { async record() { throw new Error('unreachable') } }
+  const productionAudit = materializeActorAuditContext(actor({ environment: 'production' }))
+  const unconfigured = new EnvironmentProviderRuntimeRouter({}, repository)
+  assert.throws(
+    () => unconfigured.resolveTranscription(productionAudit),
+    /pricing is not configured/,
+  )
+  const configured = new EnvironmentProviderRuntimeRouter({
+    GROQ_API_KEY: 'g'.repeat(24),
+    GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR: '100',
+    OPENAI_API_KEY: 'o'.repeat(24),
+    OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR: '200',
+  }, repository)
+  const transcription = configured.resolveTranscription(productionAudit)
+  const diarization = configured.resolveDiarization(productionAudit)
+  assert.equal(transcription.identity.provider, 'groq')
+  assert.equal(diarization.identity.provider, 'openai')
+  assert.notEqual(transcription.create().constructor.name, 'SandboxMediaTranscriber')
+  assert.notEqual(diarization.create().constructor.name, 'SandboxSpeakerDiarizationProvider')
 })

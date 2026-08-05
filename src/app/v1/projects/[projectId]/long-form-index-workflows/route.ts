@@ -9,6 +9,7 @@ import {
 import { DomainError } from '@/v2/domain/errors'
 import {
   createLongFormIndexWorkflowRepository,
+  createProviderRuntimeRouter,
 } from '@/v2/infrastructure/repository-factory'
 import {
   authenticateExternalRequest,
@@ -99,6 +100,7 @@ export async function POST(
     const body = parseCreateLongFormIndexWorkflowBody(rawBody)
     const result = await createLongFormIndexWorkflowService({
       repository: createLongFormIndexWorkflowRepository(),
+      providers: createProviderRuntimeRouter(),
       clock: () => new Date(),
       createWorkflowId: () =>
         `long-form-workflow-${randomUUID()}`,

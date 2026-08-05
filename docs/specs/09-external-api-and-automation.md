@@ -782,7 +782,7 @@ Environment `sandbox`:
 
 O mesmo OpenAPI é usado nos dois environments; capabilities podem indicar `availableIn`.
 
-O roteamento é server-owned e usa exclusivamente o environment do ator autenticado. Para embedding semântico, `sandbox` seleciona `apollo-sandbox-fake` independentemente de credentials externas presentes no processo; o receipt persistido contém somente hashes de input/output, unidades, custo simulado inteiro e `externalCalls=0`. `production` rejeita fake/deterministic e não possui fallback silencioso. `GET /v1/governance/sandbox-executions` expõe a administradores uma página workspace-bound desses receipts, nunca o input original. Transcrição, diarização e providers sintéticos só satisfazem este requisito depois de atravessarem o mesmo router.
+O roteamento é server-owned e usa exclusivamente o environment do ator autenticado persistido na operação. Para embedding semântico, ingest/transcrição e stages long-form de transcript/diarização, `sandbox` seleciona `apollo-sandbox-fake` independentemente de credentials externas presentes no processo; receipts v1/v2 persistidos contêm somente hashes de input/output, unidades, custo simulado inteiro e `externalCalls=0`. `production` rejeita fake/deterministic, não possui fallback silencioso e exige identidade provider/model/version compatível antes do enqueue long-form. `GET /v1/governance/sandbox-executions` v2 expõe a administradores uma página workspace-bound de receipts mistos, nunca o input original. Providers sintéticos só satisfazem este requisito depois de atravessarem o mesmo router.
 
 ## 26. Falhas e fallbacks
 

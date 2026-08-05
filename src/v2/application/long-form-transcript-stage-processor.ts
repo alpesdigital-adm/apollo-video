@@ -1,5 +1,5 @@
 import { DomainError } from '../domain/errors.ts'
-import type { MediaTranscriber } from './ports/media-ingest.ts'
+import type { ProviderRuntimeRouter } from './ports/provider-runtime-router.ts'
 import type {
   LongFormIndexStageProcessor,
 } from './ports/long-form-index-stage-processor.ts'
@@ -27,11 +27,9 @@ function resultCount(transcript: Readonly<{
 export function createLongFormTranscriptStageProcessor(
   dependencies: {
     repository: LongFormIndexWorkflowRepository
-    transcriber: MediaTranscriber
+    providers: Pick<ProviderRuntimeRouter, 'resolveTranscription'>
     audio: SpeakerDiarizationAudioPreparer
     createTranscriptId: (transcriptHash: string) => string
-    providerVersion: string
-    pricingMinorUnitsPerHour: number
     clock?: () => Date
     monotonicClock?: () => number
   },
@@ -39,20 +37,6 @@ export function createLongFormTranscriptStageProcessor(
   const clock = dependencies.clock ?? (() => new Date())
   const monotonicClock =
     dependencies.monotonicClock ?? (() => performance.now())
-  if (
-    !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(
-      dependencies.providerVersion,
-    ) ||
-    !Number.isSafeInteger(dependencies.pricingMinorUnitsPerHour) ||
-    dependencies.pricingMinorUnitsPerHour < 1 ||
-    dependencies.pricingMinorUnitsPerHour > 10_000_000
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_NOT_CONFIGURED',
-      'Long-form transcription pricing or provider version is invalid',
-    )
-  }
-
   return Object.freeze({
     async process(
       input: Parameters<
@@ -70,12 +54,17 @@ export function createLongFormTranscriptStageProcessor(
           'Transcript processor requires a running transcript stage',
         )
       }
+      const runtime = dependencies.providers.resolveTranscription(
+        input.authenticationAudit,
+      )
       if (
-        checkpoint.version.version !== dependencies.providerVersion
+        checkpoint.version.provider !== runtime.identity.provider ||
+        checkpoint.version.model !== runtime.identity.model ||
+        checkpoint.version.version !== runtime.identity.version
       ) {
         throw new DomainError(
           'PERSISTENCE_NOT_CONFIGURED',
-          'Transcript adapter version does not match the checkpoint',
+          'Transcript provider does not match the authenticated environment',
         )
       }
       const context =
@@ -155,7 +144,7 @@ export function createLongFormTranscriptStageProcessor(
       }
       const maximumExpectedCost = stageCost(
         context.durationMs,
-        dependencies.pricingMinorUnitsPerHour,
+        runtime.pricingMinorUnitsPerHour,
       )
       const remainingWorkflowBudget =
         workflow.budget.maximumCostMinorUnits -
@@ -197,7 +186,7 @@ export function createLongFormTranscriptStageProcessor(
             'Transcript lease was lost after audio preparation',
           )
         }
-        const transcript = await dependencies.transcriber.transcribe({
+        const transcript = await runtime.create().transcribe({
           audioPath: prepared.audioPath,
           language: context.language,
           signal: input.signal,
@@ -242,7 +231,7 @@ export function createLongFormTranscriptStageProcessor(
             operationAttempt: input.lease.attempt,
             transcriptId,
             transcript,
-            providerVersion: checkpoint.version.version,
+            providerVersion: runtime.identity.version,
             sourceArtifactId: workflow.sourceArtifactId,
             sourceArtifactSha256:
               workflow.sourceArtifactSha256,

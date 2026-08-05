@@ -627,18 +627,32 @@ test('T-FR-133 stage processor prepares immutable audio, persists lineage and re
         assert.equal(operationId, fixture.context.operationId)
       },
     },
-    provider: {
-      async diarize(input) {
-        providerCalls += 1
-        providerLanguage = input.language
+    providers: {
+      resolveDiarization() {
         return {
-          provider: {
-            id: 'openai',
+          identity: {
+            provider: 'openai',
             model: 'gpt-4o-transcribe-diarize',
             version: 'diarized-json/v1',
           },
-          segments,
-          usageSeconds: 7200,
+          pricingMinorUnitsPerHour: 60,
+          create() {
+            return {
+              async diarize(input) {
+                providerCalls += 1
+                providerLanguage = input.language
+                return {
+                  provider: {
+                    id: 'openai',
+                    model: 'gpt-4o-transcribe-diarize',
+                    version: 'diarized-json/v1',
+                  },
+                  segments,
+                  usageSeconds: 7200,
+                }
+              },
+            }
+          },
         }
       },
     },
@@ -649,7 +663,6 @@ test('T-FR-133 stage processor prepares immutable audio, persists lineage and re
       monotonic += 1000
       return value
     },
-    pricingMinorUnitsPerHour: 60,
   })
   const request = {
     workflow,
@@ -660,6 +673,7 @@ test('T-FR-133 stage processor prepares immutable audio, persists lineage and re
       attempt: 1,
     },
     signal: new AbortController().signal,
+    authenticationAudit: {},
     heartbeat: async () => true,
   }
   const first = await processor.process(request)
@@ -700,14 +714,27 @@ test('T-FR-133 stage processor blocks unapproved cost before preparing or callin
       },
       async cleanup() {},
     },
-    provider: {
-      async diarize() {
-        touchedExternalInput = true
-        throw new Error('must not run')
+    providers: {
+      resolveDiarization() {
+        return {
+          identity: {
+            provider: 'openai',
+            model: 'gpt-4o-transcribe-diarize',
+            version: 'diarized-json/v1',
+          },
+          pricingMinorUnitsPerHour: 1000,
+          create() {
+            return {
+              async diarize() {
+                touchedExternalInput = true
+                throw new Error('must not run')
+              },
+            }
+          },
+        }
       },
     },
     createRunId: () => 'diarization-run-budget',
-    pricingMinorUnitsPerHour: 1000,
   })
   await assert.rejects(
     processor.process({
@@ -719,6 +746,7 @@ test('T-FR-133 stage processor blocks unapproved cost before preparing or callin
         attempt: 1,
       },
       signal: new AbortController().signal,
+      authenticationAudit: {},
       heartbeat: async () => true,
     }),
     (error) => error.code === 'PRECONDITION_REQUIRED',

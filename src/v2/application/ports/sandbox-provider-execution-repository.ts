@@ -1,15 +1,15 @@
 import type {
-  SandboxProviderReceipt,
+  SandboxProviderExecutionReceipt,
 } from '../../domain/sandbox-provider-execution.ts'
 
 export interface SandboxProviderExecutionRecord {
-  receipt: Readonly<SandboxProviderReceipt>
+  receipt: Readonly<SandboxProviderExecutionReceipt>
   createdAt: string
 }
 
 export interface SandboxProviderExecutionRepository {
   record(
-    receipt: Readonly<SandboxProviderReceipt>,
+    receipt: Readonly<SandboxProviderExecutionReceipt>,
   ): Promise<Readonly<SandboxProviderExecutionRecord>>
   list(input: {
     workspaceId: string

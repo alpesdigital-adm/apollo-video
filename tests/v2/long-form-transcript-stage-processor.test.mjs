@@ -141,10 +141,20 @@ function fixture(options = {}) {
   }
   const processor = createLongFormTranscriptStageProcessor({
     repository,
-    transcriber: {
-      async transcribe() {
-        providerCalls += 1
-        return transcript
+    providers: {
+      resolveTranscription() {
+        return {
+          identity: versions.transcript,
+          pricingMinorUnitsPerHour: 25,
+          create() {
+            return {
+              async transcribe() {
+                providerCalls += 1
+                return transcript
+              },
+            }
+          },
+        }
       },
     },
     audio: {
@@ -166,8 +176,6 @@ function fixture(options = {}) {
       },
     },
     createTranscriptId: (hash) => `transcript-${hash}`,
-    providerVersion: 'groq-audio-transcriptions/v1',
-    pricingMinorUnitsPerHour: 25,
     monotonicClock: (() => {
       let value = 0
       return () => (value += 10)
@@ -194,6 +202,7 @@ function input(value, heartbeat = async () => true) {
       attempt: 1,
     },
     signal: new AbortController().signal,
+    authenticationAudit: {},
     heartbeat,
   }
 }

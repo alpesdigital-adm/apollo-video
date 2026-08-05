@@ -287,10 +287,7 @@ import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpe
 import {
   createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment,
 } from './media/ffmpeg-speaker-diarization-audio-preparer.ts'
-import { createMediaTranscriberFromEnvironment } from './media/groq-media-transcriber.ts'
-import {
-  createOpenAiSpeakerDiarizationProviderFromEnvironment,
-} from './media/openai-speaker-diarization-provider.ts'
+import { EnvironmentProviderRuntimeRouter } from './provider-runtime-router.ts'
 import { createConfiguredRenderTargetRegistry } from './render-target-registry.ts'
 import { createProtectedPayloadCipherFromEnvironment } from './security/recipe-parameter-cipher.ts'
 import { createWebhookSigningSecretProtector } from './security/webhook-signing-secret-protector.ts'
@@ -540,35 +537,28 @@ SpeakerDiarizationRepository {
   return new PrismaSpeakerDiarizationRepository(resolveV2Client())
 }
 
+export function createProviderRuntimeRouter(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return new EnvironmentProviderRuntimeRouter(
+    environment,
+    createSandboxProviderExecutionRepository(),
+  )
+}
+
 export function createSpeakerDiarizationStageProcessorFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const pricingMinorUnitsPerHour = Number(
-    environment.OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR,
-  )
-  if (
-    !Number.isSafeInteger(pricingMinorUnitsPerHour) ||
-    pricingMinorUnitsPerHour < 1
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_NOT_CONFIGURED',
-      'OpenAI diarization pricing is not configured',
-    )
-  }
   return createSpeakerDiarizationStageProcessor({
     repository: createSpeakerDiarizationRepository(),
-    provider:
-      createOpenAiSpeakerDiarizationProviderFromEnvironment(
-        environment,
-      ),
+    providers: createProviderRuntimeRouter(environment),
     audio:
       createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment(
         environment,
       ),
     createRunId: () => `diarization-run-${randomUUID()}`,
     clock,
-    pricingMinorUnitsPerHour,
   })
 }
 
@@ -576,31 +566,15 @@ export function createLongFormTranscriptStageProcessorFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  const pricingMinorUnitsPerHour = Number(
-    environment.GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR,
-  )
-  if (
-    !Number.isSafeInteger(pricingMinorUnitsPerHour) ||
-    pricingMinorUnitsPerHour < 1
-  ) {
-    throw new DomainError(
-      'PERSISTENCE_NOT_CONFIGURED',
-      'Groq transcription pricing is not configured',
-    )
-  }
   return createLongFormTranscriptStageProcessor({
     repository: createLongFormIndexWorkflowRepository(),
-    transcriber: createMediaTranscriberFromEnvironment(environment),
+    providers: createProviderRuntimeRouter(environment),
     audio:
       createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment(
         environment,
       ),
     createTranscriptId: (transcriptHash) =>
       `transcript-${transcriptHash}`,
-    providerVersion:
-      environment.GROQ_TRANSCRIBE_ADAPTER_VERSION?.trim() ||
-      'groq-audio-transcriptions/v1',
-    pricingMinorUnitsPerHour,
     clock,
   })
 }
@@ -1299,7 +1273,7 @@ export function createMediaIngestWorker(
     storage: createVerifiedMediaStorage(environment),
     processor: createFfmpegIngestProcessorFromEnvironment(environment),
     prober: { probe: probeVideo },
-    transcriber: createMediaTranscriberFromEnvironment(environment),
+    providers: createProviderRuntimeRouter(environment),
     rights: createAssetRightsRepository(),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),

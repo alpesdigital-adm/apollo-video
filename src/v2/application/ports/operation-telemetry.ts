@@ -43,12 +43,14 @@ export type PublicOperationSpanKind = 'provider' | 'renderer'
 export type PublicOperationSpanName =
   | 'ffmpeg-media-normalize'
   | 'groq-transcription'
+  | 'media-transcription'
   | 'ffmpeg-editorial-proxy'
   | 'remotion-authorized-render'
   | 'ffmpeg-final-export'
   | 'ffmpeg-source-cleanup'
   | 'long-form-transcript'
   | 'openai-diarization'
+  | 'speaker-diarization'
   | 'long-form-derived-analysis'
 
 export interface PublicOperationSpanTelemetryEvent {

@@ -3827,7 +3827,7 @@
       "exposure": "workspace-admin",
       "endpoint": "GET /v1/governance/sandbox-executions",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/sandbox-provider-execution-page/v1",
+      "outputSchemaRef": "apollo://schemas/sandbox-provider-execution-page/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

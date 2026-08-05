@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto'
 
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
-import type { MediaIngestProcessor, MediaSourceProber, MediaTranscriber, ProjectMediaRepository, VerifiedMediaStorage } from './ports/media-ingest.ts'
+import type { MediaIngestProcessor, MediaSourceProber, ProjectMediaRepository, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import type { MediaTransferRepository } from './ports/media-transfer-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import type { ProviderRuntimeRouter } from './ports/provider-runtime-router.ts'
 import { assetRightsRevision } from '../domain/asset-rights.ts'
 import { createMediaColorProbe } from '../domain/color-and-export.ts'
 import { DomainError } from '../domain/errors.ts'
@@ -51,7 +52,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   storage: VerifiedMediaStorage
   processor: MediaIngestProcessor
   prober: MediaSourceProber
-  transcriber: MediaTranscriber
+  providers: Pick<ProviderRuntimeRouter, 'resolveTranscription'>
   rights: AssetRightsRepository
   clock?: () => Date
   leaseDurationMs?: number
@@ -221,13 +222,16 @@ export function runNextMediaIngestOperationService(dependencies: {
       await enter('transcribing')
       const project = await dependencies.projectMedia.readProject({ workspaceId: operation.workspaceId, projectId: context.projectId })
       if (!project) throw new DomainError('PERSISTENCE_CONFLICT', 'Ingest project no longer exists')
-      const transcribe = () => dependencies.transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
+      const transcriber = dependencies.providers
+        .resolveTranscription(claimed.authenticationAudit)
+        .create()
+      const transcribe = () => transcriber.transcribe({ audioPath: normalized.audioPath, language: project.locale, signal: abortController.signal })
       const transcript = dependencies.telemetry
         ? await runPublicOperationSpan({
             telemetry: dependencies.telemetry,
             record: claimed,
             spanKind: 'provider',
-            spanName: 'groq-transcription',
+            spanName: 'media-transcription',
             clock,
             action: transcribe,
           })

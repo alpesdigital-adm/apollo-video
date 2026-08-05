@@ -9,8 +9,10 @@ import type {
 } from '../../application/ports/sandbox-provider-execution-repository.ts'
 import {
   createSandboxProviderReceipt,
+  createSandboxProviderReceiptV2,
+  type SandboxProviderExecutionReceipt,
   type SandboxProviderOperation,
-  type SandboxProviderReceipt,
+  type SandboxProviderOperationV2,
 } from '../../domain/sandbox-provider-execution.ts'
 import { DomainError } from '../../domain/errors.ts'
 
@@ -18,7 +20,19 @@ function hydrate(
   row: V2SandboxProviderExecution,
 ): Readonly<SandboxProviderExecutionRecord> {
   try {
-    const receipt = createSandboxProviderReceipt({
+    const receipt = row.schemaVersion === 'sandbox-provider-receipt/v2'
+      ? createSandboxProviderReceiptV2({
+          workspaceId: row.workspaceId,
+          clientId: row.clientId,
+          environment: row.environment,
+          operation: row.operation as SandboxProviderOperationV2,
+          inputHash: row.inputHash,
+          outputHash: row.outputHash,
+          units: row.units,
+          minorUnits: row.costMinorUnits,
+          receiptHash: row.receiptHash,
+        })
+      : createSandboxProviderReceipt({
       workspaceId: row.workspaceId,
       clientId: row.clientId,
       environment: row.environment,
@@ -28,7 +42,7 @@ function hydrate(
       units: row.units,
       minorUnits: row.costMinorUnits,
       receiptHash: row.receiptHash,
-    })
+        })
     if (
       row.schemaVersion !== receipt.schemaVersion ||
       row.provider !== receipt.provider || row.currency !== 'USD' ||
@@ -49,7 +63,7 @@ function hydrate(
   }
 }
 
-function createData(receipt: Readonly<SandboxProviderReceipt>) {
+function createData(receipt: Readonly<SandboxProviderExecutionReceipt>) {
   return {
     receiptHash: receipt.receiptHash,
     schemaVersion: receipt.schemaVersion,
@@ -75,8 +89,20 @@ implements SandboxProviderExecutionRepository {
     this.client = client
   }
 
-  async record(receipt: Readonly<SandboxProviderReceipt>) {
-    const canonical = createSandboxProviderReceipt({
+  async record(receipt: Readonly<SandboxProviderExecutionReceipt>) {
+    const canonical = receipt.schemaVersion === 'sandbox-provider-receipt/v2'
+      ? createSandboxProviderReceiptV2({
+          workspaceId: receipt.workspaceId,
+          clientId: receipt.clientId,
+          environment: receipt.environment,
+          operation: receipt.operation,
+          inputHash: receipt.inputHash,
+          outputHash: receipt.outputHash,
+          units: receipt.units,
+          minorUnits: receipt.cost.minorUnits,
+          receiptHash: receipt.receiptHash,
+        })
+      : createSandboxProviderReceipt({
       workspaceId: receipt.workspaceId,
       clientId: receipt.clientId,
       environment: receipt.environment,
@@ -86,7 +112,7 @@ implements SandboxProviderExecutionRepository {
       units: receipt.units,
       minorUnits: receipt.cost.minorUnits,
       receiptHash: receipt.receiptHash,
-    })
+        })
     const row = await this.client.v2SandboxProviderExecution.upsert({
       where: { receiptHash: canonical.receiptHash },
       create: createData(canonical),

@@ -169,9 +169,10 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       storage,
       processor: new FfmpegIngestProcessor({ workRoot: join(root, '.ingest-work'), ffmpegPath }),
       prober: { probe: probeVideo },
-      transcriber: {
-        async transcribe() {
-          return createMediaTranscript({
+      providers: {
+        resolveTranscription() {
+          return { create() { return { async transcribe() {
+            return createMediaTranscript({
             language: 'pt-BR',
             text: 'Apollo transforma uma gravação em uma história clara e segura.',
             provider: 'controlled',
@@ -195,7 +196,9 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
               end: 4.55,
               confidence: 1,
             }],
-          })
+            })
+          } }
+        } }
         },
       },
       rights: new PrismaAssetRightsRepository(prisma),
@@ -436,8 +439,8 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       [
         ['ffmpeg-media-normalize', 'operation.span-started'],
         ['ffmpeg-media-normalize', 'operation.span-succeeded'],
-        ['groq-transcription', 'operation.span-started'],
-        ['groq-transcription', 'operation.span-succeeded'],
+        ['media-transcription', 'operation.span-started'],
+        ['media-transcription', 'operation.span-succeeded'],
         ['ffmpeg-editorial-proxy', 'operation.span-started'],
         ['ffmpeg-editorial-proxy', 'operation.span-succeeded'],
       ],
@@ -449,7 +452,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
     )
     for (const spanName of [
       'ffmpeg-media-normalize',
-      'groq-transcription',
+      'media-transcription',
       'ffmpeg-editorial-proxy',
     ]) {
       const pair = spans.filter((event) => event.spanName === spanName)

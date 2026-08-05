@@ -49,6 +49,14 @@ const budget = Object.freeze({
   maximumElapsedMs: 10_800_000,
   maximumConcurrency: 4,
 })
+const providers = Object.freeze({
+  resolveTranscription: () => Object.freeze({
+    identity: versions.transcript,
+  }),
+  resolveDiarization: () => Object.freeze({
+    identity: versions.diarization,
+  }),
+})
 
 function longFormActor(credentialId = 'credential-long-form') {
   const auditContext = createExternalAuditContext({
@@ -151,6 +159,7 @@ test('F2.022 creates one API-first durable workflow and reuses exact probe and t
   const fixture = repositoryFixture()
   const create = createLongFormIndexWorkflowService({
     repository: fixture.repository,
+    providers,
     clock: () => new Date('2026-07-29T18:00:00.000Z'),
     createWorkflowId: () => 'workflow-long-form-1',
     createOperationId: () => 'operation-long-form-1',
@@ -225,6 +234,7 @@ test('F2.022 fails closed when the immutable source hash changed', async () => {
   const fixture = repositoryFixture()
   const create = createLongFormIndexWorkflowService({
     repository: fixture.repository,
+    providers,
     clock: () => new Date('2026-07-29T18:00:00.000Z'),
     createWorkflowId: () => 'workflow-long-form-2',
     createOperationId: () => 'operation-long-form-2',
@@ -238,10 +248,37 @@ test('F2.022 fails closed when the immutable source hash changed', async () => {
   assert.equal(fixture.records.length, 0)
 })
 
+test('F0.102 rejects caller-selected paid providers before queueing a workflow', async () => {
+  const fixture = repositoryFixture()
+  const create = createLongFormIndexWorkflowService({
+    repository: fixture.repository,
+    providers,
+    clock: () => new Date('2026-07-29T18:00:00.000Z'),
+    createWorkflowId: () => 'workflow-long-form-provider-drift',
+    createOperationId: () => 'operation-long-form-provider-drift',
+  })
+  await assert.rejects(
+    create(request({
+      versions: Object.freeze({
+        ...versions,
+        transcript: Object.freeze({
+          provider: 'caller-selected-provider',
+          model: 'untrusted-model',
+          version: 'v1',
+        }),
+      }),
+    })),
+    (error) => error.code === 'INVALID_CAPABILITY',
+  )
+  assert.equal(fixture.records.length, 0)
+  assert.equal(fixture.createInputs.length, 0)
+})
+
 test('F2.022 read and list expose the same workflow and operation model', async () => {
   const fixture = repositoryFixture()
   const create = createLongFormIndexWorkflowService({
     repository: fixture.repository,
+    providers,
     clock: () => new Date('2026-07-29T18:00:00.000Z'),
     createWorkflowId: () => 'workflow-long-form-3',
     createOperationId: () => 'operation-long-form-3',
