@@ -63,6 +63,9 @@ async function waitForServer(baseUrl, child) {
 test('authenticated public API manages projects, clients and artifact inspection', async () => {
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
+  const { calculateGovernancePolicyRevision } = await import(
+    '../../src/v2/domain/governance-limits.ts'
+  )
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createWebhookAdministrationCommand } = await import(
     '../../src/v2/domain/webhook-administration-command.ts'
@@ -3174,6 +3177,152 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
     })).status, 200)
+    const existingChildAdmissions = await client.v2GovernanceAdmission.count({
+      where: {
+        workspaceId,
+        clientId: childCreated.data.client.id,
+        environment: apiEnvironment,
+        createdAt: { gte: new Date(Date.now() - 60_000) },
+      },
+    })
+    const governancePolicyLimits = {
+      requestsPerMinute: existingChildAdmissions + 1,
+      maxConcurrency: 100,
+      quotaUnits: 1_000_000,
+      spendBudgetMinorUnits: 1_000_000,
+    }
+    const governancePolicyId = 'public-api-governance-child-rate-policy'
+    const governancePolicyAt = new Date()
+    await client.v2GovernancePolicy.create({
+      data: {
+        id: governancePolicyId,
+        workspaceId,
+        scopeType: 'client',
+        scopeId: childCreated.data.client.id,
+        environment: apiEnvironment,
+        ...governancePolicyLimits,
+        revision: calculateGovernancePolicyRevision({
+          workspaceId,
+          scopeType: 'client',
+          scopeId: childCreated.data.client.id,
+          environment: apiEnvironment,
+          limits: governancePolicyLimits,
+        }),
+        updatedByClientId: apiClientId,
+        createdAt: governancePolicyAt,
+        updatedAt: governancePolicyAt,
+      },
+    })
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 200)
+    const rateBlockedResponse = await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })
+    const rateBlocked = await rateBlockedResponse.json()
+    assert.equal(rateBlockedResponse.status, 429, JSON.stringify(rateBlocked))
+    assert.equal(rateBlocked.error.code, 'GOVERNANCE_LIMIT_EXCEEDED')
+    const blockedAdmission = await client.v2GovernanceAdmission.findFirstOrThrow({
+      where: {
+        workspaceId,
+        clientId: childCreated.data.client.id,
+        allowed: false,
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    assert.deepEqual(JSON.parse(blockedAdmission.reasonsJson), ['RATE_LIMIT'])
+    assert.equal(await client.v2GovernanceAlert.count({
+      where: {
+        workspaceId,
+        admissionId: blockedAdmission.id,
+        reasonCode: 'RATE_LIMIT',
+      },
+    }), 1)
+    const governanceAuditResponse = await fetch(
+      `${baseUrl}/v1/governance/usage-audit?limit=100`,
+      { headers: { authorization } },
+    )
+    const governanceAudit = await governanceAuditResponse.json()
+    assert.equal(
+      governanceAuditResponse.status,
+      200,
+      JSON.stringify(governanceAudit),
+    )
+    const blockedAuditEntry = governanceAudit.data.entries.find((entry) =>
+      entry.id === blockedAdmission.id)
+    assert.equal(blockedAuditEntry.decision, 'blocked')
+    assert.deepEqual(blockedAuditEntry.reasonCodes, ['RATE_LIMIT'])
+    assert.equal(JSON.stringify(blockedAuditEntry).includes('revision'), false)
+    await client.v2GovernancePolicy.delete({
+      where: { id: governancePolicyId },
+    })
+    const existingWorkspaceAdmissions = await client.v2GovernanceAdmission.count({
+      where: {
+        workspaceId,
+        environment: apiEnvironment,
+        createdAt: { gte: new Date(Date.now() - 60_000) },
+      },
+    })
+    const workspaceGovernancePolicyId =
+      'public-api-governance-workspace-rate-policy'
+    const workspaceGovernanceLimits = {
+      requestsPerMinute: existingWorkspaceAdmissions + 1,
+      maxConcurrency: 100,
+      quotaUnits: 1_000_000,
+      spendBudgetMinorUnits: 1_000_000,
+    }
+    await client.v2GovernancePolicy.create({
+      data: {
+        id: workspaceGovernancePolicyId,
+        workspaceId,
+        scopeType: 'workspace',
+        scopeId: workspaceId,
+        environment: apiEnvironment,
+        ...workspaceGovernanceLimits,
+        revision: calculateGovernancePolicyRevision({
+          workspaceId,
+          scopeType: 'workspace',
+          scopeId: workspaceId,
+          environment: apiEnvironment,
+          limits: workspaceGovernanceLimits,
+        }),
+        updatedByClientId: apiClientId,
+        createdAt: governancePolicyAt,
+        updatedAt: governancePolicyAt,
+      },
+    })
+    assert.equal((await fetch(`${baseUrl}/v1/projects`, {
+      headers: { authorization: childAuthorization },
+    })).status, 200)
+    const workspaceRateBlockedResponse = await fetch(
+      `${baseUrl}/v1/projects`,
+      { headers: { authorization } },
+    )
+    assert.equal(workspaceRateBlockedResponse.status, 429)
+    const workspaceBlockedAdmission =
+      await client.v2GovernanceAdmission.findFirstOrThrow({
+        where: {
+          workspaceId,
+          clientId: apiClientId,
+          allowed: false,
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+    assert.deepEqual(
+      JSON.parse(workspaceBlockedAdmission.reasonsJson),
+      ['RATE_LIMIT'],
+    )
+    assert.equal(await client.v2GovernanceAlert.count({
+      where: {
+        workspaceId,
+        admissionId: workspaceBlockedAdmission.id,
+        scopeType: 'workspace',
+        reasonCode: 'RATE_LIMIT',
+      },
+    }), 1)
+    await client.v2GovernancePolicy.delete({
+      where: { id: workspaceGovernancePolicyId },
+    })
     const accessControlledClientResponse = await fetch(
       `${baseUrl}/v1/workspaces/${workspaceId}/clients`,
       {

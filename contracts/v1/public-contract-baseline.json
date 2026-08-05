@@ -1719,14 +1719,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.governance.usage-audit.list": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "workspace-admin",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "clients:admin"
       ],
-      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v1",
+      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/governance/usage-audit"
@@ -1757,7 +1757,7 @@
           "required": false,
           "schema": {
             "type": "string",
-            "minLength": 8,
+            "minLength": 16,
             "maxLength": 1024
           }
         }
@@ -34301,6 +34301,7 @@
                 "PREFLIGHT_TOKEN_INVALID",
                 "PREFLIGHT_TOKEN_EXPIRED",
                 "PREFLIGHT_TOKEN_STALE",
+                "GOVERNANCE_LIMIT_EXCEEDED",
                 "OPERATIONAL_KILL_SWITCH_ACTIVE",
                 "INTERNAL_ERROR"
               ]
@@ -37289,6 +37290,405 @@
             "nextCursor": {
               "type": "string",
               "minLength": 8,
+              "maxLength": 1024
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/governance-usage-audit-page/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "clientId",
+                  "capabilityId",
+                  "environment",
+                  "operationKind",
+                  "costClass",
+                  "decision",
+                  "reasonCodes",
+                  "scopes",
+                  "requested",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "capabilityId": {
+                    "type": "string",
+                    "pattern": "^apollo\\.[a-z0-9_.-]{2,120}$"
+                  },
+                  "environment": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  },
+                  "operationKind": {
+                    "enum": [
+                      "query",
+                      "command",
+                      "preflight",
+                      "job"
+                    ]
+                  },
+                  "costClass": {
+                    "enum": [
+                      "free",
+                      "low",
+                      "medium",
+                      "high",
+                      "variable"
+                    ]
+                  },
+                  "decision": {
+                    "enum": [
+                      "allowed",
+                      "blocked"
+                    ]
+                  },
+                  "reasonCodes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 4,
+                    "items": {
+                      "enum": [
+                        "RATE_LIMIT",
+                        "CONCURRENCY_LIMIT",
+                        "QUOTA_EXCEEDED",
+                        "SPEND_BUDGET_EXCEEDED"
+                      ]
+                    }
+                  },
+                  "scopes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "workspace",
+                      "client"
+                    ],
+                    "properties": {
+                      "workspace": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "reasons",
+                          "limits",
+                          "usage",
+                          "remaining"
+                        ],
+                        "properties": {
+                          "reasons": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 4,
+                            "items": {
+                              "enum": [
+                                "RATE_LIMIT",
+                                "CONCURRENCY_LIMIT",
+                                "QUOTA_EXCEEDED",
+                                "SPEND_BUDGET_EXCEEDED"
+                              ]
+                            }
+                          },
+                          "limits": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsPerMinute",
+                              "maxConcurrency",
+                              "quotaUnits",
+                              "spendBudgetMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsPerMinute": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "maxConcurrency": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendBudgetMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "usage": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsInWindow",
+                              "activeConcurrency",
+                              "quotaUnitsUsed",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsInWindow": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "activeConcurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnitsUsed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "remaining": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requests",
+                              "concurrency",
+                              "quotaUnits",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requests": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "concurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "client": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "reasons",
+                          "limits",
+                          "usage",
+                          "remaining"
+                        ],
+                        "properties": {
+                          "reasons": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 4,
+                            "items": {
+                              "enum": [
+                                "RATE_LIMIT",
+                                "CONCURRENCY_LIMIT",
+                                "QUOTA_EXCEEDED",
+                                "SPEND_BUDGET_EXCEEDED"
+                              ]
+                            }
+                          },
+                          "limits": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsPerMinute",
+                              "maxConcurrency",
+                              "quotaUnits",
+                              "spendBudgetMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsPerMinute": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "maxConcurrency": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendBudgetMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "usage": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsInWindow",
+                              "activeConcurrency",
+                              "quotaUnitsUsed",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsInWindow": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "activeConcurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnitsUsed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "remaining": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requests",
+                              "concurrency",
+                              "quotaUnits",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requests": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "concurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "requested": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requests",
+                      "concurrency",
+                      "quotaUnits",
+                      "spendMinorUnits"
+                    ],
+                    "properties": {
+                      "requests": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "concurrency": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "quotaUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "spendMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 16,
               "maxLength": 1024
             }
           }

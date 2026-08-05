@@ -364,4 +364,17 @@ test('T-FR-242 kill switch permits only delegated recovery capabilities', () => 
     () => assertKillSwitchRecoveryAccess(delegated, 'apollo.projects.list'),
     (error) => error instanceof DomainError && error.code === 'OPERATIONAL_KILL_SWITCH_ACTIVE',
   )
+  assert.throws(
+    () => assertKillSwitchRecoveryAccess(
+      actor(),
+      'apollo.projects.list',
+      { APOLLO_OPERATIONAL_KILL_SWITCH: 'true' },
+    ),
+    (error) => error instanceof DomainError && error.code === 'OPERATIONAL_KILL_SWITCH_ACTIVE',
+  )
+  assert.doesNotThrow(() => assertKillSwitchRecoveryAccess(
+    delegated,
+    'apollo.api-access.workspace.change',
+    { APOLLO_OPERATIONAL_KILL_SWITCH: ' TRUE ' },
+  ))
 })

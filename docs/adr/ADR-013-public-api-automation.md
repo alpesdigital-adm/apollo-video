@@ -8,6 +8,8 @@ Webhooks são at-least-once, assinados sobre bytes exatos e ordenados por resour
 
 O gateway aplica quotas por workspace/client, rate limit por capability, limites de payload e correlation IDs sem revelar tenants, filas internas, credenciais, prompts ou payloads crus de providers.
 
+O enforcement de governança ocorre no único caminho autenticado da Public API, após a capability e sua autorização serem resolvidas e antes do handler. Cada tentativa autorizada para chegar ao handler gera uma admission imutável; a mesma transação PostgreSQL adquire lock por workspace/environment, mede separadamente o agregado do workspace e o consumo do client, aplica em cada escopo sua policy limitada pelos defaults, mede janela móvel e reservas e persiste alertas por escopo antes de devolver 429. A `PublicOperation` continua sendo a fonte de concorrência durável; reservations de curta duração cobrem apenas a lacuna entre admission e criação da operação. O kill switch global usa esse choke point, sem impedir as ações de recuperação por sessão humana administradora explicitamente allowlisted.
+
 > **Status:** Accepted; autenticação de service account fechada no ADR-010
 >
 > **Data:** 12 de julho de 2026

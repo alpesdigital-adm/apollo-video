@@ -51,6 +51,9 @@ model V2Workspace {
   publicOperationControlCommands         V2PublicOperationControlCommand[]
   operationTelemetryEvents               V2OperationTelemetryEvent[]
   operationTelemetryAlerts               V2OperationTelemetryAlert[]
+  governancePolicies                     V2GovernancePolicy[]
+  governanceAdmissions                   V2GovernanceAdmission[]
+  governanceAlerts                       V2GovernanceAlert[]
   uiSessions                             V2UiSession[]
   workspaceMembers                       V2WorkspaceMember[]
   uiPrincipal                            V2WorkspaceUiPrincipal?
@@ -2081,6 +2084,75 @@ model V2OperationTelemetryAlert {
   @@index([workspaceId, severity, occurredAt(sort: Desc)])
   @@index([workspaceId, alertKind, occurredAt(sort: Desc)])
   @@map("operation_telemetry_alerts")
+}
+
+model V2GovernancePolicy {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  scopeType             String   @db.VarChar(16)
+  scopeId               String   @db.VarChar(128)
+  environment           String   @db.VarChar(16)
+  requestsPerMinute     Int
+  maxConcurrency        Int
+  quotaUnits            Int
+  spendBudgetMinorUnits Int
+  revision              String   @db.Char(64)
+  updatedByClientId     String   @db.VarChar(80)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, map: "governance_policies_workspace_fkey")
+
+  @@unique([workspaceId, scopeType, scopeId, environment], map: "governance_policies_scope_key")
+  @@index([workspaceId, environment, scopeType], map: "governance_policies_lookup_idx")
+  @@map("governance_policies")
+}
+
+model V2GovernanceAdmission {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  clientId                 String   @db.VarChar(80)
+  capabilityId             String   @db.VarChar(128)
+  environment              String   @db.VarChar(16)
+  operationKind            String   @db.VarChar(16)
+  costClass                String   @db.VarChar(16)
+  allowed                  Boolean
+  reasonsJson              String   @db.Text
+  workspaceDecisionJson    String   @db.Text
+  clientDecisionJson       String   @db.Text
+  requestedRequests        Int
+  requestedConcurrency     Int
+  requestedQuotaUnits      Int
+  requestedSpendMinorUnits Int
+  admissionHash            String   @unique(map: "governance_admissions_hash_key") @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade, map: "governance_admissions_workspace_fkey")
+  alerts    V2GovernanceAlert[]
+
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)], map: "governance_admissions_page_idx")
+  @@index([workspaceId, clientId, createdAt(sort: Desc)], map: "governance_admissions_client_idx")
+  @@index([workspaceId, clientId, environment, createdAt(sort: Desc)], map: "governance_admissions_window_idx")
+  @@map("governance_admissions")
+}
+
+model V2GovernanceAlert {
+  alertHash   String   @id @db.Char(64)
+  workspaceId String   @db.VarChar(128)
+  clientId    String   @db.VarChar(80)
+  admissionId String   @db.VarChar(128)
+  scopeType   String   @db.VarChar(16)
+  reasonCode  String   @db.VarChar(32)
+  observed    Int
+  threshold   Int
+  createdAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade, map: "governance_alerts_workspace_fkey")
+  admission V2GovernanceAdmission @relation(fields: [admissionId], references: [id], onDelete: Cascade, map: "governance_alerts_admission_fkey")
+
+  @@index([workspaceId, createdAt(sort: Desc)], map: "governance_alerts_workspace_idx")
+  @@index([workspaceId, clientId, scopeType, reasonCode, createdAt(sort: Desc)], map: "governance_alerts_client_scope_reason_idx")
+  @@map("governance_alerts")
 }
 
 model V2UiSession {

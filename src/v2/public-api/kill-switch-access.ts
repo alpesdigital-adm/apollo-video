@@ -11,8 +11,12 @@ const KILL_SWITCH_RECOVERY_CAPABILITIES = new Set([
 export function assertKillSwitchRecoveryAccess(
   actor: AuthenticatedExternalActor,
   capabilityId: string,
+  environment: NodeJS.ProcessEnv = process.env,
 ): void {
+  const environmentKillSwitchEngaged =
+    environment.APOLLO_OPERATIONAL_KILL_SWITCH?.trim().toLowerCase() === 'true'
   if (
+    !environmentKillSwitchEngaged &&
     actor.clientAccessStatus === 'active' && actor.workspaceAccessStatus === 'active' &&
     !actor.clientKillSwitchEngaged && !actor.workspaceKillSwitchEngaged
   ) return

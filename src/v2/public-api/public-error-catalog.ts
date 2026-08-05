@@ -184,6 +184,10 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     codes: ['AUTH_NOT_CONFIGURED', 'PERSISTENCE_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
   },
   {
+    status: 429, category: 'quota', retryable: true,
+    codes: ['GOVERNANCE_LIMIT_EXCEEDED'],
+  },
+  {
     status: 503, category: 'policy', retryable: true,
     codes: ['OPERATIONAL_KILL_SWITCH_ACTIVE'],
   },

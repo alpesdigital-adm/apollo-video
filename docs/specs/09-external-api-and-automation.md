@@ -793,6 +793,19 @@ O mesmo OpenAPI é usado nos dois environments; capabilities podem indicar `avai
 | base version stale | 409 com conflito/diff resumido |
 | preflight expirado | 409; solicitar novo preflight |
 | quota/rate limit | 429 com retry/quota metadata |
+
+### Admission ledger
+
+Toda capability autenticada passa por admission depois de auth/scope/policy e antes do handler. O registro não contém request body, provider payload, secret ou diagnóstico: somente workspace/client, capability, environment, classe de custo, decisão, reasons, contadores/reservas/saldos e hash canônico.
+
+- budgets agregados do workspace e budgets do client são avaliados separadamente; a policy de cada escopo só pode restringir seu default;
+- rate usa janela móvel de 60 segundos e conta rejeições;
+- concurrency usa operações duráveis ativas e reservations de 30 segundos sob o mesmo lock;
+- quota e spend reservado usam janela de 30 dias;
+- lock transacional por workspace/environment evita corrida entre clients contra o mesmo budget agregado;
+- negação e alertas são persistidos antes do 429;
+- cursor do audit é canônico e vinculado ao workspace;
+- kill switch global bloqueia antes da admission, preservando apenas recovery humano administrativo allowlisted.
 | provider indisponível | operation waiting/retrying/fallback; não esconder custo |
 | webhook falha | retry/dead-letter; mutation original não reverte |
 | client revogado | bloquear requests e novos callbacks administrativos |

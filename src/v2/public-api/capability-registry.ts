@@ -5219,12 +5219,12 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.artifacts.download-grants.revoke', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
   {
-    id: 'apollo.governance.usage-audit.list', version: '1.0.0', title: 'List governance usage and audit entries',
-    description: 'Returns a stable paginated and redacted view of durable operation usage and audit actions.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
-    outputSchemaRef: 'apollo://schemas/governance-usage-audit-page/v1', endpoint: { method: 'GET', path: '/v1/governance/usage-audit' }, toolName: 'apollo.governance.usage-audit.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    id: 'apollo.governance.usage-audit.list', version: '2.0.0', title: 'List governance usage and audit entries',
+    description: 'Returns a stable paginated and redacted view of durable capability admissions, reservations, decisions and limit reasons.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
+    outputSchemaRef: 'apollo://schemas/governance-usage-audit-page/v2', endpoint: { method: 'GET', path: '/v1/governance/usage-audit' }, toolName: 'apollo.governance.usage-audit.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
     queryParameters: [
       { name: 'limit', description: 'Maximum entries per page.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
-      { name: 'after', description: 'Opaque cursor from the previous page.', required: false, schema: { type: 'string', minLength: 8, maxLength: 1024 } },
+      { name: 'after', description: 'Opaque cursor from the previous page.', required: false, schema: { type: 'string', minLength: 16, maxLength: 1024 } },
     ],
   },
 ])

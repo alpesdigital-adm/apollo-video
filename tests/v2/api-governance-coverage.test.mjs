@@ -23,6 +23,38 @@ test('client governance covers listing, scoped creation, environments and secret
   for (const id of ['apollo.clients.list', 'apollo.clients.create', 'apollo.clients.credentials.rotate', 'apollo.clients.credentials.revoke']) assert.deepEqual(capabilities.get(id).requiredScopes, ['clients:admin'])
 })
 
+test('F0.100 every authenticated capability crosses the centralized durable admission gate', () => {
+  const authentication = readFileSync(
+    join(root, 'src/v2/public-api/authentication.ts'),
+    'utf8',
+  )
+  assert.match(authentication, /assertPublicCapabilityQuery/)
+  assert.match(authentication, /assertCapabilityAccess/)
+  assert.match(authentication, /assertKillSwitchRecoveryAccess/)
+  assert.match(authentication, /admitGovernedCapabilityService/)
+  assert.match(authentication, /createGovernanceAdmissionRepository/)
+  assert.match(authentication, /governanceDefaultLimitsFromEnvironment/)
+  const runtime = authentication.slice(
+    authentication.indexOf('export async function authenticateExternalRequest'),
+  )
+  assert.ok(
+    runtime.indexOf('assertCapabilityAccess') <
+      runtime.indexOf('admitGovernedCapabilityService'),
+    'unauthorized capabilities must fail before consuming governance quota',
+  )
+  const routeFiles = readdirSync(join(root, 'src/app/v1'), {
+    recursive: true,
+  }).map(String).filter((file) => file.endsWith('route.ts'))
+  const bypasses = routeFiles.filter((relative) => {
+    const source = readFileSync(join(root, 'src/app/v1', relative), 'utf8')
+    return /authenticateApiClientService|createApiClientRepository/.test(source)
+  }).map((relative) => relative.replaceAll('\\', '/'))
+  assert.deepEqual(bypasses.sort(), [
+    'session/route.ts',
+    'session/workspace/route.ts',
+  ])
+})
+
 test('webhook governance covers endpoint, subscription, lifecycle, delivery and diagnostics', () => {
   const required = [
     'apollo.webhooks.endpoints.create', 'apollo.webhooks.endpoints.list', 'apollo.webhooks.endpoints.read', 'apollo.webhooks.endpoints.status.set',

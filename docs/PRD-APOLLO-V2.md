@@ -1940,6 +1940,8 @@ Incremento local F0.096–F0.097: production batch persiste uma identidade opera
 
 ### FR-249 — Governança da API
 
+Incremento local F0.100–F0.101/F0.103: o gateway autenticado passou a registrar admission transacional por capability antes do handler, avaliando separadamente o budget agregado do workspace e o budget do client, cada qual limitado por seus defaults e policy persistida. Rate, concurrency/reservas, quota e spend produzem decisão e alertas duráveis content-addressed; bloqueio público é 429 e o audit v2 pagina somente projeção redigida por escopo. O kill switch global atua no mesmo ponto comum com recovery humano administrativo estritamente allowlisted. Policy lifecycle público, custo real reconciliado por client, anomaly agregado de error-rate, provider fake efetivamente roteado, PostgreSQL E2E executado, deploy e aceite permanecem pendentes.
+
 O workspace deve administrar clients, secrets, scopes, rate limits, quotas, webhooks, usage e audit log. Deve existir ambiente ou modo de teste com provider fakes para integrações sem custo externo involuntário.
 
 ---

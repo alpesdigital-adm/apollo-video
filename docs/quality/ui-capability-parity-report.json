@@ -19,8 +19,10 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProjectsService",
         "requireScope"
       ],
@@ -36,8 +38,10 @@
       "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProjectWorkspaceService",
         "requireScope"
       ],
@@ -53,8 +57,10 @@
       "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProjectWorkspaceService",
         "requireScope"
       ],
@@ -70,8 +76,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/script-alignments",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listScriptAlignmentsService",
         "requireScope"
       ],
@@ -87,8 +95,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/take-libraries",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listTakeLibrariesService",
         "requireScope"
       ],
@@ -104,8 +114,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/compatibility-graphs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listCompatibilityGraphsService",
         "requireScope"
       ],
@@ -121,8 +133,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/variant-recipes",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listVariantRecipesService",
         "requireScope"
       ],
@@ -138,8 +152,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/variant-portfolio-preflights",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listVariantPortfolioPreflightsService",
         "requireScope"
       ],
@@ -155,8 +171,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/edit-preflights",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listBatchEditPreflightsService",
         "requireScope"
       ],
@@ -172,8 +190,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/edit-commands",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listBatchEditCommandsService",
         "requireScope"
       ],
@@ -189,8 +209,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/batches/{batchId}/partial-retries",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listBatchPartialRetriesService",
         "requireScope"
       ],
@@ -206,9 +228,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createProductionBatchService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -223,8 +247,10 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/batches/{batchId}",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProductionBatchService",
         "requireScope"
       ],
@@ -241,8 +267,10 @@
       "endpoint": "POST /v1/batches/{batchId}/actions",
       "applicationServices": [
         "actOnProductionBatchService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -258,8 +286,10 @@
       "endpoint": "POST /v1/batches/{batchId}/items/{itemId}/actions",
       "applicationServices": [
         "actOnProductionBatchItemService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -274,9 +304,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/partial-retries",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createBatchPartialRetryService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -291,9 +323,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/script-alignments",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createScriptAlignmentService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -308,8 +342,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/script-alignments/{alignmentId}/reviews",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "reviewScriptAlignmentService"
       ],
@@ -325,9 +361,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/take-libraries",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createTakeLibraryService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -342,8 +380,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/take-libraries/{libraryId}/selections",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "selectTakeService"
       ],
@@ -359,9 +399,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/compatibility-graphs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createCompatibilityGraphService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -376,9 +418,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/variant-recipes",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createVariantRecipeService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -393,9 +437,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/variant-portfolio-preflights",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createVariantPortfolioPreflightService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -410,9 +456,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createBatchEditPreflightService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -427,9 +475,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/batches/{batchId}/edit-preflights/{preflightId}/commit",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "commitBatchEditService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -444,8 +494,10 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/batches",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProductionBatchesService",
         "requireScope"
       ],
@@ -507,8 +559,10 @@
       "capabilityVersion": "6.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProjectWorkspaceService",
         "requireScope"
       ],
@@ -524,8 +578,10 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/projects/{projectId}/timeline",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readManualTimelineService",
         "requireScope"
       ],
@@ -541,8 +597,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/source-deconstructions",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listSourceDeconstructionsService",
         "requireScope"
       ],
@@ -558,8 +616,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/contamination-reports",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listContaminationReportsService",
         "requireScope"
       ],
@@ -575,8 +635,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/source-cleanups",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listSourceCleanupsService",
         "requireScope"
       ],
@@ -592,8 +654,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/validation-envelope-reuses",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listValidationEnvelopeReusesService",
         "requireScope"
       ],
@@ -609,8 +673,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-needs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProofNeedRunsService",
         "requireScope"
       ],
@@ -626,8 +692,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-integrity-runs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProofIntegrityRunsService",
         "requireScope"
       ],
@@ -643,8 +711,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-mode-runs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProofModeRunsService",
         "requireScope"
       ],
@@ -660,9 +730,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/proof-mode-runs",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createProofModeRunService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -677,8 +749,10 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects/{projectId}/annotations",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProjectReviewService",
         "requireScope"
       ],
@@ -694,8 +768,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProxyReviewService",
         "requireScope"
       ],
@@ -711,8 +787,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/long-form-moments",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "searchLongFormMomentsService"
       ],
@@ -728,9 +806,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/contiguous-extractions",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createContiguousExtractionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -745,10 +825,12 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/manual-edits",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "applyManualEditService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "enqueueProjectProxyRenderService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -763,8 +845,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/version-comparisons",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readVersionComparisonService",
         "requireScope"
       ],
@@ -780,8 +864,10 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects/{projectId}/annotations",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readProjectReviewService",
         "requireScope"
       ],
@@ -797,11 +883,13 @@
       "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/version-comparisons",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "applyManualEditService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "decideVersionComparisonService",
         "enqueueProjectProxyRenderService",
+        "governanceDefaultLimitsFromEnvironment",
         "readVersionComparisonService",
         "requireScope"
       ],
@@ -817,8 +905,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/render-elements",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "resolveRenderElementsService"
       ],
@@ -834,9 +924,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/annotations",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createProjectReviewAnnotationService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -851,8 +943,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "proposeReviewPatchService",
         "requireScope"
       ],
@@ -868,11 +962,13 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals/{proposalId}/apply",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "applyReviewPatchService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "calculateVersionHash",
         "enqueueProjectProxyRenderService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -887,8 +983,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "proposeReviewPatchService",
         "requireScope"
       ],
@@ -904,8 +1002,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "proposeReviewPatchBatchService",
         "requireScope"
       ],
@@ -921,11 +1021,13 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches/{batchId}/apply",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "applyReviewPatchBatchService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "calculateVersionHash",
         "enqueueProjectProxyRenderService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -940,8 +1042,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/media/uploads/{uploadId}",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "inspectMediaUploadService"
       ],
       "tests": [
@@ -956,9 +1060,11 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/media/uploads",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
-        "beginMediaUploadService"
+        "beginMediaUploadService",
+        "governanceDefaultLimitsFromEnvironment"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -972,8 +1078,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/media/uploads/{uploadId}/session",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "issueMediaUploadSessionService"
       ],
       "tests": [
@@ -1002,8 +1110,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/media/uploads/{uploadId}",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "inspectMediaUploadService"
       ],
       "tests": [
@@ -1032,10 +1142,12 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/media/uploads/{uploadId}/complete",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "completeMediaUploadService",
-        "enqueueMediaIngestService"
+        "enqueueMediaIngestService",
+        "governanceDefaultLimitsFromEnvironment"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -1050,8 +1162,10 @@
       "endpoint": "POST /v1/media/uploads/{uploadId}/abort",
       "applicationServices": [
         "abortMediaUploadService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
-        "authenticateUiSessionService"
+        "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -1065,10 +1179,12 @@
       "capabilityVersion": "7.0.0",
       "endpoint": "POST /v1/projects/{projectId}/commands",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "applyEditorialCutCommandService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "enqueueProjectProxyRenderService",
+        "governanceDefaultLimitsFromEnvironment",
         "replaceSourceTranscriptService",
         "requireScope",
         "runProjectDirectorService"
@@ -1085,9 +1201,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/exports",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "enqueueProjectFinalExportService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1103,8 +1221,10 @@
       "endpoint": "POST /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
         "acknowledgeProxyWarningsService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1119,9 +1239,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/source-cleanups",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createSourceCleanupService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1136,9 +1258,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/validation-envelope-reuses/{reusePlanId}/approval",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "decideValidationEnvelopeReuseService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1153,8 +1277,10 @@
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listProjectsService",
         "requireScope"
       ],
@@ -1170,9 +1296,11 @@
       "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createProjectService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1201,8 +1329,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/webhooks/endpoints",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listWebhookEndpointsService",
         "requireScope"
       ],
@@ -1218,8 +1348,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/webhooks/subscriptions",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listWebhookSubscriptionsService",
         "requireScope"
       ],
@@ -1235,8 +1367,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/webhooks/deliveries",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listWebhookDeliveriesService",
         "requireScope"
       ],
@@ -1266,8 +1400,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "listWebhookSigningSecretRotationsService",
         "requireScope"
       ],
@@ -1283,8 +1419,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/webhooks/deliveries/{deliveryId}",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readWebhookDeliveryService",
         "requireScope"
       ],
@@ -1300,9 +1438,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/webhooks/endpoints",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createWebhookEndpointService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1317,9 +1457,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/webhooks/subscriptions",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "createWebhookSubscriptionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1334,8 +1476,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "PUT /v1/webhooks/subscriptions/{subscriptionId}/status",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "setWebhookSubscriptionStatusService"
       ],
@@ -1352,8 +1496,10 @@
       "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/challenge",
       "applicationServices": [
         "activateWebhookEndpointConvergentlyService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "readWebhookEndpointService",
         "requireScope"
       ],
@@ -1369,8 +1515,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "PUT /v1/webhooks/endpoints/{endpointId}/status",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "setWebhookEndpointStatusService"
       ],
@@ -1386,8 +1534,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "stageWebhookSigningSecretRotationService"
       ],
@@ -1404,8 +1554,10 @@
       "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/activate",
       "applicationServices": [
         "activateWebhookSigningSecretRotationService",
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1420,9 +1572,11 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/webhooks/endpoints/{endpointId}/signing-secrets/rotations/{rotationId}/cancel",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "cancelWebhookSigningSecretRotationService",
+        "governanceDefaultLimitsFromEnvironment",
         "requireScope"
       ],
       "tests": [
@@ -1437,8 +1591,10 @@
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/webhooks/deliveries/{deliveryId}/replay",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment",
         "replayWebhookDeliveryService",
         "requireScope"
       ],
@@ -1454,8 +1610,10 @@
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/capabilities",
       "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
-        "authenticateUiSessionService"
+        "authenticateUiSessionService",
+        "governanceDefaultLimitsFromEnvironment"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -3636,7 +3794,7 @@
       "exposure": "workspace-admin",
       "endpoint": "GET /v1/governance/usage-audit",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v1",
+      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

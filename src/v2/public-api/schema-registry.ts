@@ -11759,6 +11759,47 @@ function projectVersionComparisonActionResultBody(
   })
 }
 
+const governanceAdmissionScopeDecisionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['reasons', 'limits', 'usage', 'remaining'],
+  properties: {
+    reasons: {
+      type: 'array', uniqueItems: true, maxItems: 4,
+      items: { enum: ['RATE_LIMIT', 'CONCURRENCY_LIMIT', 'QUOTA_EXCEEDED', 'SPEND_BUDGET_EXCEEDED'] },
+    },
+    limits: {
+      type: 'object', additionalProperties: false,
+      required: ['requestsPerMinute', 'maxConcurrency', 'quotaUnits', 'spendBudgetMinorUnits'],
+      properties: {
+        requestsPerMinute: { type: 'integer', minimum: 1, maximum: 2000000000 },
+        maxConcurrency: { type: 'integer', minimum: 1, maximum: 2000000000 },
+        quotaUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        spendBudgetMinorUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+      },
+    },
+    usage: {
+      type: 'object', additionalProperties: false,
+      required: ['requestsInWindow', 'activeConcurrency', 'quotaUnitsUsed', 'spendMinorUnits'],
+      properties: {
+        requestsInWindow: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        activeConcurrency: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        quotaUnitsUsed: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        spendMinorUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+      },
+    },
+    remaining: {
+      type: 'object', additionalProperties: false,
+      required: ['requests', 'concurrency', 'quotaUnits', 'spendMinorUnits'],
+      properties: {
+        requests: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        concurrency: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        quotaUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        spendMinorUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+      },
+    },
+  },
+}
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('health-response', 1, 'Health response',
     successSchema({
@@ -19122,6 +19163,53 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   })),
   defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
+  defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({
+    type: 'object', additionalProperties: false, required: ['entries'], properties: {
+      entries: {
+        type: 'array', maxItems: 100, items: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'id', 'clientId', 'capabilityId', 'environment',
+            'operationKind', 'costClass', 'decision', 'reasonCodes',
+            'scopes', 'requested', 'createdAt',
+          ],
+          properties: {
+            id: idSchema,
+            clientId: idSchema,
+            capabilityId: { type: 'string', pattern: '^apollo\\.[a-z0-9_.-]{2,120}$' },
+            environment: { enum: ['sandbox', 'production'] },
+            operationKind: { enum: ['query', 'command', 'preflight', 'job'] },
+            costClass: { enum: ['free', 'low', 'medium', 'high', 'variable'] },
+            decision: { enum: ['allowed', 'blocked'] },
+            reasonCodes: {
+              type: 'array', uniqueItems: true, maxItems: 4,
+              items: { enum: ['RATE_LIMIT', 'CONCURRENCY_LIMIT', 'QUOTA_EXCEEDED', 'SPEND_BUDGET_EXCEEDED'] },
+            },
+            scopes: {
+              type: 'object', additionalProperties: false,
+              required: ['workspace', 'client'],
+              properties: {
+                workspace: governanceAdmissionScopeDecisionSchema,
+                client: governanceAdmissionScopeDecisionSchema,
+              },
+            },
+            requested: {
+              type: 'object', additionalProperties: false,
+              required: ['requests', 'concurrency', 'quotaUnits', 'spendMinorUnits'],
+              properties: {
+                requests: { type: 'integer', minimum: 0 },
+                concurrency: { type: 'integer', minimum: 0 },
+                quotaUnits: { type: 'integer', minimum: 0 },
+                spendMinorUnits: { type: 'integer', minimum: 0 },
+              },
+            },
+            createdAt: dateTimeSchema,
+          },
+        },
+      },
+      nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
+    },
   })),
   defineSchema('project-lut-selection-applied', 3, 'Applied project LUT selection with explicit current ProjectVersion state', successSchema({
     ...projectLutSelectionResultSchemaV3,

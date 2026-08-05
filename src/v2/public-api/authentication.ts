@@ -4,10 +4,18 @@ import {
   authenticateApiClientService,
   type AuthenticatedExternalActor,
 } from '../application/authenticate-api-client.ts'
+import {
+  admitGovernedCapabilityService,
+  governanceDefaultLimitsFromEnvironment,
+} from '../application/admit-governed-capability.ts'
 import { authenticateUiSessionService } from '../application/authenticate-ui-session.ts'
 import type { ApiEnvironment } from '../domain/api-client.ts'
 import { DomainError } from '../domain/errors.ts'
-import { createApiClientRepository, createUiSessionSecurityRepository } from '../infrastructure/repository-factory.ts'
+import {
+  createApiClientRepository,
+  createGovernanceAdmissionRepository,
+  createUiSessionSecurityRepository,
+} from '../infrastructure/repository-factory.ts'
 import { nodeApiCredentialCrypto } from '../infrastructure/security/api-credential.ts'
 import {
   APOLLO_SESSION_COOKIE,
@@ -85,6 +93,10 @@ export async function authenticateExternalRequest(request: NextRequest) {
     actor,
     policy,
   })
+  await admitGovernedCapabilityService({
+    repository: createGovernanceAdmissionRepository(),
+    defaultLimits: governanceDefaultLimitsFromEnvironment(),
+  })({ actor, capability })
   return actor
 }
 

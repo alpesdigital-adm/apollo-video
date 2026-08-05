@@ -6764,6 +6764,60 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/governance-usage-audit-page/v1': [
       { data: { entries: [{ id: 'operation-example-1', clientId: 'client-example-1', action: 'artifact-render', status: 'succeeded', target: { type: 'artifact', id: 'artifact-example-1' }, usage: { unit: 'operation', quantity: 1 }, createdAt, updatedAt: createdAt }] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/governance-usage-audit-page/v2': [
+      {
+        data: {
+          entries: [{
+            id: 'governance-admission-example-1',
+            clientId: 'client-example-1',
+            capabilityId: 'apollo.projects.list',
+            environment: 'production',
+            operationKind: 'query',
+            costClass: 'free',
+            decision: 'allowed',
+            reasonCodes: [],
+            scopes: {
+              workspace: {
+                reasons: [],
+                limits: {
+                  requestsPerMinute: 1000, maxConcurrency: 20,
+                  quotaUnits: 10000, spendBudgetMinorUnits: 10000,
+                },
+                usage: {
+                  requestsInWindow: 20, activeConcurrency: 2,
+                  quotaUnitsUsed: 100, spendMinorUnits: 100,
+                },
+                remaining: {
+                  requests: 979, concurrency: 18,
+                  quotaUnits: 9900, spendMinorUnits: 9900,
+                },
+              },
+              client: {
+                reasons: [],
+                limits: {
+                  requestsPerMinute: 100, maxConcurrency: 4,
+                  quotaUnits: 1000, spendBudgetMinorUnits: 1000,
+                },
+                usage: {
+                  requestsInWindow: 4, activeConcurrency: 0,
+                  quotaUnitsUsed: 20, spendMinorUnits: 20,
+                },
+                remaining: {
+                  requests: 95, concurrency: 4,
+                  quotaUnits: 980, spendMinorUnits: 980,
+                },
+              },
+            },
+            requested: {
+              requests: 1, concurrency: 0,
+              quotaUnits: 0, spendMinorUnits: 0,
+            },
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },
