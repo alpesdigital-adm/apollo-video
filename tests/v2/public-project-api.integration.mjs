@@ -63,9 +63,6 @@ async function waitForServer(baseUrl, child) {
 test('authenticated public API manages projects, clients and artifact inspection', async () => {
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { calculateVersionHash } = await import('../../src/v2/application/version-hash.ts')
-  const { calculateGovernancePolicyRevision } = await import(
-    '../../src/v2/domain/governance-limits.ts'
-  )
   const { createApiAccessAuditContext } = await import('../../src/v2/domain/api-access-control.ts')
   const { createWebhookAdministrationCommand } = await import(
     '../../src/v2/domain/webhook-administration-command.ts'
@@ -3191,28 +3188,50 @@ test('authenticated public API manages projects, clients and artifact inspection
       quotaUnits: 1_000_000,
       spendBudgetMinorUnits: 1_000_000,
     }
-    const governancePolicyId = 'public-api-governance-child-rate-policy'
-    const governancePolicyAt = new Date()
-    await client.v2GovernancePolicy.create({
-      data: {
-        id: governancePolicyId,
-        workspaceId,
-        scopeType: 'client',
-        scopeId: childCreated.data.client.id,
-        environment: apiEnvironment,
-        ...governancePolicyLimits,
-        revision: calculateGovernancePolicyRevision({
-          workspaceId,
+    const governancePolicyCreateResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/governance/policies`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-governance-policy-child-create-1',
+        },
+        body: JSON.stringify({
           scopeType: 'client',
           scopeId: childCreated.data.client.id,
           environment: apiEnvironment,
           limits: governancePolicyLimits,
+          baseRevision: null,
+          reason: 'Apply the approved child-client rate budget.',
+          confirmed: true,
         }),
-        updatedByClientId: apiClientId,
-        createdAt: governancePolicyAt,
-        updatedAt: governancePolicyAt,
       },
-    })
+    )
+    const governancePolicyCreated = await governancePolicyCreateResponse.json()
+    assert.equal(
+      governancePolicyCreateResponse.status,
+      201,
+      JSON.stringify(governancePolicyCreated),
+    )
+    const governancePolicyId = governancePolicyCreated.data.policy.id
+    assert.equal(governancePolicyCreated.data.action, 'set')
+    assert.equal(governancePolicyCreated.data.replayed, false)
+    assert.equal(await client.v2GovernancePolicyCommand.count({
+      where: { workspaceId, policyId: governancePolicyId, action: 'set' },
+    }), 1)
+    const governancePolicyListResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/governance/policies`,
+      { headers: { authorization } },
+    )
+    const governancePolicyList = await governancePolicyListResponse.json()
+    assert.equal(governancePolicyListResponse.status, 200)
+    assert.equal(
+      governancePolicyList.data.policies.some((policy) =>
+        policy.id === governancePolicyId &&
+        policy.scopeId === childCreated.data.client.id),
+      true,
+    )
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
     })).status, 200)
@@ -3253,9 +3272,56 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(blockedAuditEntry.decision, 'blocked')
     assert.deepEqual(blockedAuditEntry.reasonCodes, ['RATE_LIMIT'])
     assert.equal(JSON.stringify(blockedAuditEntry).includes('revision'), false)
-    await client.v2GovernancePolicy.delete({
+    const governancePolicyDeleteResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/governance/policies/${governancePolicyId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-governance-policy-child-delete-1',
+        },
+        body: JSON.stringify({
+          baseRevision: governancePolicyCreated.data.policy.revision,
+          reason: 'Restore defaults after the governance proof.',
+          confirmed: true,
+        }),
+      },
+    )
+    const governancePolicyDeleted = await governancePolicyDeleteResponse.json()
+    assert.equal(
+      governancePolicyDeleteResponse.status,
+      200,
+      JSON.stringify(governancePolicyDeleted),
+    )
+    assert.equal(governancePolicyDeleted.data.action, 'delete')
+    assert.equal(governancePolicyDeleted.data.deletedPolicyId, governancePolicyId)
+    assert.equal(await client.v2GovernancePolicy.count({
       where: { id: governancePolicyId },
-    })
+    }), 0)
+    assert.equal(await client.v2GovernancePolicyCommand.count({
+      where: { workspaceId, policyId: governancePolicyId },
+    }), 2)
+    const governancePolicyDeleteReplayResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/governance/policies/${governancePolicyId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-governance-policy-child-delete-1',
+        },
+        body: JSON.stringify({
+          baseRevision: governancePolicyCreated.data.policy.revision,
+          reason: 'Restore defaults after the governance proof.',
+          confirmed: true,
+        }),
+      },
+    )
+    const governancePolicyDeleteReplay =
+      await governancePolicyDeleteReplayResponse.json()
+    assert.equal(governancePolicyDeleteReplayResponse.status, 200)
+    assert.equal(governancePolicyDeleteReplay.data.replayed, true)
     const existingWorkspaceAdmissions = await client.v2GovernanceAdmission.count({
       where: {
         workspaceId,
@@ -3263,34 +3329,40 @@ test('authenticated public API manages projects, clients and artifact inspection
         createdAt: { gte: new Date(Date.now() - 60_000) },
       },
     })
-    const workspaceGovernancePolicyId =
-      'public-api-governance-workspace-rate-policy'
     const workspaceGovernanceLimits = {
-      requestsPerMinute: existingWorkspaceAdmissions + 1,
+      requestsPerMinute: existingWorkspaceAdmissions + 2,
       maxConcurrency: 100,
       quotaUnits: 1_000_000,
       spendBudgetMinorUnits: 1_000_000,
     }
-    await client.v2GovernancePolicy.create({
-      data: {
-        id: workspaceGovernancePolicyId,
-        workspaceId,
-        scopeType: 'workspace',
-        scopeId: workspaceId,
-        environment: apiEnvironment,
-        ...workspaceGovernanceLimits,
-        revision: calculateGovernancePolicyRevision({
-          workspaceId,
+    const workspaceGovernancePolicyResponse = await fetch(
+      `${baseUrl}/v1/workspaces/${workspaceId}/governance/policies`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': 'public-governance-policy-workspace-create-1',
+        },
+        body: JSON.stringify({
           scopeType: 'workspace',
           scopeId: workspaceId,
           environment: apiEnvironment,
           limits: workspaceGovernanceLimits,
+          baseRevision: null,
+          reason: 'Apply the approved aggregate workspace rate budget.',
+          confirmed: true,
         }),
-        updatedByClientId: apiClientId,
-        createdAt: governancePolicyAt,
-        updatedAt: governancePolicyAt,
       },
-    })
+    )
+    const workspaceGovernancePolicy =
+      await workspaceGovernancePolicyResponse.json()
+    assert.equal(
+      workspaceGovernancePolicyResponse.status,
+      201,
+      JSON.stringify(workspaceGovernancePolicy),
+    )
+    const workspaceGovernancePolicyId = workspaceGovernancePolicy.data.policy.id
     assert.equal((await fetch(`${baseUrl}/v1/projects`, {
       headers: { authorization: childAuthorization },
     })).status, 200)

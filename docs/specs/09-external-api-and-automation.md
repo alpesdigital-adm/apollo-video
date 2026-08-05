@@ -806,6 +806,8 @@ Toda capability autenticada passa por admission depois de auth/scope/policy e an
 - negação e alertas são persistidos antes do 429;
 - cursor do audit é canônico e vinculado ao workspace;
 - kill switch global bloqueia antes da admission, preservando apenas recovery humano administrativo allowlisted.
+
+Policies explícitas são administradas por `apollo.governance.policies.list/set/delete`. Create exige `baseRevision: null`; update/delete exigem a revision corrente. Set/delete requerem confirmação e Idempotency-Key e persistem command actor-bound, request/result hashes e policy/delete na mesma transação. Replay com payload diferente falha fechado. Policy client-scoped só é válida para client do mesmo workspace que permita o environment. Operações gratuitas ainda consomem rate, mas não são bloqueadas por concurrency/quota/spend que não reservam.
 | provider indisponível | operation waiting/retrying/fallback; não esconder custo |
 | webhook falha | retry/dead-letter; mutation original não reverte |
 | client revogado | bloquear requests e novos callbacks administrativos |

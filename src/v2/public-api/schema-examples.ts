@@ -6761,6 +6761,89 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         { itemId: 'item-2', operationId: 'operation-example-2', status: 'failed', retryable: true, error: { code: 'PROVIDER_TIMEOUT', message: 'Provider timed out.' }, updatedAt: createdAt },
       ] }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/set-governance-policy-request/v1': [
+      {
+        scopeType: 'client',
+        scopeId: 'client-example-1',
+        environment: 'production',
+        limits: {
+          requestsPerMinute: 120,
+          maxConcurrency: 4,
+          quotaUnits: 10000,
+          spendBudgetMinorUnits: 25000,
+        },
+        baseRevision: null,
+        reason: 'Apply the approved production budget.',
+        confirmed: true,
+      },
+    ],
+    'apollo://schemas/delete-governance-policy-request/v1': [
+      {
+        baseRevision: 'a'.repeat(64),
+        reason: 'Restore workspace defaults after the review.',
+        confirmed: true,
+      },
+    ],
+    'apollo://schemas/governance-policy-list/v1': [
+      {
+        data: {
+          policies: [{
+            id: 'governance-policy-example-1',
+            workspaceId: 'workspace-example-1',
+            scopeType: 'client',
+            scopeId: 'client-example-1',
+            environment: 'production',
+            limits: {
+              requestsPerMinute: 120,
+              maxConcurrency: 4,
+              quotaUnits: 10000,
+              spendBudgetMinorUnits: 25000,
+            },
+            updatedByClientId: 'client-admin-example-1',
+            createdAt,
+            updatedAt: createdAt,
+            revision: 'a'.repeat(64),
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/governance-policy-command-result/v1': [
+      {
+        data: {
+          action: 'set',
+          policy: {
+            id: 'governance-policy-example-1',
+            workspaceId: 'workspace-example-1',
+            scopeType: 'client',
+            scopeId: 'client-example-1',
+            environment: 'production',
+            limits: {
+              requestsPerMinute: 120,
+              maxConcurrency: 4,
+              quotaUnits: 10000,
+              spendBudgetMinorUnits: 25000,
+            },
+            updatedByClientId: 'client-admin-example-1',
+            createdAt,
+            updatedAt: createdAt,
+            revision: 'a'.repeat(64),
+          },
+          commandHash: 'b'.repeat(64),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+      {
+        data: {
+          action: 'delete',
+          deletedPolicyId: 'governance-policy-example-1',
+          commandHash: 'c'.repeat(64),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/governance-usage-audit-page/v1': [
       { data: { entries: [{ id: 'operation-example-1', clientId: 'client-example-1', action: 'artifact-render', status: 'succeeded', target: { type: 'artifact', id: 'artifact-example-1' }, usage: { unit: 'operation', quantity: 1 }, createdAt, updatedAt: createdAt }] }, meta: { apiVersion: 'v1' } },
     ],

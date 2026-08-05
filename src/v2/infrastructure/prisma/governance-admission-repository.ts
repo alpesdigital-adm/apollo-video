@@ -30,7 +30,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const CONCURRENCY_RESERVATION_MS = 30_000
 const QUOTA_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000
 
-function hydratePolicy(row: V2GovernancePolicy) {
+export function hydrateGovernancePolicy(row: V2GovernancePolicy) {
   return createGovernancePolicy({
     id: row.id,
     workspaceId: row.workspaceId,
@@ -58,7 +58,7 @@ function effectiveLimits(
   const values = [
     defaults,
     ...rows.filter((row) => row.scopeType === scopeType)
-      .map(hydratePolicy)
+      .map(hydrateGovernancePolicy)
       .map((policy) => policy.limits),
   ]
   return Object.freeze({

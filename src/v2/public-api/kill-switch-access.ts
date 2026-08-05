@@ -6,6 +6,9 @@ const KILL_SWITCH_RECOVERY_CAPABILITIES = new Set([
   'apollo.api-access.clients.change',
   'apollo.api-access.workspace.read',
   'apollo.api-access.workspace.change',
+  'apollo.governance.policies.list',
+  'apollo.governance.policies.set',
+  'apollo.governance.policies.delete',
 ])
 
 export function assertKillSwitchRecoveryAccess(

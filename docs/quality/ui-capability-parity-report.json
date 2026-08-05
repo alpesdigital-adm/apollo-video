@@ -4,9 +4,9 @@
     "uiActions": 88,
     "capabilities": 81,
     "endpoints": 81,
-    "registeredCapabilities": 195,
-    "operableCapabilities": 195,
-    "publicContractCapabilities": 195,
+    "registeredCapabilities": 198,
+    "operableCapabilities": 198,
+    "publicContractCapabilities": 198,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3784,6 +3784,39 @@
       "endpoint": "POST /v1/media/download-grants/{grantId}/revoke",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/media-download-grant-revoked/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.governance.policies.list",
+      "exposure": "workspace-admin",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/governance/policies",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/governance-policy-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.governance.policies.set",
+      "exposure": "workspace-admin",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/governance/policies",
+      "inputSchemaRef": "apollo://schemas/set-governance-policy-request/v1",
+      "outputSchemaRef": "apollo://schemas/governance-policy-command-result/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.governance.policies.delete",
+      "exposure": "workspace-admin",
+      "endpoint": "DELETE /v1/workspaces/{workspaceId}/governance/policies/{policyId}",
+      "inputSchemaRef": "apollo://schemas/delete-governance-policy-request/v1",
+      "outputSchemaRef": "apollo://schemas/governance-policy-command-result/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

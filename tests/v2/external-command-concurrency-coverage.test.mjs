@@ -285,6 +285,14 @@ const coverage = Object.freeze({
   'apollo.clients.credentials.revoke': {
     mode: 'durable-covered', evidence: 'F0-073',
   },
+  'apollo.governance.policies.set': {
+    mode: 'durable-covered',
+    evidence: 'F0.100 serializable workspace/environment advisory lock, exact optional-create or required-update revision CAS, actor-bound idempotency and atomic policy plus command persistence',
+  },
+  'apollo.governance.policies.delete': {
+    mode: 'durable-covered',
+    evidence: 'F0.100 serializable workspace/environment advisory lock, exact revision CAS, actor-bound idempotency and atomic delete plus retained command audit',
+  },
   'apollo.sessions.login': { mode: 'durable-covered', evidence: 'bounded signed UI session contract tests' },
   'apollo.sessions.oidc-start': { mode: 'durable-covered', evidence: 'random state primary key and browser-bound authorization transaction' },
   'apollo.sessions.oidc-callback': { mode: 'durable-covered', evidence: 'serializable one-shot state consumption before opaque session creation' },
@@ -319,7 +327,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    91,
+    93,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

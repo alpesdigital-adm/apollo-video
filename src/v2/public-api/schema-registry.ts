@@ -11759,6 +11759,46 @@ function projectVersionComparisonActionResultBody(
   })
 }
 
+const governanceLimitsSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'requestsPerMinute', 'maxConcurrency',
+    'quotaUnits', 'spendBudgetMinorUnits',
+  ],
+  properties: {
+    requestsPerMinute: {
+      type: 'integer', minimum: 1, maximum: 2000000000,
+    },
+    maxConcurrency: {
+      type: 'integer', minimum: 1, maximum: 2000000000,
+    },
+    quotaUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
+    spendBudgetMinorUnits: {
+      type: 'integer', minimum: 0, maximum: 2000000000,
+    },
+  },
+}
+
+const governancePolicySchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'id', 'workspaceId', 'scopeType', 'scopeId', 'environment',
+    'limits', 'updatedByClientId', 'createdAt', 'updatedAt', 'revision',
+  ],
+  properties: {
+    id: idSchema,
+    workspaceId: idSchema,
+    scopeType: { enum: ['workspace', 'client'] },
+    scopeId: idSchema,
+    environment: { enum: ['sandbox', 'production'] },
+    limits: governanceLimitsSchema,
+    updatedByClientId: idSchema,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+    revision: sha256Schema,
+  },
+}
+
 const governanceAdmissionScopeDecisionSchema = {
   type: 'object', additionalProperties: false,
   required: ['reasons', 'limits', 'usage', 'remaining'],
@@ -11767,16 +11807,7 @@ const governanceAdmissionScopeDecisionSchema = {
       type: 'array', uniqueItems: true, maxItems: 4,
       items: { enum: ['RATE_LIMIT', 'CONCURRENCY_LIMIT', 'QUOTA_EXCEEDED', 'SPEND_BUDGET_EXCEEDED'] },
     },
-    limits: {
-      type: 'object', additionalProperties: false,
-      required: ['requestsPerMinute', 'maxConcurrency', 'quotaUnits', 'spendBudgetMinorUnits'],
-      properties: {
-        requestsPerMinute: { type: 'integer', minimum: 1, maximum: 2000000000 },
-        maxConcurrency: { type: 'integer', minimum: 1, maximum: 2000000000 },
-        quotaUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
-        spendBudgetMinorUnits: { type: 'integer', minimum: 0, maximum: 2000000000 },
-      },
-    },
+    limits: governanceLimitsSchema,
     usage: {
       type: 'object', additionalProperties: false,
       required: ['requestsInWindow', 'activeConcurrency', 'quotaUnitsUsed', 'spendMinorUnits'],
@@ -19210,6 +19241,62 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
       nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
     },
+  })),
+  defineSchema('set-governance-policy-request', 1, 'Create or replace a workspace/client governance policy with CAS', {
+    type: 'object', additionalProperties: false,
+    required: [
+      'scopeType', 'scopeId', 'environment', 'limits',
+      'baseRevision', 'reason', 'confirmed',
+    ],
+    properties: {
+      scopeType: { enum: ['workspace', 'client'] },
+      scopeId: idSchema,
+      environment: { enum: ['sandbox', 'production'] },
+      limits: governanceLimitsSchema,
+      baseRevision: { anyOf: [{ type: 'null' }, sha256Schema] },
+      reason: { type: 'string', minLength: 3, maxLength: 500 },
+      confirmed: { const: true },
+    },
+  }),
+  defineSchema('delete-governance-policy-request', 1, 'Delete a governance policy with CAS and explicit confirmation', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision', 'reason', 'confirmed'],
+    properties: {
+      baseRevision: sha256Schema,
+      reason: { type: 'string', minLength: 3, maxLength: 500 },
+      confirmed: { const: true },
+    },
+  }),
+  defineSchema('governance-policy-list', 1, 'Workspace governance policies', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['policies'],
+    properties: {
+      policies: { type: 'array', maxItems: 10000, items: governancePolicySchema },
+    },
+  })),
+  defineSchema('governance-policy-command-result', 1, 'Durable governance policy mutation result', successSchema({
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false,
+        required: ['action', 'policy', 'commandHash', 'replayed'],
+        properties: {
+          action: { const: 'set' },
+          policy: governancePolicySchema,
+          commandHash: sha256Schema,
+          replayed: { type: 'boolean' },
+        },
+      },
+      {
+        type: 'object', additionalProperties: false,
+        required: ['action', 'deletedPolicyId', 'commandHash', 'replayed'],
+        properties: {
+          action: { const: 'delete' },
+          deletedPolicyId: idSchema,
+          commandHash: sha256Schema,
+          replayed: { type: 'boolean' },
+        },
+      },
+    ],
   })),
   defineSchema('project-lut-selection-applied', 3, 'Applied project LUT selection with explicit current ProjectVersion state', successSchema({
     ...projectLutSelectionResultSchemaV3,

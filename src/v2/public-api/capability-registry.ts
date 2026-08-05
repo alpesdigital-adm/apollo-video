@@ -5219,6 +5219,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.artifacts.download-grants.revoke', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'natural',
   },
   {
+    id: 'apollo.governance.policies.list', version: '1.0.0', title: 'List governance policies',
+    description: 'Lists the explicit workspace and client policies that restrict the runtime governance defaults.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
+    outputSchemaRef: 'apollo://schemas/governance-policy-list/v1', endpoint: { method: 'GET', path: '/v1/workspaces/{workspaceId}/governance/policies' }, toolName: 'apollo.governance.policies.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.governance.policies.set', version: '1.0.0', title: 'Set governance policy',
+    description: 'Creates or replaces one workspace/client governance policy under CAS with a durable actor-bound command.', exposure: 'workspace-admin', operationKind: 'command', authMode: 'required', requiredScopes: ['clients:admin'],
+    inputSchemaRef: 'apollo://schemas/set-governance-policy-request/v1', outputSchemaRef: 'apollo://schemas/governance-policy-command-result/v1', endpoint: { method: 'POST', path: '/v1/workspaces/{workspaceId}/governance/policies' }, toolName: 'apollo.governance.policies.set', supportsDryRun: false, costClass: 'free', confirmation: 'human-approval', successStatuses: [200, 201], idempotency: 'required',
+  },
+  {
+    id: 'apollo.governance.policies.delete', version: '1.0.0', title: 'Delete governance policy',
+    description: 'Deletes one governance policy under CAS and restores runtime defaults for that scope.', exposure: 'workspace-admin', operationKind: 'command', authMode: 'required', requiredScopes: ['clients:admin'],
+    inputSchemaRef: 'apollo://schemas/delete-governance-policy-request/v1', outputSchemaRef: 'apollo://schemas/governance-policy-command-result/v1', endpoint: { method: 'DELETE', path: '/v1/workspaces/{workspaceId}/governance/policies/{policyId}' }, toolName: 'apollo.governance.policies.delete', supportsDryRun: false, costClass: 'free', confirmation: 'human-approval', successStatuses: [200], idempotency: 'required',
+  },
+  {
     id: 'apollo.governance.usage-audit.list', version: '2.0.0', title: 'List governance usage and audit entries',
     description: 'Returns a stable paginated and redacted view of durable capability admissions, reservations, decisions and limit reasons.', exposure: 'workspace-admin', operationKind: 'query', authMode: 'required', requiredScopes: ['clients:admin'],
     outputSchemaRef: 'apollo://schemas/governance-usage-audit-page/v2', endpoint: { method: 'GET', path: '/v1/governance/usage-audit' }, toolName: 'apollo.governance.usage-audit.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',

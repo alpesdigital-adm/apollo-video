@@ -10,6 +10,8 @@ O gateway aplica quotas por workspace/client, rate limit por capability, limites
 
 O enforcement de governança ocorre no único caminho autenticado da Public API, após a capability e sua autorização serem resolvidas e antes do handler. Cada tentativa autorizada para chegar ao handler gera uma admission imutável; a mesma transação PostgreSQL adquire lock por workspace/environment, mede separadamente o agregado do workspace e o consumo do client, aplica em cada escopo sua policy limitada pelos defaults, mede janela móvel e reservas e persiste alertas por escopo antes de devolver 429. A `PublicOperation` continua sendo a fonte de concorrência durável; reservations de curta duração cobrem apenas a lacuna entre admission e criação da operação. O kill switch global usa esse choke point, sem impedir as ações de recuperação por sessão humana administradora explicitamente allowlisted.
 
+Policies são administradas apenas por capabilities públicas `clients:admin`. Create declara `baseRevision: null`; update/delete usam CAS pela revision corrente. Toda mutação exige confirmação e Idempotency-Key ligada ao actor context, e grava um command content-addressed atomicamente com a alteração sob o mesmo lock workspace/environment do admission. Uma policy de client é inválida se o client não pertence ao workspace/environment. Dimensões não consumidas pela capability não bloqueiam operações gratuitas de recuperação; rate continua aplicável a toda tentativa.
+
 > **Status:** Accepted; autenticação de service account fechada no ADR-010
 >
 > **Data:** 12 de julho de 2026

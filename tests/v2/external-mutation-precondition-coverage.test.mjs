@@ -287,6 +287,14 @@ const coverage = Object.freeze({
   'apollo.clients.credentials.revoke': {
     mode: 'state-machine-action', evidence: 'F0-073',
   },
+  'apollo.governance.policies.set': {
+    mode: 'explicit-precondition', mechanism: 'body-revision',
+    evidence: 'F0.100 requires explicit baseRevision null for create or the exact current revision for replacement and rechecks the scope under a serializable workspace/environment lock',
+  },
+  'apollo.governance.policies.delete': {
+    mode: 'explicit-precondition', mechanism: 'body-revision',
+    evidence: 'F0.100 requires the exact current revision and explicit confirmation before atomic policy deletion plus immutable command audit',
+  },
   'apollo.sessions.login': { mode: 'state-machine-action', evidence: 'credential verification creates a bounded server-signed session' },
   'apollo.sessions.oidc-start': { mode: 'state-machine-action', evidence: 'same-origin request creates an expiring browser-bound PKCE transaction' },
   'apollo.sessions.oidc-callback': { mode: 'state-machine-action', evidence: 'state, browser binding, PKCE, nonce, provider signature and membership must all match' },
@@ -506,7 +514,7 @@ test('the current public surface has no unguarded state replacement', () => {
   }, {})
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
-    'explicit-precondition': 7,
+    'explicit-precondition': 9,
     'idempotent-create': 48,
     'state-machine-action': 16,
     'single-flight-action': 1,

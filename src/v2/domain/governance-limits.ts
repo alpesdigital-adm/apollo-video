@@ -92,7 +92,8 @@ export function createGovernancePolicy(
   assertDomain(
     id.test(input.id) && id.test(input.workspaceId) &&
       id.test(input.scopeId) && id.test(input.updatedByClientId) &&
-      (input.scopeType === 'client' || input.scopeId === input.workspaceId),
+      (input.scopeType === 'workspace' || input.scopeType === 'client') &&
+      (input.scopeType !== 'workspace' || input.scopeId === input.workspaceId),
     'INVALID_ARGUMENT',
     'governance policy identity is invalid',
   )
@@ -101,10 +102,13 @@ export function createGovernancePolicy(
     'INVALID_ARGUMENT',
     'governance policy environment is invalid',
   )
+  const createdAt = Date.parse(input.createdAt)
+  const updatedAt = Date.parse(input.updatedAt)
   assertDomain(
-    new Date(input.createdAt).toISOString() === input.createdAt &&
-      new Date(input.updatedAt).toISOString() === input.updatedAt &&
-      Date.parse(input.createdAt) <= Date.parse(input.updatedAt),
+    Number.isFinite(createdAt) && Number.isFinite(updatedAt) &&
+      new Date(createdAt).toISOString() === input.createdAt &&
+      new Date(updatedAt).toISOString() === input.updatedAt &&
+      createdAt <= updatedAt,
     'INVALID_ARGUMENT',
     'governance policy timestamps are invalid',
   )
@@ -152,12 +156,15 @@ export function evaluateGovernanceLimits(
   const reasons: GovernanceLimitReason[] = [
     ...(usage.requestsInWindow + requested.requests >
       limits.requestsPerMinute ? ['RATE_LIMIT' as const] : []),
-    ...(usage.activeConcurrency + requested.concurrency >
+    ...(requested.concurrency > 0 &&
+      usage.activeConcurrency + requested.concurrency >
       limits.maxConcurrency ? ['CONCURRENCY_LIMIT' as const] : []),
-    ...(usage.quotaUnitsUsed + requested.quotaUnits > limits.quotaUnits
+    ...(requested.quotaUnits > 0 &&
+      usage.quotaUnitsUsed + requested.quotaUnits > limits.quotaUnits
       ? ['QUOTA_EXCEEDED' as const]
       : []),
-    ...(usage.spendMinorUnits + requested.spendMinorUnits >
+    ...(requested.spendMinorUnits > 0 &&
+      usage.spendMinorUnits + requested.spendMinorUnits >
       limits.spendBudgetMinorUnits
       ? ['SPEND_BUDGET_EXCEEDED' as const]
       : []),

@@ -1718,6 +1718,80 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.governance.policies.delete": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/delete-governance-policy-request/v1",
+      "outputSchemaRef": "apollo://schemas/governance-policy-command-result/v1",
+      "endpoint": {
+        "method": "DELETE",
+        "path": "/v1/workspaces/{workspaceId}/governance/policies/{policyId}"
+      },
+      "toolName": "apollo.governance.policies.delete",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.governance.policies.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/governance-policy-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/governance/policies"
+      },
+      "toolName": "apollo.governance.policies.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.governance.policies.set": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-governance-policy-request/v1",
+      "outputSchemaRef": "apollo://schemas/governance-policy-command-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/governance/policies"
+      },
+      "toolName": "apollo.governance.policies.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.governance.usage-audit.list": {
       "version": "2.0.0",
       "exposure": "workspace-admin",
@@ -33380,6 +33454,29 @@
         }
       }
     },
+    "apollo://schemas/delete-governance-policy-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "reason",
+        "confirmed"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500
+        },
+        "confirmed": {
+          "const": true
+        }
+      }
+    },
     "apollo://schemas/director-run-impact/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -37187,6 +37284,304 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 86400000
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/governance-policy-command-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "policy",
+                "commandHash",
+                "replayed"
+              ],
+              "properties": {
+                "action": {
+                  "const": "set"
+                },
+                "policy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "workspaceId",
+                    "scopeType",
+                    "scopeId",
+                    "environment",
+                    "limits",
+                    "updatedByClientId",
+                    "createdAt",
+                    "updatedAt",
+                    "revision"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "scopeType": {
+                      "enum": [
+                        "workspace",
+                        "client"
+                      ]
+                    },
+                    "scopeId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "environment": {
+                      "enum": [
+                        "sandbox",
+                        "production"
+                      ]
+                    },
+                    "limits": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "requestsPerMinute",
+                        "maxConcurrency",
+                        "quotaUnits",
+                        "spendBudgetMinorUnits"
+                      ],
+                      "properties": {
+                        "requestsPerMinute": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2000000000
+                        },
+                        "maxConcurrency": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2000000000
+                        },
+                        "quotaUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2000000000
+                        },
+                        "spendBudgetMinorUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2000000000
+                        }
+                      }
+                    },
+                    "updatedByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "commandHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "replayed": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "deletedPolicyId",
+                "commandHash",
+                "replayed"
+              ],
+              "properties": {
+                "action": {
+                  "const": "delete"
+                },
+                "deletedPolicyId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "commandHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "replayed": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/governance-policy-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policies"
+          ],
+          "properties": {
+            "policies": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "scopeType",
+                  "scopeId",
+                  "environment",
+                  "limits",
+                  "updatedByClientId",
+                  "createdAt",
+                  "updatedAt",
+                  "revision"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "scopeType": {
+                    "enum": [
+                      "workspace",
+                      "client"
+                    ]
+                  },
+                  "scopeId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "environment": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  },
+                  "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requestsPerMinute",
+                      "maxConcurrency",
+                      "quotaUnits",
+                      "spendBudgetMinorUnits"
+                    ],
+                    "properties": {
+                      "requestsPerMinute": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2000000000
+                      },
+                      "maxConcurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2000000000
+                      },
+                      "quotaUnits": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000000000
+                      },
+                      "spendBudgetMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000000000
+                      }
+                    }
+                  },
+                  "updatedByClientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
             }
           }
         }
@@ -118862,6 +119257,89 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2000
+        }
+      }
+    },
+    "apollo://schemas/set-governance-policy-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeType",
+        "scopeId",
+        "environment",
+        "limits",
+        "baseRevision",
+        "reason",
+        "confirmed"
+      ],
+      "properties": {
+        "scopeType": {
+          "enum": [
+            "workspace",
+            "client"
+          ]
+        },
+        "scopeId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "environment": {
+          "enum": [
+            "sandbox",
+            "production"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requestsPerMinute",
+            "maxConcurrency",
+            "quotaUnits",
+            "spendBudgetMinorUnits"
+          ],
+          "properties": {
+            "requestsPerMinute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000000000
+            },
+            "maxConcurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000000000
+            },
+            "quotaUnits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000000000
+            },
+            "spendBudgetMinorUnits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2000000000
+            }
+          }
+        },
+        "baseRevision": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500
+        },
+        "confirmed": {
+          "const": true
         }
       }
     },

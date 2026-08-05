@@ -418,6 +418,14 @@ export function createFoundationAgentToolSafety(
       impact: 'destructive', confirmation: 'human-approval',
       reason: 'Immediately and permanently revokes one API credential.',
     },
+    'apollo.governance.policies.set': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Changes the rate, concurrency, quota and spend envelope enforced for a workspace or client.',
+    },
+    'apollo.governance.policies.delete': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Removes an explicit governance envelope and restores the broader configured defaults for its scope.',
+    },
   })
 }
 

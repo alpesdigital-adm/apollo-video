@@ -83,4 +83,33 @@ test('stored governance policy revision binds scope, environment and every limit
     () => createGovernancePolicy({ ...input, revision: 'f'.repeat(64) }),
     /revision is invalid/,
   )
+  assert.throws(
+    () => createGovernancePolicy({ ...input, scopeType: 'unknown' }),
+    /identity is invalid/,
+  )
+  assert.throws(
+    () => createGovernancePolicy({ ...input, createdAt: 'invalid' }),
+    (error) => error?.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('free recovery requests remain operable after non-request budgets are exhausted', () => {
+  const decision = evaluateGovernanceLimits(
+    { workspaceId: 'workspace-1', clientId: 'client-1' },
+    {
+      requestsPerMinute: 10,
+      maxConcurrency: 1,
+      quotaUnits: 0,
+      spendBudgetMinorUnits: 0,
+    },
+    {
+      requestsInWindow: 0,
+      activeConcurrency: 5,
+      quotaUnitsUsed: 100,
+      spendMinorUnits: 100,
+    },
+    { requests: 1, concurrency: 0, quotaUnits: 0, spendMinorUnits: 0 },
+  )
+  assert.equal(decision.allowed, true)
+  assert.deepEqual(decision.reasons, [])
 })

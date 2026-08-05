@@ -52,6 +52,7 @@ model V2Workspace {
   operationTelemetryEvents               V2OperationTelemetryEvent[]
   operationTelemetryAlerts               V2OperationTelemetryAlert[]
   governancePolicies                     V2GovernancePolicy[]
+  governancePolicyCommands               V2GovernancePolicyCommand[]
   governanceAdmissions                   V2GovernanceAdmission[]
   governanceAlerts                       V2GovernanceAlert[]
   uiSessions                             V2UiSession[]
@@ -180,6 +181,7 @@ model V2ApiClient {
   authoredApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandActor")
   targetedApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandTarget")
   authoredWebhookAdministrationCommands V2WebhookAdministrationCommand[] @relation("WebhookAdministrationCommandActor")
+  authoredGovernancePolicyCommands V2GovernancePolicyCommand[] @relation("GovernancePolicyCommandActor")
   operations                      V2PublicOperation[]
   publicOperationControlCommands  V2PublicOperationControlCommand[]
   uiSessions                      V2UiSession[]
@@ -2106,6 +2108,43 @@ model V2GovernancePolicy {
   @@unique([workspaceId, scopeType, scopeId, environment], map: "governance_policies_scope_key")
   @@index([workspaceId, environment, scopeType], map: "governance_policies_lookup_idx")
   @@map("governance_policies")
+}
+
+model V2GovernancePolicyCommand {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  action                  String   @db.VarChar(16)
+  policyId                String   @db.VarChar(128)
+  scopeType               String   @db.VarChar(16)
+  scopeId                 String   @db.VarChar(128)
+  environment             String   @db.VarChar(16)
+  limitsJson              String?  @db.Text
+  baseRevision            String?  @db.Char(64)
+  resultRevision          String?  @db.Char(64)
+  reason                  String   @db.VarChar(500)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  resultJson              String   @db.Text
+  resultHash              String   @db.Char(64)
+  commandHash             String   @unique(map: "governance_policy_commands_hash_key") @db.Char(64)
+  occurredAt              DateTime @db.Timestamptz(3)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace   V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "governance_policy_commands_workspace_fkey")
+  actorClient V2ApiClient @relation("GovernancePolicyCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "governance_policy_commands_actor_fkey")
+
+  @@unique([workspaceId, actorContextHash, idempotencyKey], map: "governance_policy_commands_idempotency_key")
+  @@index([workspaceId, policyId, occurredAt(sort: Desc)], map: "governance_policy_commands_policy_history_idx")
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)], map: "governance_policy_commands_actor_history_idx")
+  @@map("governance_policy_commands")
 }
 
 model V2GovernanceAdmission {
