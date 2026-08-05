@@ -55,6 +55,7 @@ model V2Workspace {
   governancePolicyCommands               V2GovernancePolicyCommand[]
   governanceAdmissions                   V2GovernanceAdmission[]
   governanceAlerts                       V2GovernanceAlert[]
+  sandboxProviderExecutions              V2SandboxProviderExecution[]
   uiSessions                             V2UiSession[]
   workspaceMembers                       V2WorkspaceMember[]
   uiPrincipal                            V2WorkspaceUiPrincipal?
@@ -182,6 +183,7 @@ model V2ApiClient {
   targetedApiAdministrationCommands V2ApiAdministrationCommand[]     @relation("ApiAdministrationCommandTarget")
   authoredWebhookAdministrationCommands V2WebhookAdministrationCommand[] @relation("WebhookAdministrationCommandActor")
   authoredGovernancePolicyCommands V2GovernancePolicyCommand[] @relation("GovernancePolicyCommandActor")
+  sandboxProviderExecutions        V2SandboxProviderExecution[]
   operations                      V2PublicOperation[]
   publicOperationControlCommands  V2PublicOperationControlCommand[]
   uiSessions                      V2UiSession[]
@@ -2192,6 +2194,30 @@ model V2GovernanceAlert {
   @@index([workspaceId, createdAt(sort: Desc)], map: "governance_alerts_workspace_idx")
   @@index([workspaceId, clientId, scopeType, reasonCode, createdAt(sort: Desc)], map: "governance_alerts_client_scope_reason_idx")
   @@map("governance_alerts")
+}
+
+model V2SandboxProviderExecution {
+  receiptHash    String   @id @db.Char(64)
+  schemaVersion  String   @db.VarChar(64)
+  workspaceId    String   @db.VarChar(128)
+  clientId       String   @db.VarChar(80)
+  environment    String   @db.VarChar(16)
+  provider       String   @db.VarChar(64)
+  operation      String   @db.VarChar(64)
+  inputHash      String   @db.Char(64)
+  outputHash     String   @db.Char(64)
+  units          Int
+  currency       String   @db.Char(3)
+  costMinorUnits Int
+  externalCalls  Int
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, map: "sandbox_provider_executions_workspace_fkey")
+  client    V2ApiClient @relation(fields: [clientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "sandbox_provider_executions_client_fkey")
+
+  @@index([workspaceId, createdAt(sort: Desc), receiptHash(sort: Desc)], map: "sandbox_provider_executions_page_idx")
+  @@index([workspaceId, clientId, createdAt(sort: Desc)], map: "sandbox_provider_executions_client_idx")
+  @@map("sandbox_provider_executions")
 }
 
 model V2UiSession {

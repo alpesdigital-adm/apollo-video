@@ -19242,6 +19242,43 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
     },
   })),
+  defineSchema('sandbox-provider-execution-page', 1, 'Redacted simulated provider execution receipts', successSchema({
+    type: 'object', additionalProperties: false, required: ['entries'], properties: {
+      entries: {
+        type: 'array', maxItems: 100, items: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'schemaVersion', 'workspaceId', 'clientId', 'environment',
+            'provider', 'operation', 'inputHash', 'outputHash', 'units',
+            'cost', 'externalCalls', 'receiptHash', 'createdAt',
+          ],
+          properties: {
+            schemaVersion: { const: 'sandbox-provider-receipt/v1' },
+            workspaceId: idSchema,
+            clientId: idSchema,
+            environment: { const: 'sandbox' },
+            provider: { const: 'apollo-sandbox-fake' },
+            operation: { enum: ['semantic-embedding'] },
+            inputHash: sha256Schema,
+            outputHash: sha256Schema,
+            units: { type: 'integer', minimum: 1, maximum: 100000 },
+            cost: {
+              type: 'object', additionalProperties: false,
+              required: ['currency', 'minorUnits'],
+              properties: {
+                currency: { const: 'USD' },
+                minorUnits: { type: 'integer', minimum: 0, maximum: 1000000000 },
+              },
+            },
+            externalCalls: { const: 0 },
+            receiptHash: sha256Schema,
+            createdAt: dateTimeSchema,
+          },
+        },
+      },
+      nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
+    },
+  })),
   defineSchema('set-governance-policy-request', 1, 'Create or replace a workspace/client governance policy with CAS', {
     type: 'object', additionalProperties: false,
     required: [

@@ -6901,6 +6901,28 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/sandbox-provider-execution-page/v1': [
+      {
+        data: {
+          entries: [{
+            schemaVersion: 'sandbox-provider-receipt/v1',
+            workspaceId: 'workspace-example-1',
+            clientId: 'client-example-1',
+            environment: 'sandbox',
+            provider: 'apollo-sandbox-fake',
+            operation: 'semantic-embedding',
+            inputHash: 'd'.repeat(64),
+            outputHash: 'e'.repeat(64),
+            units: 24,
+            cost: { currency: 'USD', minorUnits: 48 },
+            externalCalls: 0,
+            receiptHash: 'f'.repeat(64),
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/webhook-signing-secret-rotation-list/v1': [
       { data: { rotations: [] }, meta: { apiVersion: 'v1' } },
       { data: { rotations: [webhookSigningSecretRotationExample] }, meta: { apiVersion: 'v1' } },

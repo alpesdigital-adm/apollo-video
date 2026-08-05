@@ -3,8 +3,16 @@ import { createHash } from 'node:crypto'
 import type {
   SemanticEmbeddingProvider,
 } from '../application/ports/semantic-embedding-provider.ts'
+import type {
+  SandboxProviderExecutionRepository,
+} from '../application/ports/sandbox-provider-execution-repository.ts'
+import type {
+  ApiEnvironment,
+} from '../domain/api-client.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
 import { normalizeSpeechText } from '../domain/speech-segment-catalog.ts'
+import { SimulatedSandboxProvider } from './sandbox/simulated-provider.ts'
 
 const DIMENSIONS = 256
 
@@ -121,40 +129,88 @@ implements SemanticEmbeddingProvider {
   }
 }
 
-function e2eDatabase(): boolean {
-  try {
-    const name = new URL(process.env.V2_DATABASE_URL ?? '')
-      .pathname.slice(1)
-    return /(?:^|_)e2e(?:_|$)/.test(name)
-  } catch {
-    return false
+export class SandboxSemanticEmbeddingProvider
+implements SemanticEmbeddingProvider {
+  readonly descriptor = Object.freeze({
+    provider: 'apollo-sandbox-fake',
+    model: 'deterministic-semantic-projection',
+    version: '1.0.0',
+    dimensions: DIMENSIONS,
+    degraded: false,
+  })
+
+  private readonly deterministic =
+    new DeterministicSemanticEmbeddingProvider()
+  private readonly context: Readonly<{
+    workspaceId: string
+    clientId: string
+    environment: 'sandbox'
+  }>
+  private readonly repository: SandboxProviderExecutionRepository
+  private readonly provider: SimulatedSandboxProvider
+
+  constructor(
+    context: Readonly<{
+      workspaceId: string
+      clientId: string
+      environment: 'sandbox'
+    }>,
+    repository: SandboxProviderExecutionRepository,
+    provider = new SimulatedSandboxProvider(),
+  ) {
+    this.context = context
+    this.repository = repository
+    this.provider = provider
+  }
+
+  async embed(input: string): Promise<readonly number[]> {
+    const vector = await this.deterministic.embed(input)
+    const receipt = this.provider.execute({
+      ...this.context,
+      operation: 'semantic-embedding',
+      inputHash: calculateCanonicalHash({ input }),
+      outputHash: calculateCanonicalHash({ vector }),
+      units: Buffer.byteLength(input, 'utf8'),
+    })
+    await this.repository.record(receipt)
+    return vector
   }
 }
 
-export function createSemanticEmbeddingProvider():
-SemanticEmbeddingProvider {
+export function createSemanticEmbeddingProvider(input: {
+  environment: ApiEnvironment
+  workspaceId: string
+  clientId: string
+  sandboxExecutions: SandboxProviderExecutionRepository
+  environmentVariables?: NodeJS.ProcessEnv
+}): SemanticEmbeddingProvider {
+  if (input.environment === 'sandbox') {
+    return new SandboxSemanticEmbeddingProvider({
+      environment: 'sandbox',
+      workspaceId: input.workspaceId,
+      clientId: input.clientId,
+    }, input.sandboxExecutions)
+  }
+  const environmentVariables = input.environmentVariables ?? process.env
   const selected =
-    process.env.APOLLO_SEMANTIC_EMBEDDING_PROVIDER?.trim()
+    environmentVariables.APOLLO_SEMANTIC_EMBEDDING_PROVIDER?.trim()
       .toLowerCase()
   if (selected === 'deterministic') {
-    if (
-      process.env.NODE_ENV === 'production' &&
-      !e2eDatabase()
-    ) {
-      throw new DomainError(
-        'PERSISTENCE_NOT_CONFIGURED',
-        'Deterministic semantic embeddings are restricted to isolated E2E databases in production mode',
-      )
-    }
-    return new DeterministicSemanticEmbeddingProvider()
-  }
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
-  if (apiKey) return new OpenAISemanticEmbeddingProvider(apiKey)
-  if (process.env.NODE_ENV === 'production' && !e2eDatabase()) {
     throw new DomainError(
       'PERSISTENCE_NOT_CONFIGURED',
-      'OPENAI_API_KEY is required for production semantic search',
+      'Deterministic semantic embeddings are sandbox-only',
     )
   }
-  return new DeterministicSemanticEmbeddingProvider()
+  if (selected && selected !== 'openai') {
+    throw new DomainError(
+      'PERSISTENCE_NOT_CONFIGURED',
+      'Configured semantic embedding provider is not supported',
+    )
+  }
+  const apiKey = environmentVariables.OPENAI_API_KEY?.trim()
+  if (apiKey) return new OpenAISemanticEmbeddingProvider(apiKey)
+  throw new DomainError(
+    'PERSISTENCE_NOT_CONFIGURED',
+    'OPENAI_API_KEY is required for production semantic search',
+  )
 }

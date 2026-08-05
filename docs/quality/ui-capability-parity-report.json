@@ -4,9 +4,9 @@
     "uiActions": 88,
     "capabilities": 81,
     "endpoints": 81,
-    "registeredCapabilities": 198,
-    "operableCapabilities": 198,
-    "publicContractCapabilities": 198,
+    "registeredCapabilities": 199,
+    "operableCapabilities": 199,
+    "publicContractCapabilities": 199,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3817,6 +3817,17 @@
       "endpoint": "DELETE /v1/workspaces/{workspaceId}/governance/policies/{policyId}",
       "inputSchemaRef": "apollo://schemas/delete-governance-policy-request/v1",
       "outputSchemaRef": "apollo://schemas/governance-policy-command-result/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.governance.sandbox-executions.list",
+      "exposure": "workspace-admin",
+      "endpoint": "GET /v1/governance/sandbox-executions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/sandbox-provider-execution-page/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -23,6 +23,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import {
   DeterministicSemanticEmbeddingProvider,
   OpenAISemanticEmbeddingProvider,
+  SandboxSemanticEmbeddingProvider,
   createSemanticEmbeddingProvider,
 } from '../../src/v2/infrastructure/semantic-embedding-provider.ts'
 import {
@@ -1266,42 +1267,54 @@ test('T-FR-048 deterministic E2E adapter is stable and normalized', async () => 
   )
 })
 
-test('T-FR-048 embedding configuration fails closed in production and permits deterministic vectors only for isolated E2E', () => {
-  const previous = {
-    nodeEnv: process.env.NODE_ENV,
-    databaseUrl: process.env.V2_DATABASE_URL,
-    apiKey: process.env.OPENAI_API_KEY,
-    selected: process.env.APOLLO_SEMANTIC_EMBEDDING_PROVIDER,
+test('T-F0-102 embedding routing is actor-environment owned and fails closed', async () => {
+  const recorded = []
+  const sandboxExecutions = {
+    async record(receipt) {
+      recorded.push(receipt)
+      return { receipt, createdAt: '2026-08-05T03:00:00.000Z' }
+    },
   }
-  try {
-    process.env.NODE_ENV = 'production'
-    process.env.V2_DATABASE_URL =
-      'postgresql://example:example@localhost:5432/apollo_video_v2'
-    delete process.env.OPENAI_API_KEY
-    delete process.env.APOLLO_SEMANTIC_EMBEDDING_PROVIDER
-    assert.throws(
-      () => createSemanticEmbeddingProvider(),
-      /OPENAI_API_KEY is required/,
-    )
-    process.env.V2_DATABASE_URL =
-      'postgresql://example:example@localhost:5432/apollo_video_v2_e2e_search'
-    process.env.APOLLO_SEMANTIC_EMBEDDING_PROVIDER =
-      'deterministic'
-    assert.ok(
-      createSemanticEmbeddingProvider() instanceof
-        DeterministicSemanticEmbeddingProvider,
-    )
-  } finally {
-    const restore = (name, value) => {
-      if (value === undefined) delete process.env[name]
-      else process.env[name] = value
-    }
-    restore('NODE_ENV', previous.nodeEnv)
-    restore('V2_DATABASE_URL', previous.databaseUrl)
-    restore('OPENAI_API_KEY', previous.apiKey)
-    restore(
-      'APOLLO_SEMANTIC_EMBEDDING_PROVIDER',
-      previous.selected,
-    )
+  const context = {
+    workspaceId: 'workspace-semantic',
+    clientId: 'client-semantic',
+    sandboxExecutions,
   }
+  const sandbox = createSemanticEmbeddingProvider({
+    ...context,
+    environment: 'sandbox',
+    environmentVariables: {
+      OPENAI_API_KEY: 'must-never-be-used-in-sandbox',
+      APOLLO_SEMANTIC_EMBEDDING_PROVIDER: 'openai',
+    },
+  })
+  assert.ok(sandbox instanceof SandboxSemanticEmbeddingProvider)
+  await sandbox.embed('prova de campanha')
+  assert.equal(recorded.length, 1)
+  assert.equal(recorded[0].externalCalls, 0)
+  assert.equal(recorded[0].operation, 'semantic-embedding')
+
+  assert.throws(
+    () => createSemanticEmbeddingProvider({
+      ...context,
+      environment: 'production',
+      environmentVariables: {},
+    }),
+    /OPENAI_API_KEY is required/,
+  )
+  assert.throws(
+    () => createSemanticEmbeddingProvider({
+      ...context,
+      environment: 'production',
+      environmentVariables: {
+        APOLLO_SEMANTIC_EMBEDDING_PROVIDER: 'deterministic',
+      },
+    }),
+    /sandbox-only/,
+  )
+  assert.ok(createSemanticEmbeddingProvider({
+    ...context,
+    environment: 'production',
+    environmentVariables: { OPENAI_API_KEY: 'controlled-api-key' },
+  }) instanceof OpenAISemanticEmbeddingProvider)
 })

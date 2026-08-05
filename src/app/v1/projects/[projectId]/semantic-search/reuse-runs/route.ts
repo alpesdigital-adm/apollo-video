@@ -12,6 +12,7 @@ import {
   createSemanticEmbeddingProvider,
 } from '@/v2/infrastructure/semantic-embedding-provider'
 import {
+  createSandboxProviderExecutionRepository,
   createSemanticSearchRepository,
 } from '@/v2/infrastructure/repository-factory'
 import {
@@ -55,7 +56,12 @@ export async function POST(
     const clock = () => new Date()
     const search = hybridSearchService({
       repository,
-      embeddingProvider: createSemanticEmbeddingProvider(),
+      embeddingProvider: createSemanticEmbeddingProvider({
+        environment: actor.environment,
+        workspaceId: actor.workspaceId,
+        clientId: actor.clientId,
+        sandboxExecutions: createSandboxProviderExecutionRepository(),
+      }),
       clock,
     })
     const result = await recordSemanticReuseRunService({

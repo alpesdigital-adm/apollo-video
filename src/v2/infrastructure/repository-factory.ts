@@ -44,6 +44,7 @@ import { calculateVersionHash } from '../application/version-hash.ts'
 import type { ApiClientRepository } from '../application/ports/api-client-repository.ts'
 import type { ApiClientAdministrationRepository } from '../application/ports/api-client-administration-repository.ts'
 import type { GovernanceAdmissionRepository } from '../application/ports/governance-admission-repository.ts'
+import type { SandboxProviderExecutionRepository } from '../application/ports/sandbox-provider-execution-repository.ts'
 import type { GovernancePolicyRepository } from '../application/ports/governance-policy-repository.ts'
 import type { ApiAccessControlRepository } from '../application/ports/api-access-control-repository.ts'
 import type { AssetRightsRepository } from '../application/ports/asset-rights-repository.ts'
@@ -142,6 +143,7 @@ import type {
 import { DomainError } from '../domain/errors.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
+import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
 import { PrismaGovernancePolicyRepository } from './prisma/governance-policy-repository.ts'
 import { PrismaApiAccessControlRepository } from './prisma/api-access-control-repository.ts'
 import { PrismaArtifactRenderCheckpointRepository } from './prisma/artifact-render-checkpoint-repository.ts'
@@ -306,6 +308,10 @@ export function createApiClientRepository(): ApiClientRepository {
 
 export function createGovernanceAdmissionRepository(): GovernanceAdmissionRepository {
   return new PrismaGovernanceAdmissionRepository(resolveV2Client())
+}
+
+export function createSandboxProviderExecutionRepository(): SandboxProviderExecutionRepository {
+  return new PrismaSandboxProviderExecutionRepository(resolveV2Client())
 }
 
 export function createGovernancePolicyRepository(): GovernancePolicyRepository {

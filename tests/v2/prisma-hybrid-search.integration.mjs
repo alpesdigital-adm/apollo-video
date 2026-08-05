@@ -139,8 +139,8 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       id: `hybrid-e2e-client-${suffix}`,
       workspaceId,
       name: 'Hybrid search E2E',
-      environment: 'production',
-      scopes: ['projects:read', 'projects:write'],
+      environment: 'sandbox',
+      scopes: ['projects:read', 'projects:write', 'clients:admin'],
     })
     await client.v2Project.create({
       data: {
@@ -293,8 +293,9 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
           ...process.env,
           NODE_ENV: 'production',
           __NEXT_PROCESSED_ENV: 'true',
-          APOLLO_API_ENVIRONMENT: 'production',
-          APOLLO_SEMANTIC_EMBEDDING_PROVIDER: 'deterministic',
+          APOLLO_API_ENVIRONMENT: 'sandbox',
+          APOLLO_SEMANTIC_EMBEDDING_PROVIDER: 'openai',
+          OPENAI_API_KEY: 'must-never-be-used-by-sandbox',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -1075,6 +1076,26 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
           row.has_full_text === true,
       ),
     )
+    const sandboxRows = await client.v2SandboxProviderExecution.findMany({
+      where: { workspaceId, clientId: issued.client.id },
+      orderBy: { createdAt: 'desc' },
+    })
+    assert.ok(sandboxRows.length >= 10)
+    assert.ok(sandboxRows.every((row) =>
+      row.environment === 'sandbox' &&
+      row.provider === 'apollo-sandbox-fake' &&
+      row.operation === 'semantic-embedding' &&
+      row.externalCalls === 0 && row.costMinorUnits > 0))
+    const sandboxAuditResponse = await fetch(
+      `${baseUrl}/v1/governance/sandbox-executions?limit=5`,
+      { headers: { authorization } },
+    )
+    const sandboxAuditPayload = await sandboxAuditResponse.json()
+    assert.equal(sandboxAuditResponse.status, 200)
+    assert.equal(sandboxAuditPayload.data.entries.length, 5)
+    assert.ok(sandboxAuditPayload.data.entries.every((entry) =>
+      entry.externalCalls === 0 && entry.input === undefined))
+    assert.ok(sandboxAuditPayload.data.nextCursor)
     assert.equal(
       await client.v2RetrievalEvaluation.count({
         where: { workspaceId, projectId },

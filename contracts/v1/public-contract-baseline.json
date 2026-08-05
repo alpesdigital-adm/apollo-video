@@ -1792,6 +1792,52 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.governance.sandbox-executions.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/sandbox-provider-execution-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/governance/sandbox-executions"
+      },
+      "toolName": "apollo.governance.sandbox-executions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum receipts per page.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor from the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 1024
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.governance.usage-audit.list": {
       "version": "2.0.0",
       "exposure": "workspace-admin",
@@ -115092,6 +115138,133 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      }
+    },
+    "apollo://schemas/sandbox-provider-execution-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "workspaceId",
+                  "clientId",
+                  "environment",
+                  "provider",
+                  "operation",
+                  "inputHash",
+                  "outputHash",
+                  "units",
+                  "cost",
+                  "externalCalls",
+                  "receiptHash",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "sandbox-provider-receipt/v1"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "environment": {
+                    "const": "sandbox"
+                  },
+                  "provider": {
+                    "const": "apollo-sandbox-fake"
+                  },
+                  "operation": {
+                    "enum": [
+                      "semantic-embedding"
+                    ]
+                  },
+                  "inputHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "outputHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "units": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                  },
+                  "cost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "currency",
+                      "minorUnits"
+                    ],
+                    "properties": {
+                      "currency": {
+                        "const": "USD"
+                      },
+                      "minorUnits": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000000
+                      }
+                    }
+                  },
+                  "externalCalls": {
+                    "const": 0
+                  },
+                  "receiptHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 1024
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

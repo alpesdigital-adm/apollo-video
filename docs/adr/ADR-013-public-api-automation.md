@@ -12,6 +12,8 @@ O enforcement de governança ocorre no único caminho autenticado da Public API,
 
 Policies são administradas apenas por capabilities públicas `clients:admin`. Create declara `baseRevision: null`; update/delete usam CAS pela revision corrente. Toda mutação exige confirmação e Idempotency-Key ligada ao actor context, e grava um command content-addressed atomicamente com a alteração sob o mesmo lock workspace/environment do admission. Uma policy de client é inválida se o client não pertence ao workspace/environment. Dimensões não consumidas pela capability não bloqueiam operações gratuitas de recuperação; rate continua aplicável a toda tentativa.
 
+O environment autenticado, e não configuração global do processo, decide a classe de provider. Um request sandbox nunca pode alcançar adapter externo mesmo que credentials de produção existam no processo. O fake produz resultado determinístico e receipt persistido content-addressed com custo explicitamente simulado e contagem zero de chamadas externas. Um request production nunca pode degradar silenciosamente para fake; configuração ausente ou seleção incompatível falha fechado. Receipts sandbox são auditáveis por capability administrativa sem expor o conteúdo de entrada.
+
 > **Status:** Accepted; autenticação de service account fechada no ADR-010
 >
 > **Data:** 12 de julho de 2026
