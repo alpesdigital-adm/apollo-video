@@ -19,8 +19,8 @@ import type {
   PreflightCommitTokenIssuer,
 } from './ports/preflight-commit-token.ts'
 import {
-  validatePreflightCommitTokenService,
-} from './validate-preflight-commit-token.ts'
+  requirePreflightForActionService,
+} from './preflight-gate.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -427,10 +427,11 @@ export function commitBatchEditService(dependencies: {
       'AUTH_INVALID',
       'Batch edit commit actor differs from the preflight actor',
     )
-    validatePreflightCommitTokenService({
+    requirePreflightForActionService({
       issuer: dependencies.tokenIssuer,
       clock: dependencies.clock,
     })({
+      actionId: 'batch-edit.commit',
       token: request.commitToken,
       clientId,
       workspaceId,

@@ -15,7 +15,11 @@ test('dry-run, expiry, partial retry and budget block form one deterministic pre
   const issuer = new HmacPreflightCommitTokenIssuer('e'.repeat(32))
   const claims = { clientId: 'client-1', workspaceId: 'workspace-1', fingerprint: dryRun.fingerprint, snapshot: 'b'.repeat(64), costFingerprint: 'c'.repeat(64), expiresAt: '2026-07-17T00:05:00Z' }
   const expiredGate = requirePreflightForActionService({ issuer, clock: () => new Date('2026-07-17T00:05:01Z') })
-  assert.throws(() => expiredGate({ actionClass: 'batch', token: issuer.issue(claims), ...claims }), /expired/)
+  assert.throws(() => expiredGate({
+    actionId: 'batch-edit.commit',
+    token: issuer.issue(claims),
+    ...claims,
+  }), /expired/)
 
   const budgetBlocked = createPreflightResult({ ...common, eligible: false, quota: { unit: 'cent', required: 150, remaining: 50, allowed: false } })
   assert.equal(budgetBlocked.eligible, false)

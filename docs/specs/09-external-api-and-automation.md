@@ -553,6 +553,8 @@ Token é assinado, de uso único ou idempotentemente reutilizável para o mesmo 
 
 O token continua fora do `PreflightResult` e aparece ao lado dele quando o fluxo exige commit ou confirmação. Batch edit e variant portfolio publicam esse resultado em outputs major v2; o fingerprint é materializado na Application e coincide com o claim assinado, inclusive em replay.
 
+O payload HMAC v1 usa JSON canônico e sete claims exatas (`v`, client, workspace, fingerprint, snapshot, cost fingerprint e expiry). O verifier limita o token antes do decode, aceita apenas base64url canônico e compara a assinatura em tempo constante. A política recebe action ID, nunca uma classe fornecida pelo caller: somente IDs server-owned explicitamente bounded dispensam token. Final export unitário aprovado é bounded; matriz final continua uma ação distinta e obrigatoriamente preflighted.
+
 ## 18. Batch externo
 
 - create/import/list/read via API;

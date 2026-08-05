@@ -646,6 +646,8 @@ Complemento parcial F0.027: a cobertura de política de invalidação por Comman
 
 Incremento local F0.092: `preflight-result/v1` deixou de ser schema órfão e agora é materializado pelos application services reais de batch edit e variant portfolio. As duas rotas de criação publicam `result` obrigatório em outputs v2, com o mesmo fingerprint assinado no commit/confirmation token, targets, bloqueios, invalidações, jobs, custo, quota e warnings derivados do run persistido. Os contratos v1 permanecem publicados; PostgreSQL E2E, deploy e aceite continuam pendentes, portanto a caixa permanece aberta.
 
+Incremento local F0.093–F0.095: o token v1 agora usa payload canônico, codec base64url estrito, limites antes do decode, claims exatas e secret com limite em bytes, preservando tokens v1 válidos emitidos anteriormente. O gate central deixou de aceitar `actionClass` do caller e resolve somente action IDs registrados; batch edit commit e confirmação de variant portfolio atravessam esse gate, enquanto final export de um único formato é explicitamente bounded. As quatro classes possuem política fail-closed, mas matriz final e commit destrutivo reais ainda não estão integrados; PostgreSQL E2E, deploy e aceite seguem pendentes.
+
 - [ ] Definir `PreflightResult` com targets, conflicts, invalidations, jobs, custo, quota e warnings. Evidência F0-092: contrato canônico `preflight-result/v1` possui limites explícitos, elegibilidade derivada de conflitos/quota, custo em minor units e schema/exemplo acessíveis por `GET /v1/schemas/preflight-result/v1`.
 - [ ] Gerar commit token vinculado a client, workspace, fingerprint, snapshot e expiry. Evidência F0-093: token HMAC v1 carrega claims assinadas de client/workspace/fingerprint/snapshot/cost/expiry, usa comparação timing-safe e possui schema público de evidência sem expor claims em texto claro.
 - [ ] Invalidar token quando versão, input ou custo material mudar. Evidência F0-094: validação reabre claims assinadas e rejeita expiry, client/workspace diferente e qualquer divergência de fingerprint, snapshot ou cost fingerprint antes do commit.
@@ -5449,3 +5451,15 @@ Regressões locais desta slice:
 - `POST` das duas capacidades passou para `2.0.0` e outputs `...-preflight-mutated/v2`, preservando os schemas v1 publicados; o baseline mudou somente nessas duas capacidades e nos dois schemas novos;
 - regressões validam os outputs v2 com JSON Schema e provam que payload v1 sem `result` é rejeitado pelo contrato major novo;
 - persistência PostgreSQL real, E2E HTTP implantado e aceite ainda faltam; nenhuma caixa foi marcada.
+
+### Incremento operacional F0.093–F0.095 — token estrito e registry central
+
+**Status:** implementado e testado localmente em 4 de agosto de 2026; cobertura operacional parcial, sem deploy ou aceite.
+
+- a emissão HMAC v1 serializa claims canonicamente; client/workspace, três hashes e expiry são validados antes da assinatura;
+- a verificação limita o token antes de split/decode, exige base64url canônico, assinatura de 32 bytes em comparação timing-safe, objeto JSON com exatamente sete claims e nenhum campo extra;
+- regressão comprova determinismo, adulteração, encoding não canônico, payload excessivo, claim extra assinada, identidade inválida, staleness/expiry e leitura de token v1 legado válido;
+- `PREFLIGHT_ACTION_POLICIES` é o único classificador: batch, final-matrix, variable-generation e destructive exigem token; action ID desconhecido falha fechado e o caller não pode declarar `bounded`;
+- `commitBatchEditService` e a confirmação de `createVariantPortfolioPreflightService` usam o gate central, sem chamada direta ao validador; o fingerprint/snapshot/custo continuam revalidados contra estado atual;
+- `enqueueProjectFinalExportService` passa pelo mesmo registry como bounded apenas para um formato aprovado; uma matriz multi-formato permanece classe distinta com preflight obrigatório;
+- matriz final e commit destrutivo ainda não possuem application services integrados a esse gate; PostgreSQL/HTTP E2E, deploy e aceite faltam, portanto F0.093–F0.095 permanecem abertas.

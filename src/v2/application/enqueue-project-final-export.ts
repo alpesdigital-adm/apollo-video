@@ -12,6 +12,7 @@ import type { ProjectFinalExportRepository } from './ports/project-final-export-
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
+import { requirePreflightForActionService } from './preflight-gate.ts'
 import { resolveRenderColorPipelineBindings } from './resolve-render-color-pipelines.ts'
 import { calculateVersionHash } from './version-hash.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
@@ -67,6 +68,9 @@ export function enqueueProjectFinalExportService(dependencies: {
     assertDomain(request.approval?.approved === true, 'INVALID_ARGUMENT', 'Explicit final approval is required')
     const approvalNote = validateNote(request.approval.note)
     assertDomain(OUTPUT_ASPECT_RATIOS.includes(request.format as OutputAspectRatio), 'INVALID_OUTPUT_SPEC', 'Final export format is not supported')
+    requirePreflightForActionService()({
+      actionId: 'project-final-export.enqueue',
+    })
 
     const source = await dependencies.projects.readApprovedCurrentSource({
       workspaceId,

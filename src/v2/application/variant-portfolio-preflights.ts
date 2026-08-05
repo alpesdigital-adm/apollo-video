@@ -15,8 +15,8 @@ import type {
   VariantPortfolioPreflightRepository,
 } from './ports/variant-portfolio-preflight-repository.ts'
 import {
-  validatePreflightCommitTokenService,
-} from './validate-preflight-commit-token.ts'
+  requirePreflightForActionService,
+} from './preflight-gate.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -222,10 +222,11 @@ export function createVariantPortfolioPreflightService(dependencies: {
     })
     let confirmationSatisfied = false
     if (request.confirmationToken) {
-      validatePreflightCommitTokenService({
+      requirePreflightForActionService({
         issuer: dependencies.tokenIssuer,
         clock: dependencies.clock,
       })({
+        actionId: 'variant-portfolio.confirm',
         token: request.confirmationToken,
         clientId,
         workspaceId,

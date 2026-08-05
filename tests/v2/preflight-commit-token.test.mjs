@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
 import test from 'node:test'
 
 import { HmacPreflightCommitTokenIssuer } from '../../src/v2/infrastructure/security/preflight-commit-token.ts'
@@ -8,17 +9,56 @@ test('commit token binds client, workspace, fingerprint, snapshot, cost and expi
   const issuer = new HmacPreflightCommitTokenIssuer('p'.repeat(32))
   const claims = { clientId: 'client-1', workspaceId: 'workspace-1', fingerprint: 'a'.repeat(64), snapshot: 'b'.repeat(64), costFingerprint: 'c'.repeat(64), expiresAt: '2026-07-17T00:00:00.000Z' }
   const token = issuer.issue(claims)
+  assert.equal(issuer.issue({ ...claims }), token)
   assert.deepEqual(issuer.verify(token), claims)
   assert.equal(token.includes('client-1'), false)
   assert.equal(token.includes('workspace-1'), false)
 })
 
 test('commit token rejects tampering and incomplete claims', () => {
-  const issuer = new HmacPreflightCommitTokenIssuer('p'.repeat(32))
+  const secret = 'p'.repeat(32)
+  const issuer = new HmacPreflightCommitTokenIssuer(secret)
   const claims = { clientId: 'client-1', workspaceId: 'workspace-1', fingerprint: 'a'.repeat(64), snapshot: 'b'.repeat(64), costFingerprint: 'c'.repeat(64), expiresAt: '2026-07-17T00:00:00.000Z' }
   const token = issuer.issue(claims)
   assert.throws(() => issuer.verify(`${token.slice(0, -1)}x`), /invalid/)
+  assert.throws(() => issuer.verify(`${token}=`), /invalid/)
+  assert.throws(() => issuer.verify(`${'a'.repeat(4_097)}.${'b'.repeat(43)}`), /invalid/)
   assert.throws(() => issuer.issue({ ...claims, snapshot: 'bad' }), /claims/)
+  assert.throws(() => issuer.issue({ ...claims, clientId: 'x' }), /claims/)
+
+  const payload = Buffer.from(JSON.stringify({
+    v: 1,
+    cid: claims.clientId,
+    wid: claims.workspaceId,
+    fp: claims.fingerprint,
+    snap: claims.snapshot,
+    cost: claims.costFingerprint,
+    exp: claims.expiresAt,
+    extra: true,
+  })).toString('base64url')
+  const signature = createHmac('sha256', secret)
+    .update(payload)
+    .digest('base64url')
+  assert.throws(() => issuer.verify(`${payload}.${signature}`), /invalid/)
+})
+
+test('strict verifier preserves valid previously issued v1 tokens', () => {
+  const secret = 'legacy-preflight-secret-with-32-bytes'
+  const issuer = new HmacPreflightCommitTokenIssuer(secret)
+  const claims = { clientId: 'client-legacy', workspaceId: 'workspace-legacy', fingerprint: '1'.repeat(64), snapshot: '2'.repeat(64), costFingerprint: '3'.repeat(64), expiresAt: '2026-07-17T00:30:00.000Z' }
+  const payload = Buffer.from(JSON.stringify({
+    v: 1,
+    cid: claims.clientId,
+    wid: claims.workspaceId,
+    fp: claims.fingerprint,
+    snap: claims.snapshot,
+    cost: claims.costFingerprint,
+    exp: claims.expiresAt,
+  })).toString('base64url')
+  const signature = createHmac('sha256', secret)
+    .update(payload)
+    .digest('base64url')
+  assert.deepEqual(issuer.verify(`${payload}.${signature}`), claims)
 })
 
 test('commit validation invalidates expiry and any material input, snapshot or cost change', () => {
