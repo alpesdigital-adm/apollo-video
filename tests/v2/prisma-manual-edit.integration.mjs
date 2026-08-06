@@ -1169,7 +1169,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(transcriptApplied.data.command.type, 'replace-source-transcript')
     assert.equal(transcriptApplied.data.sourceTranscript.replacementTranscriptId, replacementTranscriptId)
     assert.equal(transcriptApplied.data.sourceTranscript.impact.renderBlockedUntilDirectorRun, true)
-    assert.deepEqual(transcriptApplied.data.sourceTranscript.impact.affectedRanges, [{ startFrame: 0, endFrame: cropPlan.durationFrames }])
+    assert.deepEqual(transcriptApplied.data.sourceTranscript.impact.affectedRanges, [{
+      startFrame: 0,
+      endFrame: editorialApplied.data.editorial.outputDurationFrames,
+    }])
     assert.equal(transcriptApplied.data.sourceTranscript.invalidations.length, 1)
     assert.equal(transcriptApplied.data.sourceTranscript.nextRequiredCapability, 'apollo.projects.commands.apply:run-director')
     const replacementVersion = await client.v2ProjectVersion.findUnique({
