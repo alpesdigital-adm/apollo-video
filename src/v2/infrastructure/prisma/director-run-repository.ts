@@ -73,6 +73,45 @@ function parseArray(value: string, field: string): unknown[] {
   }
 }
 
+async function editPlanOriginIsInVersionLineage(input: {
+  client: PrismaClient
+  workspaceId: string
+  projectId: string
+  currentVersionId: string
+  originVersionId: string
+  editPlanSnapshotId: string
+}): Promise<boolean> {
+  const rows = await input.client.$queryRaw<readonly { id: string }[]>(Prisma.sql`
+    WITH RECURSIVE "lineage" AS (
+      SELECT "id", "parentVersionId", "sequence", "editPlanSnapshotId"
+      FROM "project_versions"
+      WHERE
+        "id" = ${input.currentVersionId} AND
+        "workspaceId" = ${input.workspaceId} AND
+        "projectId" = ${input.projectId}
+
+      UNION ALL
+
+      SELECT
+        parent."id", parent."parentVersionId", parent."sequence",
+        parent."editPlanSnapshotId"
+      FROM "project_versions" parent
+      INNER JOIN "lineage" child
+        ON parent."id" = child."parentVersionId"
+        AND parent."workspaceId" = ${input.workspaceId}
+        AND parent."projectId" = ${input.projectId}
+        AND parent."sequence" < child."sequence"
+    )
+    SELECT "id"
+    FROM "lineage"
+    WHERE
+      "id" = ${input.originVersionId} AND
+      "editPlanSnapshotId" = ${input.editPlanSnapshotId}
+    LIMIT 1
+  `)
+  return rows.length === 1
+}
+
 function parseDirectorQualityReport(input: {
   contentJson: string
   contentHash: string
@@ -417,9 +456,19 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     const planTranscriptHash = 'sourceTranscriptHash' in retimedTranscript
       ? String(retimedTranscript.sourceTranscriptHash)
       : undefined
+    const editPlanOriginIsCurrentOrAncestor =
+      typeof editPlan.projectVersionId === 'string' &&
+      await editPlanOriginIsInVersionLineage({
+        client: this.client,
+        workspaceId: project.workspaceId,
+        projectId: project.id,
+        currentVersionId: versionRow.id,
+        originVersionId: editPlan.projectVersionId,
+        editPlanSnapshotId: versionRow.editPlanSnapshotId,
+      })
     if (
       editPlan.schemaVersion !== 2 || editPlan.state !== 'compiled' ||
-      editPlan.projectVersionId !== versionRow.id ||
+      !editPlanOriginIsCurrentOrAncestor ||
       retimedTranscript.sourceTranscriptId !== transcriptRow.id ||
       (planTranscriptHash !== undefined && planTranscriptHash !== transcriptRow.transcriptHash)
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan is not aligned to the current transcript')
