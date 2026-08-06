@@ -6,6 +6,7 @@ import {
 } from '../application/authenticate-api-client.ts'
 import {
   admitGovernedCapabilityService,
+  governanceAnomalyPolicyFromEnvironment,
   governanceDefaultLimitsFromEnvironment,
 } from '../application/admit-governed-capability.ts'
 import { authenticateUiSessionService } from '../application/authenticate-ui-session.ts'
@@ -96,6 +97,7 @@ export async function authenticateExternalRequest(request: NextRequest) {
   await admitGovernedCapabilityService({
     repository: createGovernanceAdmissionRepository(),
     defaultLimits: governanceDefaultLimitsFromEnvironment(),
+    anomalyPolicy: governanceAnomalyPolicyFromEnvironment(),
   })({ actor, capability })
   return actor
 }

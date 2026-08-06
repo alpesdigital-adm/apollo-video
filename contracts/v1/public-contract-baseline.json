@@ -1718,6 +1718,52 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.governance.alerts.list": {
+      "version": "1.0.0",
+      "exposure": "workspace-admin",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "clients:admin"
+      ],
+      "outputSchemaRef": "apollo://schemas/governance-alert-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/governance/alerts"
+      },
+      "toolName": "apollo.governance.alerts.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum alerts per page.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        {
+          "name": "after",
+          "description": "Opaque cursor from the previous page.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 1024
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.governance.policies.delete": {
       "version": "1.0.0",
       "exposure": "workspace-admin",
@@ -1839,14 +1885,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.governance.usage-audit.list": {
-      "version": "2.0.0",
+      "version": "3.0.0",
       "exposure": "workspace-admin",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "clients:admin"
       ],
-      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v2",
+      "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v3",
       "endpoint": {
         "method": "GET",
         "path": "/v1/governance/usage-audit"
@@ -37335,6 +37381,198 @@
         }
       }
     },
+    "apollo://schemas/governance-alert-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "alertHash",
+                  "clientId",
+                  "admissionId",
+                  "scopeType",
+                  "reasonCode",
+                  "observed",
+                  "threshold",
+                  "anomalyRecoveryBypassed",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "enum": [
+                      "governance-alert/v1",
+                      "governance-alert/v2"
+                    ]
+                  },
+                  "alertHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "admissionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "scopeType": {
+                    "enum": [
+                      "workspace",
+                      "client"
+                    ]
+                  },
+                  "reasonCode": {
+                    "enum": [
+                      "RATE_LIMIT",
+                      "CONCURRENCY_LIMIT",
+                      "QUOTA_EXCEEDED",
+                      "SPEND_BUDGET_EXCEEDED",
+                      "REQUEST_RATE_ANOMALY",
+                      "SPEND_RATE_ANOMALY",
+                      "ERROR_RATE_ANOMALY"
+                    ]
+                  },
+                  "observed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000000000
+                  },
+                  "threshold": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000000000
+                  },
+                  "policyHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "anomalyRecoveryBypassed": {
+                    "type": "boolean"
+                  },
+                  "windowStartedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "windowEndedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "governance-alert/v2"
+                        }
+                      },
+                      "required": [
+                        "schemaVersion"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "policyHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "windowStartedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "windowEndedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "policyHash",
+                        "windowStartedAt",
+                        "windowEndedAt"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "governance-alert/v1"
+                        }
+                      },
+                      "required": [
+                        "schemaVersion"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "policyHash"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "windowStartedAt"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "windowEndedAt"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 1024
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/governance-policy-command-result/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -38119,6 +38357,519 @@
                         "minimum": 0
                       }
                     }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 1024
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/governance-usage-audit-page/v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "clientId",
+                  "capabilityId",
+                  "environment",
+                  "operationKind",
+                  "costClass",
+                  "decision",
+                  "reasonCodes",
+                  "scopes",
+                  "requested",
+                  "anomalyPolicyHash",
+                  "anomalyRecoveryBypassed",
+                  "createdAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "enum": [
+                      "governance-admission/v1",
+                      "governance-admission/v2"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "capabilityId": {
+                    "type": "string",
+                    "pattern": "^apollo\\.[a-z0-9_.-]{2,120}$"
+                  },
+                  "environment": {
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ]
+                  },
+                  "operationKind": {
+                    "enum": [
+                      "query",
+                      "command",
+                      "preflight",
+                      "job"
+                    ]
+                  },
+                  "costClass": {
+                    "enum": [
+                      "free",
+                      "low",
+                      "medium",
+                      "high",
+                      "variable"
+                    ]
+                  },
+                  "decision": {
+                    "enum": [
+                      "allowed",
+                      "blocked"
+                    ]
+                  },
+                  "reasonCodes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 7,
+                    "items": {
+                      "enum": [
+                        "RATE_LIMIT",
+                        "CONCURRENCY_LIMIT",
+                        "QUOTA_EXCEEDED",
+                        "SPEND_BUDGET_EXCEEDED",
+                        "REQUEST_RATE_ANOMALY",
+                        "SPEND_RATE_ANOMALY",
+                        "ERROR_RATE_ANOMALY"
+                      ]
+                    }
+                  },
+                  "scopes": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "workspace",
+                      "client"
+                    ],
+                    "properties": {
+                      "workspace": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "reasons",
+                          "anomalies",
+                          "limits",
+                          "usage",
+                          "remaining"
+                        ],
+                        "properties": {
+                          "reasons": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 7,
+                            "items": {
+                              "enum": [
+                                "RATE_LIMIT",
+                                "CONCURRENCY_LIMIT",
+                                "QUOTA_EXCEEDED",
+                                "SPEND_BUDGET_EXCEEDED",
+                                "REQUEST_RATE_ANOMALY",
+                                "SPEND_RATE_ANOMALY",
+                                "ERROR_RATE_ANOMALY"
+                              ]
+                            }
+                          },
+                          "anomalies": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 3,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "reason",
+                                "observed",
+                                "threshold",
+                                "windowMs"
+                              ],
+                              "properties": {
+                                "reason": {
+                                  "enum": [
+                                    "REQUEST_RATE_ANOMALY",
+                                    "SPEND_RATE_ANOMALY",
+                                    "ERROR_RATE_ANOMALY"
+                                  ]
+                                },
+                                "observed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2000000000
+                                },
+                                "threshold": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2000000000
+                                },
+                                "windowMs": {
+                                  "enum": [
+                                    60000,
+                                    300000
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "limits": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsPerMinute",
+                              "maxConcurrency",
+                              "quotaUnits",
+                              "spendBudgetMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsPerMinute": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "maxConcurrency": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendBudgetMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "usage": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsInWindow",
+                              "activeConcurrency",
+                              "quotaUnitsUsed",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsInWindow": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "activeConcurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnitsUsed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "remaining": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requests",
+                              "concurrency",
+                              "quotaUnits",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requests": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "concurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "client": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "reasons",
+                          "anomalies",
+                          "limits",
+                          "usage",
+                          "remaining"
+                        ],
+                        "properties": {
+                          "reasons": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 7,
+                            "items": {
+                              "enum": [
+                                "RATE_LIMIT",
+                                "CONCURRENCY_LIMIT",
+                                "QUOTA_EXCEEDED",
+                                "SPEND_BUDGET_EXCEEDED",
+                                "REQUEST_RATE_ANOMALY",
+                                "SPEND_RATE_ANOMALY",
+                                "ERROR_RATE_ANOMALY"
+                              ]
+                            }
+                          },
+                          "anomalies": {
+                            "type": "array",
+                            "uniqueItems": true,
+                            "maxItems": 3,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "reason",
+                                "observed",
+                                "threshold",
+                                "windowMs"
+                              ],
+                              "properties": {
+                                "reason": {
+                                  "enum": [
+                                    "REQUEST_RATE_ANOMALY",
+                                    "SPEND_RATE_ANOMALY",
+                                    "ERROR_RATE_ANOMALY"
+                                  ]
+                                },
+                                "observed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2000000000
+                                },
+                                "threshold": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 2000000000
+                                },
+                                "windowMs": {
+                                  "enum": [
+                                    60000,
+                                    300000
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "limits": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsPerMinute",
+                              "maxConcurrency",
+                              "quotaUnits",
+                              "spendBudgetMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsPerMinute": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "maxConcurrency": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendBudgetMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "usage": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requestsInWindow",
+                              "activeConcurrency",
+                              "quotaUnitsUsed",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requestsInWindow": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "activeConcurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnitsUsed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          },
+                          "remaining": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "requests",
+                              "concurrency",
+                              "quotaUnits",
+                              "spendMinorUnits"
+                            ],
+                            "properties": {
+                              "requests": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "concurrency": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "quotaUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              },
+                              "spendMinorUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000000
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "requested": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requests",
+                      "concurrency",
+                      "quotaUnits",
+                      "spendMinorUnits"
+                    ],
+                    "properties": {
+                      "requests": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "concurrency": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "quotaUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "spendMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "anomalyPolicyHash": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    ]
+                  },
+                  "anomalyRecoveryBypassed": {
+                    "type": "boolean"
                   },
                   "createdAt": {
                     "type": "string",

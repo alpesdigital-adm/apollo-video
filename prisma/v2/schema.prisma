@@ -2151,6 +2151,7 @@ model V2GovernancePolicyCommand {
 
 model V2GovernanceAdmission {
   id                       String   @id @db.VarChar(128)
+  schemaVersion            String   @default("governance-admission/v1") @db.VarChar(64)
   workspaceId              String   @db.VarChar(128)
   clientId                 String   @db.VarChar(80)
   capabilityId             String   @db.VarChar(128)
@@ -2165,6 +2166,8 @@ model V2GovernanceAdmission {
   requestedConcurrency     Int
   requestedQuotaUnits      Int
   requestedSpendMinorUnits Int
+  anomalyPolicyHash        String?  @db.Char(64)
+  anomalyRecoveryBypassed  Boolean  @default(false)
   admissionHash            String   @unique(map: "governance_admissions_hash_key") @db.Char(64)
   createdAt                DateTime @db.Timestamptz(3)
 
@@ -2179,6 +2182,7 @@ model V2GovernanceAdmission {
 
 model V2GovernanceAlert {
   alertHash   String   @id @db.Char(64)
+  schemaVersion String @default("governance-alert/v1") @db.VarChar(64)
   workspaceId String   @db.VarChar(128)
   clientId    String   @db.VarChar(80)
   admissionId String   @db.VarChar(128)
@@ -2186,6 +2190,10 @@ model V2GovernanceAlert {
   reasonCode  String   @db.VarChar(32)
   observed    Int
   threshold   Int
+  policyHash  String?  @db.Char(64)
+  anomalyRecoveryBypassed Boolean @default(false)
+  windowStartedAt DateTime? @db.Timestamptz(3)
+  windowEndedAt DateTime? @db.Timestamptz(3)
   createdAt   DateTime @db.Timestamptz(3)
 
   workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade, map: "governance_alerts_workspace_fkey")

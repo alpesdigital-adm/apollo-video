@@ -659,7 +659,7 @@ Incremento local F0.096–F0.097: cada item de production batch ganhou `operatio
 
 ### F0.043 — Governança da API [FR-249]
 
-Incremento local F0.100–F0.101/F0.103: toda capability autenticada agora atravessa um admission gate único após autenticação/autorização e antes do handler. Um ledger PostgreSQL content-addressed, sob advisory lock por workspace/environment e transação serializable com retry limitado, avalia separadamente os budgets agregados do workspace e os budgets do client, usando policy de cada escopo limitada pelos defaults, janela móvel de 60 segundos, reservas concorrentes, quota e spend em 30 dias; decisão bloqueada é persistida com alertas bounded antes do erro público 429. `GET /v1/governance/usage-audit` v2 deixou de projetar apenas operações e pagina admissions redigidas com decisão, reasons, uso, reserva e saldo por escopo. O kill switch global por ambiente passou a atuar no mesmo runtime central com exceção somente para recuperação humana administrativa. A jornada HTTP/PostgreSQL foi ampliada para provar tanto bloqueio client-scoped quanto budget workspace-scoped agregado entre dois clients, com admission/alert/query, mas não foi executada neste host. Ainda faltam reconciliação de custo real por client, anomaly agregado de error-rate, roteamento sandbox dos demais providers, deploy e aceite.
+Incremento local F0.100–F0.101/F0.103: toda capability autenticada agora atravessa um admission gate único após autenticação/autorização e antes do handler. Um ledger PostgreSQL content-addressed, sob advisory lock por workspace/environment e transação serializable com retry limitado, avalia separadamente budgets e anomalias agregadas do workspace e do client. Rate/concurrency/quota/spend e picos versionados de requests, spend e error-rate produzem decisão e alertas bounded antes do erro público 429. `GET /v1/governance/usage-audit` v3 pagina admissions v1/v2 redigidas; `GET /v1/governance/alerts` publica evidência content-addressed sem admission hash. Recuperação de anomalia é restrita a sessão humana administradora e nunca contorna hard limits. A jornada HTTP/PostgreSQL cobre policies por dois escopos e foi preparada com 10 operações terminais controladas (6 falhas) para provar `ERROR_RATE_ANOMALY`, mas não foi executada neste host. Ainda faltam reconciliação de custo real por client, detecção específica de mutations/generation/downloads, roteamento sandbox dos demais providers, deploy e aceite.
 
 Incremento local seguinte F0.100: três capabilities `clients:admin` tornam o lifecycle de policies API-first: list, set por escopo/environment e delete. Set/delete exigem confirmação, CAS e Idempotency-Key actor-bound; policy e command content-addressed são gravados/removidos atomicamente sob o mesmo lock do admission, com replay verificável e validação de que client-scoped policy aponta para client do mesmo workspace e environment. Operações gratuitas deixaram de ser negadas apenas por concurrency/quota/spend que elas não consomem, preservando recuperação administrativa; rate continua contando cada tentativa. O E2E HTTP/PostgreSQL agora cria/lista/remove a policy de client somente pelas rotas públicas e comprova replay, mas permanece não executado neste host. Alertas agregados, custo real, demais providers sandbox, deploy e aceite ainda faltam.
 
@@ -670,7 +670,7 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 - [ ] Implementar rate limits, quotas, concurrency e spend budgets por client/workspace. Evidência F0-100: evaluator único e fail-closed recebe scope duplo, limites/uso inteiros e retorna decisão conjunta com reasons explícitos e saldo de requests, concorrência, quota e spend.
 - [ ] Criar usage e audit queries paginadas com redaction. Evidência F0-101: `GET /v1/governance/usage-audit` reutiliza paginação estável de operações, exige `clients:admin` e retorna somente identidade, client, ação, status, target e unidade de uso, omitindo payload/erro/lease/provider/secrets.
 - [ ] Criar sandbox isolado com provider fakes e custos simulados. Evidência F0-102: adapter determinístico aceita apenas environment sandbox, produz receipt SHA-256 e custo inteiro simulado, reporta zero chamadas externas e falha fechado em production.
-- [ ] Implementar anomaly alerts e kill switch operacional. Evidência F0-103: gate pré-execução bloqueia quando `APOLLO_OPERATIONAL_KILL_SWITCH=true`; error-rate/spend/request spikes acima do threshold emitem alerta bounded por workspace/client e negam execução.
+- [ ] Implementar anomaly alerts e kill switch operacional. Evidência local F0-103: gate pré-execução bloqueia o kill switch e avalia uma policy canônica `governance-anomaly-policy/v1` para request/spend/error-rate por workspace e client; admissions/alerts v2 persistem policy hash, janela e eventual recovery humano, e `apollo.governance.alerts.list` expõe somente a projeção administrativa redigida. Pendentes: PostgreSQL E2E executado, sinais específicos de mutations/generation/downloads, deploy e aceite.
 - [ ] Criar E2E administrativo sem permitir que client autoeleve seus scopes. Evidência F0-104: jornada HTTP real autentica child client, tenta criar outro client com `clients:admin`, recebe 403 e também comprova isolamento cross-workspace; unit test impede grant de scope ausente no ator antes da persistência.
 
 ---
@@ -5495,9 +5495,21 @@ Regressões locais desta slice:
 - rate usa janela móvel de 60 segundos e conta inclusive rejeições; concurrency combina operações ativas com reservas recentes para impedir corrida antes da criação da operação; quota/spend reservados usam janela de 30 dias;
 - cada negação cria alertas content-addressed por reason e só então retorna `GOVERNANCE_LIMIT_EXCEEDED` como 429 retryable;
 - `APOLLO_OPERATIONAL_KILL_SWITCH=true` bloqueia no ponto comum antes da admission, exceto as capabilities de recuperação por sessão humana administradora já allowlisted;
-- `governance-usage-audit-page/v2` pagina até 100 admissions com cursor workspace-bound e expõe somente capability, classificação, decisão, reasons, uso/saldo por escopo, reserva comum e timestamps;
+- `governance-usage-audit-page/v3` preserva leitura do histórico v1/v2, pagina até 100 admissions com cursor workspace-bound e expõe somente capability, classificação, decisão, reasons/anomalies, uso/saldo por escopo, reserva, policy hash e recovery;
 - a jornada PostgreSQL/HTTP existente foi ampliada com policy client-scoped, uma request permitida, a seguinte bloqueada, admission/alert e leitura administrativa redigida; uma segunda policy workspace-scoped prova consumo agregado entre dois clients; permanece skip-gated e não foi executada neste host;
-- reconciliação de custo efetivo por client, anomaly agregado de error-rate e roteamento sandbox dos demais providers continuam pendentes; F0.100–F0.103 permanecem abertas.
+- reconciliação de custo efetivo por client, sinais específicos de mutation/generation/download, execução PostgreSQL e roteamento sandbox dos demais providers continuam pendentes; F0.100–F0.103 permanecem abertas.
+
+### Incremento operacional F0.103 — anomaly policy e alertas públicos
+
+**Status:** implementado e testado localmente em 6 de agosto de 2026; E2E PostgreSQL/HTTP preparado, sem execução, deploy ou aceite.
+
+- `governance-anomaly-policy/v1` fixa janelas de sinal/baseline/error-rate, thresholds bounded e hash canônico; configuração explícita inválida falha como ambiente não configurado;
+- o admission repository mede requests e spend recentes contra baseline anterior, além de operações terminais/falhas por workspace, client e environment, sob o mesmo advisory lock/transação serializable da decisão;
+- `governance-admission/v2` persiste policy hash, medições por escopo e recovery; `governance-alert/v2` vincula admission, policy, janela, observado/threshold e bypass em hash próprio;
+- picos negam execução e geram alertas por escopo. Somente sessão humana `clients:admin` acessando capabilities de recuperação allowlisted pode ignorar razões de anomalia; rate/quota/concurrency/spend comuns continuam bloqueando;
+- `GET /v1/governance/alerts` é uma capability pública `clients:admin`, paginada, workspace-bound e redigida. O usage audit evoluiu para v3 sem remover schemas v1/v2;
+- testes locais cobrem aritmética, limites, adulteração, isolamento, cursor, redaction, atomicidade, retry e recovery. O E2E preparado atravessa HTTP → admission Prisma → alertas e injeta 10 operações terminais (6 falhas), removidas em `finally`, para comprovar `ERROR_RATE_ANOMALY`;
+- o E2E não foi executado porque este host não possui PostgreSQL local isolado confirmado; nenhuma VPS ou banco remoto foi tocado. Detecção específica de mutations/generation/downloads, custo efetivo reconciliado, deploy e aceite permanecem pendentes; F0.103 continua aberta e nenhuma caixa foi marcada.
 
 ### Incremento operacional F0.100 — lifecycle público de governance policies
 
@@ -5509,7 +5521,7 @@ Regressões locais desta slice:
 - a transação serializable usa o mesmo advisory lock workspace/environment do admission, revalida CAS, policy/client/environment e persiste policy+command ou delete+command atomicamente; conflitos recuperáveis tentam no máximo três vezes;
 - policies client-scoped falham fechado quando o client não pertence ao workspace ou não permite o environment solicitado;
 - o E2E PostgreSQL/HTTP preparado cria, lista, aplica rate block, consulta audit, remove e repete a remoção de policy client-scoped pelas rotas públicas; policy workspace-scoped também é criada pela API e prova budget agregado entre clients;
-- o teste não foi executado neste host por ausência de PostgreSQL local isolado; custo efetivo reconciliado, anomaly agregado, demais providers sandbox, deploy e aceite permanecem pendentes, então F0.100 continua aberta.
+- o teste não foi executado neste host por ausência de PostgreSQL local isolado; custo efetivo reconciliado, sinais específicos por operação, demais providers sandbox, deploy e aceite permanecem pendentes, então F0.100 continua aberta.
 
 ### Incremento operacional F0.102 — sandbox roteado em providers semânticos e de mídia
 

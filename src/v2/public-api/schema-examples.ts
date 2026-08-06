@@ -6901,6 +6901,92 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/governance-usage-audit-page/v3': [
+      {
+        data: {
+          entries: [{
+            schemaVersion: 'governance-admission/v2',
+            id: 'governance-admission-example-2',
+            clientId: 'client-example-1',
+            capabilityId: 'apollo.projects.exports.create',
+            environment: 'production',
+            operationKind: 'job',
+            costClass: 'high',
+            decision: 'blocked',
+            reasonCodes: ['ERROR_RATE_ANOMALY'],
+            scopes: {
+              workspace: {
+                reasons: ['ERROR_RATE_ANOMALY'],
+                anomalies: [{
+                  reason: 'ERROR_RATE_ANOMALY',
+                  observed: 6000,
+                  threshold: 5000,
+                  windowMs: 300000,
+                }],
+                limits: {
+                  requestsPerMinute: 1000, maxConcurrency: 20,
+                  quotaUnits: 10000, spendBudgetMinorUnits: 10000,
+                },
+                usage: {
+                  requestsInWindow: 20, activeConcurrency: 2,
+                  quotaUnitsUsed: 100, spendMinorUnits: 100,
+                },
+                remaining: {
+                  requests: 979, concurrency: 17,
+                  quotaUnits: 9800, spendMinorUnits: 9800,
+                },
+              },
+              client: {
+                reasons: [],
+                anomalies: [],
+                limits: {
+                  requestsPerMinute: 100, maxConcurrency: 4,
+                  quotaUnits: 1000, spendBudgetMinorUnits: 1000,
+                },
+                usage: {
+                  requestsInWindow: 4, activeConcurrency: 0,
+                  quotaUnitsUsed: 20, spendMinorUnits: 20,
+                },
+                remaining: {
+                  requests: 95, concurrency: 3,
+                  quotaUnits: 880, spendMinorUnits: 880,
+                },
+              },
+            },
+            requested: {
+              requests: 1, concurrency: 1,
+              quotaUnits: 100, spendMinorUnits: 100,
+            },
+            anomalyPolicyHash: '4'.repeat(64),
+            anomalyRecoveryBypassed: false,
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/governance-alert-page/v1': [
+      {
+        data: {
+          entries: [{
+            schemaVersion: 'governance-alert/v2',
+            alertHash: '5'.repeat(64),
+            clientId: 'client-example-1',
+            admissionId: 'governance-admission-example-2',
+            scopeType: 'workspace',
+            reasonCode: 'ERROR_RATE_ANOMALY',
+            observed: 6000,
+            threshold: 5000,
+            policyHash: '4'.repeat(64),
+            anomalyRecoveryBypassed: false,
+            windowStartedAt: '2026-07-31T23:55:00.000Z',
+            windowEndedAt: createdAt,
+            createdAt,
+          }],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/sandbox-provider-execution-page/v1': [
       {
         data: {

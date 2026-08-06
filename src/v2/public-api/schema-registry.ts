@@ -11831,6 +11831,43 @@ const governanceAdmissionScopeDecisionSchema = {
   },
 }
 
+const governanceDecisionReasonSchema = {
+  enum: [
+    'RATE_LIMIT', 'CONCURRENCY_LIMIT', 'QUOTA_EXCEEDED',
+    'SPEND_BUDGET_EXCEEDED', 'REQUEST_RATE_ANOMALY',
+    'SPEND_RATE_ANOMALY', 'ERROR_RATE_ANOMALY',
+  ],
+}
+
+const governanceAnomalyMeasurementSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['reason', 'observed', 'threshold', 'windowMs'],
+  properties: {
+    reason: { enum: ['REQUEST_RATE_ANOMALY', 'SPEND_RATE_ANOMALY', 'ERROR_RATE_ANOMALY'] },
+    observed: { type: 'integer', minimum: 0, maximum: 2000000000 },
+    threshold: { type: 'integer', minimum: 0, maximum: 2000000000 },
+    windowMs: { enum: [60000, 300000] },
+  },
+}
+
+const governanceAdmissionScopeDecisionSchemaV2 = {
+  type: 'object', additionalProperties: false,
+  required: ['reasons', 'anomalies', 'limits', 'usage', 'remaining'],
+  properties: {
+    reasons: {
+      type: 'array', uniqueItems: true, maxItems: 7,
+      items: governanceDecisionReasonSchema,
+    },
+    anomalies: {
+      type: 'array', uniqueItems: true, maxItems: 3,
+      items: governanceAnomalyMeasurementSchema,
+    },
+    limits: governanceLimitsSchema,
+    usage: governanceAdmissionScopeDecisionSchema.properties.usage,
+    remaining: governanceAdmissionScopeDecisionSchema.properties.remaining,
+  },
+}
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('health-response', 1, 'Health response',
     successSchema({
@@ -19237,6 +19274,124 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             },
             createdAt: dateTimeSchema,
           },
+        },
+      },
+      nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
+    },
+  })),
+  defineSchema('governance-usage-audit-page', 3, 'Redacted governance admission, anomaly and recovery audit page', successSchema({
+    type: 'object', additionalProperties: false, required: ['entries'], properties: {
+      entries: {
+        type: 'array', maxItems: 100, items: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'schemaVersion', 'id', 'clientId', 'capabilityId', 'environment',
+            'operationKind', 'costClass', 'decision', 'reasonCodes',
+            'scopes', 'requested', 'anomalyPolicyHash',
+            'anomalyRecoveryBypassed', 'createdAt',
+          ],
+          properties: {
+            schemaVersion: { enum: ['governance-admission/v1', 'governance-admission/v2'] },
+            id: idSchema,
+            clientId: idSchema,
+            capabilityId: { type: 'string', pattern: '^apollo\\.[a-z0-9_.-]{2,120}$' },
+            environment: { enum: ['sandbox', 'production'] },
+            operationKind: { enum: ['query', 'command', 'preflight', 'job'] },
+            costClass: { enum: ['free', 'low', 'medium', 'high', 'variable'] },
+            decision: { enum: ['allowed', 'blocked'] },
+            reasonCodes: {
+              type: 'array', uniqueItems: true, maxItems: 7,
+              items: governanceDecisionReasonSchema,
+            },
+            scopes: {
+              type: 'object', additionalProperties: false,
+              required: ['workspace', 'client'],
+              properties: {
+                workspace: governanceAdmissionScopeDecisionSchemaV2,
+                client: governanceAdmissionScopeDecisionSchemaV2,
+              },
+            },
+            requested: {
+              type: 'object', additionalProperties: false,
+              required: ['requests', 'concurrency', 'quotaUnits', 'spendMinorUnits'],
+              properties: {
+                requests: { type: 'integer', minimum: 0 },
+                concurrency: { type: 'integer', minimum: 0 },
+                quotaUnits: { type: 'integer', minimum: 0 },
+                spendMinorUnits: { type: 'integer', minimum: 0 },
+              },
+            },
+            anomalyPolicyHash: { anyOf: [{ type: 'null' }, sha256Schema] },
+            anomalyRecoveryBypassed: { type: 'boolean' },
+            createdAt: dateTimeSchema,
+          },
+        },
+      },
+      nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },
+    },
+  })),
+  defineSchema('governance-alert-page', 1, 'Redacted content-addressed governance alerts', successSchema({
+    type: 'object', additionalProperties: false, required: ['entries'], properties: {
+      entries: {
+        type: 'array', maxItems: 100, items: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'schemaVersion', 'alertHash', 'clientId', 'admissionId',
+            'scopeType', 'reasonCode', 'observed', 'threshold',
+            'anomalyRecoveryBypassed', 'createdAt',
+          ],
+          properties: {
+            schemaVersion: { enum: ['governance-alert/v1', 'governance-alert/v2'] },
+            alertHash: sha256Schema,
+            clientId: idSchema,
+            admissionId: idSchema,
+            scopeType: { enum: ['workspace', 'client'] },
+            reasonCode: governanceDecisionReasonSchema,
+            observed: { type: 'integer', minimum: 0, maximum: 2000000000 },
+            threshold: { type: 'integer', minimum: 0, maximum: 2000000000 },
+            policyHash: sha256Schema,
+            anomalyRecoveryBypassed: { type: 'boolean' },
+            windowStartedAt: dateTimeSchema,
+            windowEndedAt: dateTimeSchema,
+            createdAt: dateTimeSchema,
+          },
+          allOf: [
+            {
+              if: {
+                properties: {
+                  schemaVersion: { const: 'governance-alert/v2' },
+                },
+                required: ['schemaVersion'],
+              },
+              then: {
+                properties: {
+                  policyHash: sha256Schema,
+                  windowStartedAt: dateTimeSchema,
+                  windowEndedAt: dateTimeSchema,
+                },
+                required: [
+                  'policyHash', 'windowStartedAt', 'windowEndedAt',
+                ],
+              },
+            },
+            {
+              if: {
+                properties: {
+                  schemaVersion: { const: 'governance-alert/v1' },
+                },
+                required: ['schemaVersion'],
+              },
+              then: {
+                not: {
+                  anyOf: [
+                    { required: ['policyHash'] },
+                    { required: ['windowStartedAt'] },
+                    { required: ['windowEndedAt'] },
+                  ],
+                },
+              },
+            },
+          ],
         },
       },
       nextCursor: { type: 'string', minLength: 16, maxLength: 1024 },

@@ -13,9 +13,14 @@ import type {
   GovernanceOperationKind,
 } from '../domain/governance-admission.ts'
 import {
+  MAX_GOVERNANCE_COUNTER,
   validateGovernanceLimits,
   type GovernanceLimits,
 } from '../domain/governance-limits.ts'
+import {
+  createGovernanceAnomalyPolicy,
+  type GovernanceAnomalyPolicy,
+} from '../domain/governance-anomaly.ts'
 
 const COST_RESERVATIONS = Object.freeze({
   free: Object.freeze({ quotaUnits: 0, spendMinorUnits: 0 }),
@@ -35,15 +40,34 @@ export const DEFAULT_GOVERNANCE_LIMITS = Object.freeze({
   spendBudgetMinorUnits: 1_000_000_000,
 })
 
+export const DEFAULT_GOVERNANCE_ANOMALY_POLICY =
+  createGovernanceAnomalyPolicy({
+    requestMinimum: 20,
+    requestBaselineMultiplierBps: 30_000,
+    spendMinimumMinorUnits: 1_000,
+    spendBaselineMultiplierBps: 30_000,
+    errorMinimumTerminalOperations: 10,
+    errorRateThresholdBps: 5_000,
+  })
+
+const ANOMALY_RECOVERY_CAPABILITIES = new Set([
+  'apollo.governance.alerts.list',
+  'apollo.governance.usage-audit.list',
+  'apollo.governance.policies.list',
+  'apollo.governance.policies.set',
+  'apollo.governance.policies.delete',
+])
+
 function configuredLimit(
   value: string | undefined,
   fallback: number,
   field: string,
   minimum: number,
+  maximum = MAX_GOVERNANCE_COUNTER,
 ): number {
   if (value === undefined || value.trim() === '') return fallback
   const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed < minimum) {
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw new DomainError(
       'PERSISTENCE_NOT_CONFIGURED',
       `${field} governance default is invalid`,
@@ -83,9 +107,57 @@ export function governanceDefaultLimitsFromEnvironment(
   })
 }
 
+export function governanceAnomalyPolicyFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): Readonly<GovernanceAnomalyPolicy> {
+  return createGovernanceAnomalyPolicy({
+    requestMinimum: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.requestMinimum,
+      'Request anomaly minimum',
+      1,
+    ),
+    requestBaselineMultiplierBps: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MULTIPLIER_BPS,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.requestBaselineMultiplierBps,
+      'Request anomaly multiplier',
+      10_001,
+      1_000_000,
+    ),
+    spendMinimumMinorUnits: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_SPEND_MINIMUM_MINOR_UNITS,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.spendMinimumMinorUnits,
+      'Spend anomaly minimum',
+      1,
+    ),
+    spendBaselineMultiplierBps: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_SPEND_MULTIPLIER_BPS,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.spendBaselineMultiplierBps,
+      'Spend anomaly multiplier',
+      10_001,
+      1_000_000,
+    ),
+    errorMinimumTerminalOperations: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_ERROR_MINIMUM_OPERATIONS,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.errorMinimumTerminalOperations,
+      'Error-rate anomaly minimum',
+      1,
+      1_000_000,
+    ),
+    errorRateThresholdBps: configuredLimit(
+      environment.APOLLO_GOVERNANCE_ANOMALY_ERROR_RATE_BPS,
+      DEFAULT_GOVERNANCE_ANOMALY_POLICY.errorRateThresholdBps,
+      'Error-rate anomaly threshold',
+      1,
+      10_000,
+    ),
+  })
+}
+
 export function admitGovernedCapabilityService(dependencies: {
   repository: GovernanceAdmissionRepository
   defaultLimits?: Readonly<GovernanceLimits>
+  anomalyPolicy?: Readonly<GovernanceAnomalyPolicy>
   clock?: () => Date
   createId?: () => string
 }) {
@@ -93,6 +165,9 @@ export function admitGovernedCapabilityService(dependencies: {
     dependencies.defaultLimits ?? DEFAULT_GOVERNANCE_LIMITS,
   )
   const clock = dependencies.clock ?? (() => new Date())
+  const anomalyPolicy = createGovernanceAnomalyPolicy(
+    dependencies.anomalyPolicy ?? DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+  )
   const createId = dependencies.createId ??
     (() => `governance-admission-${randomUUID()}`)
   return async function admit(input: {
@@ -106,6 +181,10 @@ export function admitGovernedCapabilityService(dependencies: {
     const audit = materializeActorAuditContext(input.actor)
     const createdAt = clock().toISOString()
     const reservation = COST_RESERVATIONS[input.capability.costClass]
+    const anomalyRecoveryAuthorized =
+      input.actor.authenticationKind === 'ui-session' &&
+      input.actor.scopes.has('clients:admin') &&
+      ANOMALY_RECOVERY_CAPABILITIES.has(input.capability.id)
     const admission = await dependencies.repository.admit({
       draft: {
         id: createId(),
@@ -120,9 +199,11 @@ export function admitGovernedCapabilityService(dependencies: {
           concurrency: input.capability.operationKind === 'job' ? 1 : 0,
           ...reservation,
         },
+        anomalyRecoveryAuthorized,
         createdAt,
       },
       defaultLimits,
+      anomalyPolicy,
     })
     if (!admission.allowed) {
       throw new DomainError(

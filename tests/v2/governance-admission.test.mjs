@@ -3,6 +3,8 @@ import test from 'node:test'
 
 import {
   admitGovernedCapabilityService,
+  DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+  governanceAnomalyPolicyFromEnvironment,
   governanceDefaultLimitsFromEnvironment,
 } from '../../src/v2/application/admit-governed-capability.ts'
 import {
@@ -41,9 +43,11 @@ class AdmissionRepository {
   constructor(usage) {
     this.usage = usage
     this.admissions = []
+    this.drafts = []
   }
 
   async admit({ draft, defaultLimits }) {
+    this.drafts.push(draft)
     const decision = evaluateGovernanceLimits(
       { workspaceId: draft.workspaceId, clientId: draft.clientId },
       defaultLimits,
@@ -152,6 +156,60 @@ test('governance defaults fail closed on invalid configuration', () => {
     }),
     /governance default is invalid/,
   )
+  assert.throws(
+    () => governanceAnomalyPolicyFromEnvironment({
+      APOLLO_GOVERNANCE_ANOMALY_ERROR_RATE_BPS: '10001',
+    }),
+    (error) => error?.code === 'PERSISTENCE_NOT_CONFIGURED',
+  )
+})
+
+test('F0.103 only an authenticated human administrator receives anomaly recovery authority', async () => {
+  const repository = new AdmissionRepository({
+    requestsInWindow: 0, activeConcurrency: 0,
+    quotaUnitsUsed: 0, spendMinorUnits: 0,
+  })
+  const admit = admitGovernedCapabilityService({ repository })
+  const bearer = actor()
+  await admit({
+    actor: Object.freeze({
+      ...bearer,
+      scopes: new Set([...bearer.scopes, 'clients:admin']),
+    }),
+    capability: {
+      id: 'apollo.governance.alerts.list',
+      operationKind: 'query', costClass: 'free',
+    },
+  })
+  await admit({
+    actor: (() => {
+      const auditContext = createExternalAuditContext({
+        clientId: bearer.clientId,
+        credentialId: bearer.credentialId,
+        workspaceId: bearer.workspaceId,
+        environment: bearer.environment,
+        delegatedUserId: 'human-admin-user',
+        delegatedIdentityId: 'human-admin-identity',
+        workspaceRole: 'administrator',
+      })
+      return Object.freeze({
+        ...bearer,
+        ...auditContext,
+        auditContext,
+        delegatedUserId: auditContext.delegatedUserId,
+        delegatedIdentityId: auditContext.delegatedIdentityId,
+        workspaceRole: auditContext.workspaceRole,
+      authenticationKind: 'ui-session',
+      scopes: new Set([...bearer.scopes, 'clients:admin']),
+      })
+    })(),
+    capability: {
+      id: 'apollo.governance.alerts.list',
+      operationKind: 'query', costClass: 'free',
+    },
+  })
+  assert.equal(repository.drafts[0].anomalyRecoveryAuthorized, false)
+  assert.equal(repository.drafts[1].anomalyRecoveryAuthorized, true)
 })
 
 test('Prisma governance admission retries serialization conflicts only three times', async () => {
@@ -188,6 +246,7 @@ test('Prisma governance admission retries serialization conflicts only three tim
         quotaUnits: 200,
         spendBudgetMinorUnits: 200,
       },
+      anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
     }),
     (error) => error?.code === 'PERSISTENCE_CONFLICT',
   )
@@ -256,6 +315,7 @@ test('Prisma governance admission evaluates aggregate workspace and client budge
       quotaUnits: 200,
       spendBudgetMinorUnits: 200,
     },
+    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
   })
   assert.equal(result.allowed, false)
   assert.deepEqual(result.reasons, ['RATE_LIMIT'])
@@ -271,4 +331,133 @@ test('Prisma governance admission evaluates aggregate workspace and client budge
   )
   assert.equal(persistedAlerts.length, 1)
   assert.equal(persistedAlerts[0].scopeType, 'workspace')
+})
+
+function anomalyTransaction(evidence) {
+  return {
+    async $queryRaw() { return [{ pg_advisory_xact_lock: null }] },
+    v2GovernancePolicy: { async findMany() { return [] } },
+    v2PublicOperation: {
+      async count({ where }) {
+        if (where.status?.in?.includes('running')) return 0
+        if (where.status?.in?.includes('succeeded')) return 10
+        if (where.status === 'failed') return 6
+        return 0
+      },
+    },
+    v2GovernanceAdmission: {
+      async count({ where }) {
+        if (where.requestedConcurrency || where.createdAt?.lt) return 0
+        return 20
+      },
+      async aggregate() {
+        return { _sum: { requestedQuotaUnits: 0, requestedSpendMinorUnits: 0 } }
+      },
+      async create({ data }) { evidence.admission = data; return data },
+    },
+    v2GovernanceAlert: {
+      async createMany({ data }) {
+        evidence.alerts = data
+        return { count: data.length }
+      },
+    },
+  }
+}
+
+test('F0.103 Prisma admission atomically blocks request/error anomalies and persists evidence', async () => {
+  const evidence = {}
+  const transaction = anomalyTransaction(evidence)
+  const repository = new PrismaGovernanceAdmissionRepository({
+    async $transaction(callback) { return callback(transaction) },
+  })
+  const result = await repository.admit({
+    draft: {
+      id: 'governance-admission-anomaly-block',
+      workspaceId: 'governance-workspace', clientId: 'governance-client',
+      capabilityId: 'apollo.projects.exports.create',
+      environment: 'production', operationKind: 'job', costClass: 'free',
+      requested: { requests: 1, concurrency: 0, quotaUnits: 0, spendMinorUnits: 0 },
+      anomalyRecoveryAuthorized: false,
+      createdAt: '2026-08-06T12:00:00.000Z',
+    },
+    defaultLimits: {
+      requestsPerMinute: 1000, maxConcurrency: 100,
+      quotaUnits: 10000, spendBudgetMinorUnits: 10000,
+    },
+    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+  })
+  assert.equal(result.allowed, false)
+  assert.deepEqual(result.reasons, [
+    'REQUEST_RATE_ANOMALY', 'ERROR_RATE_ANOMALY',
+  ])
+  assert.equal(result.schemaVersion, 'governance-admission/v2')
+  assert.equal(evidence.admission.anomalyPolicyHash,
+    DEFAULT_GOVERNANCE_ANOMALY_POLICY.policyHash)
+  assert.equal(evidence.alerts.length, 4)
+  assert.ok(evidence.alerts.every((alert) =>
+    alert.schemaVersion === 'governance-alert/v2' &&
+    alert.windowStartedAt instanceof Date &&
+    alert.windowEndedAt instanceof Date))
+})
+
+test('F0.103 human recovery authorization bypasses only anomaly blocking and remains alerted', async () => {
+  const evidence = {}
+  const transaction = anomalyTransaction(evidence)
+  const repository = new PrismaGovernanceAdmissionRepository({
+    async $transaction(callback) { return callback(transaction) },
+  })
+  const result = await repository.admit({
+    draft: {
+      id: 'governance-admission-anomaly-recovery',
+      workspaceId: 'governance-workspace', clientId: 'governance-client',
+      capabilityId: 'apollo.governance.alerts.list',
+      environment: 'production', operationKind: 'query', costClass: 'free',
+      requested: { requests: 1, concurrency: 0, quotaUnits: 0, spendMinorUnits: 0 },
+      anomalyRecoveryAuthorized: true,
+      createdAt: '2026-08-06T12:00:00.000Z',
+    },
+    defaultLimits: {
+      requestsPerMinute: 1000, maxConcurrency: 100,
+      quotaUnits: 10000, spendBudgetMinorUnits: 10000,
+    },
+    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+  })
+  assert.equal(result.allowed, true)
+  assert.deepEqual(result.reasons, [])
+  assert.equal(result.anomalyRecoveryBypassed, true)
+  assert.equal(result.scopes.workspace.anomalies.length, 2)
+  assert.equal(evidence.alerts.length, 4)
+  assert.ok(evidence.alerts.every((alert) =>
+    alert.anomalyRecoveryBypassed === true))
+})
+
+test('F0.103 anomaly recovery never bypasses an ordinary governance limit', async () => {
+  const evidence = {}
+  const transaction = anomalyTransaction(evidence)
+  const repository = new PrismaGovernanceAdmissionRepository({
+    async $transaction(callback) { return callback(transaction) },
+  })
+  const result = await repository.admit({
+    draft: {
+      id: 'governance-admission-limit-during-recovery',
+      workspaceId: 'governance-workspace', clientId: 'governance-client',
+      capabilityId: 'apollo.governance.alerts.list',
+      environment: 'production', operationKind: 'query', costClass: 'free',
+      requested: { requests: 1, concurrency: 0, quotaUnits: 0, spendMinorUnits: 0 },
+      anomalyRecoveryAuthorized: true,
+      createdAt: '2026-08-06T12:00:00.000Z',
+    },
+    defaultLimits: {
+      requestsPerMinute: 20, maxConcurrency: 100,
+      quotaUnits: 10000, spendBudgetMinorUnits: 10000,
+    },
+    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+  })
+  assert.equal(result.allowed, false)
+  assert.deepEqual(result.reasons, ['RATE_LIMIT'])
+  assert.equal(result.anomalyRecoveryBypassed, true)
+  assert.ok(evidence.alerts.some((alert) => alert.reasonCode === 'RATE_LIMIT'))
+  assert.ok(evidence.alerts.some((alert) =>
+    alert.reasonCode === 'ERROR_RATE_ANOMALY' &&
+    alert.anomalyRecoveryBypassed === true))
 })

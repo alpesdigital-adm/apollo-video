@@ -9,16 +9,16 @@ import type {
   GovernanceAdmissionRepository,
 } from './ports/governance-admission-repository.ts'
 
-interface GovernanceAuditCursor {
+interface GovernanceAlertCursor {
   v: 1
   workspaceId: string
   createdAt: string
-  id: string
+  alertHash: string
 }
 
 const CURSOR = /^[A-Za-z0-9_-]{16,1024}$/
 
-function encodeCursor(value: GovernanceAuditCursor): string {
+function encodeCursor(value: GovernanceAlertCursor): string {
   return Buffer.from(stableSerialize(value), 'utf8').toString('base64url')
 }
 
@@ -31,28 +31,31 @@ function decodeCursor(value: string, workspaceId: string) {
       'INVALID_CURSOR',
       'cursor is invalid',
     )
-    const parsed = JSON.parse(decoded.toString('utf8')) as GovernanceAuditCursor
+    const parsed = JSON.parse(decoded.toString('utf8')) as GovernanceAlertCursor
     const createdAt = Date.parse(parsed?.createdAt)
     assertDomain(
       typeof parsed === 'object' && parsed !== null &&
         Object.keys(parsed).toSorted().join(',') ===
-          'createdAt,id,v,workspaceId' &&
+          'alertHash,createdAt,v,workspaceId' &&
         parsed.v === 1 && parsed.workspaceId === workspaceId &&
-        /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(parsed.id) &&
+        /^[a-f0-9]{64}$/.test(parsed.alertHash) &&
         Number.isFinite(createdAt) &&
         new Date(createdAt).toISOString() === parsed.createdAt,
       'INVALID_CURSOR',
-      'cursor does not match this governance query',
+      'cursor does not match this governance alert query',
     )
-    return Object.freeze({ createdAt: parsed.createdAt, id: parsed.id })
+    return Object.freeze({
+      createdAt: parsed.createdAt,
+      alertHash: parsed.alertHash,
+    })
   } catch (error) {
     if (error instanceof DomainError) throw error
     throw new DomainError('INVALID_CURSOR', 'cursor is invalid')
   }
 }
 
-export function listGovernanceUsageAuditService(dependencies: {
-  repository: GovernanceAdmissionRepository
+export function listGovernanceAlertsService(dependencies: {
+  repository: Pick<GovernanceAdmissionRepository, 'listAlerts'>
 }) {
   return async function query(input: {
     actor: AuthenticatedExternalActor
@@ -74,7 +77,7 @@ export function listGovernanceUsageAuditService(dependencies: {
       'INVALID_ARGUMENT',
       'limit must be an integer between 1 and 100',
     )
-    const rows = await dependencies.repository.list({
+    const rows = await dependencies.repository.listAlerts({
       workspaceId,
       limit: limit + 1,
       ...(input.after
@@ -84,31 +87,25 @@ export function listGovernanceUsageAuditService(dependencies: {
     const page = rows.slice(0, limit)
     const last = page.at(-1)
     return Object.freeze({
-      entries: Object.freeze(page.map((admission) => Object.freeze({
-        schemaVersion: admission.schemaVersion,
-        id: admission.id,
-        clientId: admission.clientId,
-        capabilityId: admission.capabilityId,
-        environment: admission.environment,
-        operationKind: admission.operationKind,
-        costClass: admission.costClass,
-        decision: admission.allowed ? 'allowed' as const : 'blocked' as const,
-        reasonCodes: admission.reasons,
-        scopes: Object.freeze({
-          workspace: Object.freeze({
-            ...admission.scopes.workspace,
-            anomalies: admission.scopes.workspace.anomalies ?? [],
-          }),
-          client: Object.freeze({
-            ...admission.scopes.client,
-            anomalies: admission.scopes.client.anomalies ?? [],
-          }),
-        }),
-        requested: admission.requested,
-        anomalyPolicyHash: admission.anomalyPolicyHash ?? null,
+      entries: Object.freeze(page.map((alert) => Object.freeze({
+        schemaVersion: alert.schemaVersion,
+        alertHash: alert.alertHash,
+        clientId: alert.clientId,
+        admissionId: alert.admissionId,
+        scopeType: alert.scopeType,
+        reasonCode: alert.reasonCode,
+        observed: alert.observed,
+        threshold: alert.threshold,
+        ...(alert.policyHash ? { policyHash: alert.policyHash } : {}),
         anomalyRecoveryBypassed:
-          admission.anomalyRecoveryBypassed ?? false,
-        createdAt: admission.createdAt,
+          alert.anomalyRecoveryBypassed ?? false,
+        ...(alert.windowStartedAt
+          ? { windowStartedAt: alert.windowStartedAt }
+          : {}),
+        ...(alert.windowEndedAt
+          ? { windowEndedAt: alert.windowEndedAt }
+          : {}),
+        createdAt: alert.createdAt,
       }))),
       ...(rows.length > limit && last
         ? {
@@ -116,7 +113,7 @@ export function listGovernanceUsageAuditService(dependencies: {
               v: 1,
               workspaceId,
               createdAt: last.createdAt,
-              id: last.id,
+              alertHash: last.alertHash,
             }),
           }
         : {}),

@@ -653,6 +653,10 @@ test('authenticated public API manages projects, clients and artifact inspection
           APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 9).toString('base64url'),
           APOLLO_RENDERER_DIGEST: sha('8'),
           APOLLO_FFMPEG_PATH: ffmpegPath,
+          // This broad journey generates hundreds of legitimate requests. Keep
+          // request/spend spike detection out of this isolated error-rate proof.
+          APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '2000000000',
+          APOLLO_GOVERNANCE_ANOMALY_SPEND_MINIMUM_MINOR_UNITS: '2000000000',
           ...uiEnvironment,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1683,6 +1687,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         'apollo.media.uploads.content.put',
         'apollo.artifacts.download-grants.issue',
         'apollo.artifacts.download-grants.revoke',
+        'apollo.governance.alerts.list',
         'apollo.governance.usage-audit.list',
       ],
     )
@@ -3257,6 +3262,22 @@ test('authenticated public API manages projects, clients and artifact inspection
         reasonCode: 'RATE_LIMIT',
       },
     }), 1)
+    const governanceAlertsResponse = await fetch(
+      `${baseUrl}/v1/governance/alerts?limit=100`,
+      { headers: { authorization } },
+    )
+    const governanceAlerts = await governanceAlertsResponse.json()
+    assert.equal(
+      governanceAlertsResponse.status,
+      200,
+      JSON.stringify(governanceAlerts),
+    )
+    const rateAlertEntry = governanceAlerts.data.entries.find((entry) =>
+      entry.admissionId === blockedAdmission.id &&
+      entry.reasonCode === 'RATE_LIMIT')
+    assert.ok(rateAlertEntry)
+    assert.equal(rateAlertEntry.schemaVersion, 'governance-alert/v2')
+    assert.equal('admissionHash' in rateAlertEntry, false)
     const governanceAuditResponse = await fetch(
       `${baseUrl}/v1/governance/usage-audit?limit=100`,
       { headers: { authorization } },
@@ -3322,6 +3343,107 @@ test('authenticated public API manages projects, clients and artifact inspection
       await governancePolicyDeleteReplayResponse.json()
     assert.equal(governancePolicyDeleteReplayResponse.status, 200)
     assert.equal(governancePolicyDeleteReplay.data.replayed, true)
+    const anomalyOperationIds = Array.from(
+      { length: 10 },
+      (_, index) => `public-governance-anomaly-operation-${index}`,
+    )
+    const anomalyNow = new Date()
+    const anomalyStartedAt = new Date(anomalyNow.getTime() - 1_000)
+    await client.v2PublicOperation.createMany({
+      data: anomalyOperationIds.map((id, index) => {
+        const failed = index < 6
+        return {
+          id,
+          workspaceId,
+          clientId: childCreated.data.client.id,
+          actorEnvironment: apiEnvironment,
+          type: 'artifact-render',
+          status: failed ? 'failed' : 'succeeded',
+          phase: failed ? 'failed' : 'completed',
+          targetType: 'media-artifact',
+          targetId: derivedArtifactId,
+          cancelable: false,
+          retryable: false,
+          attempt: 1,
+          maxAttempts: 3,
+          ...(failed
+            ? {
+                errorCode: 'controlled-e2e-failure',
+                errorMessage: 'Controlled terminal failure for anomaly evidence',
+                errorRetryable: false,
+              }
+            : {
+                resultJson: stableSerialize({
+                  resource: {
+                    type: 'media-artifact',
+                    id: derivedArtifactId,
+                    manifestId: derivedManifestId,
+                  },
+                }),
+              }),
+          idempotencyKey: id,
+          requestFingerprint: createHash('sha256').update(id).digest('hex'),
+          createdAt: anomalyStartedAt,
+          updatedAt: anomalyNow,
+          startedAt: anomalyStartedAt,
+          completedAt: anomalyNow,
+        }
+      }),
+    })
+    try {
+      const anomalyBlockedResponse = await fetch(`${baseUrl}/v1/projects`, {
+        headers: { authorization: childAuthorization },
+      })
+      const anomalyBlocked = await anomalyBlockedResponse.json()
+      assert.equal(
+        anomalyBlockedResponse.status,
+        429,
+        JSON.stringify(anomalyBlocked),
+      )
+      const anomalyAdmission =
+        await client.v2GovernanceAdmission.findFirstOrThrow({
+          where: {
+            workspaceId,
+            clientId: childCreated.data.client.id,
+            allowed: false,
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      assert.deepEqual(
+        JSON.parse(anomalyAdmission.reasonsJson),
+        ['ERROR_RATE_ANOMALY'],
+      )
+      assert.equal(anomalyAdmission.schemaVersion, 'governance-admission/v2')
+      assert.match(anomalyAdmission.anomalyPolicyHash, /^[a-f0-9]{64}$/)
+      assert.equal(await client.v2GovernanceAlert.count({
+        where: {
+          workspaceId,
+          admissionId: anomalyAdmission.id,
+          reasonCode: 'ERROR_RATE_ANOMALY',
+        },
+      }), 2)
+    } finally {
+      await client.v2PublicOperation.deleteMany({
+        where: { id: { in: anomalyOperationIds } },
+      })
+    }
+    const anomalyAlertsResponse = await fetch(
+      `${baseUrl}/v1/governance/alerts?limit=100`,
+      { headers: { authorization } },
+    )
+    const anomalyAlerts = await anomalyAlertsResponse.json()
+    assert.equal(
+      anomalyAlertsResponse.status,
+      200,
+      JSON.stringify(anomalyAlerts),
+    )
+    const anomalyAlertEntry = anomalyAlerts.data.entries.find((entry) =>
+      entry.clientId === childCreated.data.client.id &&
+      entry.reasonCode === 'ERROR_RATE_ANOMALY')
+    assert.ok(anomalyAlertEntry)
+    assert.equal(anomalyAlertEntry.schemaVersion, 'governance-alert/v2')
+    assert.equal(anomalyAlertEntry.anomalyRecoveryBypassed, false)
+    assert.equal('admissionHash' in anomalyAlertEntry, false)
     const existingWorkspaceAdmissions = await client.v2GovernanceAdmission.count({
       where: {
         workspaceId,
