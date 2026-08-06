@@ -348,7 +348,7 @@ function anomalyTransaction(evidence) {
     },
     v2GovernanceAdmission: {
       async count({ where }) {
-        if (where.requestedConcurrency || where.createdAt?.lt) return 0
+        if (where.requestedConcurrency) return 0
         return 20
       },
       async aggregate() {
