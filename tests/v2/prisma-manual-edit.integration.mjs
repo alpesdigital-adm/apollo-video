@@ -928,6 +928,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.match(restoredCommand.payloadJson, /"action":"restore"/)
 
     const selectionBaseVersion = persistedVersions.at(-1)
+    const selectionBaseSnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: selectionBaseVersion.editPlanSnapshotId },
+    })
+    const selectionBasePlan = JSON.parse(selectionBaseSnapshot.contentJson)
+    const selectionClipId = selectionBasePlan.videoTracks[0].clips[0].id
+    assert.equal(selectionClipId, 'clip-1:a')
     const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
     const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
     const selectionColorBindings = renderColorBindings(sourceA, sourceB)
@@ -972,8 +978,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         baseHash: selectionBaseVersion.baseHash,
         expectedRevision: 10,
         variantId: '9:16',
-        targetId: 'clip-1',
-        operation: { kind: 'select', clipId: 'clip-1' },
+        targetId: selectionClipId,
+        operation: { kind: 'select', clipId: selectionClipId },
       }),
     })
     const selectedResponse = await select()
@@ -1016,9 +1022,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         baseHash: selected.data.version.baseHash,
         expectedRevision: 11,
         variantId: '9:16',
-        targetId: 'clip-1',
+        targetId: selectionClipId,
         operation: {
-          kind: 'crop', clipId: 'clip-1',
+          kind: 'crop', clipId: selectionClipId,
           crop: { x: 0.2, y: 0, width: 0.6, height: 1 },
         },
         reason: 'Reenquadramento manual restrito ao clip e formato 9:16.',
@@ -1037,7 +1043,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       include: { editPlanSnapshot: true },
     })
     const cropPlan = JSON.parse(cropVersion.editPlanSnapshot.contentJson)
-    assert.deepEqual(cropPlan.videoTracks[0].clips.find((clip) => clip.id === 'clip-1').crop, {
+    assert.deepEqual(cropPlan.videoTracks[0].clips.find((clip) => clip.id === selectionClipId).crop, {
       x: 0.2, y: 0, width: 0.6, height: 1,
     })
     const cropInvalidations = await client.v2CommandArtifactInvalidation.findMany({
