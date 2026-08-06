@@ -3016,6 +3016,29 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.director-runs.quality.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/director-runs/{directorRunId}/quality-report"
+      },
+      "toolName": "apollo.projects.director-runs.quality.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.duplicates.create": {
       "version": "2.0.0",
       "exposure": "public",
@@ -33895,6 +33918,429 @@
         },
         "confirmed": {
           "const": true
+        }
+      }
+    },
+    "apollo://schemas/director-quality-report-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "qualityReport"
+          ],
+          "properties": {
+            "qualityReport": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "directorRunId",
+                "projectId",
+                "objective",
+                "objectiveVersion",
+                "rubricRef",
+                "qualitySnapshot",
+                "report"
+              ],
+              "properties": {
+                "directorRunId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "objective": {
+                  "enum": [
+                    "discovery",
+                    "awareness",
+                    "warming",
+                    "lead-generation",
+                    "sale",
+                    "whatsapp",
+                    "booking",
+                    "download"
+                  ]
+                },
+                "objectiveVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rubricRef": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+/v[1-9][0-9]*$"
+                },
+                "qualitySnapshot": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "contentSchemaVersion",
+                    "contentHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contentSchemaVersion": {
+                      "const": 2
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "report": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "status",
+                    "score",
+                    "strategic",
+                    "hardChecks",
+                    "issues",
+                    "criticVersion",
+                    "evaluatedAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "director-quality-report/v2"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "status": {
+                      "enum": [
+                        "approved",
+                        "approved-with-warnings",
+                        "blocked"
+                      ]
+                    },
+                    "score": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "strategic": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "rubric",
+                        "score",
+                        "passed",
+                        "gateResults",
+                        "gateFailures",
+                        "evidence",
+                        "evaluatedAt"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "strategic-quality-report/v1"
+                        },
+                        "rubric": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "version",
+                            "objective",
+                            "purpose",
+                            "threshold",
+                            "requiredGates"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "version": {
+                              "const": 1
+                            },
+                            "objective": {
+                              "enum": [
+                                "discovery",
+                                "awareness",
+                                "warming",
+                                "lead-generation",
+                                "sale",
+                                "whatsapp",
+                                "booking",
+                                "download"
+                              ]
+                            },
+                            "purpose": {
+                              "const": "editorial-quality-proxy"
+                            },
+                            "threshold": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 100
+                            },
+                            "requiredGates": {
+                              "type": "array",
+                              "minItems": 3,
+                              "maxItems": 4,
+                              "uniqueItems": true,
+                              "items": {
+                                "enum": [
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance",
+                                  "cta-required"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "score": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 100
+                        },
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "gateResults": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 4,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "passed",
+                              "evidence"
+                            ],
+                            "properties": {
+                              "id": {
+                                "enum": [
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance",
+                                  "cta-required"
+                                ]
+                              },
+                              "passed": {
+                                "type": "boolean"
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "gateFailures": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "narrative-integrity",
+                              "legibility",
+                              "rights-compliance",
+                              "cta-required"
+                            ]
+                          }
+                        },
+                        "evidence": {
+                          "type": "array",
+                          "minItems": 5,
+                          "maxItems": 10,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "criterionId",
+                              "score",
+                              "weight",
+                              "evidence"
+                            ],
+                            "properties": {
+                              "criterionId": {
+                                "enum": [
+                                  "hook-clarity",
+                                  "problem-recognition",
+                                  "trust-building",
+                                  "offer-clarity",
+                                  "proof-strength",
+                                  "cta-clarity",
+                                  "friction-reduction",
+                                  "narrative-integrity",
+                                  "legibility",
+                                  "rights-compliance"
+                                ]
+                              },
+                              "score": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "weight": {
+                                "type": "number",
+                                "exclusiveMinimum": 0,
+                                "maximum": 1
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "evaluatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "hardChecks": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "openingMotionProtected",
+                        "automaticZoomDisabled",
+                        "subtitlesFaceSafe",
+                        "subtitlesBounded",
+                        "forbiddenSpeechAbsent",
+                        "timelineContinuous"
+                      ],
+                      "properties": {
+                        "openingMotionProtected": {
+                          "type": "boolean"
+                        },
+                        "automaticZoomDisabled": {
+                          "type": "boolean"
+                        },
+                        "subtitlesFaceSafe": {
+                          "type": "boolean"
+                        },
+                        "subtitlesBounded": {
+                          "type": "boolean"
+                        },
+                        "forbiddenSpeechAbsent": {
+                          "type": "boolean"
+                        },
+                        "timelineContinuous": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "issues": {
+                      "type": "array",
+                      "maxItems": 500,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "severity",
+                          "category",
+                          "message",
+                          "correctable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "severity": {
+                            "enum": [
+                              "hard",
+                              "warning"
+                            ]
+                          },
+                          "category": {
+                            "enum": [
+                              "technical",
+                              "policy",
+                              "integrity",
+                              "editorial"
+                            ]
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          },
+                          "rangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "number",
+                              "minimum": 0
+                            }
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "correctable": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "criticVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "evaluatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

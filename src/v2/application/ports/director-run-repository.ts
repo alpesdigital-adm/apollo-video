@@ -28,6 +28,18 @@ export interface DirectorRunContext {
   currentDurationFrames: number
   proxyVariantId: string
   outputReferences: readonly Readonly<CommandImpactOutputReference>[]
+  sourceRights: Readonly<
+    | { state: 'missing' }
+    | {
+        state: 'present'
+        snapshotId: string
+        snapshotHash: string
+        status: string
+        consentStatus: string
+        expiresAt?: string
+        consentExpiresAt?: string
+      }
+  >
   transcript: Readonly<{
     id: string
     sourceArtifactId: string
@@ -69,6 +81,23 @@ export interface DirectorRunResult {
 }
 
 export interface DirectorRunRepository {
+  readQualityReport(input: {
+    workspaceId: string
+    projectId: string
+    directorRunId: string
+  }): Promise<Readonly<{
+    directorRunId: string
+    projectId: string
+    objective: StrategicObjectiveId
+    objectiveVersion: number
+    rubricRef: string
+    qualitySnapshot: Readonly<{
+      id: string
+      contentSchemaVersion: number
+      contentHash: string
+    }>
+    report: Readonly<DirectorRun['qualityReport']>
+  }> | null>
   findIdempotentResult(input: {
     workspaceId: string
     projectId: string

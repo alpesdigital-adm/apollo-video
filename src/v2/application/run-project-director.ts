@@ -3,6 +3,7 @@ import {
   type DirectedSubtitleCue,
   type DirectorDecision,
   type DirectorPerceptionSnapshot,
+  type DirectorQualityIssue,
   type DirectorQualityReport,
   type DirectorRun,
   type RunDirectorCommandPayload,
@@ -10,7 +11,12 @@ import {
   validateDirectorDecisions,
 } from '../domain/director-run.ts'
 import { createEditCommand } from '../domain/edit-command.ts'
-import { createDesiredAction } from '../domain/desired-action.ts'
+import {
+  createDesiredAction,
+  validateDesiredActionAlignment,
+  type DesiredAction,
+  type DesiredActionDestinationType,
+} from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createPerceptionTimeline, type PerceptionObservation } from '../domain/perception-timeline.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
@@ -21,6 +27,12 @@ import {
   resolveStrategicObjective,
   type StrategicObjectiveId,
 } from '../domain/strategic-objective.ts'
+import {
+  createQualityReport as createStrategicQualityReport,
+  resolveStrategicRubric,
+  type QualityEvidence,
+  type RubricCriterionId,
+} from '../domain/strategic-rubric.ts'
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
@@ -217,6 +229,8 @@ function buildSubtitleCues(input: {
 function buildStoryPlan(input: {
   id: string
   objective: string
+  desiredAction: Readonly<DesiredAction>
+  ctaPresent: boolean
   clips: readonly Readonly<{
     id: string
     timelineInFrame: number
@@ -227,21 +241,33 @@ function buildStoryPlan(input: {
 }): Readonly<StoryPlan> & Readonly<{ id: string }> {
   const blocks: StoryBlock[] = input.clips.map((clip, index) => {
     const durationMs = Math.max(1, Math.round((clip.timelineOutFrame - clip.timelineInFrame) / input.fps * 1000))
+    const isCta = input.desiredAction.kind !== 'continue-viewing' &&
+      input.ctaPresent && index === input.clips.length - 1
     return {
       id: `story-block-${index + 1}`,
-      actId: index === 0 ? 'opening' : 'development',
-      role: index === 0 ? 'hook' : index === input.clips.length - 1 ? 'context' : 'argument',
-      intent: index === 0 ? 'establish-speaker-and-premise' : index === input.clips.length - 1 ? 'close-with-next-understanding' : 'develop-value-and-proof-context',
+      actId: index === 0 ? 'opening' : isCta ? 'resolution' : 'development',
+      role: index === 0 ? 'hook' : isCta ? 'cta' : index === input.clips.length - 1 ? 'context' : 'argument',
+      intent: index === 0
+        ? 'establish-speaker-and-premise'
+        : isCta
+          ? `perform-${input.desiredAction.kind}`
+          : index === input.clips.length - 1
+            ? 'close-with-next-understanding'
+            : 'develop-value-and-proof-context',
       dependencies: index === 0 ? [] : [`story-block-${index}`],
       sourceCandidateIds: [clip.id],
       durationTargetMs: { min: Math.max(1, durationMs - 1_000), ideal: durationMs, max: durationMs + 1_000 },
-      content: { claimIds: [], qualifierIds: [], proofIds: [] },
+      content: {
+        claimIds: [], qualifierIds: [], proofIds: [],
+        ...(isCta ? { ctaId: `desired-action:${input.desiredAction.kind}` } : {}),
+      },
       presentation: 'source-video',
       sourceRangeId: clip.id,
     }
   })
   const opening = blocks.filter((block) => block.actId === 'opening').map((block) => block.id)
   const development = blocks.filter((block) => block.actId === 'development').map((block) => block.id)
+  const resolution = blocks.filter((block) => block.actId === 'resolution').map((block) => block.id)
   const durationMs = Math.max(1, Math.round(input.durationFrames / input.fps * 1000))
   const plan: StoryPlan & { id: string } = {
     id: input.id,
@@ -251,6 +277,7 @@ function buildStoryPlan(input: {
     acts: [
       { id: 'opening', role: 'opening', blockIds: opening },
       ...(development.length ? [{ id: 'development', role: 'development' as const, blockIds: development }] : []),
+      ...(resolution.length ? [{ id: 'resolution', role: 'resolution' as const, blockIds: resolution }] : []),
     ],
     blocks,
   }
@@ -313,9 +340,117 @@ function normalizedSpeech(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
+const desiredActionDestinationTypes = new Set<DesiredActionDestinationType>([
+  'url', 'handle', 'whatsapp', 'calendar', 'file',
+])
+
+function desiredActionFromBrief(
+  brief: Readonly<Record<string, unknown>>,
+  objective: StrategicObjectiveId,
+): Readonly<DesiredAction> {
+  const stored = brief.desiredAction
+  assertDomain(
+    typeof stored === 'object' && stored !== null && !Array.isArray(stored),
+    'PERSISTENCE_CONFLICT',
+    'Project brief has no structured desired action',
+  )
+  const record = stored as Record<string, unknown>
+  const destination = record.destination
+  assertDomain(
+    destination === undefined ||
+      (typeof destination === 'object' && destination !== null && !Array.isArray(destination)),
+    'PERSISTENCE_CONFLICT',
+    'Project desired action destination is invalid',
+  )
+  const destinationRecord = destination as Record<string, unknown> | undefined
+  const destinationType = destinationRecord?.type
+  assertDomain(
+    destinationType === undefined ||
+      (typeof destinationType === 'string' &&
+        desiredActionDestinationTypes.has(destinationType as DesiredActionDestinationType)),
+    'PERSISTENCE_CONFLICT',
+    'Project desired action destination type is invalid',
+  )
+  assertDomain(
+    destinationRecord?.value === undefined || typeof destinationRecord.value === 'string',
+    'PERSISTENCE_CONFLICT',
+    'Project desired action destination value is invalid',
+  )
+  assertDomain(
+    record.verbalCta === undefined || typeof record.verbalCta === 'string',
+    'PERSISTENCE_CONFLICT',
+    'Project verbal CTA is invalid',
+  )
+  assertDomain(
+    record.visualCta === undefined || typeof record.visualCta === 'string',
+    'PERSISTENCE_CONFLICT',
+    'Project visual CTA is invalid',
+  )
+  assertDomain(
+    Array.isArray(record.disclosures) &&
+      record.disclosures.every((item) => typeof item === 'string'),
+    'PERSISTENCE_CONFLICT',
+    'Project desired action disclosures are invalid',
+  )
+  const action = createDesiredAction({
+    objective,
+    ...(typeof destinationRecord?.value === 'string'
+      ? { destination: destinationRecord.value }
+      : {}),
+    ...(typeof destinationType === 'string'
+      ? { destinationType: destinationType as DesiredActionDestinationType }
+      : {}),
+    ...(typeof record.verbalCta === 'string' ? { verbalCta: record.verbalCta } : {}),
+    ...(typeof record.visualCta === 'string' ? { visualCta: record.visualCta } : {}),
+    disclosures: record.disclosures as string[],
+  })
+  assertDomain(
+    record.kind === action.kind && validateDesiredActionAlignment({ objective, action }).valid,
+    'PERSISTENCE_CONFLICT',
+    'Project desired action does not match its strategic objective',
+  )
+  return action
+}
+
+function hasObservableCta(
+  action: Readonly<DesiredAction>,
+  words: readonly Readonly<{ text: string }>[],
+): boolean {
+  if (action.kind === 'continue-viewing') return true
+  if (action.visualCta?.trim() || action.verbalCta?.trim()) return true
+  const transcript = normalizedSpeech(words.map((word) => word.text).join(' '))
+  const patterns: Record<Exclude<DesiredAction['kind'], 'continue-viewing'>, RegExp> = {
+    'submit-lead': /\b(cadastre|cadastro|inscreva|formulario|deixe seu contato)\b/,
+    buy: /\b(compre|comprar|checkout|garanta|adquira)\b/,
+    'message-whatsapp': /\bwhatsapp\b/,
+    book: /\b(agende|agendar|agenda|marque|marcar)\b/,
+    download: /\b(baixe|baixar|download|material|guia|arquivo)\b/,
+  }
+  return patterns[action.kind].test(transcript)
+}
+
 function buildQualityReport(input: {
   id: string
   plan: Readonly<DirectedEditPlan>
+  storyPlan: Readonly<StoryPlan> & Readonly<{ id: string }>
+  objective: StrategicObjectiveId
+  rubricRef: string
+  desiredAction: Readonly<DesiredAction>
+  ctaPresent: boolean
+  hasSelectedInsert: boolean
+  transcriptId: string
+  sourceRights: Readonly<
+    | { state: 'missing' }
+    | {
+        state: 'present'
+        snapshotId: string
+        snapshotHash: string
+        status: string
+        consentStatus: string
+        expiresAt?: string
+        consentExpiresAt?: string
+      }
+  >
   evaluatedAt: string
 }): Readonly<DirectorQualityReport> {
   const cues = input.plan.subtitleTracks.flatMap((track) => track.cues)
@@ -331,7 +466,98 @@ function buildQualityReport(input: {
     forbiddenSpeechAbsent,
     timelineContinuous,
   })
-  const issues = Object.freeze([{
+  const evaluatedAtMs = new Date(input.evaluatedAt).getTime()
+  const unexpired = (value?: string) => value === undefined || (
+    !Number.isNaN(new Date(value).getTime()) && new Date(value).getTime() > evaluatedAtMs
+  )
+  const rightsPassed = input.sourceRights.state === 'present' &&
+    input.sourceRights.status === 'approved' &&
+    ['approved', 'not-required'].includes(input.sourceRights.consentStatus) &&
+    unexpired(input.sourceRights.expiresAt) &&
+    unexpired(input.sourceRights.consentExpiresAt)
+  const narrativeIntegrity = hardChecks.openingMotionProtected &&
+    hardChecks.automaticZoomDisabled && hardChecks.forbiddenSpeechAbsent &&
+    hardChecks.timelineContinuous
+  const legibility = hardChecks.subtitlesFaceSafe && hardChecks.subtitlesBounded
+  const structuredCta = input.storyPlan.blocks.some((block) =>
+    block.role === 'cta' && Boolean(block.content.ctaId))
+  const rubric = resolveStrategicRubric(input.objective)
+  assertDomain(
+    input.rubricRef === `${rubric.id}/v${rubric.version}`,
+    'PERSISTENCE_CONFLICT',
+    'Director objective and strategic rubric do not match',
+  )
+  const hasOpening = input.storyPlan.blocks.some((block) => block.role === 'hook') &&
+    cues.some((cue) => cue.startFrame <= Math.round(input.plan.fps))
+  const hasDevelopment = input.storyPlan.blocks.some((block) =>
+    ['context', 'argument', 'proof'].includes(block.role))
+  const hasDestination = Boolean(input.desiredAction.destination?.value)
+  const scoreFor = (criterionId: RubricCriterionId): Readonly<QualityEvidence> => {
+    const values: Record<RubricCriterionId, readonly [number, readonly string[]]> = {
+      'hook-clarity': [hasOpening ? 100 : 0, [
+        `story:${input.storyPlan.id}:opening=${hasOpening}`,
+        `transcript:${input.transcriptId}:early-caption=${hasOpening}`,
+      ]],
+      'problem-recognition': [hasDevelopment ? 85 : 35, [
+        `story:${input.storyPlan.id}:development=${hasDevelopment}`,
+        `transcript:${input.transcriptId}:semantic-proxy=structure-only`,
+      ]],
+      'trust-building': [narrativeIntegrity && rightsPassed ? 90 : 30, [
+        `edit-plan:${input.plan.id}:narrative-integrity=${narrativeIntegrity}`,
+        `rights:${input.sourceRights.state === 'present' ? input.sourceRights.snapshotId : 'missing'}`,
+      ]],
+      'offer-clarity': [hasDestination ? 85 : 0, [
+        `desired-action:${input.desiredAction.kind}:destination=${hasDestination}`,
+        'semantic-proxy:offer-copy-not-inferred',
+      ]],
+      'proof-strength': [input.hasSelectedInsert ? 85 : 60, [
+        `edit-plan:${input.plan.id}:selected-proof-insert=${input.hasSelectedInsert}`,
+        'semantic-proxy:no-commercial-causality',
+      ]],
+      'cta-clarity': [structuredCta && input.ctaPresent ? 100 : 0, [
+        `story:${input.storyPlan.id}:structured-cta=${structuredCta}`,
+        `desired-action:${input.desiredAction.kind}:observable-cta=${input.ctaPresent}`,
+      ]],
+      'friction-reduction': [hasDestination ? 90 : input.desiredAction.kind === 'continue-viewing' ? 85 : 0, [
+        `desired-action:${input.desiredAction.kind}:destination=${hasDestination}`,
+      ]],
+      'narrative-integrity': [narrativeIntegrity ? 100 : 0, [
+        `edit-plan:${input.plan.id}:forbidden-speech-absent=${hardChecks.forbiddenSpeechAbsent}`,
+        `edit-plan:${input.plan.id}:timeline-continuous=${hardChecks.timelineContinuous}`,
+      ]],
+      legibility: [legibility ? 100 : 0, [
+        `edit-plan:${input.plan.id}:subtitle-face-safe=${hardChecks.subtitlesFaceSafe}`,
+        `edit-plan:${input.plan.id}:subtitle-bounded=${hardChecks.subtitlesBounded}`,
+      ]],
+      'rights-compliance': [rightsPassed ? 100 : 0, [
+        input.sourceRights.state === 'present'
+          ? `rights:${input.sourceRights.snapshotId}:${input.sourceRights.snapshotHash}:status=${input.sourceRights.status}:consent=${input.sourceRights.consentStatus}`
+          : 'rights:missing',
+      ]],
+    }
+    const [score, evidence] = values[criterionId]
+    return Object.freeze({ criterionId, score, evidence: Object.freeze([...evidence]) })
+  }
+  const strategic = createStrategicQualityReport({
+    objective: input.objective,
+    evidence: rubric.criteria.map((criterion) => scoreFor(criterion.id)),
+    gates: {
+      narrativeIntegrity,
+      legibility,
+      rights: rightsPassed,
+      ctaPresent: input.ctaPresent && structuredCta,
+    },
+    gateEvidence: {
+      'narrative-integrity': [`edit-plan:${input.plan.id}:narrative=${narrativeIntegrity}`],
+      legibility: [`edit-plan:${input.plan.id}:legibility=${legibility}`],
+      'rights-compliance': [input.sourceRights.state === 'present'
+        ? `rights:${input.sourceRights.snapshotId}:eligible=${rightsPassed}`
+        : 'rights:missing'],
+      'cta-required': [`story:${input.storyPlan.id}:cta=${input.ctaPresent && structuredCta}`],
+    },
+    evaluatedAt: input.evaluatedAt,
+  })
+  const baseIssues: DirectorQualityIssue[] = [{
     code: 'FACE_PERCEPTION_UNAVAILABLE_SAFE_FALLBACK',
     severity: 'warning' as const,
     category: 'editorial' as const,
@@ -339,13 +565,40 @@ function buildQualityReport(input: {
     rangeMs: [0, Math.round(input.plan.durationFrames / input.plan.fps * 1000)] as const,
     targetId: input.plan.subtitleTracks[0]?.id ?? 'subtitle-track',
     correctable: true,
-  }])
-  const blocked = Object.values(hardChecks).some((value) => !value)
+  }]
+  const gateIssue = {
+    'narrative-integrity': ['STRATEGIC_NARRATIVE_INTEGRITY_FAILED', 'integrity'],
+    legibility: ['STRATEGIC_LEGIBILITY_FAILED', 'technical'],
+    'rights-compliance': ['STRATEGIC_RIGHTS_FAILED', 'policy'],
+    'cta-required': ['STRATEGIC_CTA_REQUIRED', 'editorial'],
+  } as const
+  for (const gate of strategic.gateFailures) {
+    const [code, category] = gateIssue[gate]
+    baseIssues.push(Object.freeze({
+      code,
+      severity: 'hard' as const,
+      category,
+      message: `Strategic quality gate ${gate} failed with persisted evidence.`,
+      correctable: true,
+    }))
+  }
+  if (strategic.score < strategic.rubric.threshold) {
+    baseIssues.push(Object.freeze({
+      code: 'STRATEGIC_SCORE_BELOW_THRESHOLD',
+      severity: 'hard' as const,
+      category: 'editorial' as const,
+      message: `Strategic editorial proxy score ${strategic.score} is below threshold ${strategic.rubric.threshold}.`,
+      correctable: true,
+    }))
+  }
+  const issues = Object.freeze(baseIssues)
+  const blocked = !strategic.passed || Object.values(hardChecks).some((value) => !value)
   return Object.freeze({
-    schemaVersion: 'director-quality-report/v1' as const,
+    schemaVersion: 'director-quality-report/v2' as const,
     id: input.id,
     status: blocked ? 'blocked' as const : issues.length ? 'approved-with-warnings' as const : 'approved' as const,
-    score: blocked ? 0 : 0.9,
+    score: strategic.score / 100,
+    strategic,
     hardChecks,
     issues,
     criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
@@ -487,10 +740,18 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
             : {}),
         })
       : undefined
+    const desiredAction = changedDesiredAction ?? desiredActionFromBrief(
+      context.brief,
+      objective.id,
+    )
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
     const hasSelectedInsert = clips.some(
       (clip) => clip.sourceArtifactId !== context.transcript.sourceArtifactId,
+    )
+    const ctaPresent = hasObservableCta(
+      desiredAction,
+      context.editPlan.retimedTranscript.words,
     )
     const createdAt = dependencies.clock().toISOString()
     const directorRunId = dependencies.createId('director-run')
@@ -522,7 +783,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         clips.every((clip) => Boolean(clip.audioSourceArtifactId))
         ? 'visual-montage'
         : 'talking-head',
-      rubric: { id: `${objective.rubricId}/v1`, version: 1, proofRequired: false },
+      rubric: { id: objectiveBinding.rubricRef, version: 1, proofRequired: false },
       policy: { snapshotId: context.currentVersion.snapshotRefs.policies, maxPatternBreaksPer30s: 2, forbiddenEffects: ['zoom'] },
       perception: {
         summaryId: perception.summary.id,
@@ -532,7 +793,15 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       },
     })
     const treatmentPlan = Object.freeze({ id: treatmentPlanId, ...treatmentBase })
-    const storyPlan = buildStoryPlan({ id: storyPlanId, objective: objective.id, clips, fps: context.editPlan.fps, durationFrames: context.editPlan.durationFrames })
+    const storyPlan = buildStoryPlan({
+      id: storyPlanId,
+      objective: objective.id,
+      desiredAction,
+      ctaPresent,
+      clips,
+      fps: context.editPlan.fps,
+      durationFrames: context.editPlan.durationFrames,
+    })
     const decisions = buildDecisions({
       briefRef: briefSnapshotId,
       transcriptRef: context.transcript.id,
@@ -588,8 +857,30 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       createdAt,
     }
     validateDirectedEditPlan(editPlan)
-    const qualityReport = buildQualityReport({ id: qualityReportId, plan: editPlan, evaluatedAt: createdAt })
-    assertDomain(qualityReport.status !== 'blocked', 'INVALID_RENDER_INPUT', 'Director critic blocked the proposed EditPlan')
+    const qualityReport = buildQualityReport({
+      id: qualityReportId,
+      plan: editPlan,
+      storyPlan,
+      objective: objective.id,
+      rubricRef: objectiveBinding.rubricRef,
+      desiredAction,
+      ctaPresent,
+      hasSelectedInsert,
+      transcriptId: context.transcript.id,
+      sourceRights: context.sourceRights,
+      evaluatedAt: createdAt,
+    })
+    assertDomain(
+      qualityReport.status !== 'blocked',
+      'INVALID_RENDER_INPUT',
+      'Director critic blocked the proposed EditPlan',
+      {
+        qualityReportId,
+        score: qualityReport.strategic.score,
+        threshold: qualityReport.strategic.rubric.threshold,
+        gateFailures: qualityReport.strategic.gateFailures,
+      },
+    )
     const perceptionSnapshotId = dependencies.createId('project-snapshot')
     const treatmentSnapshotId = dependencies.createId('project-snapshot')
     const storySnapshotId = dependencies.createId('project-snapshot')
@@ -628,7 +919,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: 1, value: treatmentPlan, createdAt }),
       snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
       snapshot({ id: editPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
-      snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 1, value: qualityReport, createdAt }),
+      snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 2, value: qualityReport, createdAt }),
     ])
     const snapshotRefs = Object.freeze({
       brief: briefSnapshotId,

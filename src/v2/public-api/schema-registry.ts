@@ -19,14 +19,136 @@ export interface PublicSchemaDefinition {
 }
 
 const idSchema = PUBLIC_ID_SCHEMA
+const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
+const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 const strategicObjectiveSchema = {
   enum: [
     'discovery', 'awareness', 'warming', 'lead-generation',
     'sale', 'whatsapp', 'booking', 'download',
   ],
 } as const
-const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
-const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const directorQualityCriterionSchema = {
+  enum: [
+    'hook-clarity', 'problem-recognition', 'trust-building', 'offer-clarity',
+    'proof-strength', 'cta-clarity', 'friction-reduction',
+    'narrative-integrity', 'legibility', 'rights-compliance',
+  ],
+} as const
+const directorQualityGateSchema = {
+  enum: ['narrative-integrity', 'legibility', 'rights-compliance', 'cta-required'],
+} as const
+const directorStrategicQualityReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'rubric', 'score', 'passed', 'gateResults',
+    'gateFailures', 'evidence', 'evaluatedAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'strategic-quality-report/v1' },
+    rubric: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'version', 'objective', 'purpose', 'threshold', 'requiredGates'],
+      properties: {
+        id: idSchema,
+        version: { const: 1 },
+        objective: strategicObjectiveSchema,
+        purpose: { const: 'editorial-quality-proxy' },
+        threshold: { type: 'number', minimum: 0, maximum: 100 },
+        requiredGates: {
+          type: 'array', minItems: 3, maxItems: 4, uniqueItems: true,
+          items: directorQualityGateSchema,
+        },
+      },
+    },
+    score: { type: 'number', minimum: 0, maximum: 100 },
+    passed: { type: 'boolean' },
+    gateResults: {
+      type: 'array', minItems: 3, maxItems: 4,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'passed', 'evidence'],
+        properties: {
+          id: directorQualityGateSchema,
+          passed: { type: 'boolean' },
+          evidence: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 500 } },
+        },
+      },
+    },
+    gateFailures: { type: 'array', maxItems: 4, uniqueItems: true, items: directorQualityGateSchema },
+    evidence: {
+      type: 'array', minItems: 5, maxItems: 10,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['criterionId', 'score', 'weight', 'evidence'],
+        properties: {
+          criterionId: directorQualityCriterionSchema,
+          score: { type: 'number', minimum: 0, maximum: 100 },
+          weight: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+          evidence: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 500 } },
+        },
+      },
+    },
+    evaluatedAt: dateTimeSchema,
+  },
+} as const
+const directorQualityReportReadSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'directorRunId', 'projectId', 'objective', 'objectiveVersion',
+    'rubricRef', 'qualitySnapshot', 'report',
+  ],
+  properties: {
+    directorRunId: idSchema,
+    projectId: idSchema,
+    objective: strategicObjectiveSchema,
+    objectiveVersion: { type: 'integer', minimum: 1 },
+    rubricRef: { type: 'string', pattern: '^[a-z0-9-]+/v[1-9][0-9]*$' },
+    qualitySnapshot: {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'contentSchemaVersion', 'contentHash'],
+      properties: { id: idSchema, contentSchemaVersion: { const: 2 }, contentHash: sha256Schema },
+    },
+    report: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'id', 'status', 'score', 'strategic', 'hardChecks', 'issues', 'criticVersion', 'evaluatedAt'],
+      properties: {
+        schemaVersion: { const: 'director-quality-report/v2' },
+        id: idSchema,
+        status: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+        score: { type: 'number', minimum: 0, maximum: 1 },
+        strategic: directorStrategicQualityReportSchema,
+        hardChecks: {
+          type: 'object', additionalProperties: false,
+          required: ['openingMotionProtected', 'automaticZoomDisabled', 'subtitlesFaceSafe', 'subtitlesBounded', 'forbiddenSpeechAbsent', 'timelineContinuous'],
+          properties: {
+            openingMotionProtected: { type: 'boolean' }, automaticZoomDisabled: { type: 'boolean' },
+            subtitlesFaceSafe: { type: 'boolean' }, subtitlesBounded: { type: 'boolean' },
+            forbiddenSpeechAbsent: { type: 'boolean' }, timelineContinuous: { type: 'boolean' },
+          },
+        },
+        issues: {
+          type: 'array', maxItems: 500,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['code', 'severity', 'category', 'message', 'correctable'],
+            properties: {
+              code: { type: 'string', minLength: 1, maxLength: 128 },
+              severity: { enum: ['hard', 'warning'] },
+              category: { enum: ['technical', 'policy', 'integrity', 'editorial'] },
+              message: { type: 'string', minLength: 1, maxLength: 2000 },
+              rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number', minimum: 0 } },
+              targetId: idSchema,
+              correctable: { type: 'boolean' },
+            },
+          },
+        },
+        criticVersion: { type: 'string', minLength: 1, maxLength: 128 },
+        evaluatedAt: dateTimeSchema,
+      },
+    },
+  },
+} as const
 const workspaceLutSchema = {
   type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'status', 'currentVersion'],
   properties: {
@@ -19422,6 +19544,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         operation: publicOperationSchemaV9,
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('director-quality-report-read', 1, 'Read one immutable objective-bound Director quality report with exact rubric evidence and hard gates',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['qualityReport'],
+      properties: { qualityReport: directorQualityReportReadSchema },
     }),
   ),
   defineSchema('project-manual-timeline', 1, 'Current manual editing timeline and immutable history',

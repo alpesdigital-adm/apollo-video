@@ -38,6 +38,8 @@ import {
   bindDirectorObjective,
   resolveStrategicObjective,
 } from '../../domain/strategic-objective.ts'
+import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -69,6 +71,64 @@ function parseArray(value: string, field: string): unknown[] {
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
+}
+
+function parseDirectorQualityReport(input: {
+  contentJson: string
+  contentHash: string
+  contentSchemaVersion: number
+  objective: string
+  rubricRef: string
+}): Readonly<DirectorQualityReport> {
+  const record = parseRecord(input.contentJson, 'Director quality report')
+  const objective = resolveStrategicObjective(input.objective)
+  const strategic = parseStrategicQualityReport(record.strategic)
+  const hardChecks = record.hardChecks as Record<string, unknown> | undefined
+  const expectedHardChecks = [
+    'openingMotionProtected', 'automaticZoomDisabled', 'subtitlesFaceSafe',
+    'subtitlesBounded', 'forbiddenSpeechAbsent', 'timelineContinuous',
+  ]
+  const issues = record.issues
+  const issuesValid = Array.isArray(issues) && issues.length <= 500 && issues.every((candidate) => {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return false
+    const issue = candidate as Record<string, unknown>
+    const allowedKeys = new Set(['code', 'severity', 'category', 'message', 'rangeMs', 'targetId', 'correctable'])
+    const range = issue.rangeMs
+    return Object.keys(issue).every((key) => allowedKeys.has(key)) &&
+      typeof issue.code === 'string' && issue.code.length >= 1 && issue.code.length <= 128 &&
+      ['hard', 'warning'].includes(String(issue.severity)) &&
+      ['technical', 'policy', 'integrity', 'editorial'].includes(String(issue.category)) &&
+      typeof issue.message === 'string' && issue.message.length >= 1 && issue.message.length <= 2_000 &&
+      typeof issue.correctable === 'boolean' &&
+      (issue.targetId === undefined || typeof issue.targetId === 'string') &&
+      (range === undefined || (
+        Array.isArray(range) && range.length === 2 &&
+        range.every((value) => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+      ))
+  })
+  if (
+    input.contentSchemaVersion !== 2 ||
+    record.schemaVersion !== 'director-quality-report/v2' ||
+    typeof record.id !== 'string' ||
+    !['approved', 'approved-with-warnings', 'blocked'].includes(String(record.status)) ||
+    typeof record.score !== 'number' || !Number.isFinite(record.score) ||
+    record.score !== strategic.score / 100 ||
+    strategic.rubric.objective !== objective.id ||
+    `${strategic.rubric.id}/v${strategic.rubric.version}` !== input.rubricRef ||
+    (strategic.passed !== ['approved', 'approved-with-warnings'].includes(String(record.status))) ||
+    typeof hardChecks !== 'object' || hardChecks === null ||
+    Object.keys(hardChecks).sort().join('|') !== [...expectedHardChecks].sort().join('|') ||
+    !expectedHardChecks.every((key) => typeof hardChecks[key] === 'boolean') ||
+    !issuesValid ||
+    typeof record.criticVersion !== 'string' || record.criticVersion.length < 1 ||
+    typeof record.evaluatedAt !== 'string' || record.evaluatedAt !== strategic.evaluatedAt ||
+    Number.isNaN(new Date(record.evaluatedAt).getTime())
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report is inconsistent')
+  const report = Object.freeze({ ...record, strategic }) as unknown as Readonly<DirectorQualityReport>
+  if (calculateCanonicalHash(report) !== input.contentHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director quality report hash is inconsistent')
+  }
+  return report
 }
 
 function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<DirectorRunResult> {
@@ -116,7 +176,13 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   const treatmentPlan = parseRecord(row.treatmentSnapshot.contentJson, 'TreatmentPlan') as unknown as TreatmentPlan & { id: string }
   const storyPlan = parseRecord(row.storySnapshot.contentJson, 'StoryPlan') as unknown as StoryPlan & { id: string }
   const editPlan = parseRecord(row.editPlanSnapshot.contentJson, 'Director EditPlan') as unknown as DirectedEditPlan
-  const qualityReport = parseRecord(row.qualitySnapshot.contentJson, 'Director quality report') as unknown as DirectorQualityReport
+  const qualityReport = parseDirectorQualityReport({
+    contentJson: row.qualitySnapshot.contentJson,
+    contentHash: row.qualitySnapshot.contentHash,
+    contentSchemaVersion: row.qualitySnapshot.schemaVersion,
+    objective: row.objective,
+    rubricRef: row.rubricRef,
+  })
   const brief = parseRecord(row.resultVersion.briefSnapshot.contentJson, 'Director brief')
   const decisions = validateDirectorDecisions(parseArray(row.decisionsJson, 'Director decisions') as unknown as DirectorRun['decisions'])
   const assumptions = Object.freeze(parseArray(row.assumptionsJson, 'Director assumptions').map((item) => String(item)))
@@ -145,6 +211,14 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     editPlan.projectVersionId !== version.id || editPlan.directorRunId !== row.id ||
     treatmentPlan.id !== editPlan.treatmentPlanId || storyPlan.id !== editPlan.storyPlanId ||
     treatmentPlan.objective !== objective.id || storyPlan.objective !== objective.id ||
+    qualityReport.schemaVersion !== 'director-quality-report/v2' ||
+    !qualityReport.strategic ||
+    qualityReport.strategic.rubric.id + `/v${qualityReport.strategic.rubric.version}` !== row.rubricRef ||
+    qualityReport.strategic.rubric.objective !== objective.id ||
+    qualityReport.strategic.rubric.purpose !== 'editorial-quality-proxy' ||
+    qualityReport.score !== qualityReport.strategic.score / 100 ||
+    qualityReport.strategic.passed !== ['approved', 'approved-with-warnings'].includes(qualityReport.status) ||
+    row.qualitySnapshot.schemaVersion !== 2 ||
     qualityReport.status === 'blocked' || row.initiatedByType !== 'api-client'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun references are inconsistent')
   const run: DirectorRun = Object.freeze({
@@ -202,6 +276,43 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     this.client = client
   }
 
+  async readQualityReport(input: {
+    workspaceId: string
+    projectId: string
+    directorRunId: string
+  }) {
+    const row = await this.client.v2DirectorRun.findFirst({
+      where: {
+        id: input.directorRunId,
+        projectId: input.projectId,
+        workspaceId: input.workspaceId,
+      },
+      include: { qualitySnapshot: true },
+    })
+    if (!row) return null
+    const objective = resolveStrategicObjective(row.objective)
+    const report = parseDirectorQualityReport({
+      contentJson: row.qualitySnapshot.contentJson,
+      contentHash: row.qualitySnapshot.contentHash,
+      contentSchemaVersion: row.qualitySnapshot.schemaVersion,
+      objective: objective.id,
+      rubricRef: row.rubricRef,
+    })
+    return Object.freeze({
+      directorRunId: row.id,
+      projectId: row.projectId,
+      objective: objective.id,
+      objectiveVersion: row.objectiveVersion,
+      rubricRef: row.rubricRef,
+      qualitySnapshot: Object.freeze({
+        id: row.qualitySnapshot.id,
+        contentSchemaVersion: row.qualitySnapshot.schemaVersion,
+        contentHash: row.qualitySnapshot.contentHash,
+      }),
+      report,
+    })
+  }
+
   async findIdempotentResult(input: {
     workspaceId: string
     projectId: string
@@ -234,7 +345,12 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       where: { id: input.projectId, workspaceId: input.workspaceId },
       include: {
         currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true, policiesSnapshot: true } },
-        mediaAssets: { where: { role: 'source-master' }, orderBy: { createdAt: 'desc' }, take: 1 },
+        mediaAssets: {
+          where: { role: 'source-master' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { artifact: { include: { currentRightsSnapshot: true } } },
+        },
         directorRuns: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1,
@@ -254,11 +370,17 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           const quality = parseRecord(
             latestDirectorRun.qualitySnapshot.contentJson,
             'latest Director quality report',
-          )
+          ) as unknown as DirectorQualityReport
           if (
             latestDirectorRun.rubricRef !== `${storedObjective.rubricId}/v1` ||
             !Number.isSafeInteger(latestDirectorRun.objectiveVersion) ||
             latestDirectorRun.objectiveVersion < 1 ||
+            latestDirectorRun.qualitySnapshot.schemaVersion !== 2 ||
+            quality.schemaVersion !== 'director-quality-report/v2' ||
+            !quality.strategic ||
+            quality.strategic.rubric.id + `/v${quality.strategic.rubric.version}` !== latestDirectorRun.rubricRef ||
+            quality.strategic.rubric.objective !== storedObjective.id ||
+            quality.score !== quality.strategic.score / 100 ||
             !['approved', 'approved-with-warnings', 'blocked'].includes(String(quality.status))
           ) throw new DomainError(
             'PERSISTENCE_CONFLICT',
@@ -342,6 +464,21 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       editPlan: Object.freeze(editPlan),
       currentDurationFrames,
       proxyVariantId: project.format,
+      sourceRights: master.artifact.currentRightsSnapshot
+        ? Object.freeze({
+            state: 'present' as const,
+            snapshotId: master.artifact.currentRightsSnapshot.id,
+            snapshotHash: master.artifact.currentRightsSnapshot.snapshotHash,
+            status: master.artifact.currentRightsSnapshot.status,
+            consentStatus: master.artifact.currentRightsSnapshot.consentStatus,
+            ...(master.artifact.currentRightsSnapshot.expiresAt
+              ? { expiresAt: master.artifact.currentRightsSnapshot.expiresAt.toISOString() }
+              : {}),
+            ...(master.artifact.currentRightsSnapshot.consentExpiresAt
+              ? { consentExpiresAt: master.artifact.currentRightsSnapshot.consentExpiresAt.toISOString() }
+              : {}),
+          })
+        : Object.freeze({ state: 'missing' as const }),
       outputReferences: Object.freeze([
         ...proxyOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'proxy' as const, sourceVersionId: versionRow.id, variantId: project.format! })),
         ...finalOutputs.map((output) => Object.freeze({ artifactId: output.outputArtifactId, kind: 'final' as const, sourceVersionId: versionRow.id, variantId: output.outputAspectRatio })),

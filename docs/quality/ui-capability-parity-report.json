@@ -4,9 +4,9 @@
     "uiActions": 94,
     "capabilities": 85,
     "endpoints": 85,
-    "registeredCapabilities": 203,
-    "operableCapabilities": 203,
-    "publicContractCapabilities": 203,
+    "registeredCapabilities": 204,
+    "operableCapabilities": 204,
+    "publicContractCapabilities": 204,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3496,6 +3496,17 @@
       "endpoint": "POST /v1/projects/{projectId}/director-runs",
       "inputSchemaRef": "apollo://schemas/enqueue-project-director-run-request/v2",
       "outputSchemaRef": "apollo://schemas/project-director-operation-enqueued/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-runs.quality.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/quality-report",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-quality-report-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

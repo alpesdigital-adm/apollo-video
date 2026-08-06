@@ -6,6 +6,7 @@ import type { TreatmentPlan } from './treatment-plan.ts'
 import type { ManualCropRegion } from './manual-editing.ts'
 import type { DirectorRunImpactV1 } from './director-run-impact.ts'
 import type { StrategicObjectiveId } from './strategic-objective.ts'
+import type { QualityReport as StrategicQualityReport } from './strategic-rubric.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -128,10 +129,11 @@ export interface DirectorQualityIssue {
 }
 
 export interface DirectorQualityReport {
-  schemaVersion: 'director-quality-report/v1'
+  schemaVersion: 'director-quality-report/v2'
   id: string
   status: 'approved' | 'approved-with-warnings' | 'blocked'
   score: number
+  strategic: Readonly<StrategicQualityReport>
   hardChecks: Readonly<{
     openingMotionProtected: boolean
     automaticZoomDisabled: boolean

@@ -271,7 +271,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         status: 'succeeded',
         objective: 'discovery',
         objectiveVersion: 1,
-        rubricRef: 'discovery/rubric-v1',
+        rubricRef: 'awareness-discovery/v1',
         plannerVersion: 'director-e2e-1.0.0',
         criticVersion: 'critic-e2e-1.0.0',
         perceptionSnapshotId: snapshotIds.perception,

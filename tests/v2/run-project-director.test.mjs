@@ -3,11 +3,13 @@ import test from 'node:test'
 
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
+import { readDirectorQualityReportService } from '../../src/v2/application/read-director-quality-report.ts'
 import { enqueueProjectDirectorRunService } from '../../src/v2/application/enqueue-project-director-run.ts'
 import { runNextProjectDirectorOperationService } from '../../src/v2/application/run-project-director-operation-worker.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import {
   advancePublicOperationPhase,
@@ -24,6 +26,35 @@ import {
 
 const baseHash = 'a'.repeat(64)
 
+test('Director quality read is workspace-scoped and returns the exact immutable snapshot binding', async () => {
+  const expected = Object.freeze({
+    directorRunId: 'director-run-read-1', projectId: 'project-read-1',
+    objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1',
+    qualitySnapshot: Object.freeze({ id: 'quality-snapshot-read-1', contentSchemaVersion: 2, contentHash: 'b'.repeat(64) }),
+    report: Object.freeze({ id: 'quality-report-read-1' }),
+  })
+  const calls = []
+  const read = readDirectorQualityReportService({
+    repository: {
+      async readQualityReport(input) {
+        calls.push(input)
+        return input.workspaceId === 'workspace-read-1' ? expected : null
+      },
+    },
+  })
+  assert.equal(await read({
+    workspaceId: 'workspace-read-1', projectId: 'project-read-1', directorRunId: 'director-run-read-1',
+  }), expected)
+  await assert.rejects(
+    read({ workspaceId: 'workspace-read-2', projectId: 'project-read-1', directorRunId: 'director-run-read-1' }),
+    (error) => error instanceof DomainError && error.code === 'PROJECT_NOT_FOUND',
+  )
+  assert.deepEqual(calls, [
+    { workspaceId: 'workspace-read-1', projectId: 'project-read-1', directorRunId: 'director-run-read-1' },
+    { workspaceId: 'workspace-read-2', projectId: 'project-read-1', directorRunId: 'director-run-read-1' },
+  ])
+})
+
 function directorEnqueueActor(credentialId = 'credential-director-1') {
   const auditContext = createExternalAuditContext({
     clientId: 'client-1', credentialId, workspaceId: 'workspace-1', environment: 'production',
@@ -37,7 +68,7 @@ function directorEnqueueActor(credentialId = 'credential-director-1') {
   })
 }
 
-function compiledEditorialPlan(selectedInsert = false) {
+function compiledEditorialPlan(selectedInsert = false, ctaText) {
   const words = [
     ['Seja', 0, 8], ['bem-vindo.', 8, 24],
     ['Comunicar', 34, 48], ['bem', 48, 56], ['muda', 56, 66], ['resultados.', 66, 88],
@@ -50,6 +81,13 @@ function compiledEditorialPlan(selectedInsert = false) {
     timelineStartFrame,
     timelineEndFrame,
   }))
+  if (ctaText) words.push({
+    text: ctaText,
+    sourceStartSeconds: 13.4,
+    sourceEndSeconds: 13.8,
+    timelineStartFrame: 280,
+    timelineEndFrame: 294,
+  })
   return Object.freeze({
     schemaVersion: 2,
     state: 'compiled',
@@ -108,6 +146,16 @@ class InMemoryDirectorRepository {
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
+    this.ctaText = Object.hasOwn(options, 'ctaText')
+      ? options.ctaText
+      : ({
+          'lead-generation': 'Cadastre', sale: 'Compre', whatsapp: 'WhatsApp',
+          booking: 'Agende', download: 'Baixe',
+        })[this.projectObjective]
+    this.sourceRights = options.sourceRights ?? {
+      state: 'present', snapshotId: 'rights-snapshot-master-1',
+      snapshotHash: 'c'.repeat(64), status: 'approved', consentStatus: 'not-required',
+    }
     this.outputReferences = options.outputReferences ?? [
       { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
       { artifactId: 'artifact-final-4', kind: 'final', sourceVersionId: 'project-version-4', variantId: '9:16' },
@@ -138,11 +186,21 @@ class InMemoryDirectorRepository {
         ? { latestDirectorObjective: this.latestDirectorObjective }
         : {}),
       currentVersion: this.currentVersion,
-      brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
+      brief: {
+        objective: this.projectObjective,
+        desiredAction: createDesiredAction({
+          objective: this.projectObjective,
+          ...(['lead-generation', 'sale', 'whatsapp', 'booking', 'download'].includes(this.projectObjective)
+            ? { destination: 'https://destination.example/action' }
+            : {}),
+        }),
+        productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
+      },
       policies: { automaticZoom: false, faceProtection: true },
-      editPlan: compiledEditorialPlan(this.selectedInsert),
+      editPlan: compiledEditorialPlan(this.selectedInsert, this.ctaText),
       currentDurationFrames: 300,
       proxyVariantId: '9:16',
+      sourceRights: this.sourceRights,
       outputReferences: this.outputReferences,
       transcript: {
         id: 'transcript-1', sourceArtifactId: 'artifact-master-1', language: 'pt-BR',
@@ -252,7 +310,16 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_effect'), true)
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_insert'), true)
   assert.equal(result.run.qualityReport.status, 'approved-with-warnings')
+  assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v2')
+  assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')
+  assert.equal(result.run.qualityReport.strategic.rubric.threshold, 68)
+  assert.equal(result.run.qualityReport.strategic.rubric.purpose, 'editorial-quality-proxy')
+  assert.equal(result.run.qualityReport.strategic.passed, true)
+  assert.deepEqual(result.run.qualityReport.strategic.gateFailures, [])
+  assert.equal(result.run.qualityReport.strategic.evidence.length, 6)
+  assert.equal(result.run.qualityReport.score, result.run.qualityReport.strategic.score / 100)
   assert.equal(Object.values(result.run.qualityReport.hardChecks).every(Boolean), true)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'quality-report').contentSchemaVersion, 2)
   assert.equal(repository.lastBundle.event.type, 'project.version.created')
   assert.deepEqual(result.impact.changeKinds, ['director-replan'])
   assert.deepEqual(result.impact.dependencyTypes, ['audio', 'content', 'policy', 'timing', 'visual'])
@@ -299,7 +366,7 @@ test('Director binds every strategic objective to its canonical rubric in runtim
 })
 
 test('approved strategic objective change creates a new brief, version and superseding DirectorRun', async () => {
-  const { repository, service } = fixture()
+  const { repository, service } = fixture({ ctaText: 'Compre' })
   const first = await service(request())
   const changed = await service(request({
     baseVersionId: first.version.id,
@@ -353,6 +420,28 @@ test('objective change fails before persistence without reason or required desti
       idempotency: { key: 'director-objective-change-no-destination' },
     })),
     (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('Director hard gates reject missing rights and missing conversion CTA with explicit evidence', async () => {
+  const missingRights = fixture()
+  missingRights.repository.sourceRights = { state: 'missing' }
+  await assert.rejects(
+    () => missingRights.service(request({ idempotency: { key: 'director-rights-missing' } })),
+    (error) => error instanceof DomainError &&
+      error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.gateFailures.includes('rights-compliance'),
+  )
+
+  const noCta = fixture({ projectObjective: 'sale', ctaText: null })
+  await assert.rejects(
+    () => noCta.service(request({
+      objective: 'sale',
+      idempotency: { key: 'director-sale-cta-missing' },
+    })),
+    (error) => error instanceof DomainError &&
+      error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.gateFailures.includes('cta-required'),
   )
 })
 

@@ -95,7 +95,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 
   try {
     await cleanup()
-    const brief = { schemaVersion: 1, objective: 'discovery', createdAt: createdAt.toISOString() }
+    const brief = {
+      schemaVersion: 1,
+      objective: 'discovery',
+      desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+      createdAt: createdAt.toISOString(),
+    }
     const policies = { schemaVersion: 1, state: 'configured', createdAt: createdAt.toISOString() }
     const editPlan = {
       schemaVersion: 2,
@@ -232,6 +237,23 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         role: artifactId === sourceA ? 'source-master' : 'supporting',
         originalFileName: `${artifactId}.mp4`, createdAt,
       } })
+      if (artifactId === sourceA) {
+        const rightsSnapshotId = `rights-${sourceA}`
+        await client.v2AssetRightsSnapshot.create({ data: {
+          id: rightsSnapshotId, workspaceId, artifactId, sequence: 1,
+          schemaVersion: 'asset-rights/v1',
+          snapshotHash: calculateVersionHash({ artifactId, rights: 'approved' }),
+          owner: 'Apollo E2E', license: 'test-owned', status: 'approved',
+          allowedUsesJson: stableSerialize(['rendering']), prohibitedUsesJson: '[]',
+          allowedWorkspaceIdsJson: stableSerialize([workspaceId]),
+          consentStatus: 'not-required', consentAllowedUsesJson: '[]',
+          createdByType: 'api-client', createdById: issued.client.id, createdAt,
+        } })
+        await client.v2MediaArtifact.update({
+          where: { id: artifactId },
+          data: { currentRightsSnapshotId: rightsSnapshotId, rightsRevision: 1 },
+        })
+      }
     }
     const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
     const currentTranscript = createMediaTranscript({
@@ -1197,6 +1219,28 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 2)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'conversion-sale/v1')
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, directorApplied.data.directorRun.id)
+    const qualityResponse = await fetch(
+      `${baseUrl}/v1/projects/${projectId}/director-runs/${storedAsyncOperation.projectDirectorRun.directorRun.id}/quality-report`,
+      { headers: { authorization } },
+    )
+    const qualityRead = await qualityResponse.json()
+    assert.equal(qualityResponse.status, 200, JSON.stringify(qualityRead))
+    assert.equal(qualityRead.data.qualityReport.directorRunId, storedAsyncOperation.projectDirectorRun.directorRun.id)
+    assert.equal(qualityRead.data.qualityReport.projectId, projectId)
+    assert.equal(qualityRead.data.qualityReport.objective, 'sale')
+    assert.equal(qualityRead.data.qualityReport.objectiveVersion, 2)
+    assert.equal(qualityRead.data.qualityReport.rubricRef, 'conversion-sale/v1')
+    assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 2)
+    assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
+    assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v2')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.schemaVersion, 'strategic-quality-report/v1')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'sale')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.purpose, 'editorial-quality-proxy')
+    assert.equal(qualityRead.data.qualityReport.report.strategic.passed, true)
+    assert.deepEqual(qualityRead.data.qualityReport.report.strategic.gateFailures, [])
+    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.length, 8)
+    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'cta-clarity'), true)
+    assert.equal(qualityRead.data.qualityReport.report.strategic.evidence.some((item) => item.criterionId === 'rights-compliance'), true)
     const projectAfterObjectiveChange = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
     assert.equal(projectAfterObjectiveChange.currentVersionId, allocatedResultVersionId)
     assert.equal(projectAfterObjectiveChange.objective, 'sale')

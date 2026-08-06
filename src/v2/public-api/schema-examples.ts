@@ -5736,6 +5736,63 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/director-quality-report-read/v1': [
+      {
+        data: {
+          qualityReport: {
+            directorRunId: 'director-run-example-1',
+            projectId,
+            objective: 'discovery',
+            objectiveVersion: 1,
+            rubricRef: 'awareness-discovery/v1',
+            qualitySnapshot: { id: 'quality-snapshot-example-1', contentSchemaVersion: 2, contentHash: '7'.repeat(64) },
+            report: {
+              schemaVersion: 'director-quality-report/v2',
+              id: 'quality-report-example-1',
+              status: 'approved-with-warnings',
+              score: 0.93,
+              strategic: {
+                schemaVersion: 'strategic-quality-report/v1',
+                rubric: {
+                  id: 'awareness-discovery', version: 1, objective: 'discovery',
+                  purpose: 'editorial-quality-proxy', threshold: 68,
+                  requiredGates: ['narrative-integrity', 'legibility', 'rights-compliance'],
+                },
+                score: 93,
+                passed: true,
+                gateResults: [
+                  { id: 'narrative-integrity', passed: true, evidence: ['edit-plan:example:narrative=true'] },
+                  { id: 'legibility', passed: true, evidence: ['edit-plan:example:legibility=true'] },
+                  { id: 'rights-compliance', passed: true, evidence: ['rights:example:eligible=true'] },
+                ],
+                gateFailures: [],
+                evidence: [
+                  { criterionId: 'hook-clarity', score: 100, weight: 0.35, evidence: ['story:example:opening=true'] },
+                  { criterionId: 'problem-recognition', score: 85, weight: 0.2, evidence: ['story:example:development=true'] },
+                  { criterionId: 'narrative-integrity', score: 100, weight: 0.15, evidence: ['edit-plan:example:timeline-continuous=true'] },
+                  { criterionId: 'legibility', score: 100, weight: 0.15, evidence: ['edit-plan:example:subtitle-bounded=true'] },
+                  { criterionId: 'rights-compliance', score: 100, weight: 0.15, evidence: ['rights:example:approved'] },
+                ],
+                evaluatedAt: createdAt,
+              },
+              hardChecks: {
+                openingMotionProtected: true, automaticZoomDisabled: true,
+                subtitlesFaceSafe: true, subtitlesBounded: true,
+                forbiddenSpeechAbsent: true, timelineContinuous: true,
+              },
+              issues: [{
+                code: 'FACE_PERCEPTION_UNAVAILABLE_SAFE_FALLBACK', severity: 'warning',
+                category: 'editorial', message: 'Conservative caption safe area used.',
+                correctable: true,
+              }],
+              criticVersion: 'apollo-director-critic/v2',
+              evaluatedAt: createdAt,
+            },
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/operation-telemetry-summary/v1': [
       {
         data: {

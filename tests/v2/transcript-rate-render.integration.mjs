@@ -354,11 +354,19 @@ class DirectorRepository {
       workspaceId,
       project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
       currentVersion: this.currentVersion,
-      brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
+      brief: {
+        objective: 'discovery',
+        desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+        productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
+      },
       policies: { automaticZoom: false, faceProtection: true },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,
       proxyVariantId: '9:16',
+      sourceRights: {
+        state: 'present', snapshotId: 'rights-rate-master',
+        snapshotHash: 'e'.repeat(64), status: 'approved', consentStatus: 'not-required',
+      },
       outputReferences: [
         { artifactId: 'proxy-9x16', kind: 'proxy', sourceVersionId: this.currentVersion.id, variantId: '9:16' },
       ],
