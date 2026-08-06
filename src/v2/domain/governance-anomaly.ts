@@ -149,7 +149,7 @@ export function evaluateGovernanceAnomalies(input: {
     ? 0
     : Math.floor(usage.failedOperations * 10_000 / usage.terminalOperations)
   const measurements: GovernanceAnomalyMeasurement[] = [
-    ...(requestObserved > requestThreshold
+    ...(usage.baselineRequests > 0 && requestObserved > requestThreshold
       ? [{
           reason: 'REQUEST_RATE_ANOMALY' as const,
           observed: requestObserved,

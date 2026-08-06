@@ -150,7 +150,7 @@ test('runtime admission persists a blocked decision before returning retryable g
 })
 
 test('governance defaults fail closed on invalid configuration', () => {
-  assert.equal(DEFAULT_GOVERNANCE_ANOMALY_POLICY.requestMinimum, 100)
+  assert.equal(DEFAULT_GOVERNANCE_ANOMALY_POLICY.requestMinimum, 20)
   assert.throws(
     () => governanceDefaultLimitsFromEnvironment({
       APOLLO_GOVERNANCE_REQUESTS_PER_MINUTE: '0',

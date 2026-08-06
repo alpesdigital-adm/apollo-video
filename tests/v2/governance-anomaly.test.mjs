@@ -65,6 +65,14 @@ test('F0.103 anomaly policy compares against the previous five-minute baseline',
   }), [])
 })
 
+test('F0.103 cold clients warm a baseline without false request anomalies', () => {
+  assert.deepEqual(evaluateGovernanceAnomalies({
+    policy,
+    usage: { ...quiet, recentRequests: 200, baselineRequests: 0 },
+    requested: { requests: 1, spendMinorUnits: 0 },
+  }), [])
+})
+
 test('F0.103 error-rate requires a minimum terminal sample and reports basis points', () => {
   assert.deepEqual(evaluateGovernanceAnomalies({
     policy,
