@@ -515,6 +515,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        APOLLO_AUTH_MODE: 'bootstrap',
+        APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
         APOLLO_UI_USERNAME: uiUsername,
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `manual-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
