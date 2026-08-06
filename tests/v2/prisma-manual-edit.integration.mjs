@@ -234,7 +234,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       } })
       await client.v2ProjectMediaAsset.create({ data: {
         id: randomUUID(), workspaceId, projectId, artifactId,
-        role: artifactId === sourceA ? 'source-master' : 'supporting',
+        role: artifactId === sourceA ? 'source-master' : 'selected-insert',
         originalFileName: `${artifactId}.mp4`, createdAt,
       } })
       if (artifactId === sourceA) {
