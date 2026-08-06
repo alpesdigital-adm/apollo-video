@@ -365,6 +365,10 @@ function anomalyTransaction(evidence) {
   }
 }
 
+const anomalyTestPolicy = governanceAnomalyPolicyFromEnvironment({
+  APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: '20',
+})
+
 test('F0.103 Prisma admission atomically blocks request/error anomalies and persists evidence', async () => {
   const evidence = {}
   const transaction = anomalyTransaction(evidence)
@@ -385,7 +389,7 @@ test('F0.103 Prisma admission atomically blocks request/error anomalies and pers
       requestsPerMinute: 1000, maxConcurrency: 100,
       quotaUnits: 10000, spendBudgetMinorUnits: 10000,
     },
-    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+    anomalyPolicy: anomalyTestPolicy,
   })
   assert.equal(result.allowed, false)
   assert.deepEqual(result.reasons, [
@@ -393,7 +397,7 @@ test('F0.103 Prisma admission atomically blocks request/error anomalies and pers
   ])
   assert.equal(result.schemaVersion, 'governance-admission/v2')
   assert.equal(evidence.admission.anomalyPolicyHash,
-    DEFAULT_GOVERNANCE_ANOMALY_POLICY.policyHash)
+    anomalyTestPolicy.policyHash)
   assert.equal(evidence.alerts.length, 4)
   assert.ok(evidence.alerts.every((alert) =>
     alert.schemaVersion === 'governance-alert/v2' &&
@@ -421,7 +425,7 @@ test('F0.103 human recovery authorization bypasses only anomaly blocking and rem
       requestsPerMinute: 1000, maxConcurrency: 100,
       quotaUnits: 10000, spendBudgetMinorUnits: 10000,
     },
-    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+    anomalyPolicy: anomalyTestPolicy,
   })
   assert.equal(result.allowed, true)
   assert.deepEqual(result.reasons, [])
@@ -452,7 +456,7 @@ test('F0.103 anomaly recovery never bypasses an ordinary governance limit', asyn
       requestsPerMinute: 20, maxConcurrency: 100,
       quotaUnits: 10000, spendBudgetMinorUnits: 10000,
     },
-    anomalyPolicy: DEFAULT_GOVERNANCE_ANOMALY_POLICY,
+    anomalyPolicy: anomalyTestPolicy,
   })
   assert.equal(result.allowed, false)
   assert.deepEqual(result.reasons, ['RATE_LIMIT'])
