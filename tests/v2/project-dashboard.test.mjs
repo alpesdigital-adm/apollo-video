@@ -35,6 +35,12 @@ test('T-FR-236 dashboard consumes the public visible-state contract without infe
   assert.match(dashboardSource, /measuredTotal[\s\S]*measuredPercent/)
   assert.match(dashboardSource, /measuredPercent !== null[\s\S]*role="progressbar"/)
   assert.match(dashboardSource, /sem total medido/)
+  assert.match(dashboardSource, /PROJECT_DASHBOARD_FILTER_SESSION_KEY/)
+  assert.match(dashboardSource, /window\.history\.replaceState/)
+  assert.match(dashboardSource, /projectDashboardApiSearch/)
+  assert.match(dashboardSource, /nextCursor/)
+  assert.match(dashboardSource, /Carregar mais projetos/)
+  assert.doesNotMatch(dashboardSource, /project\.name\.toLocaleLowerCase/)
 })
 
 function project(status = 'rendering-proxy') {

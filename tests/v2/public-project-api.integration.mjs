@@ -5353,6 +5353,71 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.deepEqual(dashboardProject.dashboard.outputs, [])
     assert.equal(dashboardProject.dashboard.outputCount, 0)
 
+    const firstProjectPageResponse = await fetch(
+      `${baseUrl}/v1/projects?limit=1`,
+      { headers: { authorization } },
+    )
+    const firstProjectPage = await firstProjectPageResponse.json()
+    assert.equal(firstProjectPageResponse.status, 200)
+    assert.equal(firstProjectPage.data.projects.length, 1)
+    assert.match(firstProjectPage.data.nextCursor, /^[A-Za-z0-9_-]+$/)
+    const secondProjectPageResponse = await fetch(
+      `${baseUrl}/v1/projects?limit=1&after=${encodeURIComponent(
+        firstProjectPage.data.nextCursor,
+      )}`,
+      { headers: { authorization } },
+    )
+    const secondProjectPage = await secondProjectPageResponse.json()
+    assert.equal(secondProjectPageResponse.status, 200)
+    assert.equal(secondProjectPage.data.projects.length, 1)
+    assert.equal('nextCursor' in secondProjectPage.data, false)
+    assert.deepEqual(
+      new Set([
+        firstProjectPage.data.projects[0].id,
+        secondProjectPage.data.projects[0].id,
+      ]),
+      new Set([created.data.project.id, uiProjectCreated.data.project.id]),
+    )
+
+    const createdDay = created.data.project.createdAt.slice(0, 10)
+    const exactProjectFilters = new URLSearchParams({
+      limit: '20',
+      text: 'criado externamente',
+      status: 'draft',
+      objective: 'discovery',
+      format: '9:16',
+      locale: 'pt-BR',
+      createdFrom: `${createdDay}T00:00:00.000Z`,
+      createdTo: `${createdDay}T23:59:59.999Z`,
+      ownerId: apiClientId,
+    })
+    const exactProjectResponse = await fetch(
+      `${baseUrl}/v1/projects?${exactProjectFilters}`,
+      { headers: { authorization } },
+    )
+    const exactProject = await exactProjectResponse.json()
+    assert.equal(exactProjectResponse.status, 200)
+    assert.deepEqual(
+      exactProject.data.projects.map((project) => project.id),
+      [created.data.project.id],
+    )
+    const zeroProjectResponse = await fetch(
+      `${baseUrl}/v1/projects?text=${encodeURIComponent('não existe')}`,
+      { headers: { authorization } },
+    )
+    assert.deepEqual((await zeroProjectResponse.json()).data.projects, [])
+    const mismatchedProjectCursorResponse = await fetch(
+      `${baseUrl}/v1/projects?status=completed&after=${encodeURIComponent(
+        firstProjectPage.data.nextCursor,
+      )}`,
+      { headers: { authorization } },
+    )
+    assert.equal(mismatchedProjectCursorResponse.status, 422)
+    assert.equal(
+      (await mismatchedProjectCursorResponse.json()).error.code,
+      'INVALID_ARGUMENT',
+    )
+
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {
         id_clientId: {

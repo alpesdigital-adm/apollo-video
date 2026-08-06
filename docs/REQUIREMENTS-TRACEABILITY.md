@@ -151,6 +151,15 @@ medido; refresh por evento cancela a leitura anterior e rejeita resposta fora
 de ordem. Testes de domínio, repositório, contrato e apresentação passaram; a
 jornada HTTP/PostgreSQL foi ampliada, mas não executada neste ambiente. Faltam
 E2E visual/browser, lotes, qualidade, armazenamento/fila, implantação e aceite.
+
+Atualização local parcial de FR-003 — o dashboard envia texto, status, objetivo,
+formato, locale, intervalo de criação e owner ao mesmo `GET /v1/projects`, pagina
+por cursor opaco e deduplica itens. Um codec puro/versionado dá precedência à
+URL sobre `sessionStorage`, canonicaliza datas inclusivas e restaura `popstate`;
+requests e páginas superados são cancelados. Regressões locais cobrem combinação,
+isolamento de cursor, URL/sessão/API e zero results. A jornada HTTP/PostgreSQL foi
+ampliada, mas não executada; faltam índices de campanha/tags/pessoa/material,
+E2E browser, implantação e aceite.
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |

@@ -255,6 +255,15 @@ aberto.
 
 Busca por nome, campanha, objetivo, tags, pessoa, material, idioma, status e data.
 
+Estado local parcial de FR-003: o dashboard usa as facetas públicas disponíveis
+de texto, status persistido, objetivo, formato, locale, intervalo de criação e
+owner, com paginação opaca de 24 itens e ordenação estável. URL explícita vence
+o estado versionado da sessão; queries superadas são canceladas e páginas são
+deduplicadas. Campanha, tags, pessoa e material dependem dos respectivos
+catálogos/índices ainda não integrados. A jornada HTTP/PostgreSQL foi preparada,
+mas não executada neste ambiente; E2E browser, implantação e aceite permanecem
+pendentes.
+
 ### FR-004 — Ações rápidas
 
 - Abrir.

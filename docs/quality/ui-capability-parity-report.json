@@ -1,7 +1,7 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 88,
+    "uiActions": 89,
     "capabilities": 81,
     "endpoints": 81,
     "registeredCapabilities": 200,
@@ -1334,7 +1334,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:190",
+      "uiAction": "src/app/ProjectsPageClient.tsx:243",
       "capabilityId": "apollo.projects.list",
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects",
@@ -1354,7 +1354,27 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:277",
+      "uiAction": "src/app/ProjectsPageClient.tsx:322",
+      "capabilityId": "apollo.projects.list",
+      "capabilityVersion": "3.0.0",
+      "endpoint": "GET /v1/projects",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listProjectsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/ProjectsPageClient.tsx:385",
       "capabilityId": "apollo.projects.create",
       "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects",

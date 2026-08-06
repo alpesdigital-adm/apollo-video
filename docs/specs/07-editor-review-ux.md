@@ -334,6 +334,15 @@ Eventos invalidam a consulta, que roda sem cache e cancela requests superados.
 Esta implementação permanece parcial até E2E visual/browser, transporte de
 eventos integrado, implantação e aceite.
 
+Filtros do dashboard são server-side e compartilham o contrato público: texto,
+status persistido, objetivo, formato, locale, intervalo de criação e owner. A
+URL explícita é a fonte de navegação e vence o snapshot versionado da sessão;
+sem filtros na URL, a sessão é restaurada. Datas de UI expandem para limites UTC
+inclusivos antes da chamada, e cursor fica vinculado ao fingerprint exato da
+consulta. Troca de filtro cancela request/paginação anterior; “carregar mais”
+deduplica por Project ID. Contadores informam que cobrem somente resultados
+carregados quando há outra página.
+
 ## 25. Versões e compare
 
 - O operador escolhe explicitamente “antes” e “depois” entre as versões imutáveis do projeto.

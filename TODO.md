@@ -689,10 +689,10 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 
 ### F1.002 — Busca e filtros [FR-003]
 
-- [ ] Definir filtros por texto, status, objetivo, formato, locale, data e owner. Evidência F1-002: query pública tipada e dashboard oferecem as oito facetas, com validação de status, formato, locale, objetivo, owner e intervalo.
-- [ ] Implementar busca paginada, ordenação estável e combinação de filtros. Evidência F1-002: `listProjectsService` combina filtros, ordena por `createdAt/id` e vincula cursor opaco ao workspace e ao fingerprint exato da consulta.
-- [ ] Persistir filtros durante a sessão e refletir estado na URL quando adequado. Evidência F1-002: dashboard recupera filtros do `sessionStorage`, prioriza parâmetros explícitos da URL e mantém ambos sincronizados.
-- [ ] Testar isolamento de workspace, paginação e zero results. Evidência F1-002: regressões cobrem cursor entre workspaces/consultas, combinação normalizada, página vazia e rejeição anterior ao acesso ao storage.
+- [ ] Definir filtros por texto, status, objetivo, formato, locale, data e owner. Parcial local F1.002: o dashboard envia as oito facetas para `GET /v1/projects`; o codec de UI canonicaliza enums, locale, IDs e datas antes de construir a query pública, enquanto o application service continua validando tudo fail-closed. E2E browser, execução HTTP/PostgreSQL, implantação e aceite permanecem pendentes.
+- [ ] Implementar busca paginada, ordenação estável e combinação de filtros. Parcial local F1.002: `listProjectsService` combina filtros, ordena por `createdAt/id` e vincula cursor opaco ao workspace e ao fingerprint exato; a UI consome páginas de 24, cancela requests superados e deduplica resultados ao carregar mais. A jornada PostgreSQL foi ampliada para duas páginas, oito facetas, zero results e cursor incompatível, mas não foi executada neste ambiente.
+- [ ] Persistir filtros durante a sessão e refletir estado na URL quando adequado. Parcial local F1.002: codec puro e versionado recupera `sessionStorage` somente quando a URL não contém filtros, dá precedência explícita à URL, canonicaliza a query e restaura navegação por `popstate`. Testes locais passaram; E2E browser, implantação e aceite permanecem pendentes.
+- [ ] Testar isolamento de workspace, paginação e zero results. Parcial local F1.002: regressões locais cobrem cursor entre workspaces/consultas, combinação normalizada, codec URL/sessão/API, página vazia, datas inclusivas e rejeição anterior ao storage. A integração HTTP/PostgreSQL real está preparada e não executada neste ambiente; a caixa permanece aberta.
 
 ### F1.003 — Ações rápidas [FR-004]
 

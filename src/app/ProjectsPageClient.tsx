@@ -19,6 +19,16 @@ import type {
   VisibleStateAction,
   VisibleStateLabel,
 } from '@/v2/domain/visible-state'
+import {
+  EMPTY_PROJECT_DASHBOARD_FILTERS,
+  PROJECT_DASHBOARD_FILTER_SESSION_KEY,
+  hasProjectDashboardFilters,
+  normalizeProjectDashboardFilters,
+  projectDashboardApiSearch,
+  projectDashboardUrlSearch,
+  resolveProjectDashboardFilters,
+  type ProjectDashboardFilters,
+} from '@/v2/ui/project-dashboard-filters'
 
 type ProjectStateBucket = 'draft' | 'processing' | 'review' | 'completed' | 'failed' | 'history'
 
@@ -164,13 +174,19 @@ function projectBucket(visibleState: VisibleState): ProjectStateBucket {
 export default function Dashboard() {
   const router = useRouter()
   const idempotencyKey = useRef<string | null>(null)
+  const pageController = useRef<AbortController | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [filtersReady, setFiltersReady] = useState(false)
+  const [refreshRevision, setRefreshRevision] = useState(0)
   const [creating, setCreating] = useState(false)
   const [composerOpen, setComposerOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [filters, setFilters] = useState<ProjectDashboardFilters>({
+    ...EMPTY_PROJECT_DASHBOARD_FILTERS,
+  })
   const [name, setName] = useState('')
   const [objective, setObjective] = useState<StrategicObjectiveId>('discovery')
   const [format, setFormat] = useState<OutputAspectRatio>('9:16')
@@ -179,15 +195,52 @@ export default function Dashboard() {
   const [destination, setDestination] = useState('')
 
   useEffect(() => {
-    let activeController: AbortController | null = null
-    let requestSequence = 0
-    async function loadProjects() {
-      activeController?.abort()
-      const controller = new AbortController()
-      activeController = controller
-      const sequence = ++requestSequence
+    const resolveFromLocation = (includeSession: boolean) => {
+      setFilters({ ...resolveProjectDashboardFilters({
+        urlSearch: window.location.search,
+        sessionValue: includeSession
+          ? window.sessionStorage.getItem(PROJECT_DASHBOARD_FILTER_SESSION_KEY)
+          : null,
+      }) })
+      setFiltersReady(true)
+    }
+    resolveFromLocation(true)
+    const restoreFromHistory = () => resolveFromLocation(false)
+    window.addEventListener('popstate', restoreFromHistory)
+    return () => window.removeEventListener('popstate', restoreFromHistory)
+  }, [])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    window.sessionStorage.setItem(
+      PROJECT_DASHBOARD_FILTER_SESSION_KEY,
+      JSON.stringify(normalizeProjectDashboardFilters(filters)),
+    )
+    const nextUrl = `${window.location.pathname}${projectDashboardUrlSearch(
+      normalizeProjectDashboardFilters(filters),
+    )}`
+    window.history.replaceState(window.history.state, '', nextUrl)
+  }, [filters, filtersReady])
+
+  const apiSearch = useMemo(
+    () => projectDashboardApiSearch(
+      normalizeProjectDashboardFilters(filters),
+      { limit: 24 },
+    ),
+    [filters],
+  )
+
+  useEffect(() => {
+    if (!filtersReady) return
+    const controller = new AbortController()
+    pageController.current?.abort()
+    pageController.current = null
+    setLoadingMore(false)
+    setLoading(true)
+    setNotice(null)
+    const timer = window.setTimeout(async () => {
       try {
-        const response = await fetch('/v1/projects?limit=100', {
+        const response = await fetch(`/v1/projects?${apiSearch}`, {
           signal: controller.signal,
           cache: 'no-store',
           headers: { accept: 'application/json' },
@@ -196,33 +249,40 @@ export default function Dashboard() {
           router.replace('/login')
           return
         }
-        const payload = await response.json() as PublicApiEnvelope<{ projects: ProjectSummary[] }>
+        const payload = await response.json() as PublicApiEnvelope<{
+          projects: ProjectSummary[]
+          nextCursor?: string
+        }>
         if (!response.ok || !payload.data) {
           throw new Error(errorMessage(payload, 'Não foi possível carregar os projetos.'))
         }
-        if (sequence === requestSequence) setProjects(payload.data.projects)
+        setProjects(payload.data.projects)
+        setNextCursor(payload.data.nextCursor ?? null)
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
-        if (sequence === requestSequence) {
-          setNotice(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
-        }
+        setNotice(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
       } finally {
-        if (sequence === requestSequence && !controller.signal.aborted) {
-          setLoading(false)
-        }
+        if (!controller.signal.aborted) setLoading(false)
       }
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
     }
-    void loadProjects()
-    const refreshFromProjectEvent = () => void loadProjects()
+  }, [apiSearch, filtersReady, refreshRevision, router])
+
+  useEffect(() => {
+    const refreshFromProjectEvent = () => setRefreshRevision((value) => value + 1)
     window.addEventListener('apollo:project-updated', refreshFromProjectEvent)
     return () => {
       window.removeEventListener(
         'apollo:project-updated',
         refreshFromProjectEvent,
       )
-      activeController?.abort()
     }
-  }, [router])
+  }, [])
+
+  useEffect(() => () => pageController.current?.abort(), [])
 
   useEffect(() => {
     if (!composerOpen) return
@@ -233,14 +293,62 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [composerOpen, creating])
 
-  const visibleProjects = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase('pt-BR')
-    return projects.filter((project) => {
-      if (normalizedQuery && !project.name.toLocaleLowerCase('pt-BR').includes(normalizedQuery)) return false
-      if (statusFilter !== 'all' && projectBucket(project.visibleState) !== statusFilter) return false
-      return true
+  function setFilter<K extends keyof ProjectDashboardFilters>(
+    key: K,
+    value: ProjectDashboardFilters[K],
+  ) {
+    setFilters((current) => {
+      const next = { ...current, [key]: value }
+      if (key === 'createdFrom' && next.createdTo &&
+          String(value) > next.createdTo) {
+        next.createdTo = ''
+      }
+      return next
     })
-  }, [projects, query, statusFilter])
+  }
+
+  async function loadMoreProjects() {
+    if (!nextCursor || loadingMore) return
+    const controller = new AbortController()
+    pageController.current?.abort()
+    pageController.current = controller
+    setLoadingMore(true)
+    setNotice(null)
+    try {
+      const search = projectDashboardApiSearch(
+        normalizeProjectDashboardFilters(filters),
+        { limit: 24, after: nextCursor },
+      )
+      const response = await fetch(`/v1/projects?${search}`, {
+        signal: controller.signal,
+        cache: 'no-store',
+        headers: { accept: 'application/json' },
+      })
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as PublicApiEnvelope<{
+        projects: ProjectSummary[]
+        nextCursor?: string
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(errorMessage(payload, 'Não foi possível carregar mais projetos.'))
+      }
+      const page = payload.data
+      setProjects((current) => {
+        const existing = new Set(current.map((project) => project.id))
+        return [...current, ...page.projects.filter((project) =>
+          !existing.has(project.id))]
+      })
+      setNextCursor(page.nextCursor ?? null)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setNotice(error instanceof Error ? error.message : 'Não foi possível carregar mais projetos.')
+    } finally {
+      if (!controller.signal.aborted) setLoadingMore(false)
+    }
+  }
 
   const counts = useMemo(() => projects.reduce((result, project) => {
     const state = projectBucket(project.visibleState)
@@ -313,6 +421,9 @@ export default function Dashboard() {
   const selectedObjective = STRATEGIC_OBJECTIVES.find((item) => item.id === objective)!
   const requiresDestination = DESTINATION_REQUIRED.has(objective)
   const hasProjects = projects.length > 0
+  const hasActiveFilters = hasProjectDashboardFilters(
+    normalizeProjectDashboardFilters(filters),
+  )
 
   return (
     <main className="min-h-screen bg-[#070707] text-[#f4f1ea] selection:bg-[#eab83e]/25 selection:text-[#fff8df]">
@@ -354,7 +465,7 @@ export default function Dashboard() {
                 </a>
                 <div className="hidden items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:flex">
                   <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                  <input aria-label="Buscar projetos" className="w-40 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55] xl:w-56" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar projeto" value={query} />
+                  <input aria-label="Buscar projetos" className="w-40 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55] xl:w-56" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar projeto" value={filters.text} />
                 </div>
                 <LogoutButton />
               </div>
@@ -408,6 +519,9 @@ export default function Dashboard() {
                 </article>
               ))}
             </section>
+            <p className="mt-2 text-right text-[10px] text-[#56534e]">
+              Contagens dos resultados carregados{nextCursor ? '; há mais páginas' : ''}.
+            </p>
 
             <section className="mt-10">
               <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -418,17 +532,63 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 py-2 text-[#77736b] sm:hidden">
                     <ApiIcon className="h-4 w-4" path="m20 20-4.4-4.4m2.4-4.1a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-                    <input aria-label="Buscar projetos" className="min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55]" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar" value={query} />
+                    <input aria-label="Buscar projetos" className="min-w-0 bg-transparent text-sm text-[#e6e1d8] outline-none placeholder:text-[#5e5b55]" onChange={(event) => setFilter('text', event.target.value)} placeholder="Buscar" value={filters.text} />
                   </div>
-                  <select aria-label="Filtrar por status" className="h-10 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setStatusFilter(event.target.value)} value={statusFilter}>
-                    <option value="all">Todos os status</option>
+                  <select aria-label="Filtrar por status" className="h-10 rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('status', event.target.value as ProjectDashboardFilters['status'])} value={filters.status}>
+                    <option value="">Todos os status</option>
                     <option value="draft">Configuração</option>
-                    <option value="processing">Em produção</option>
-                    <option value="review">Em revisão</option>
+                    <option value="ingesting">Ingestão</option>
+                    <option value="perceiving">Percepção</option>
+                    <option value="planning">Planejamento</option>
+                    <option value="generating">Geração</option>
+                    <option value="reviewing-assets">Revisar materiais</option>
+                    <option value="rendering-proxy">Renderizando proxy</option>
+                    <option value="reviewing-proxy">Revisar proxy</option>
+                    <option value="revising">Aplicando revisão</option>
+                    <option value="rendering-final">Exportando final</option>
                     <option value="completed">Concluído</option>
                     <option value="failed">Requer atenção</option>
-                    <option value="history">Histórico</option>
+                    <option value="canceled">Cancelado</option>
+                    <option value="archived">Arquivado</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 rounded-2xl border border-white/[0.06] bg-[#0a0a0a] p-4 sm:grid-cols-2 xl:grid-cols-4">
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Objetivo
+                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('objective', event.target.value as ProjectDashboardFilters['objective'])} value={filters.objective}>
+                    <option value="">Todos</option>
+                    {STRATEGIC_OBJECTIVES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </label>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Formato
+                  <select className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('format', event.target.value as ProjectDashboardFilters['format'])} value={filters.format}>
+                    <option value="">Todos</option>
+                    {OUTPUT_ASPECT_RATIOS.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Idioma
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-none placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={35} onChange={(event) => setFilter('locale', event.target.value)} placeholder="pt-BR" value={filters.locale} />
+                </label>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Responsável
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#ddd8cf] outline-none placeholder:text-[#55524d] focus:border-[#d7a936]/50" maxLength={128} onChange={(event) => setFilter('ownerId', event.target.value)} placeholder="ID do responsável" value={filters.ownerId} />
+                </label>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Criado a partir de
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" onChange={(event) => setFilter('createdFrom', event.target.value)} type="date" value={filters.createdFrom} />
+                </label>
+                <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#6d6962]">
+                  Criado até
+                  <input className="mt-2 h-10 w-full rounded-xl border border-white/[0.08] bg-[#0c0c0c] px-3 text-xs normal-case tracking-normal text-[#aaa59c] outline-none focus:border-[#d7a936]/50" min={filters.createdFrom || undefined} onChange={(event) => setFilter('createdTo', event.target.value)} type="date" value={filters.createdTo} />
+                </label>
+                <div className="flex items-end sm:col-span-2">
+                  <button className="h-10 rounded-xl border border-white/[0.08] px-4 text-xs font-medium text-[#99958d] transition hover:border-[#d7a936]/30 hover:text-[#e1bb5a] disabled:cursor-not-allowed disabled:opacity-40" disabled={!hasActiveFilters} onClick={() => setFilters({ ...EMPTY_PROJECT_DASHBOARD_FILTERS })} type="button">
+                    Limpar filtros
+                  </button>
                 </div>
               </div>
 
@@ -436,7 +596,7 @@ export default function Dashboard() {
                 <div className="mt-5 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
                   {[0, 1, 2].map((item) => <div className="h-56 animate-pulse rounded-2xl border border-white/[0.05] bg-white/[0.025]" key={item} />)}
                 </div>
-              ) : !hasProjects ? (
+              ) : !hasProjects && !hasActiveFilters ? (
                 <div className="mt-5 grid min-h-72 place-items-center rounded-2xl border border-dashed border-white/[0.11] bg-[#0a0a0a] px-6 py-12 text-center">
                   <div>
                     <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-[#d8a936]/20 bg-[#d8a936]/[0.06] text-[#c89d35]">
@@ -447,11 +607,12 @@ export default function Dashboard() {
                     <button className="mt-5 rounded-xl border border-[#d9aa38]/30 px-4 py-2.5 text-sm font-medium text-[#dab455] transition hover:bg-[#d9aa38]/10" onClick={() => setComposerOpen(true)} type="button">Criar primeiro projeto</button>
                   </div>
                 </div>
-              ) : visibleProjects.length === 0 ? (
+              ) : !hasProjects ? (
                 <div className="mt-5 rounded-2xl border border-dashed border-white/[0.1] px-6 py-14 text-center text-sm text-[#77736c]">Nenhum projeto corresponde a esses filtros.</div>
               ) : (
+                <>
                 <div className="mt-5 grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
-                  {visibleProjects.map((project) => {
+                  {projects.map((project) => {
                     const objectiveLabel = STRATEGIC_OBJECTIVES.find((item) => item.id === project.objective)?.label ?? 'Objetivo não informado'
                     const stateLabel = PROJECT_STATE_LABELS[project.visibleState.label] ?? project.visibleState.label
                     const actionLabel = PROJECT_ACTION_LABELS[project.visibleState.primaryAction] ?? 'Abrir workspace'
@@ -530,6 +691,14 @@ export default function Dashboard() {
                     )
                   })}
                 </div>
+                {nextCursor ? (
+                  <div className="mt-6 flex justify-center">
+                    <button className="rounded-xl border border-white/[0.1] px-5 py-2.5 text-sm font-medium text-[#aaa59c] transition hover:border-[#d7a936]/35 hover:text-[#e0ba58] disabled:cursor-wait disabled:opacity-50" disabled={loadingMore} onClick={() => void loadMoreProjects()} type="button">
+                      {loadingMore ? 'Carregando…' : 'Carregar mais projetos'}
+                    </button>
+                  </div>
+                ) : null}
+                </>
               )}
             </section>
           </div>
