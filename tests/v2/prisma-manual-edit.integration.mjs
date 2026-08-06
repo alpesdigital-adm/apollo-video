@@ -608,6 +608,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(publicApplied.data.command.payload.schemaVersion, 2)
     assert.equal(publicApplied.data.command.payload.impact.schemaVersion, 'command-impact/v1')
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
+    const { readProjectWorkspaceService } = await import('../../src/v2/application/read-project-workspace.ts')
+    const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
+    const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+    const workspaceProjection = await readProjectWorkspaceService({
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      operations: new PrismaPublicOperationRepository(client),
+    })({ workspaceId, projectId })
+    assert.equal(workspaceProjection.version.id, publicApplied.data.version.id)
 
     const executablePath = [
       process.env.PLAYWRIGHT_CHROME_EXECUTABLE,
