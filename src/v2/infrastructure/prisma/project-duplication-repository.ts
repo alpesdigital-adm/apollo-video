@@ -17,6 +17,7 @@ import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createProject, type ProjectStatus } from '../../domain/project.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
+import { createProjectSnapshot } from '../../domain/project-snapshot.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import {
   assertProjectCreationCommand,
@@ -215,7 +216,15 @@ implements ProjectDuplicationRepository {
         workspaceId: input.workspaceId,
       },
       include: {
-        currentVersion: true,
+        currentVersion: {
+          include: {
+            briefSnapshot: true,
+            treatmentSnapshot: true,
+            storySnapshot: true,
+            editPlanSnapshot: true,
+            policiesSnapshot: true,
+          },
+        },
         mediaAssets: {
           orderBy: [{ role: 'asc' }, { artifactId: 'asc' }],
           select: {
@@ -227,9 +236,26 @@ implements ProjectDuplicationRepository {
       },
     })
     if (!project?.currentVersion) return null
+    const sourceSnapshots = [
+      project.currentVersion.briefSnapshot,
+      project.currentVersion.treatmentSnapshot,
+      project.currentVersion.storySnapshot,
+      project.currentVersion.editPlanSnapshot,
+      project.currentVersion.policiesSnapshot,
+    ].filter((snapshot) => snapshot !== null).map((snapshot) => createProjectSnapshot({
+      id: snapshot.id,
+      workspaceId: snapshot.workspaceId,
+      projectId: snapshot.projectId,
+      kind: snapshot.kind as Parameters<typeof createProjectSnapshot>[0]['kind'],
+      contentSchemaVersion: snapshot.schemaVersion,
+      contentJson: snapshot.contentJson,
+      contentHash: snapshot.contentHash,
+      createdAt: snapshot.createdAt.toISOString(),
+    }))
     return Object.freeze({
       project: hydrateProject(project),
       version: hydrateVersion(project.currentVersion),
+      snapshots: Object.freeze(sourceSnapshots),
       media: Object.freeze(project.mediaAssets.map((item) =>
         Object.freeze({ ...item }))),
     })
@@ -340,26 +366,41 @@ implements ProjectDuplicationRepository {
             'Project duplication lineage is invalid',
           )
         }
-        const sourceSnapshotRefs = {
-          brief: sourceVersion.briefSnapshotId,
-          ...(sourceVersion.treatmentSnapshotId
-            ? { treatment: sourceVersion.treatmentSnapshotId }
-            : {}),
-          ...(sourceVersion.storySnapshotId
-            ? { story: sourceVersion.storySnapshotId }
-            : {}),
-          editPlan: sourceVersion.editPlanSnapshotId,
-          policies: sourceVersion.policiesSnapshotId,
-        }
-        if (
-          stableSerialize(bundle.version.snapshotRefs) !==
-          stableSerialize(sourceSnapshotRefs)
-        ) {
+        const sourceSnapshots = await transaction.v2ProjectSnapshot.findMany({
+          where: { id: { in: [
+            sourceVersion.briefSnapshotId,
+            sourceVersion.treatmentSnapshotId,
+            sourceVersion.storySnapshotId,
+            sourceVersion.editPlanSnapshotId,
+            sourceVersion.policiesSnapshotId,
+          ].filter((id): id is string => Boolean(id)) } },
+        })
+        const sourceIdentity = sourceSnapshots.map((snapshot) => ({
+          kind: snapshot.kind,
+          schemaVersion: snapshot.schemaVersion,
+          contentHash: snapshot.contentHash,
+          contentJson: snapshot.contentJson,
+        })).sort((left, right) => left.kind.localeCompare(right.kind))
+        const duplicateIdentity = bundle.snapshots.map((snapshot) => ({
+          kind: snapshot.kind,
+          schemaVersion: snapshot.contentSchemaVersion,
+          contentHash: snapshot.contentHash,
+          contentJson: snapshot.contentJson,
+        })).sort((left, right) => left.kind.localeCompare(right.kind))
+        if (stableSerialize(duplicateIdentity) !== stableSerialize(sourceIdentity)) {
           throw new DomainError(
             'PERSISTENCE_CONFLICT',
-            'Project duplication must share the exact immutable snapshots',
+            'Project duplication snapshots must preserve immutable source content',
           )
         }
+        const duplicateSnapshotRefs = new Set(Object.values(bundle.version.snapshotRefs))
+        if (
+          bundle.snapshots.some((snapshot) =>
+            snapshot.workspaceId !== bundle.project.workspaceId ||
+            snapshot.projectId !== bundle.project.id ||
+            !duplicateSnapshotRefs.has(snapshot.id)) ||
+          duplicateSnapshotRefs.size !== bundle.snapshots.length
+        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Project duplication snapshot ownership is invalid')
         const requestedMedia = bundle.media
           .map(({ artifactId, role, originalFileName }) => ({
             artifactId,
@@ -407,6 +448,18 @@ implements ProjectDuplicationRepository {
             createdAt: new Date(bundle.project.createdAt),
           },
         })
+        await transaction.v2ProjectSnapshot.createMany({
+          data: bundle.snapshots.map((snapshot) => ({
+            id: snapshot.id,
+            workspaceId: snapshot.workspaceId,
+            projectId: snapshot.projectId,
+            kind: snapshot.kind,
+            schemaVersion: snapshot.contentSchemaVersion,
+            contentJson: snapshot.contentJson,
+            contentHash: snapshot.contentHash,
+            createdAt: new Date(snapshot.createdAt),
+          })),
+        })
         await transaction.v2ProjectVersion.create({
           data: {
             id: bundle.version.id,
@@ -415,11 +468,11 @@ implements ProjectDuplicationRepository {
             sequence: 1,
             forkedFromProjectId: sourceProject.id,
             forkedFromVersionId: sourceVersion.id,
-            briefSnapshotId: sourceVersion.briefSnapshotId,
-            treatmentSnapshotId: sourceVersion.treatmentSnapshotId,
-            storySnapshotId: sourceVersion.storySnapshotId,
-            editPlanSnapshotId: sourceVersion.editPlanSnapshotId,
-            policiesSnapshotId: sourceVersion.policiesSnapshotId,
+            briefSnapshotId: bundle.version.snapshotRefs.brief!,
+            treatmentSnapshotId: bundle.version.snapshotRefs.treatment,
+            storySnapshotId: bundle.version.snapshotRefs.story,
+            editPlanSnapshotId: bundle.version.snapshotRefs.editPlan,
+            policiesSnapshotId: bundle.version.snapshotRefs.policies,
             baseHash: bundle.version.baseHash,
             createdBy: bundle.version.createdBy,
             createdAt: new Date(bundle.version.createdAt),

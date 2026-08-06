@@ -3,6 +3,7 @@ import type { CommandActor } from '../domain/edit-command.ts'
 import { createProjectCreationCommand } from '../domain/project-creation-command.ts'
 import { createProject, normalizeProjectName } from '../domain/project.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
+import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -21,7 +22,7 @@ export function duplicateProjectService(dependencies: {
   repository: ProjectDuplicationRepository
   clock: () => Date
   createId: (
-    kind: 'project' | 'project-version' | 'project-media-asset' |
+    kind: 'project' | 'project-version' | 'project-snapshot' | 'project-media-asset' |
       'project-creation-command' | 'idempotency-record',
   ) => string
 }) {
@@ -125,6 +126,22 @@ export function duplicateProjectService(dependencies: {
     const createdAt = createdAtDate.toISOString()
     const duplicateProjectId = dependencies.createId('project')
     const duplicateVersionId = dependencies.createId('project-version')
+    const snapshots = source.snapshots.map((snapshot) => createProjectSnapshot({
+      id: dependencies.createId('project-snapshot'),
+      workspaceId,
+      projectId: duplicateProjectId,
+      kind: snapshot.kind,
+      contentSchemaVersion: snapshot.contentSchemaVersion,
+      contentJson: snapshot.contentJson,
+      contentHash: snapshot.contentHash,
+      createdAt,
+    }))
+    const snapshotIdByKind = new Map(snapshots.map((snapshot) => [snapshot.kind, snapshot.id]))
+    const requiredSnapshotId = (kind: 'brief' | 'edit-plan' | 'policies') => {
+      const id = snapshotIdByKind.get(kind)
+      assertDomain(Boolean(id), 'PERSISTENCE_CONFLICT', `Source ${kind} snapshot is missing`)
+      return id!
+    }
     const name = requestedName ?? normalizeProjectName(
       `${source.project.name} (cópia)`,
     )
@@ -151,7 +168,17 @@ export function duplicateProjectService(dependencies: {
       sequence: 1,
       forkedFromProjectId: source.project.id,
       forkedFromVersionId: source.version.id,
-      snapshotRefs: source.version.snapshotRefs,
+      snapshotRefs: {
+        brief: requiredSnapshotId('brief'),
+        ...(snapshotIdByKind.get('treatment')
+          ? { treatment: snapshotIdByKind.get('treatment')! }
+          : {}),
+        ...(snapshotIdByKind.get('story')
+          ? { story: snapshotIdByKind.get('story')! }
+          : {}),
+        editPlan: requiredSnapshotId('edit-plan'),
+        policies: requiredSnapshotId('policies'),
+      },
       baseHash: calculateVersionHash({
         projectId: duplicateProjectId,
         sequence: 1,
@@ -187,6 +214,7 @@ export function duplicateProjectService(dependencies: {
       sourceVersionHash: source.version.baseHash,
       project,
       version,
+      snapshots,
       media,
       auditCommand,
       idempotency: {

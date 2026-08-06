@@ -425,6 +425,9 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
     }
 
     const projectIds = [primary.id, companion.id]
+    const snapshotProjectIds = duplicate
+      ? [...projectIds, duplicate.id]
+      : projectIds
     const [
       snapshots,
       media,
@@ -443,7 +446,7 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
       this.client.v2ProjectSnapshot.findMany({
         where: {
           workspaceId: input.workspaceId,
-          projectId: { in: projectIds },
+          projectId: { in: snapshotProjectIds },
         },
       }),
       this.client.v2ProjectMediaAsset.findMany({
@@ -733,19 +736,29 @@ export class PrismaMvpCoreGateRepository implements MvpCoreGateRepository {
         record(record(payload.operation)?.patch)?.[field] !== undefined)
     const undo = manual.find(({ payload }) => payload.action === 'undo')
 
+    const sameSnapshotContent = (leftId: string | null, rightId: string | null) => {
+      if (leftId === null || rightId === null) return leftId === rightId
+      const left = snapshotById.get(leftId)?.row
+      const right = snapshotById.get(rightId)?.row
+      return Boolean(
+        left && right && left.id !== right.id &&
+        left.kind === right.kind &&
+        left.schemaVersion === right.schemaVersion &&
+        left.contentHash === right.contentHash &&
+        left.contentJson === right.contentJson &&
+        left.projectId === primary.id && right.projectId === duplicate?.id,
+      )
+    }
     const duplicateValid = Boolean(
       duplicate?.currentVersion &&
       duplicate.duplicatedFromProjectId === primary.id &&
       duplicate.currentVersion.forkedFromProjectId === primary.id &&
       duplicate.currentVersion.forkedFromVersionId &&
-      duplicate.currentVersion.briefSnapshotId === primaryVersion.briefSnapshotId &&
-      duplicate.currentVersion.treatmentSnapshotId ===
-        primaryVersion.treatmentSnapshotId &&
-      duplicate.currentVersion.storySnapshotId === primaryVersion.storySnapshotId &&
-      duplicate.currentVersion.editPlanSnapshotId ===
-        primaryVersion.editPlanSnapshotId &&
-      duplicate.currentVersion.policiesSnapshotId ===
-        primaryVersion.policiesSnapshotId,
+      sameSnapshotContent(primaryVersion.briefSnapshotId, duplicate.currentVersion.briefSnapshotId) &&
+      sameSnapshotContent(primaryVersion.treatmentSnapshotId, duplicate.currentVersion.treatmentSnapshotId) &&
+      sameSnapshotContent(primaryVersion.storySnapshotId, duplicate.currentVersion.storySnapshotId) &&
+      sameSnapshotContent(primaryVersion.editPlanSnapshotId, duplicate.currentVersion.editPlanSnapshotId) &&
+      sameSnapshotContent(primaryVersion.policiesSnapshotId, duplicate.currentVersion.policiesSnapshotId),
     )
     const sourceArtifactIds = new Set(
       allDuplicateMedia

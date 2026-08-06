@@ -2,10 +2,12 @@ import type { Project } from '../../domain/project.ts'
 import type { ProjectVersion } from '../../domain/project-version.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ProjectCreationCommand } from '../../domain/project-creation-command.ts'
+import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 
 export interface ProjectDuplicationSource {
   project: Readonly<Project>
   version: Readonly<ProjectVersion>
+  snapshots: readonly Readonly<ProjectSnapshot>[]
   media: readonly Readonly<{
     artifactId: string
     role: string
@@ -19,6 +21,7 @@ export interface ProjectDuplicationBundle {
   sourceVersionHash: string
   project: Readonly<Project>
   version: Readonly<ProjectVersion>
+  snapshots: readonly Readonly<ProjectSnapshot>[]
   media: readonly Readonly<{
     id: string
     artifactId: string

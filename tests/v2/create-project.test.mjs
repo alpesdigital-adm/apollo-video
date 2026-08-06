@@ -163,6 +163,7 @@ async function createDuplicationFixture() {
   const repository = new InMemoryProjectDuplicationRepository({
     project: source.project,
     version: source.version,
+    snapshots: creation.repository.lastBundle.snapshots,
     media: [{
       artifactId: 'artifact-source-1',
       role: 'source-master',
@@ -371,7 +372,14 @@ test('project duplication persists actor-bound copy-on-write lineage without cop
   assert.equal(result.project.duplicatedFromProjectId, source.project.id)
   assert.equal(result.version.forkedFromProjectId, source.project.id)
   assert.equal(result.version.forkedFromVersionId, source.version.id)
-  assert.deepEqual(result.version.snapshotRefs, source.version.snapshotRefs)
+  assert.notDeepEqual(result.version.snapshotRefs, source.version.snapshotRefs)
+  assert.equal(repository.lastBundle.snapshots.length, 3)
+  assert.deepEqual(
+    repository.lastBundle.snapshots.map(({ kind, contentHash }) => ({ kind, contentHash })),
+    repository.source.snapshots.map(({ kind, contentHash }) => ({ kind, contentHash })),
+  )
+  assert.equal(repository.lastBundle.snapshots.every((snapshot) =>
+    snapshot.projectId === result.project.id), true)
   assert.deepEqual(result.sharedArtifactIds, ['artifact-source-1'])
   assert.equal(result.copiedBytes, 0)
   assert.equal(repository.lastBundle.auditCommand.action, 'duplicate')
