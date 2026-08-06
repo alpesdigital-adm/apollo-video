@@ -1130,13 +1130,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const editorialReplayResponse = await applyEditorialCut()
     assert.equal(editorialReplayResponse.status, 200)
     assert.equal((await editorialReplayResponse.json()).data.replayed, true)
+    const editorialOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
+      where: { id: editorialApplied.data.operation.id }, select: { createdAt: true },
+    })).createdAt
     await client.v2PublicOperation.update({
       where: { id: editorialApplied.data.operation.id },
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
         progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
+        startedAt: editorialOperationCreatedAt,
+        completedAt: editorialOperationCreatedAt,
+        updatedAt: editorialOperationCreatedAt,
       },
     })
     await client.v2ProjectProxyRenderOperation.update({
@@ -1262,13 +1267,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(directorReplayResponse.status, 200, JSON.stringify(directorReplay))
     assert.equal(directorReplay.data.replayed, true)
     assert.equal(directorReplay.data.operation.id, directorApplied.data.operation.id)
+    const directorOperationCreatedAt = (await client.v2PublicOperation.findUniqueOrThrow({
+      where: { id: directorApplied.data.operation.id }, select: { createdAt: true },
+    })).createdAt
     await client.v2PublicOperation.update({
       where: { id: directorApplied.data.operation.id },
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
         progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
-        startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
+        startedAt: directorOperationCreatedAt,
+        completedAt: directorOperationCreatedAt,
+        updatedAt: directorOperationCreatedAt,
       },
     })
     await client.v2ProjectProxyRenderOperation.update({
