@@ -306,6 +306,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
       resultJson: stableSerialize({ resource: {
         type: 'media-artifact', id: completedProxyArtifactId,
@@ -942,6 +943,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
       resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
       idempotencyKey: `manual-transcript-base-proxy-${suffix}`,
@@ -996,6 +998,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { id: editorialApplied.data.operation.id },
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
+        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
         startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
       },
@@ -1066,6 +1069,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
+      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
       resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
       idempotencyKey: `manual-director-base-proxy-${suffix}`,
@@ -1125,6 +1129,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { id: directorApplied.data.operation.id },
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
+        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
         startedAt: createdAt, completedAt: createdAt, updatedAt: createdAt,
       },
