@@ -367,12 +367,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       segments: [{ id: 0, start: 0.2, end: 3.6, text: 'Primeira frase Segunda' }],
     })
     const replacementTranscript = createMediaTranscript({
-      language: 'pt-BR', text: 'Primeira corrigida Segunda', provider: 'groq', model: 'whisper-large-v3',
+      language: 'pt-BR', text: 'Corrigida frase Segunda', provider: 'groq', model: 'whisper-large-v3',
       words: [
-        { word: 'Primeira', start: 0.2, end: 0.5 }, { word: 'corrigida', start: 1.2, end: 1.6 },
+        { word: 'Corrigida', start: 0.2, end: 0.5 }, { word: 'frase', start: 1.2, end: 1.6 },
         { word: 'Segunda', start: 3.2, end: 3.6 },
       ],
-      segments: [{ id: 0, start: 0.2, end: 3.6, text: 'Primeira corrigida Segunda' }],
+      segments: [{ id: 0, start: 0.2, end: 3.6, text: 'Corrigida frase Segunda' }],
     })
     for (const [id, transcript, offset] of [
       [currentTranscriptId, currentTranscript, 0],
@@ -1181,7 +1181,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const replacementPlan = JSON.parse(replacementVersion.editPlanSnapshot.contentJson)
     assert.equal(replacementPlan.retimedTranscript.sourceTranscriptId, replacementTranscriptId)
     assert.equal(replacementPlan.retimedTranscript.sourceTranscriptHash, replacementTranscript.transcriptHash)
-    assert.match(replacementPlan.retimedTranscript.words.map((word) => word.text).join(' '), /corrigida/)
+    assert.match(replacementPlan.retimedTranscript.words.map((word) => word.text).join(' '), /Corrigida/)
     assert.equal(await client.v2ProjectProxyRenderOperation.count({
       where: { projectVersionId: transcriptApplied.data.version.id },
     }), 0)
