@@ -1138,6 +1138,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
         progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+        cancelable: false, retryable: false, attempt: 1,
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
         startedAt: editorialOperationCreatedAt,
         completedAt: editorialOperationCreatedAt,
@@ -1275,6 +1276,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       data: {
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: completedProxyArtifactId,
         progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
+        cancelable: false, retryable: false, attempt: 1,
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: completedProxyArtifactId, manifestId: completedProxyManifestId } }),
         startedAt: directorOperationCreatedAt,
         completedAt: directorOperationCreatedAt,
