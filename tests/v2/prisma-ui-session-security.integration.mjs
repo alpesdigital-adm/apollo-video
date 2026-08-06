@@ -72,6 +72,15 @@ test('UI session security is revocable, idle-bounded, distributed and auditable 
     assert.equal(touched.idleExpiresAt, '2026-08-02T00:40:00.000Z')
     assert.equal(touched.memberId, memberId)
     assert.equal(touched.memberRole, 'operator')
+    const concurrentTouches = await Promise.all(Array.from({ length: 16 }, (_, index) =>
+      (index % 2 === 0 ? first : second).readActiveAndTouch({
+        nonceHash,
+        now: `2026-08-02T00:10:${String(index).padStart(2, '0')}.000Z`,
+        idleTtlSeconds: 1800,
+        identifierMaxAgeSeconds: 900,
+      }),
+    ))
+    assert.equal(concurrentTouches.every((session) => session?.nonceHash === nonceHash), true)
     await client.v2WorkspaceMember.update({ where: { id: memberId }, data: { status: 'suspended' } })
     assert.equal(await first.readActiveAndTouch({ nonceHash, now: '2026-08-02T00:11:00.000Z', idleTtlSeconds: 1800, identifierMaxAgeSeconds: 900 }), null)
     await client.v2WorkspaceMember.update({ where: { id: memberId }, data: { status: 'active' } })

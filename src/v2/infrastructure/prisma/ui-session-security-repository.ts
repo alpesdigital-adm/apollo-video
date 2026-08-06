@@ -56,30 +56,35 @@ export class PrismaUiSessionSecurityRepository implements UiSessionSecurityRepos
     return hydrate(row, row.member.role, row.member.identityId)
   }
 
-  async readActiveAndTouch(input: Parameters<UiSessionSecurityRepository['readActiveAndTouch']>[0], retry = 0): Promise<Readonly<DurableUiSessionRecord> | null> {
+  async readActiveAndTouch(input: Parameters<UiSessionSecurityRepository['readActiveAndTouch']>[0]): Promise<Readonly<DurableUiSessionRecord> | null> {
     const now = new Date(input.now)
     if (!SHA256.test(input.nonceHash) || !Number.isFinite(now.getTime()) || !validSeconds(input.idleTtlSeconds) || !validSeconds(input.identifierMaxAgeSeconds)) {
       throw new DomainError('INVALID_ARGUMENT', 'UI session refresh input is invalid')
     }
-    try {
-      return await this.client.$transaction(async (transaction) => {
-        const current = await transaction.v2UiSession.findUnique({ where: { nonceHash: input.nonceHash }, include: { member: { include: { identity: true } } } })
-        if (
-          !current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now ||
-          current.issuedAt.getTime() + input.identifierMaxAgeSeconds * 1000 <= now.getTime() ||
-          current.member.status !== 'active' || current.member.identity.status !== 'active'
-        ) return null
-        const idleExpiresAt = new Date(Math.min(current.expiresAt.getTime(), now.getTime() + input.idleTtlSeconds * 1000))
-        const updated = await transaction.v2UiSession.update({
-          where: { nonceHash: input.nonceHash }, data: { lastSeenAt: now, idleExpiresAt }, include: { member: true },
-        })
-        return hydrate(updated, updated.member.role, updated.member.identityId)
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-    } catch (error) {
-      if (prismaCode(error, 'P2034') && retry < 3) return this.readActiveAndTouch(input, retry + 1)
-      if (prismaCode(error, 'P2034')) throw new DomainError('PERSISTENCE_CONFLICT', 'UI session could not be refreshed')
-      throw error
-    }
+    const idleExpiresAt = new Date(now.getTime() + input.idleTtlSeconds * 1000)
+    const identifierCutoff = new Date(now.getTime() - input.identifierMaxAgeSeconds * 1000)
+    const touched = await this.client.v2UiSession.updateMany({
+      where: {
+        nonceHash: input.nonceHash,
+        revokedAt: null,
+        expiresAt: { gt: now },
+        idleExpiresAt: { gt: now },
+        issuedAt: { gt: identifierCutoff },
+        member: { status: 'active', identity: { status: 'active' } },
+      },
+      data: { lastSeenAt: now, idleExpiresAt },
+    })
+    if (touched.count !== 1) return null
+    const current = await this.client.v2UiSession.findUnique({
+      where: { nonceHash: input.nonceHash },
+      include: { member: { include: { identity: true } } },
+    })
+    if (
+      !current || current.revokedAt || current.expiresAt <= now || current.idleExpiresAt <= now ||
+      current.issuedAt <= identifierCutoff || current.member.status !== 'active' ||
+      current.member.identity.status !== 'active'
+    ) return null
+    return hydrate(current, current.member.role, current.member.identityId)
   }
 
   async refreshActiveSession(
