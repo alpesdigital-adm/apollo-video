@@ -1356,6 +1356,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         objective: 'sale',
         desiredAction: {
           destination: { type: 'url', value: 'https://example.com/checkout' },
+          visualCta: 'Garanta sua vaga',
+          disclosures: ['Oferta sujeita a disponibilidade.'],
         },
         reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
       }),
@@ -1402,6 +1404,30 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 2)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'conversion-sale/v1')
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, directorApplied.data.directorRun.id)
+    const persistedDesiredAction = JSON.parse(storedAsyncOperation.projectDirectorRun.desiredActionJson)
+    assert.deepEqual(persistedDesiredAction, {
+      schemaVersion: 1,
+      kind: 'buy',
+      destination: { type: 'url', value: 'https://example.com/checkout' },
+      visualCta: 'Garanta sua vaga',
+      disclosures: ['Oferta sujeita a disponibilidade.'],
+    })
+    const [storedStorySnapshot, storedEditPlanSnapshot] = await Promise.all([
+      client.v2ProjectSnapshot.findUniqueOrThrow({
+        where: { id: storedAsyncOperation.projectDirectorRun.directorRun.storySnapshotId },
+      }),
+      client.v2ProjectSnapshot.findUniqueOrThrow({
+        where: { id: storedAsyncOperation.projectDirectorRun.directorRun.editPlanSnapshotId },
+      }),
+    ])
+    const storedStoryPlan = JSON.parse(storedStorySnapshot.contentJson)
+    const storedEditPlan = JSON.parse(storedEditPlanSnapshot.contentJson)
+    assert.deepEqual(storedStoryPlan.desiredActionRef.action, persistedDesiredAction)
+    assert.equal(storedStoryPlan.desiredActionRef.actionHash.length, 64)
+    assert.equal(storedEditPlan.desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
+    assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
+    assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
+    assert.equal(storedEditPlan.overlayTracks[0].text, 'Garanta sua vaga')
     const qualityResponse = await fetch(
       `${baseUrl}/v1/projects/${projectId}/director-runs/${storedAsyncOperation.projectDirectorRun.directorRun.id}/quality-report`,
       { headers: { authorization } },
@@ -1416,6 +1442,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(qualityRead.data.qualityReport.qualitySnapshot.contentSchemaVersion, 2)
     assert.match(qualityRead.data.qualityReport.qualitySnapshot.contentHash, /^[a-f0-9]{64}$/)
     assert.equal(qualityRead.data.qualityReport.report.schemaVersion, 'director-quality-report/v2')
+    assert.equal(
+      qualityRead.data.qualityReport.report.desiredActionRef.id,
+      storedStoryPlan.desiredActionRef.id,
+    )
     assert.equal(qualityRead.data.qualityReport.report.strategic.schemaVersion, 'strategic-quality-report/v1')
     assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.objective, 'sale')
     assert.equal(qualityRead.data.qualityReport.report.strategic.rubric.purpose, 'editorial-quality-proxy')
