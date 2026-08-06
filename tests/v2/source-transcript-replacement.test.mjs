@@ -73,7 +73,10 @@ function version() {
   return createProjectVersion({
     id: 'version-base', workspaceId: 'workspace-transcript', projectId: 'project-transcript',
     sequence: 4, parentVersionId: 'version-parent',
-    snapshotRefs: { brief: 'snapshot-brief', editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies' },
+    snapshotRefs: {
+      brief: 'snapshot-brief', treatment: undefined, story: undefined,
+      editPlan: 'snapshot-edit-plan', policies: 'snapshot-policies',
+    },
     baseHash: 'a'.repeat(64), createdBy: 'client-transcript', createdAt: '2026-07-31T22:00:00.000Z',
   })
 }
@@ -122,6 +125,7 @@ test('T-FR-233 source transcript replacement retimes immutable evidence and bloc
     idempotencyKey: 'source-transcript-replacement-1',
   }
   const result = await execute(request)
+  assert.deepEqual(Object.keys(version().snapshotRefs), ['brief', 'editPlan', 'policies'])
   assert.equal(result.command.type, 'replace-source-transcript')
   assert.equal(result.version.sequence, 5)
   assert.equal(result.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-replacement')

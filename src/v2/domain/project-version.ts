@@ -64,6 +64,18 @@ export function createProjectVersion(input: ProjectVersionInput): Readonly<Proje
   return Object.freeze({
     ...input,
     schemaVersion: 1 as const,
-    snapshotRefs: Object.freeze({ ...input.snapshotRefs }),
+    snapshotRefs: Object.freeze({
+      ...(input.snapshotRefs.brief !== undefined
+        ? { brief: input.snapshotRefs.brief }
+        : {}),
+      ...(input.snapshotRefs.treatment !== undefined
+        ? { treatment: input.snapshotRefs.treatment }
+        : {}),
+      ...(input.snapshotRefs.story !== undefined
+        ? { story: input.snapshotRefs.story }
+        : {}),
+      editPlan: input.snapshotRefs.editPlan,
+      policies: input.snapshotRefs.policies,
+    }),
   })
 }
