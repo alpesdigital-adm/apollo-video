@@ -79,12 +79,19 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const loginKeyHash = uiLoginThrottleKey('direct', uiUsername, sessionEnvironment)
     const loginSubjectHash = uiSessionSubjectHash(uiUsername, sessionEnvironment)
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
-    await client.v2DirectorRun.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({
       where: { workspaceId, reusedFromOperationId: { not: null } },
     })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
+    const directorRunIds = (await client.v2DirectorRun.findMany({
+      where: { workspaceId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    })).map((run) => run.id)
+    for (const id of directorRunIds) {
+      await client.v2DirectorRun.delete({ where: { id } })
+    }
     await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
     await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
     await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
