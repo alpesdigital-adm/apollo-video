@@ -612,8 +612,23 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const loginBody = await loginResponse.json()
     assert.equal(loginResponse.status(), 200, JSON.stringify(loginBody))
     await page.waitForURL(`**/projects/${projectId}`)
+    const uiWorkspaceResponse = await page.request.get(
+      `${baseUrl}/v1/projects/${projectId}/workspace`,
+      { headers: { accept: 'application/json' } },
+    )
+    const uiWorkspace = await uiWorkspaceResponse.json()
+    assert.equal(uiWorkspaceResponse.status(), 200, JSON.stringify(uiWorkspace))
+    const uiTimelineResponse = await page.request.get(
+      `${baseUrl}/v1/projects/${projectId}/timeline`,
+      { headers: { accept: 'application/json' } },
+    )
+    const uiTimeline = await uiTimelineResponse.json()
+    assert.equal(uiTimelineResponse.status(), 200, JSON.stringify(uiTimeline))
+    assert.equal(uiTimeline.data.timeline.versionId, publicApplied.data.version.id)
     const manualEditor = page.getByTestId('manual-editor')
-    await manualEditor.waitFor({ state: 'visible' })
+    await manualEditor.waitFor({ state: 'visible', timeout: 10_000 }).catch(async (error) => {
+      throw new Error(`${error.message}\n${(await page.locator('body').innerText()).slice(-4_000)}`)
+    })
     await page.getByTestId('manual-clip-clip-2').click()
     await assert.doesNotReject(async () => {
       await page.getByTestId('manual-selected-clip').waitFor({ state: 'visible' })
