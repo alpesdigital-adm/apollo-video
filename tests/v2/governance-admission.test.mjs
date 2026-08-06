@@ -215,9 +215,11 @@ test('F0.103 only an authenticated human administrator receives anomaly recovery
 
 test('Prisma governance admission retries serialization conflicts only three times', async () => {
   let attempts = 0
+  const isolationLevels = []
   const repository = new PrismaGovernanceAdmissionRepository({
-    async $transaction() {
+    async $transaction(_callback, options) {
       attempts += 1
+      isolationLevels.push(options.isolationLevel)
       const error = new Error('serialization conflict')
       error.code = 'P2034'
       throw error
@@ -252,6 +254,7 @@ test('Prisma governance admission retries serialization conflicts only three tim
     (error) => error?.code === 'PERSISTENCE_CONFLICT',
   )
   assert.equal(attempts, 3)
+  assert.deepEqual(isolationLevels, Array(3).fill('ReadCommitted'))
 })
 
 test('Prisma governance admission evaluates aggregate workspace and client budgets separately', async () => {

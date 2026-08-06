@@ -691,7 +691,7 @@ implements GovernanceAdmissionRepository {
           })
         }
         return admission
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
     } catch (error) {
       if (
         typeof error === 'object' && error !== null && 'code' in error &&
