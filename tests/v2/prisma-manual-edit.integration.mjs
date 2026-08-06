@@ -1365,10 +1365,18 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       createId: (kind) => `${kind}-async-${suffix}-${randomUUID()}`,
       createEventId: randomUUID,
     })
-    assert.deepEqual(await runNextDirector(`director-worker-${suffix}`), {
+    const asyncDirectorOutcome = await runNextDirector(`director-worker-${suffix}`)
+    const asyncDirectorSettlement = await client.v2PublicOperation.findUniqueOrThrow({
+      where: { id: asyncDirectorEnqueued.data.operation.id },
+      select: {
+        status: true, phase: true, errorCode: true,
+        errorMessage: true, errorRetryable: true,
+      },
+    })
+    assert.deepEqual(asyncDirectorOutcome, {
       operationId: asyncDirectorEnqueued.data.operation.id,
       status: 'succeeded',
-    })
+    }, JSON.stringify(asyncDirectorSettlement))
     const storedAsyncOperation = await client.v2PublicOperation.findUniqueOrThrow({
       where: { id: asyncDirectorEnqueued.data.operation.id },
       include: { projectDirectorRun: { include: { directorRun: true } } },
