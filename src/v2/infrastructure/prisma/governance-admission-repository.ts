@@ -304,7 +304,7 @@ implements GovernanceAdmissionRepository {
         await transaction.$queryRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(
             hashtextextended(${`${draft.workspaceId}:governance:${draft.environment}`}, 0)
-          )
+          )::text AS "lock"
         `)
         const policies = await transaction.v2GovernancePolicy.findMany({
           where: {

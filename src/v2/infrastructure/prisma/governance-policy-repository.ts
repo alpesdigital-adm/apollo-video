@@ -338,7 +338,7 @@ implements GovernancePolicyRepository {
         await transaction.$queryRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(
             hashtextextended(${`${policy.workspaceId}:governance:${policy.environment}`}, 0)
-          )
+          )::text AS "lock"
         `)
         if (policy.scopeType === 'client') {
           const client = await transaction.v2ApiClient.findUnique({
@@ -465,7 +465,7 @@ implements GovernancePolicyRepository {
         await transaction.$queryRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(
             hashtextextended(${`${command.workspaceId}:governance:${command.environment}`}, 0)
-          )
+          )::text AS "lock"
         `)
         const current = await transaction.v2GovernancePolicy.findFirst({
           where: { id: command.policyId, workspaceId: command.workspaceId },
