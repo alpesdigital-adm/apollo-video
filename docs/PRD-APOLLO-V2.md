@@ -318,6 +318,15 @@ jornada discovery→sale está preparada para PostgreSQL/HTTP, mas não foi
 executada neste ambiente. FR-010 continua aberto até E2E browser, implantação e
 aceite.
 
+Evidência integrada remota de 2026-08-07: o SHA `251bc11`, no run isolado
+`f1005-20260807-0230-r40`, aprovou migrations do zero, build e `T-FR-216` com
+PostgreSQL 16, HTTP e browser reais. A jornada trocou `discovery` por `sale`,
+exigiu razão, destino e CTA observável vindo do transcript selecionado, executou
+o worker durável, persistiu a revisão/rubrica/supersessão e leu o QualityReport
+pela API pública. O teardown terminou sem conexões nem contêineres órfãos.
+FR-010 continua aberto por não haver implantação e aceite do produto nem revisão
+visual do projeto real de recuperação.
+
 ### FR-011 — Ação desejada
 
 Projetos de conversão devem poder registrar ação, destino, oferta e contexto.

@@ -718,6 +718,17 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 - [ ] Criar dataset de referência com exemplos bom/limítrofe/ruim por objetivo. Evidência F1-005: conjunto versionado contém 24 referências, três bandas para cada objetivo.
 - [ ] Calibrar thresholds iniciais sem misturar performance comercial com causalidade garantida. Evidência F1-005: thresholds são explícitos e rotulados `editorial-quality-proxy`; referências negam causalidade comercial.
 
+Evidência integrada remota F1.004/F1.005 (2026-08-07, SHA `251bc11`): o run
+supervisionado `f1005-20260807-0230-r40` instalou dependências, gerou Prisma,
+aplicou todas as migrations em PostgreSQL 16 limpo, compilou o Next e aprovou a
+jornada `T-FR-216`. Browser real, sessão humana, Bearer API, Commands,
+substituição de transcript, Diretor síncrono e operação durável atravessaram
+`discovery`→`sale`; o critic exigiu CTA falado observável, persistiu
+`objectiveVersion=2`, `conversion-sale/v1`, `supersedesRunId` e permitiu leitura
+pública do QualityReport. O postflight registrou zero conexões e zero
+contêineres órfãos. As caixas permanecem abertas porque implantação do produto,
+revisão visual do projeto real e aceite do proprietário ainda não ocorreram.
+
 ### F1.006 — Ação desejada [FR-011]
 
 - [ ] Modelar ação, destino, CTA verbal/visual, URL/handle e requisitos de disclosure. Evidência F1-006: `DesiredAction/v1` tipa ação, cinco destinos, CTAs e disclosures imutáveis.

@@ -161,6 +161,14 @@ a nova run referencia a anterior; nenhuma row histórica é reescrita. Objetivos
 de conversão também exigem destino válido. Repetir o mesmo objetivo conserva a
 revisão e não cria uma supersessão artificial.
 
+Prova executada em 2026-08-07: o run remoto isolado
+`f1005-20260807-0230-r40` sobre o SHA `251bc11` atravessou browser, API,
+PostgreSQL e worker em uma mudança `discovery`→`sale`. O critic recusou a forma
+sem CTA durante a falsificação e aprovou somente quando a evidência falada
+selecionada tornou o CTA observável; revisão 2, rubrica
+`conversion-sale/v1`, supersessão e QualityReport foram relidos do estado
+persistido. Isso comprova integração/E2E do slice, não implantação ou aceite.
+
 ### 7.2 Entradas opcionais
 
 - Briefing livre.

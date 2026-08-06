@@ -178,6 +178,17 @@ obrigatório e destino obrigatório para conversão. Regressões locais cobrem a
 oito rubricas e falhas fechadas; a jornada discovery→sale via worker,
 PostgreSQL e HTTP foi preparada, mas não executada. E2E browser, deploy e aceite
 permanecem pendentes, portanto FR-010 continua aberto.
+
+Evidência remota integrada F1.004/F1.005/FR-010 (2026-08-07): SHA `251bc11`,
+run supervisionado `f1005-20260807-0230-r40`. Em PostgreSQL 16 descartável, o
+gate aplicou migrations do zero, compilou o Next e executou `T-FR-216` por
+browser, sessão humana e Bearer API. A cadeia replacement de transcript →
+DirectorRun `discovery` → seleção de LUT → operação durável `sale` comprovou
+CTA observável, `objectiveVersion=2`, `conversion-sale/v1`, supersessão
+imutável e leitura pública do QualityReport. Postflight: zero backends do
+`application_name` e zero contêineres do run. Deploy, projeto real visual e
+aceite seguem pendentes; FR-010 permanece aberto.
+
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |
