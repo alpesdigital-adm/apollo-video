@@ -44,7 +44,11 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
   const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
-  const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
+  const {
+    createUiPasswordHash,
+    uiLoginThrottleKey,
+    uiSessionSubjectHash,
+  } = await import('../../src/v2/infrastructure/security/ui-session.ts')
 
   const client = new PrismaClient()
   const repository = new PrismaManualEditRepository(client)
@@ -68,6 +72,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const colorCompilations = new Map()
 
   const cleanup = async () => {
+    const identityIds = (await client.v2WorkspaceMember.findMany({
+      where: { workspaceId }, select: { identityId: true },
+    })).map((member) => member.identityId)
+    const sessionEnvironment = { APOLLO_UI_SESSION_SECRET: uiSessionSecret }
+    const loginKeyHash = uiLoginThrottleKey('direct', uiUsername, sessionEnvironment)
+    const loginSubjectHash = uiSessionSubjectHash(uiUsername, sessionEnvironment)
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2DirectorRun.deleteMany({ where: { workspaceId } })
     await client.v2ProjectProxyRenderOperation.deleteMany({
@@ -85,9 +95,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2UiSession.deleteMany({ where: { workspaceId } })
+    await client.v2UiLoginAttempt.deleteMany({ where: { subjectHash: loginSubjectHash } })
+    await client.v2UiLoginThrottle.deleteMany({ where: { keyHash: loginKeyHash } })
     await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    if (identityIds.length > 0) {
+      await client.v2HumanIdentity.deleteMany({ where: { id: { in: identityIds } } })
+    }
   }
 
   const execute = (request) => applyManualEditService({
@@ -519,6 +534,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         APOLLO_API_ENVIRONMENT: 'production',
         APOLLO_AUTH_MODE: 'bootstrap',
         APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
+        APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
         APOLLO_UI_USERNAME: uiUsername,
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `manual-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
@@ -589,7 +605,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await page.goto(`${baseUrl}/login?next=${encodeURIComponent(`/projects/${projectId}`)}`)
     await page.locator('input[name="username"]').fill(uiUsername)
     await page.locator('input[name="password"]').fill(uiPassword)
+    const loginCompleted = page.waitForResponse((response) =>
+      response.url().endsWith('/v1/session') && response.request().method() === 'POST')
     await page.getByRole('button', { name: 'Entrar no Apollo' }).click()
+    const loginResponse = await loginCompleted
+    const loginBody = await loginResponse.json()
+    assert.equal(loginResponse.status(), 200, JSON.stringify(loginBody))
     await page.waitForURL(`**/projects/${projectId}`)
     const manualEditor = page.getByTestId('manual-editor')
     await manualEditor.waitFor({ state: 'visible' })
