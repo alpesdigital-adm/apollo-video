@@ -32,13 +32,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   skip: process.env.APOLLO_MANUAL_EDIT_E2E !== '1' && 'set APOLLO_MANUAL_EDIT_E2E=1 and use an isolated V2 database',
 }, async () => {
   const { applyManualEditService, readManualTimelineService } = await import('../../src/v2/application/manual-edit.ts')
+  const { createColorPipelineCompilationService } = await import('../../src/v2/application/color-pipeline-compilations.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+  const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+  const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
   const { DomainError } = await import('../../src/v2/domain/errors.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaManualEditRepository } = await import('../../src/v2/infrastructure/prisma/manual-edit-repository.ts')
+  const { PrismaColorPipelineCompilationRepository } = await import('../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
   const { createUiPasswordHash } = await import('../../src/v2/infrastructure/security/ui-session.ts')
 
@@ -61,6 +65,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   let server
   let browser
   let authenticatedActor
+  const colorCompilations = new Map()
 
   const cleanup = async () => {
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
@@ -72,6 +77,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2CommandArtifactInvalidation.deleteMany({ where: { workspaceId } })
     await client.v2MediaTranscript.deleteMany({ where: { workspaceId } })
+    await client.v2ColorPipelineCompilation.deleteMany({ where: { workspaceId } })
+    await client.v2MediaColorProbe.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
@@ -237,6 +244,66 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         role: artifactId === sourceA ? 'source-master' : 'selected-insert',
         originalFileName: `${artifactId}.mp4`, createdAt,
       } })
+      const sourceMetadata = Object.freeze({
+        colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709',
+        matrix: 'bt709', range: 'limited', bitDepth: 8,
+      })
+      const colorProbe = createMediaColorProbe({
+        id: `manual-color-probe-${artifactId}`,
+        workspaceId,
+        artifactId,
+        manifestId: `manifest-${artifactId}`,
+        detection: {
+          state: 'ready', metadata: sourceMetadata,
+          pixelFormat: 'yuv420p', hdrMode: 'sdr',
+        },
+        producer: {
+          provider: 'ffprobe', version: '7.1.1',
+          binaryDigest: calculateVersionHash({ tool: 'ffprobe', version: '7.1.1' }),
+        },
+        createdAt: createdAt.toISOString(),
+      })
+      await client.v2MediaColorProbe.create({ data: {
+        id: colorProbe.id,
+        workspaceId,
+        artifactId,
+        manifestId: colorProbe.manifestId,
+        schemaVersion: colorProbe.schemaVersion,
+        state: colorProbe.detection.state,
+        metadataJson: stableSerialize(colorProbe.detection.metadata),
+        pixelFormat: colorProbe.detection.pixelFormat,
+        hdrMode: colorProbe.detection.hdrMode,
+        reasonsJson: '[]',
+        producerProvider: colorProbe.producer.provider,
+        producerVersion: colorProbe.producer.version,
+        producerBinaryDigest: colorProbe.producer.binaryDigest,
+        createdAt,
+        probeHash: colorProbe.probeHash,
+      } })
+      const implementation = (provider, parameters) => Object.freeze({
+        provider, version: 'v1', parameters: Object.freeze(parameters),
+        parametersHash: calculateCanonicalHash(parameters),
+      })
+      const colorCompilation = await createColorPipelineCompilationService({
+        repository: new PrismaColorPipelineCompilationRepository(client),
+        createId: () => `manual-color-compilation-${artifactId}`,
+        clock: () => createdAt,
+      })({
+        workspaceId,
+        projectId,
+        sourceArtifactId: artifactId,
+        sourceManifestId: colorProbe.manifestId,
+        outputMetadata: sourceMetadata,
+        stages: [
+          { id: `technical-${artifactId}`, kind: 'technical', version: 'v1', enabled: true, output: sourceMetadata, implementation: implementation('ffmpeg-zscale', { mode: 'identity' }) },
+          { id: `match-${artifactId}`, kind: 'match', version: 'v1', enabled: false, output: sourceMetadata, implementation: implementation('apollo-match', { mode: 'bypass' }) },
+          { id: `creative-${artifactId}`, kind: 'creative-lut', version: 'v1', enabled: false, output: sourceMetadata, implementation: implementation('apollo-lut', { mode: 'none' }) },
+          { id: `output-${artifactId}`, kind: 'output', version: 'v1', enabled: true, output: sourceMetadata, implementation: implementation('ffmpeg-zscale', { dither: false }) },
+        ],
+        actor: authenticatedActor,
+        idempotencyKey: `manual-color-${artifactId}`,
+      })
+      colorCompilations.set(artifactId, colorCompilation.value.compilation)
       if (artifactId === sourceA) {
         const rightsSnapshotId = `rights-${sourceA}`
         await client.v2AssetRightsSnapshot.create({ data: {
@@ -796,12 +863,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectionBaseVersion = persistedVersions.at(-1)
     const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
     const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
+    const sourceAColorCompilation = colorCompilations.get(sourceA)
+    assert.ok(sourceAColorCompilation)
     const selectionColorBindings = stableSerialize([{
       sourceArtifactId: sourceA,
       sourceManifestId: `manifest-${sourceA}`,
-      compilationId: `manual-color-compilation-${suffix}`,
-      compilationHash: calculateVersionHash({ selectionBaseOperationId, compilation: true }),
-      pipelineHash: calculateVersionHash({ selectionBaseOperationId, pipeline: true }),
+      compilationId: sourceAColorCompilation.id,
+      compilationHash: sourceAColorCompilation.compilationHash,
+      pipelineHash: sourceAColorCompilation.pipeline.pipelineHash,
     }])
     await client.v2PublicOperation.create({ data: {
       id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
