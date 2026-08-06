@@ -10,12 +10,17 @@ import {
   validateDirectorDecisions,
 } from '../domain/director-run.ts'
 import { createEditCommand } from '../domain/edit-command.ts'
+import { createDesiredAction } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createPerceptionTimeline, type PerceptionObservation } from '../domain/perception-timeline.ts'
 import { createProjectSnapshot, type ProjectSnapshot, type ProjectSnapshotKind } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
-import { resolveStrategicObjective } from '../domain/strategic-objective.ts'
+import {
+  bindDirectorObjective,
+  resolveStrategicObjective,
+  type StrategicObjectiveId,
+} from '../domain/strategic-objective.ts'
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
@@ -49,6 +54,12 @@ export interface RunProjectDirectorRequest {
     now: string
   }>
   reason?: string
+  objective?: StrategicObjectiveId
+  destination?: string
+  expectedObjectiveVersion?: number
+  expectedRubricRef?: string
+  expectedSupersedesRunId?: string
+  expectedBaseObjective?: StrategicObjectiveId
 }
 
 export function projectDirectorRequestFingerprint(input: {
@@ -57,6 +68,8 @@ export function projectDirectorRequestFingerprint(input: {
   baseVersionId: string
   baseHash: string
   reason?: string
+  objective?: StrategicObjectiveId
+  destination?: string
   actorContextHash: string
   operationId?: string
 }): string {
@@ -68,6 +81,8 @@ export function projectDirectorRequestFingerprint(input: {
     baseHash: input.baseHash,
     plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
     criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+    objective: input.objective ?? null,
+    destination: input.destination?.trim() || null,
     actorContextHash: input.actorContextHash,
     execution: input.operationId
       ? { kind: 'public-operation-worker', operationId: input.operationId }
@@ -399,6 +414,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const requestFingerprint = projectDirectorRequestFingerprint({
       workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
       reason: request.reason,
+      objective: request.objective,
+      destination: request.destination,
       actorContextHash: authenticationAudit.contextHash,
       ...(request.operationFence
         ? { operationId: request.operationFence.operationId }
@@ -423,7 +440,53 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     if (context.currentVersion.id !== baseVersionId || context.currentVersion.baseHash !== request.baseHash) {
       throw new DomainError('VERSION_CONFLICT', 'Director base version is stale', { currentVersionId: context.currentVersion.id, currentBaseHash: context.currentVersion.baseHash })
     }
-    const objective = resolveStrategicObjective(context.project.objective)
+    const objective = resolveStrategicObjective(
+      request.objective ?? context.project.objective,
+    )
+    const objectiveBinding = bindDirectorObjective({
+      objective: objective.id,
+      ...(context.latestDirectorObjective
+        ? { previous: context.latestDirectorObjective }
+        : {}),
+    })
+    const objectiveChanged = objective.id !== context.project.objective
+    if (request.operationFence) {
+      assertDomain(
+        request.expectedBaseObjective === context.project.objective &&
+          request.expectedObjectiveVersion === objectiveBinding.objectiveVersion &&
+          request.expectedRubricRef === objectiveBinding.rubricRef &&
+          request.expectedSupersedesRunId === objectiveBinding.supersedesRunId,
+        'PERSISTENCE_CONFLICT',
+        'Persisted Director objective transition does not match current immutable state',
+      )
+    } else {
+      assertDomain(
+        request.expectedObjectiveVersion === undefined &&
+          request.expectedRubricRef === undefined &&
+          request.expectedSupersedesRunId === undefined &&
+          request.expectedBaseObjective === undefined,
+        'INVALID_ARGUMENT',
+        'Direct Director execution cannot provide persisted objective binding fields',
+      )
+    }
+    assertDomain(
+      !objectiveChanged || Boolean(request.reason?.trim()),
+      'PRECONDITION_REQUIRED',
+      'Changing the strategic objective requires an explicit reason',
+    )
+    assertDomain(
+      objectiveChanged || request.destination === undefined,
+      'INVALID_ARGUMENT',
+      'destination is only accepted when the strategic objective changes',
+    )
+    const changedDesiredAction = objectiveChanged
+      ? createDesiredAction({
+          objective: objective.id,
+          ...(request.destination?.trim()
+            ? { destination: request.destination.trim() }
+            : {}),
+        })
+      : undefined
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
     const hasSelectedInsert = clips.some(
@@ -439,6 +502,13 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const treatmentPlanId = `treatment-${directorRunId}`
     const storyPlanId = `story-${directorRunId}`
     const qualityReportId = `quality-${directorRunId}`
+    const currentBriefSnapshotId = normalizedIdentifier(
+      context.currentVersion.snapshotRefs.brief ?? '',
+      'briefSnapshotId',
+    )
+    const briefSnapshotId = objectiveChanged
+      ? dependencies.createId('project-snapshot')
+      : currentBriefSnapshotId
     const perception = buildPerception({
       id: perceptionId,
       durationFrames: context.editPlan.durationFrames,
@@ -464,7 +534,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const treatmentPlan = Object.freeze({ id: treatmentPlanId, ...treatmentBase })
     const storyPlan = buildStoryPlan({ id: storyPlanId, objective: objective.id, clips, fps: context.editPlan.fps, durationFrames: context.editPlan.durationFrames })
     const decisions = buildDecisions({
-      briefRef: context.currentVersion.snapshotRefs.brief ?? 'brief-unavailable',
+      briefRef: briefSnapshotId,
       transcriptRef: context.transcript.id,
       editPlanRef: context.currentVersion.snapshotRefs.editPlan,
       policyRef: context.currentVersion.snapshotRefs.policies,
@@ -525,7 +595,35 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const storySnapshotId = dependencies.createId('project-snapshot')
     const editPlanSnapshotId = dependencies.createId('project-snapshot')
     const qualitySnapshotId = dependencies.createId('project-snapshot')
+    const objectiveBrief = objectiveChanged
+      ? Object.freeze({
+          ...context.brief,
+          schemaVersion: 2,
+          objective: objective.id,
+          desiredAction: changedDesiredAction,
+          objectiveChange: Object.freeze({
+            from: context.project.objective,
+            to: objective.id,
+            objectiveVersion: objectiveBinding.objectiveVersion,
+            rubricRef: objectiveBinding.rubricRef,
+            supersedesRunId: objectiveBinding.supersedesRunId,
+            reason: request.reason!.trim(),
+            changedAt: createdAt,
+          }),
+        })
+      : undefined
     const snapshots = Object.freeze([
+      ...(objectiveBrief
+        ? [snapshot({
+            id: briefSnapshotId,
+            workspaceId,
+            projectId,
+            kind: 'brief',
+            contentSchemaVersion: 2,
+            value: objectiveBrief,
+            createdAt,
+          })]
+        : []),
       snapshot({ id: perceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 1, value: perception, createdAt }),
       snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: 1, value: treatmentPlan, createdAt }),
       snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
@@ -533,6 +631,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 1, value: qualityReport, createdAt }),
     ])
     const snapshotRefs = Object.freeze({
+      brief: briefSnapshotId,
       perception: perceptionSnapshotId,
       treatment: treatmentSnapshotId,
       story: storySnapshotId,
@@ -553,8 +652,15 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       outputReferences: context.outputReferences,
     })
     const commandPayload: RunDirectorCommandPayload = Object.freeze({
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       directorRunId,
+      previousObjective: context.project.objective,
+      objective: objective.id,
+      objectiveVersion: objectiveBinding.objectiveVersion,
+      rubricRef: objectiveBinding.rubricRef,
+      ...(objectiveBinding.supersedesRunId
+        ? { supersedesRunId: objectiveBinding.supersedesRunId }
+        : {}),
       plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
       criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
       sourceTranscriptId: context.transcript.id,
@@ -578,7 +684,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       id: versionId, workspaceId, projectId, sequence: context.currentVersion.sequence + 1,
       parentVersionId: context.currentVersion.id,
       snapshotRefs: {
-        brief: context.currentVersion.snapshotRefs.brief,
+        brief: briefSnapshotId,
         treatment: treatmentSnapshotId,
         story: storySnapshotId,
         editPlan: editPlanSnapshotId,
@@ -591,9 +697,15 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       createdBy: clientId, commandId, createdAt,
     })
     const run: DirectorRun = Object.freeze({
-      schemaVersion: 1 as const, id: directorRunId, workspaceId, projectId, commandId,
+      schemaVersion: 2 as const, id: directorRunId, workspaceId, projectId, commandId,
       baseVersionId, resultVersionId: versionId, status: 'planned' as const,
       plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION, criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
+      objective: objective.id,
+      objectiveVersion: objectiveBinding.objectiveVersion,
+      rubricRef: objectiveBinding.rubricRef,
+      ...(objectiveBinding.supersedesRunId
+        ? { supersedesRunId: objectiveBinding.supersedesRunId }
+        : {}),
       perception, treatmentPlan, storyPlan, editPlan, qualityReport, decisions, assumptions,
       initiatedBy: Object.freeze({ type: 'api-client' as const, id: clientId }), createdAt,
     })
@@ -605,6 +717,10 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         projectId, sequence: version.sequence, parentVersionId: version.parentVersionId,
         baseHash: version.baseHash, commandId, commandType: command.type, directorRunId,
         snapshotRefs: version.snapshotRefs, qualityStatus: qualityReport.status, createdAt,
+        objective: objective.id,
+        objectiveVersion: objectiveBinding.objectiveVersion,
+        rubricRef: objectiveBinding.rubricRef,
+        supersedesRunId: objectiveBinding.supersedesRunId ?? null,
         commandImpactHash: impact.impactHash,
         artifactInvalidationCount: impact.affectedArtifacts.length,
       },

@@ -8,7 +8,10 @@ import {
   createDirectorRunRepository,
   createPublicOperationRepository,
 } from '@/v2/infrastructure/repository-factory'
-import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import {
+  assertExternalMutationOrigin,
+  authenticateExternalRequest,
+} from '@/v2/public-api/authentication'
 import {
   publicApiHeaders,
   resolveRequestId,
@@ -18,6 +21,7 @@ import {
   presentPublicOperationV2,
   presentSuccess,
 } from '@/v2/public-api/presenters'
+import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +33,7 @@ export async function POST(
   try {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
+    assertExternalMutationOrigin(request, actor)
     let body: unknown
     try {
       body = await request.json()
@@ -40,13 +45,15 @@ export async function POST(
     }
     const record = body as Record<string, unknown>
     if (Object.keys(record).some((key) =>
-      !['baseVersionId', 'baseHash', 'reason'].includes(key))) {
+      !['baseVersionId', 'baseHash', 'reason', 'objective', 'destination'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (
       typeof record.baseVersionId !== 'string' ||
       typeof record.baseHash !== 'string' ||
-      (record.reason !== undefined && typeof record.reason !== 'string')
+      (record.reason !== undefined && typeof record.reason !== 'string') ||
+      (record.objective !== undefined && typeof record.objective !== 'string') ||
+      (record.destination !== undefined && typeof record.destination !== 'string')
     ) throw new DomainError('INVALID_ARGUMENT', 'Director operation request is invalid')
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
     const { projectId } = await context.params
@@ -63,6 +70,12 @@ export async function POST(
       actor,
       idempotencyKey,
       traceId: requestId,
+      ...(record.objective !== undefined
+        ? { objective: record.objective as StrategicObjectiveId }
+        : {}),
+      ...(typeof record.destination === 'string' && record.destination.trim()
+        ? { destination: record.destination.trim() }
+        : {}),
       ...(record.reason !== undefined ? { reason: record.reason } : {}),
     })
     return NextResponse.json(

@@ -19,6 +19,12 @@ export interface PublicSchemaDefinition {
 }
 
 const idSchema = PUBLIC_ID_SCHEMA
+const strategicObjectiveSchema = {
+  enum: [
+    'discovery', 'awareness', 'warming', 'lead-generation',
+    'sale', 'whatsapp', 'booking', 'download',
+  ],
+} as const
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 const workspaceLutSchema = {
@@ -17696,6 +17702,95 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-workspace', 8, 'Project workspace with objective-bound DirectorRun history',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
+      properties: {
+        project: searchableProjectSchemaV2,
+        version: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'baseHash', 'createdAt', 'visibleState'],
+          properties: {
+            id: idSchema, sequence: { type: 'integer', minimum: 1 }, baseHash: sha256Schema,
+            createdAt: dateTimeSchema, visibleState: currentProjectVersionVisibleStateSchema,
+          },
+        },
+        brief: { type: 'object', additionalProperties: true },
+        editPlan: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],
+          properties: {
+            id: idSchema, state: { type: 'string' }, fps: { type: 'number', minimum: 0 }, durationFrames: { type: 'integer', minimum: 0 },
+            clipCount: { type: 'integer', minimum: 0 }, cutCount: { type: 'integer', minimum: 0 },
+            automaticZoom: { type: 'boolean' }, subtitleFaceProtection: { type: 'boolean' },
+          },
+        },
+        commands: {
+          type: 'array', maxItems: 20,
+          items: {
+            type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'createdAt'],
+            properties: { id: idSchema, type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] }, baseVersionId: idSchema, resultVersionId: idSchema, reason: { type: 'string', maxLength: 1000 }, createdAt: dateTimeSchema },
+          },
+        },
+        directorRuns: {
+          type: 'array', maxItems: 10,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: [
+              'id', 'status', 'plannerVersion', 'criticVersion', 'objective',
+              'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
+              'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
+              'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
+              'automaticZoom', 'createdAt',
+            ],
+            properties: {
+              id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+              plannerVersion: { type: 'string', minLength: 3, maxLength: 64 }, criticVersion: { type: 'string', minLength: 3, maxLength: 64 },
+              objective: strategicObjectiveSchema,
+              objectiveVersion: { type: 'integer', minimum: 1 },
+              rubricRef: { type: 'string', minLength: 3, maxLength: 128 },
+              supersedesRunId: idSchema,
+              baseVersionId: idSchema, resultVersionId: idSchema, treatmentSnapshotId: idSchema,
+              storySnapshotId: idSchema, qualitySnapshotId: idSchema,
+              qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
+              qualityScore: { type: 'number', minimum: 0, maximum: 1 },
+              decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
+              subtitleCueCount: { type: 'integer', minimum: 0 }, transitionCount: { type: 'integer', minimum: 0 },
+              automaticZoom: { type: 'boolean' }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        media: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'role', 'originalFileName', 'artifactId', 'manifestId', 'mediaType', 'container', 'byteSize', 'sha256', 'status', 'createdAt'],
+            properties: {
+              id: idSchema, role: { enum: ['source-master', 'editing-proxy', 'editorial-proxy', 'final-output'] }, originalFileName: { type: 'string', minLength: 1, maxLength: 255 },
+              artifactId: idSchema, manifestId: idSchema, mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 2, maxLength: 16 },
+              byteSize: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' }, sha256: sha256Schema, status: { enum: ['available', 'quarantined', 'deleted'] }, rightsStatus: { type: 'string' },
+              probe: { type: 'object', additionalProperties: false, required: ['width', 'height', 'duration', 'fps'], properties: { width: { type: 'integer', minimum: 1 }, height: { type: 'integer', minimum: 1 }, duration: { type: 'number', exclusiveMinimum: 0 }, fps: { type: 'number', exclusiveMinimum: 0 } } },
+              createdAt: dateTimeSchema,
+            },
+          },
+        },
+        transcripts: {
+          type: 'array', maxItems: 1000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'sourceArtifactId', 'language', 'provider', 'model', 'transcriptHash', 'text', 'wordCount', 'segmentCount', 'createdAt'],
+            properties: {
+              id: idSchema, sourceArtifactId: idSchema, language: { type: 'string', minLength: 2, maxLength: 35 }, provider: { type: 'string' }, model: { type: 'string' },
+              transcriptHash: sha256Schema, text: { type: 'string' }, wordCount: { type: 'integer', minimum: 0 }, segmentCount: { type: 'integer', minimum: 0 }, createdAt: dateTimeSchema,
+            },
+          },
+        },
+        operationIds: { type: 'array', maxItems: 1000, items: idSchema, uniqueItems: true },
+        operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV7 },
+      },
+    }),
+  ),
   defineSchema('production-batch-mutated', 2, 'Created or mutated production batch with aggregate and per-item visible state',
     successSchema({
       type: 'object',
@@ -18726,6 +18821,65 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     ],
   }),
+  defineSchema('apply-project-edit-command-request', 5, 'Typed project edit command with objective-bound DirectorRun supersession', {
+    type: 'object', additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash'],
+    properties: {
+      type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      expectedTranscriptHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      destination: { type: 'string', minLength: 1, maxLength: 2048 },
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }, label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+          },
+        },
+      },
+      exclusionOverrides: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'],
+          properties: {
+            sourceStartSeconds: { type: 'number', minimum: 0 }, sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+            ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      {
+        required: ['sourceTranscriptId', 'rules'],
+        properties: {
+          type: { const: 'remove-spoken-content' }, sourceTranscriptId: {}, rules: {},
+          expectedTranscriptHash: false, objective: false, destination: false,
+        },
+      },
+      {
+        required: ['sourceTranscriptId', 'expectedTranscriptHash'],
+        properties: {
+          type: { const: 'replace-source-transcript' }, sourceTranscriptId: {}, expectedTranscriptHash: {},
+          rules: false, exclusionOverrides: false, objective: false, destination: false,
+        },
+      },
+      {
+        required: ['objective'],
+        properties: {
+          type: { const: 'run-director' }, objective: {}, destination: {},
+          sourceTranscriptId: false, expectedTranscriptHash: false,
+          rules: false, exclusionOverrides: false,
+        },
+      },
+    ],
+  }),
   defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
     successSchema({
       type: 'object', additionalProperties: false,
@@ -19132,6 +19286,111 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
     }),
   ),
+  defineSchema('project-edit-command-applied', 7, 'Applied edit command response with objective-bound DirectorRun supersession',
+    successSchema({
+      oneOf: [
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'editorial', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('remove-spoken-content'),
+            version: currentProjectVersionResultSchema(['brief', 'editPlan', 'policies']),
+            editorial: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'sourceTranscriptId', 'sourceArtifactId', 'exclusions', 'retainedSourceRanges',
+                'outputDurationFrames', 'fps', 'automaticZoom', 'protectedOpeningFrames',
+                'subtitleFaceProtection', 'impact', 'invalidations',
+              ],
+              properties: {
+                sourceTranscriptId: idSchema, sourceArtifactId: idSchema,
+                exclusions: { type: 'array', minItems: 1, maxItems: 128 },
+                retainedSourceRanges: { type: 'array', minItems: 1, maxItems: 129 },
+                outputDurationFrames: { type: 'integer', minimum: 1 },
+                fps: { type: 'number', exclusiveMinimum: 0 }, automaticZoom: { const: false },
+                protectedOpeningFrames: { type: 'integer', minimum: 1 }, subtitleFaceProtection: { const: true },
+                impact: editorialCutImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'directorRun', 'operation', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('run-director'),
+            version: currentProjectVersionResultSchema([
+              'brief', 'perception', 'treatment', 'story', 'editPlan', 'quality', 'policies',
+            ]),
+            directorRun: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'id', 'status', 'plannerVersion', 'criticVersion', 'objective',
+                'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
+                'perception', 'treatmentPlan', 'storyPlan', 'editPlan', 'qualityReport',
+                'decisions', 'assumptions', 'impact', 'invalidations', 'createdAt',
+              ],
+              properties: {
+                id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
+                plannerVersion: { type: 'string' }, criticVersion: { type: 'string' },
+                objective: strategicObjectiveSchema,
+                objectiveVersion: { type: 'integer', minimum: 1 },
+                rubricRef: { type: 'string', minLength: 3, maxLength: 128 },
+                supersedesRunId: idSchema,
+                baseVersionId: idSchema, resultVersionId: idSchema,
+                perception: { type: 'object', additionalProperties: false, required: ['snapshotId', 'summary'], properties: { snapshotId: idSchema, summary: { type: 'object' } } },
+                treatmentPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                storyPlan: { type: 'object', additionalProperties: false, required: ['snapshotId', 'plan'], properties: { snapshotId: idSchema, plan: { type: 'object' } } },
+                editPlan: {
+                  type: 'object', additionalProperties: false,
+                  required: ['snapshotId', 'id', 'durationFrames', 'fps', 'subtitleCueCount', 'transitionCount', 'automaticZoom'],
+                  properties: {
+                    snapshotId: idSchema, id: idSchema, durationFrames: { type: 'integer', minimum: 1 },
+                    fps: { type: 'number', exclusiveMinimum: 0 }, subtitleCueCount: { type: 'integer', minimum: 1 },
+                    transitionCount: { type: 'integer', minimum: 0 }, automaticZoom: { const: false },
+                  },
+                },
+                qualityReport: { type: 'object', additionalProperties: false, required: ['snapshotId', 'report'], properties: { snapshotId: idSchema, report: { type: 'object' } } },
+                decisions: { type: 'array', minItems: 4, maxItems: 64, items: { type: 'object' } },
+                assumptions: { type: 'array', maxItems: 64, items: { type: 'string' } },
+                impact: directorRunImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                createdAt: dateTimeSchema,
+              },
+            },
+            operation: publicOperationSchemaV3,
+            replayed: { type: 'boolean' },
+          },
+        },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['command', 'version', 'sourceTranscript', 'replayed'],
+          properties: {
+            command: appliedProjectCommandSchema('replace-source-transcript'),
+            version: currentProjectVersionResultSchema(['brief', 'treatment', 'story', 'editPlan', 'policies']),
+            sourceTranscript: {
+              type: 'object', additionalProperties: false,
+              required: [
+                'previousTranscriptId', 'previousTranscriptHash', 'replacementTranscriptId',
+                'replacementTranscriptHash', 'impact', 'invalidations', 'nextRequiredCapability',
+              ],
+              properties: {
+                previousTranscriptId: idSchema, previousTranscriptHash: sha256Schema,
+                replacementTranscriptId: idSchema, replacementTranscriptHash: sha256Schema,
+                impact: sourceTranscriptReplacementImpactSchema,
+                invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+                nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+              },
+            },
+            replayed: { type: 'boolean' },
+          },
+        },
+      ],
+    }),
+  ),
   defineSchema('enqueue-project-director-run-request', 1, 'Enqueue one fenced Director run against an immutable project version', {
     type: 'object',
     additionalProperties: false,
@@ -19139,6 +19398,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     properties: {
       baseVersionId: idSchema,
       baseHash: sha256Schema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('enqueue-project-director-run-request', 2, 'Enqueue one objective-bound fenced Director run against an immutable project version', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['baseVersionId', 'baseHash', 'objective'],
+    properties: {
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      destination: { type: 'string', minLength: 1, maxLength: 2048 },
       reason: { type: 'string', minLength: 1, maxLength: 1000 },
     },
   }),

@@ -34,10 +34,14 @@ import {
   hydrateEditCommandExternalActorAudit,
 } from './edit-command-actor-audit.ts'
 import { hydrateExternalActorAudit } from './external-actor-audit.ts'
+import {
+  bindDirectorObjective,
+  resolveStrategicObjective,
+} from '../../domain/strategic-objective.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
-  resultVersion: true,
+  resultVersion: { include: { briefSnapshot: true } },
   perceptionSnapshot: true,
   treatmentSnapshot: true,
   storySnapshot: true,
@@ -113,12 +117,21 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   const storyPlan = parseRecord(row.storySnapshot.contentJson, 'StoryPlan') as unknown as StoryPlan & { id: string }
   const editPlan = parseRecord(row.editPlanSnapshot.contentJson, 'Director EditPlan') as unknown as DirectedEditPlan
   const qualityReport = parseRecord(row.qualitySnapshot.contentJson, 'Director quality report') as unknown as DirectorQualityReport
+  const brief = parseRecord(row.resultVersion.briefSnapshot.contentJson, 'Director brief')
   const decisions = validateDirectorDecisions(parseArray(row.decisionsJson, 'Director decisions') as unknown as DirectorRun['decisions'])
   const assumptions = Object.freeze(parseArray(row.assumptionsJson, 'Director assumptions').map((item) => String(item)))
+  const objective = resolveStrategicObjective(row.objective)
+  const previousObjective = resolveStrategicObjective(payload.previousObjective)
   validateDirectedEditPlan(editPlan)
   if (
-    row.command.type !== 'run-director' || payload.schemaVersion !== 2 || payload.directorRunId !== row.id ||
+    row.command.type !== 'run-director' || payload.schemaVersion !== 3 || payload.directorRunId !== row.id ||
     row.baseVersionId !== row.command.baseVersionId || row.resultVersionId !== version.id ||
+    payload.objective !== objective.id || payload.objective !== row.objective ||
+    payload.previousObjective !== previousObjective.id ||
+    payload.objectiveVersion !== row.objectiveVersion ||
+    !Number.isSafeInteger(row.objectiveVersion) || row.objectiveVersion < 1 ||
+    payload.rubricRef !== row.rubricRef || row.rubricRef !== `${objective.rubricId}/v1` ||
+    payload.supersedesRunId !== (row.supersedesRunId ?? undefined) ||
     impact.commandId !== row.command.id || impact.baseVersionId !== row.baseVersionId ||
     impact.resultVersionId !== row.resultVersionId || impact.sourceTranscriptId !== payload.sourceTranscriptId ||
     impact.plannerVersion !== payload.plannerVersion || impact.criticVersion !== payload.criticVersion ||
@@ -127,12 +140,15 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     payload.snapshotRefs.story !== row.storySnapshotId ||
     payload.snapshotRefs.editPlan !== row.editPlanSnapshotId ||
     payload.snapshotRefs.quality !== row.qualitySnapshotId ||
+    payload.snapshotRefs.brief !== version.snapshotRefs.brief ||
+    brief.objective !== objective.id ||
     editPlan.projectVersionId !== version.id || editPlan.directorRunId !== row.id ||
     treatmentPlan.id !== editPlan.treatmentPlanId || storyPlan.id !== editPlan.storyPlanId ||
+    treatmentPlan.objective !== objective.id || storyPlan.objective !== objective.id ||
     qualityReport.status === 'blocked' || row.initiatedByType !== 'api-client'
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored DirectorRun references are inconsistent')
   const run: DirectorRun = Object.freeze({
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     id: row.id,
     workspaceId: row.workspaceId,
     projectId: row.projectId,
@@ -142,6 +158,12 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     status: row.status as DirectorRun['status'],
     plannerVersion: row.plannerVersion,
     criticVersion: row.criticVersion,
+    objective: objective.id,
+    objectiveVersion: row.objectiveVersion,
+    rubricRef: row.rubricRef,
+    ...(row.supersedesRunId
+      ? { supersedesRunId: row.supersedesRunId }
+      : {}),
     perception: Object.freeze(perception),
     treatmentPlan: Object.freeze(treatmentPlan),
     storyPlan: Object.freeze(storyPlan),
@@ -213,12 +235,49 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
       include: {
         currentVersion: { include: { briefSnapshot: true, editPlanSnapshot: true, policiesSnapshot: true } },
         mediaAssets: { where: { role: 'source-master' }, orderBy: { createdAt: 'desc' }, take: 1 },
+        directorRuns: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          include: { qualitySnapshot: true },
+        },
       },
     })
     const versionRow = project?.currentVersion
     const master = project?.mediaAssets[0]
     if (!project || !versionRow || !master) return null
     if (!project.objective || !project.format || !project.locale) throw new DomainError('PERSISTENCE_CONFLICT', 'Project direction metadata is incomplete')
+    const projectObjective = resolveStrategicObjective(project.objective)
+    const latestDirectorRun = project.directorRuns[0]
+    const latestDirectorObjective = latestDirectorRun
+      ? (() => {
+          const storedObjective = resolveStrategicObjective(latestDirectorRun.objective)
+          const quality = parseRecord(
+            latestDirectorRun.qualitySnapshot.contentJson,
+            'latest Director quality report',
+          )
+          if (
+            latestDirectorRun.rubricRef !== `${storedObjective.rubricId}/v1` ||
+            !Number.isSafeInteger(latestDirectorRun.objectiveVersion) ||
+            latestDirectorRun.objectiveVersion < 1 ||
+            !['approved', 'approved-with-warnings', 'blocked'].includes(String(quality.status))
+          ) throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Latest Director objective evidence is invalid',
+          )
+          return Object.freeze({
+            runId: latestDirectorRun.id,
+            objective: storedObjective.id,
+            objectiveVersion: latestDirectorRun.objectiveVersion,
+            rubricRef: latestDirectorRun.rubricRef,
+            ...(latestDirectorRun.supersedesRunId
+              ? { supersedesRunId: latestDirectorRun.supersedesRunId }
+              : {}),
+            approved: ['approved', 'approved-with-warnings'].includes(
+              String(quality.status),
+            ),
+          })
+        })()
+      : undefined
     const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current EditPlan') as unknown as EditorialCutEditPlan
     const retimedTranscript = editPlan.retimedTranscript as unknown
     if (typeof retimedTranscript !== 'object' || retimedTranscript === null || !('sourceTranscriptId' in retimedTranscript) || typeof retimedTranscript.sourceTranscriptId !== 'string') {
@@ -258,7 +317,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
     }
     return Object.freeze({
       workspaceId: project.workspaceId,
-      project: Object.freeze({ id: project.id, objective: project.objective, format: project.format, locale: project.locale }),
+      project: Object.freeze({ id: project.id, objective: projectObjective.id, format: project.format, locale: project.locale }),
+      ...(latestDirectorObjective ? { latestDirectorObjective } : {}),
       currentVersion: createProjectVersion({
         id: versionRow.id,
         workspaceId: versionRow.workspaceId,
@@ -363,9 +423,19 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
               targetType: 'project-version',
               targetId: bundle.version.id,
             },
+            include: { projectDirectorRun: true },
           })
+          const originContext = origin?.projectDirectorRun
           if (
             !origin ||
+            !originContext ||
+            originContext.baseVersionId !== bundle.command.baseVersionId ||
+            originContext.baseHash !== bundle.command.baseHash ||
+            originContext.baseObjective !== bundle.command.payload.previousObjective ||
+            originContext.objective !== bundle.command.payload.objective ||
+            originContext.objectiveVersion !== bundle.command.payload.objectiveVersion ||
+            originContext.rubricRef !== bundle.command.payload.rubricRef ||
+            (originContext.supersedesRunId ?? undefined) !== bundle.command.payload.supersedesRunId ||
             hydrateExternalActorAudit(origin, origin.clientId).contextHash !==
               bundle.authenticationAudit.contextHash
           ) throw new DomainError(
@@ -399,7 +469,17 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           }
         }
         const [project, transcript, sourceMaster] = await Promise.all([
-          transaction.v2Project.findFirst({ where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId }, include: { currentVersion: true } }),
+          transaction.v2Project.findFirst({
+            where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId },
+            include: {
+              currentVersion: true,
+              directorRuns: {
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 1,
+                include: { qualitySnapshot: true },
+              },
+            },
+          }),
           transaction.v2MediaTranscript.findFirst({ where: {
             id: bundle.sourceEvidence.transcriptId,
             projectId: bundle.command.projectId,
@@ -415,6 +495,54 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           } }),
         ])
         if (!project?.currentVersion || !transcript || !sourceMaster) throw new DomainError('PERSISTENCE_CONFLICT', 'Director source evidence disappeared before commit')
+        const targetObjective = resolveStrategicObjective(bundle.command.payload.objective)
+        const latestRun = project.directorRuns[0]
+        const latestQuality = latestRun
+          ? parseRecord(latestRun.qualitySnapshot.contentJson, 'latest Director quality report')
+          : undefined
+        const objectiveBinding = bindDirectorObjective({
+          objective: targetObjective.id,
+          ...(latestRun
+            ? {
+                previous: {
+                  runId: latestRun.id,
+                  objective: resolveStrategicObjective(latestRun.objective).id,
+                  objectiveVersion: latestRun.objectiveVersion,
+                  rubricRef: latestRun.rubricRef,
+                  ...(latestRun.supersedesRunId
+                    ? { supersedesRunId: latestRun.supersedesRunId }
+                    : {}),
+                  approved: ['approved', 'approved-with-warnings'].includes(
+                    String(latestQuality?.status),
+                  ),
+                },
+              }
+            : {}),
+        })
+        const changedObjective = targetObjective.id !== project.objective
+        const briefSnapshotChanged =
+          bundle.command.payload.snapshotRefs.brief !== project.currentVersion.briefSnapshotId
+        const proposedBrief = bundle.snapshots.find(
+          (item) => item.id === bundle.command.payload.snapshotRefs.brief,
+        )
+        if (
+          project.objective !== bundle.command.payload.previousObjective ||
+          bundle.run.objective !== targetObjective.id ||
+          bundle.run.objectiveVersion !== objectiveBinding.objectiveVersion ||
+          bundle.run.rubricRef !== objectiveBinding.rubricRef ||
+          bundle.run.supersedesRunId !== objectiveBinding.supersedesRunId ||
+          changedObjective !== briefSnapshotChanged ||
+          (briefSnapshotChanged && proposedBrief?.kind !== 'brief')
+        ) throw new DomainError(
+          'VERSION_CONFLICT',
+          'Project strategic objective changed before Director commit',
+        )
+        if (proposedBrief) {
+          const brief = parseRecord(proposedBrief.contentJson, 'proposed Director brief')
+          if (brief.objective !== targetObjective.id) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Director brief objective is inconsistent')
+          }
+        }
         if (
           project.currentVersion.id !== bundle.command.baseVersionId ||
           project.currentVersion.baseHash !== bundle.command.baseHash ||
@@ -497,6 +625,10 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           status: bundle.run.status,
           plannerVersion: bundle.run.plannerVersion,
           criticVersion: bundle.run.criticVersion,
+          objective: bundle.run.objective,
+          objectiveVersion: bundle.run.objectiveVersion,
+          rubricRef: bundle.run.rubricRef,
+          supersedesRunId: bundle.run.supersedesRunId,
           perceptionSnapshotId: refs.perception,
           treatmentSnapshotId: refs.treatment,
           storySnapshotId: refs.story,
@@ -520,8 +652,16 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           })) })
         }
         const updated = await transaction.v2Project.updateMany({
-          where: { id: bundle.command.projectId, workspaceId: bundle.command.workspaceId, currentVersionId: bundle.command.baseVersionId },
-          data: { currentVersionId: bundle.version.id },
+          where: {
+            id: bundle.command.projectId,
+            workspaceId: bundle.command.workspaceId,
+            currentVersionId: bundle.command.baseVersionId,
+            objective: bundle.command.payload.previousObjective,
+          },
+          data: {
+            currentVersionId: bundle.version.id,
+            objective: bundle.command.payload.objective,
+          },
         })
         if (updated.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Project current version changed during Director commit')
         await transaction.v2PublicEventOutbox.create({ data: {

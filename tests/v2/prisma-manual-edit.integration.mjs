@@ -1067,6 +1067,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         type: 'run-director',
         baseVersionId: transcriptApplied.data.version.id,
         baseHash: transcriptApplied.data.version.baseHash,
+        objective: 'discovery',
         reason: 'Recalcular a direção e invalidar somente os outputs concluídos da versão-base.',
       }),
     })
@@ -1081,12 +1082,16 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       sourceVersionId: transcriptApplied.data.version.id, variantId: '9:16',
     }])
     assert.equal(directorApplied.data.directorRun.invalidations.length, 1)
+    assert.equal(directorApplied.data.directorRun.objective, 'discovery')
+    assert.equal(directorApplied.data.directorRun.objectiveVersion, 1)
+    assert.equal(directorApplied.data.directorRun.rubricRef, 'awareness-discovery/v1')
+    assert.equal(directorApplied.data.directorRun.supersedesRunId, undefined)
     assert.equal(directorApplied.data.directorRun.invalidations[0].artifactId, completedProxyArtifactId)
     assert.equal(directorApplied.data.operation.status, 'queued')
     const storedDirectorCommand = await client.v2EditCommand.findUniqueOrThrow({
       where: { id: directorApplied.data.command.id }, include: { artifactInvalidations: true },
     })
-    assert.equal(JSON.parse(storedDirectorCommand.payloadJson).schemaVersion, 2)
+    assert.equal(JSON.parse(storedDirectorCommand.payloadJson).schemaVersion, 3)
     assert.equal(storedDirectorCommand.artifactInvalidations.length, 1)
     assert.deepEqual(JSON.parse(storedDirectorCommand.artifactInvalidations[0].dependencyTypesJson), ['audio', 'content', 'policy', 'timing', 'visual'])
     const directorReplayResponse = await runDirector()
@@ -1153,6 +1158,8 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       body: JSON.stringify({
         baseVersionId: lutSelectionApplied.data.version.id,
         baseHash: lutSelectionApplied.data.version.baseHash,
+        objective: 'sale',
+        destination: 'https://example.com/checkout',
         reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
       }),
     })
@@ -1186,7 +1193,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedAsyncOperation.projectDirectorRun.resultVersionId, allocatedResultVersionId)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.operationId, storedAsyncOperation.id)
     assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.resultVersionId, allocatedResultVersionId)
-    assert.equal((await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId, allocatedResultVersionId)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objective, 'sale')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.objectiveVersion, 2)
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.rubricRef, 'conversion-sale/v1')
+    assert.equal(storedAsyncOperation.projectDirectorRun.directorRun.supersedesRunId, directorApplied.data.directorRun.id)
+    const projectAfterObjectiveChange = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
+    assert.equal(projectAfterObjectiveChange.currentVersionId, allocatedResultVersionId)
+    assert.equal(projectAfterObjectiveChange.objective, 'sale')
     const asyncDirectorReplayResponse = await enqueueAsyncDirector()
     const asyncDirectorReplay = await asyncDirectorReplayResponse.json()
     assert.equal(asyncDirectorReplayResponse.status, 202, JSON.stringify(asyncDirectorReplay))

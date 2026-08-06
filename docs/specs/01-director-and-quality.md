@@ -149,6 +149,18 @@ O snapshot é imutável. Mudança de briefing, policy, objetivo ou preferência 
 - Rights resolvíveis para as fontes pretendidas.
 - PerceptionTimeline mínima ou job capaz de produzi-la.
 
+O objetivo primário é um binding versionado do run, não uma leitura tardia de
+metadata mutável do projeto. O `DirectorRun` persiste `objective`,
+`objectiveVersion`, `rubricRef` e, quando aplicável, `supersedesRunId`.
+TreatmentPlan, StoryPlan, QualityReport e Command devem concordar com esse
+binding ou o commit falha fechado.
+
+Trocar o objetivo após uma run aprovada exige justificativa explícita e cria
+novo brief, ProjectVersion e DirectorRun. A revisão do objetivo é incrementada e
+a nova run referencia a anterior; nenhuma row histórica é reescrita. Objetivos
+de conversão também exigem destino válido. Repetir o mesmo objetivo conserva a
+revisão e não cria uma supersessão artificial.
+
 ### 7.2 Entradas opcionais
 
 - Briefing livre.

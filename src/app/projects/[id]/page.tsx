@@ -6,6 +6,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 
 import LogoutButton from '@/components/LogoutButton'
 import type { VisibleState } from '@/v2/domain/visible-state'
+import {
+  STRATEGIC_OBJECTIVES,
+  type StrategicObjectiveId,
+} from '@/v2/domain/strategic-objective'
+
+const OBJECTIVES_REQUIRING_DESTINATION = new Set<StrategicObjectiveId>([
+  'lead-generation',
+  'sale',
+  'whatsapp',
+  'booking',
+  'download',
+])
 
 interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
 interface MediaRecord {
@@ -531,6 +543,7 @@ interface DirectorRunSummary {
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
   qualityStatus: 'approved' | 'approved-with-warnings' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
   subtitleCueCount: number; transitionCount: number; automaticZoom: boolean; createdAt: string
+  objective: StrategicObjectiveId; objectiveVersion: number; rubricRef: string; supersedesRunId?: string
 }
 interface WorkspaceData {
   project: { id: string; name: string; status: string; objective?: string; format?: string; locale?: string; createdAt: string }
@@ -934,6 +947,10 @@ export default function ProjectWorkspacePage() {
   const sourceCleanupIdempotencyKeys = useRef(new Map<string, string>())
   const validationDecisionIdempotencyKeys =
     useRef(new Map<string, string>())
+  const directorIdempotencyKey = useRef<{
+    fingerprint: string
+    key: string
+  } | null>(null)
   const contiguousExtractionKey = useRef<{
     fingerprint: string
     key: string
@@ -947,6 +964,10 @@ export default function ProjectWorkspacePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadLabel, setUploadLabel] = useState('')
   const [directorRunning, setDirectorRunning] = useState(false)
+  const [directorObjective, setDirectorObjective] =
+    useState<StrategicObjectiveId>('discovery')
+  const [directorObjectiveReason, setDirectorObjectiveReason] = useState('')
+  const [directorDestination, setDirectorDestination] = useState('')
   const [exportRunning, setExportRunning] = useState(false)
   const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'error'>('idle')
   const [review, setReview] = useState<ProjectReviewData | null>(null)
@@ -1616,6 +1637,20 @@ export default function ProjectWorkspacePage() {
   )
   const transcript = workspace?.transcripts[0]
   const latestDirectorRun = workspace?.directorRuns[0]
+  const selectedDirectorObjective = STRATEGIC_OBJECTIVES.find(
+    (item) => item.id === directorObjective,
+  )!
+  const directorObjectiveChanged =
+    Boolean(workspace?.project.objective) &&
+    directorObjective !== workspace?.project.objective
+  useEffect(() => {
+    if (!workspace?.project.objective) return
+    if (STRATEGIC_OBJECTIVES.some((item) => item.id === workspace.project.objective)) {
+      setDirectorObjective(workspace.project.objective as StrategicObjectiveId)
+      setDirectorObjectiveReason('')
+      setDirectorDestination('')
+    }
+  }, [workspace?.project.objective])
   const currentReviewScene = useMemo(
     () => review?.scenes.find((scene) => previewFrame >= scene.startFrame && previewFrame < scene.endFrame),
     [previewFrame, review?.scenes],
@@ -2631,21 +2666,60 @@ export default function ProjectWorkspacePage() {
   }
 
   async function runDirector() {
-    if (!workspace?.version || workspace.editPlan?.state !== 'compiled' || !transcript) {
+    if (!workspace?.version || !workspace.project.objective || workspace.editPlan?.state !== 'compiled' || !transcript) {
       setNotice('O Diretor V2 precisa do corte editorial compilado e da transcrição alinhada.')
       return
+    }
+    const currentObjective = workspace.project.objective as StrategicObjectiveId
+    const objectiveChanged = directorObjective !== currentObjective
+    const objectiveReason = directorObjectiveReason.trim()
+    const destination = directorDestination.trim()
+    if (objectiveChanged && !objectiveReason) {
+      setNotice('Explique por que o objetivo estratégico mudou antes de executar uma nova direção.')
+      return
+    }
+    if (
+      objectiveChanged &&
+      OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) &&
+      !destination
+    ) {
+      setNotice('O novo objetivo exige um destino explícito para a ação esperada.')
+      return
+    }
+    const reason = objectiveChanged
+      ? objectiveReason
+      : 'Planejar, criticar e materializar a direção editorial V2 completa para o objetivo aprovado.'
+    const fingerprint = JSON.stringify({
+      projectId,
+      baseVersionId: workspace.version.id,
+      baseHash: workspace.version.baseHash,
+      objective: directorObjective,
+      destination: objectiveChanged ? destination : null,
+      reason,
+    })
+    if (directorIdempotencyKey.current?.fingerprint !== fingerprint) {
+      directorIdempotencyKey.current = {
+        fingerprint,
+        key: crypto.randomUUID(),
+      }
     }
     setDirectorRunning(true)
     setNotice(null)
     try {
       await requestJson(`/v1/projects/${encodeURIComponent(projectId)}/commands`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': directorIdempotencyKey.current.key,
+        },
         body: JSON.stringify({
           type: 'run-director', baseVersionId: workspace.version.id, baseHash: workspace.version.baseHash,
-          reason: 'Planejar, criticar e materializar a primeira direção editorial V2 completa.',
+          objective: directorObjective,
+          ...(objectiveChanged && destination ? { destination } : {}),
+          reason,
         }),
       })
+      directorIdempotencyKey.current = null
       setNotice('Direção V2 persistida. O novo proxy com legendas e transições entrou na fila de render.')
       await loadWorkspace(true)
     } catch (error) {
@@ -2947,6 +3021,60 @@ export default function ProjectWorkspacePage() {
           <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
             <p className="text-[9px] uppercase tracking-[0.16em] text-[#6c685f]">Briefing do diretor</p>
             <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]">{briefText || 'Nenhuma instrução adicional. O diretor deverá declarar as premissas antes do plano editorial.'}</p>
+          </div>
+          <div className="mt-5 rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="director-objective-governance">
+            <label className="block text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]" htmlFor="director-objective">
+              Objetivo desta direção
+            </label>
+            <select
+              className="mt-2 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55"
+              disabled={directorRunning || operationActive}
+              id="director-objective"
+              onChange={(event) => {
+                setDirectorObjective(event.target.value as StrategicObjectiveId)
+                setDirectorObjectiveReason('')
+                setDirectorDestination('')
+              }}
+              value={directorObjective}
+            >
+              {STRATEGIC_OBJECTIVES.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </select>
+            <p className="mt-2 text-[10px] leading-4 text-[#8c877e]">{selectedDirectorObjective.description}</p>
+            <p className="mt-1 text-[10px] leading-4 text-[#69655e]">Resultado esperado: {selectedDirectorObjective.exampleOutcome}</p>
+            {latestDirectorRun ? (
+              <p className="mt-2 font-mono text-[8px] text-[#716c64]">
+                {latestDirectorRun.rubricRef} · revisão {latestDirectorRun.objectiveVersion}
+              </p>
+            ) : null}
+            {directorObjectiveChanged ? (
+              <div className="mt-3 space-y-3 border-t border-white/[0.07] pt-3">
+                <p className="text-[10px] leading-4 text-[#d2ad59]">A direção anterior não será alterada: a troca criará uma nova versão e um novo DirectorRun ligado ao anterior.</p>
+                <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">
+                  Motivo obrigatório
+                  <textarea
+                    className="mt-1.5 min-h-20 w-full resize-y rounded-lg border border-white/[0.09] bg-[#080808] px-3 py-2 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55"
+                    maxLength={1000}
+                    onChange={(event) => setDirectorObjectiveReason(event.target.value)}
+                    placeholder="Explique a mudança de intenção estratégica."
+                    value={directorObjectiveReason}
+                  />
+                </label>
+                {OBJECTIVES_REQUIRING_DESTINATION.has(directorObjective) ? (
+                  <label className="block text-[9px] uppercase tracking-[0.12em] text-[#777168]">
+                    Destino obrigatório
+                    <input
+                      className="mt-1.5 h-10 w-full rounded-lg border border-white/[0.09] bg-[#080808] px-3 text-xs normal-case tracking-normal text-[#d1cbc1] outline-none focus:border-[#d9a43a]/55"
+                      maxLength={2048}
+                      onChange={(event) => setDirectorDestination(event.target.value)}
+                      placeholder={directorObjective === 'whatsapp' ? 'WhatsApp ou instrução de contato' : directorObjective === 'booking' ? 'Agenda ou calendário' : directorObjective === 'download' ? 'Material para download' : 'https://destino.example/...'}
+                      value={directorDestination}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>

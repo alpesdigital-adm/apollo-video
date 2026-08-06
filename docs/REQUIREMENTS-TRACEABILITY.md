@@ -169,6 +169,15 @@ fabricado. A UI é deliberadamente pessimista. Regressões locais cobrem domíni
 contratos, paridade UI/API, escopo, replay e stale; as jornadas PostgreSQL/API
 de administração e duplicação copy-on-write estão preparadas, mas não executadas.
 Faltam browser, deploy e aceite, portanto FR-004 continua aberto.
+
+Atualização local parcial de FR-010 — o catálogo de oito objetivos agora entra
+no runtime real do Diretor e cada `DirectorRun` persiste objetivo, revisão,
+rubrica e supersessão. O editor e as duas rotas públicas V2 enviam o mesmo
+intento; mudança aprovada cria novo brief/ProjectVersion/run com CAS, motivo
+obrigatório e destino obrigatório para conversão. Regressões locais cobrem as
+oito rubricas e falhas fechadas; a jornada discovery→sale via worker,
+PostgreSQL e HTTP foi preparada, mas não executada. E2E browser, deploy e aceite
+permanecem pendentes, portanto FR-010 continua aberto.
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |

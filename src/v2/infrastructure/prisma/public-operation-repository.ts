@@ -45,6 +45,9 @@ import {
   projectStatusTransitionPath,
   projectStatusTransitionSources,
 } from '../../domain/project.ts'
+import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
+import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
+import { createDesiredAction } from '../../domain/desired-action.ts'
 import {
   persistPublicEvents,
   type PublicEventOutboxTransaction,
@@ -105,6 +108,23 @@ const OPERATION_INCLUDE = {
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
+function validDirectorObjectiveBinding(input: {
+  baseObjective: string
+  objective: string
+  objectiveVersion: number
+  rubricRef: string
+}): boolean {
+  try {
+    resolveStrategicObjective(input.baseObjective)
+    const objective = resolveStrategicObjective(input.objective)
+    return Number.isSafeInteger(input.objectiveVersion) &&
+      input.objectiveVersion >= 1 &&
+      input.rubricRef === `${objective.rubricId}/v1`
+  } catch {
+    return false
+  }
+}
+
 function validColorPipelineBindings(value: unknown): value is readonly RenderColorPipelineBinding[] {
   return Array.isArray(value) && value.length >= 1 && value.length <= 128 &&
     new Set(value.map((item) => item?.sourceArtifactId)).size === value.length &&
@@ -135,6 +155,18 @@ function parseStoredCommandImpact(value: string) {
   } catch (error) {
     if (error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT') throw error
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy reuse Command impact is invalid')
+  }
+}
+
+function parseStoredRecord(value: string, field: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('invalid')
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
   }
 }
 const OUTPUT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\.mp4$/
@@ -510,6 +542,12 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     ![directorDetail.projectId, directorDetail.baseVersionId,
       directorDetail.resultVersionId].every((value) => ID_PATTERN.test(value)) ||
     !SHA256_PATTERN.test(directorDetail.baseHash) ||
+    !validDirectorObjectiveBinding(directorDetail) ||
+    (directorDetail.supersedesRunId !== null &&
+      !ID_PATTERN.test(directorDetail.supersedesRunId)) ||
+    (directorDetail.destination !== null &&
+      (directorDetail.destination.trim().length < 1 ||
+        directorDetail.destination.length > 2048)) ||
     (directorDetail.reason !== null &&
       (directorDetail.reason.trim().length < 1 || directorDetail.reason.length > 1000)) ||
     (directorDetail.delegatedUserId !== null &&
@@ -520,7 +558,11 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       directorDetail.directorRun.workspaceId !== row.workspaceId ||
       directorDetail.directorRun.projectId !== directorDetail.projectId ||
       directorDetail.directorRun.baseVersionId !== directorDetail.baseVersionId ||
-      directorDetail.directorRun.resultVersionId !== directorDetail.resultVersionId
+      directorDetail.directorRun.resultVersionId !== directorDetail.resultVersionId ||
+      directorDetail.directorRun.objective !== directorDetail.objective ||
+      directorDetail.directorRun.objectiveVersion !== directorDetail.objectiveVersion ||
+      directorDetail.directorRun.rubricRef !== directorDetail.rubricRef ||
+      directorDetail.directorRun.supersedesRunId !== directorDetail.supersedesRunId
     ))
   )) {
     throw new DomainError(
@@ -787,6 +829,16 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         baseVersionId: directorDetail!.baseVersionId,
         baseHash: directorDetail!.baseHash,
         resultVersionId: directorDetail!.resultVersionId,
+        baseObjective: resolveStrategicObjective(directorDetail!.baseObjective).id,
+        objective: resolveStrategicObjective(directorDetail!.objective).id,
+        objectiveVersion: directorDetail!.objectiveVersion,
+        rubricRef: directorDetail!.rubricRef,
+        ...(directorDetail!.supersedesRunId
+          ? { supersedesRunId: directorDetail!.supersedesRunId }
+          : {}),
+        ...(directorDetail!.destination
+          ? { destination: directorDetail!.destination }
+          : {}),
         ...(directorDetail!.delegatedUserId
           ? { delegatedUserId: directorDetail!.delegatedUserId }
           : {}),
@@ -1255,6 +1307,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         ![directorContext.projectId, directorContext.baseVersionId,
           directorContext.resultVersionId].every((value) => ID_PATTERN.test(value)) ||
         !SHA256_PATTERN.test(directorContext.baseHash) ||
+        !validDirectorObjectiveBinding(directorContext) ||
+        (directorContext.supersedesRunId !== undefined &&
+          !ID_PATTERN.test(directorContext.supersedesRunId)) ||
+        (directorContext.destination !== undefined &&
+          (directorContext.destination.trim().length < 1 ||
+            directorContext.destination.length > 2048)) ||
         (directorContext.reason !== undefined &&
           (directorContext.reason.trim().length < 1 || directorContext.reason.length > 1000)) ||
         (directorContext.delegatedUserId !== undefined &&
@@ -1476,6 +1534,80 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           }
         }
 
+        if (directorContext) {
+          const project = await transaction.v2Project.findFirst({
+            where: {
+              id: directorContext.projectId,
+              workspaceId: input.operation.workspaceId,
+              currentVersionId: directorContext.baseVersionId,
+              objective: directorContext.baseObjective,
+              currentVersion: { baseHash: directorContext.baseHash },
+            },
+            include: {
+              directorRuns: {
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 1,
+                include: { qualitySnapshot: true },
+              },
+            },
+          })
+          if (!project) {
+            throw new DomainError(
+              'VERSION_CONFLICT',
+              'Director objective source changed before operation persistence',
+            )
+          }
+          const latestRun = project.directorRuns[0]
+          const latestQuality = latestRun
+            ? parseStoredRecord(
+                latestRun.qualitySnapshot.contentJson,
+                'Director quality report',
+              )
+            : undefined
+          const binding = bindDirectorObjective({
+            objective: directorContext.objective,
+            ...(latestRun
+              ? {
+                  previous: {
+                    runId: latestRun.id,
+                    objective: resolveStrategicObjective(latestRun.objective).id,
+                    objectiveVersion: latestRun.objectiveVersion,
+                    rubricRef: latestRun.rubricRef,
+                    ...(latestRun.supersedesRunId
+                      ? { supersedesRunId: latestRun.supersedesRunId }
+                      : {}),
+                    approved: ['approved', 'approved-with-warnings'].includes(
+                      String(latestQuality?.status),
+                    ),
+                  },
+                }
+              : {}),
+          })
+          if (
+            binding.objectiveVersion !== directorContext.objectiveVersion ||
+            binding.rubricRef !== directorContext.rubricRef ||
+            binding.supersedesRunId !== directorContext.supersedesRunId ||
+            (directorContext.objective !== directorContext.baseObjective &&
+              !directorContext.reason)
+          ) throw new DomainError(
+            'PERSISTENCE_CONFLICT',
+            'Director objective transition is inconsistent',
+          )
+          if (directorContext.objective !== directorContext.baseObjective) {
+            createDesiredAction({
+              objective: directorContext.objective,
+              ...(directorContext.destination
+                ? { destination: directorContext.destination }
+                : {}),
+            })
+          } else if (directorContext.destination !== undefined) {
+            throw new DomainError(
+              'INVALID_ARGUMENT',
+              'Director destination is only valid for an objective change',
+            )
+          }
+        }
+
         await transaction.v2PublicOperation.create({
           data: {
             id: input.operation.id,
@@ -1628,6 +1760,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               baseVersionId: directorContext!.baseVersionId,
               baseHash: directorContext!.baseHash,
               resultVersionId: directorContext!.resultVersionId,
+              baseObjective: directorContext!.baseObjective,
+              objective: directorContext!.objective,
+              objectiveVersion: directorContext!.objectiveVersion,
+              rubricRef: directorContext!.rubricRef,
+              supersedesRunId: directorContext!.supersedesRunId,
+              destination: directorContext!.destination,
               delegatedUserId: directorContext!.delegatedUserId,
               reason: directorContext!.reason,
               createdAt: new Date(input.operation.createdAt),

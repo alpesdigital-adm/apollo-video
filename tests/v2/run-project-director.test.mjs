@@ -105,6 +105,8 @@ function compiledEditorialPlan(selectedInsert = false) {
 
 class InMemoryDirectorRepository {
   constructor(options = {}) {
+    this.projectObjective = options.projectObjective ?? 'discovery'
+    this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
     this.outputReferences = options.outputReferences ?? [
       { artifactId: 'artifact-proxy-4', kind: 'proxy', sourceVersionId: 'project-version-4', variantId: '9:16' },
@@ -131,7 +133,10 @@ class InMemoryDirectorRepository {
     if (workspaceId !== 'workspace-1' || projectId !== 'project-1') return null
     return {
       workspaceId,
-      project: { id: projectId, objective: 'discovery', format: '9:16', locale: 'pt-BR' },
+      project: { id: projectId, objective: this.projectObjective, format: '9:16', locale: 'pt-BR' },
+      ...(this.latestDirectorObjective
+        ? { latestDirectorObjective: this.latestDirectorObjective }
+        : {}),
       currentVersion: this.currentVersion,
       brief: { productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } } },
       policies: { automaticZoom: false, faceProtection: true },
@@ -157,6 +162,23 @@ class InMemoryDirectorRepository {
       result,
     })
     this.currentVersion = bundle.version
+    this.outputReferences = this.outputReferences.map((reference) => ({
+      ...reference,
+      sourceVersionId: bundle.version.id,
+    }))
+    this.projectObjective = bundle.run.objective
+    this.latestDirectorObjective = {
+      runId: bundle.run.id,
+      objective: bundle.run.objective,
+      objectiveVersion: bundle.run.objectiveVersion,
+      rubricRef: bundle.run.rubricRef,
+      ...(bundle.run.supersedesRunId
+        ? { supersedesRunId: bundle.run.supersedesRunId }
+        : {}),
+      approved: ['approved', 'approved-with-warnings'].includes(
+        bundle.run.qualityReport.status,
+      ),
+    }
     return result
   }
 }
@@ -199,10 +221,16 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
 
   assert.equal(result.replayed, false)
   assert.equal(result.command.type, 'run-director')
-  assert.equal(result.command.payload.schemaVersion, 2)
+  assert.equal(result.command.payload.schemaVersion, 3)
   assert.equal(result.version.sequence, 5)
   assert.equal(result.version.parentVersionId, 'project-version-4')
   assert.equal(result.run.status, 'planned')
+  assert.equal(result.run.schemaVersion, 2)
+  assert.equal(result.run.objective, 'discovery')
+  assert.equal(result.run.objectiveVersion, 1)
+  assert.equal(result.run.rubricRef, 'awareness-discovery/v1')
+  assert.equal(result.command.payload.previousObjective, 'discovery')
+  assert.equal(result.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
   assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['perception', 'treatment', 'story', 'edit-plan', 'quality-report'])
   assert.equal(result.run.perception.timeline.observations.length, compiledEditorialPlan().retimedTranscript.words.length)
   assert.equal(result.run.treatmentPlan.patternBreaks.allowed.includes('zoom'), false)
@@ -242,6 +270,89 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.throws(
     () => parseDirectorRunImpact({ ...result.impact, impactHash: 'f'.repeat(64) }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
+
+test('Director binds every strategic objective to its canonical rubric in runtime plans', async () => {
+  const cases = [
+    ['discovery', 'awareness-discovery/v1'],
+    ['awareness', 'awareness-level/v1'],
+    ['warming', 'awareness-warming/v1'],
+    ['lead-generation', 'conversion-lead/v1'],
+    ['sale', 'conversion-sale/v1'],
+    ['whatsapp', 'conversion-whatsapp/v1'],
+    ['booking', 'conversion-booking/v1'],
+    ['download', 'conversion-download/v1'],
+  ]
+  for (const [objective, rubricRef] of cases) {
+    const { service } = fixture({ projectObjective: objective })
+    const result = await service(request({
+      objective,
+      idempotency: { key: `director-objective-${objective}` },
+    }))
+    assert.equal(result.run.objective, objective)
+    assert.equal(result.run.rubricRef, rubricRef)
+    assert.equal(result.run.objectiveVersion, 1)
+    assert.equal(result.run.treatmentPlan.objective, objective)
+    assert.equal(result.run.storyPlan.objective, objective)
+  }
+})
+
+test('approved strategic objective change creates a new brief, version and superseding DirectorRun', async () => {
+  const { repository, service } = fixture()
+  const first = await service(request())
+  const changed = await service(request({
+    baseVersionId: first.version.id,
+    baseHash: first.version.baseHash,
+    objective: 'sale',
+    destination: 'https://checkout.example/oferta',
+    reason: 'A campanha aprovada agora precisa levar a uma oferta explícita.',
+    idempotency: { key: 'director-objective-change-sale' },
+  }))
+
+  assert.equal(changed.run.objective, 'sale')
+  assert.equal(changed.run.objectiveVersion, 2)
+  assert.equal(changed.run.rubricRef, 'conversion-sale/v1')
+  assert.equal(changed.run.supersedesRunId, first.run.id)
+  assert.equal(changed.command.payload.previousObjective, 'discovery')
+  assert.equal(changed.command.payload.supersedesRunId, first.run.id)
+  assert.notEqual(
+    changed.command.payload.snapshotRefs.brief,
+    first.command.payload.snapshotRefs.brief,
+  )
+  assert.equal(changed.version.parentVersionId, first.version.id)
+  assert.equal(repository.projectObjective, 'sale')
+  const brief = JSON.parse(repository.lastBundle.snapshots.find(
+    (snapshot) => snapshot.kind === 'brief',
+  ).contentJson)
+  assert.equal(brief.objective, 'sale')
+  assert.equal(brief.desiredAction.kind, 'buy')
+  assert.equal(brief.objectiveChange.supersedesRunId, first.run.id)
+})
+
+test('objective change fails before persistence without reason or required destination', async () => {
+  const firstFixture = fixture()
+  const first = await firstFixture.service(request())
+  await assert.rejects(
+    () => firstFixture.service(request({
+      baseVersionId: first.version.id,
+      baseHash: first.version.baseHash,
+      objective: 'sale',
+      destination: 'https://checkout.example/oferta',
+      reason: ' ',
+      idempotency: { key: 'director-objective-change-no-reason' },
+    })),
+    (error) => error instanceof DomainError && error.code === 'PRECONDITION_REQUIRED',
+  )
+  await assert.rejects(
+    () => firstFixture.service(request({
+      baseVersionId: first.version.id,
+      baseHash: first.version.baseHash,
+      objective: 'sale',
+      reason: 'Trocar para venda.',
+      idempotency: { key: 'director-objective-change-no-destination' },
+    })),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
   )
 })
 
@@ -371,6 +482,10 @@ test('Director enqueue allocates one immutable result version and replays before
     baseVersionId: 'project-version-4',
     baseHash,
     resultVersionId: 'project-version-director-enqueue-1',
+    baseObjective: 'discovery',
+    objective: 'discovery',
+    objectiveVersion: 1,
+    rubricRef: 'awareness-discovery/v1',
     delegatedUserId: 'user-director-enqueue-1',
     reason: 'Recompute the full editorial plan.',
   })
@@ -426,6 +541,10 @@ test('Director worker fences the atomic commit and settles the allocated version
     baseVersionId: 'project-version-4',
     baseHash,
     resultVersionId: 'project-version-worker-result-1',
+    baseObjective: 'discovery',
+    objective: 'discovery',
+    objectiveVersion: 1,
+    rubricRef: 'awareness-discovery/v1',
     delegatedUserId: workerAuthenticationAudit.delegatedUserId,
     reason: 'Run through the durable worker.',
   })
@@ -522,6 +641,10 @@ function createResilientDirectorOperation() {
     baseVersionId: 'project-version-4',
     baseHash,
     resultVersionId: 'project-version-resilience-result-1',
+    baseObjective: 'discovery',
+    objective: 'discovery',
+    objectiveVersion: 1,
+    rubricRef: 'awareness-discovery/v1',
     reason: 'Exercise durable Director recovery.',
   })
   let lease

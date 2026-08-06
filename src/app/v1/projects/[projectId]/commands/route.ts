@@ -17,8 +17,12 @@ import {
   createPublicOperationRepository,
   createSourceTranscriptReplacementRepository,
 } from '@/v2/infrastructure/repository-factory'
-import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import {
+  assertExternalMutationOrigin,
+  authenticateExternalRequest,
+} from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import {
   presentProjectVersionV2,
   presentPublicOperation,
@@ -36,6 +40,8 @@ interface CommandBody {
   rules?: unknown
   reason?: unknown
   exclusionOverrides?: unknown
+  objective?: unknown
+  destination?: unknown
 }
 
 function parseRules(value: unknown) {
@@ -80,6 +86,7 @@ export async function POST(
   try {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
+    assertExternalMutationOrigin(request, actor)
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
     let body: CommandBody
     try {
@@ -88,11 +95,13 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     if (typeof body !== 'object' || body === null) throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
-    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides'].includes(key))) {
+    if (Object.keys(body).some((key) => !['type', 'baseVersionId', 'baseHash', 'sourceTranscriptId', 'expectedTranscriptHash', 'rules', 'reason', 'exclusionOverrides', 'objective', 'destination'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (typeof body.baseVersionId !== 'string' || typeof body.baseHash !== 'string') throw new DomainError('INVALID_ARGUMENT', 'baseVersionId and baseHash must be strings')
     if (body.reason !== undefined && typeof body.reason !== 'string') throw new DomainError('INVALID_ARGUMENT', 'reason must be a string')
+    if (body.objective !== undefined && typeof body.objective !== 'string') throw new DomainError('INVALID_ARGUMENT', 'objective must be a string')
+    if (body.destination !== undefined && typeof body.destination !== 'string') throw new DomainError('INVALID_ARGUMENT', 'destination must be a string')
     const { projectId } = await context.params
     if (body.type === 'run-director') {
       if (body.sourceTranscriptId !== undefined || body.expectedTranscriptHash !== undefined || body.rules !== undefined || body.exclusionOverrides !== undefined) {
@@ -110,6 +119,12 @@ export async function POST(
         baseHash: body.baseHash,
         actor,
         idempotency: { key: idempotencyKey },
+        ...(body.objective
+          ? { objective: body.objective as StrategicObjectiveId }
+          : {}),
+        ...(body.destination?.trim()
+          ? { destination: body.destination.trim() }
+          : {}),
         ...(body.reason?.trim() ? { reason: body.reason.trim() } : {}),
       })
       const proxy = await enqueueProjectProxyRenderService({
@@ -148,6 +163,12 @@ export async function POST(
           status: result.run.status,
           plannerVersion: result.run.plannerVersion,
           criticVersion: result.run.criticVersion,
+          objective: result.run.objective,
+          objectiveVersion: result.run.objectiveVersion,
+          rubricRef: result.run.rubricRef,
+          ...(result.run.supersedesRunId
+            ? { supersedesRunId: result.run.supersedesRunId }
+            : {}),
           baseVersionId: result.run.baseVersionId,
           resultVersionId: result.run.resultVersionId,
           perception: { snapshotId: refs.perception, summary: result.run.perception.summary },
@@ -177,7 +198,8 @@ export async function POST(
       if (
         typeof body.sourceTranscriptId !== 'string' ||
         typeof body.expectedTranscriptHash !== 'string' ||
-        body.rules !== undefined || body.exclusionOverrides !== undefined
+        body.rules !== undefined || body.exclusionOverrides !== undefined ||
+        body.objective !== undefined || body.destination !== undefined
       ) throw new DomainError('INVALID_ARGUMENT', 'replace-source-transcript requires only sourceTranscriptId and expectedTranscriptHash')
       const result = await replaceSourceTranscriptService({
         repository: createSourceTranscriptReplacementRepository(),
@@ -225,6 +247,7 @@ export async function POST(
     }
     if (body.type !== 'remove-spoken-content') throw new DomainError('INVALID_ARGUMENT', 'type must be remove-spoken-content, replace-source-transcript or run-director')
     if (typeof body.sourceTranscriptId !== 'string') throw new DomainError('INVALID_ARGUMENT', 'sourceTranscriptId must be a string')
+    if (body.objective !== undefined || body.destination !== undefined) throw new DomainError('INVALID_ARGUMENT', 'remove-spoken-content does not accept Director objective fields')
     if (body.expectedTranscriptHash !== undefined) throw new DomainError('INVALID_ARGUMENT', 'remove-spoken-content does not accept expectedTranscriptHash')
     const exclusionOverrides = parseExclusionOverrides(body.exclusionOverrides)
     const result = await applyEditorialCutCommandService({

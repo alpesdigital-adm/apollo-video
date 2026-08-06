@@ -7,6 +7,12 @@ import type {
 } from './ports/public-operation-repository.ts'
 import { projectDirectorRequestFingerprint } from './run-project-director.ts'
 import { calculateVersionHash } from './version-hash.ts'
+import { createDesiredAction } from '../domain/desired-action.ts'
+import {
+  bindDirectorObjective,
+  resolveStrategicObjective,
+  type StrategicObjectiveId,
+} from '../domain/strategic-objective.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -23,6 +29,8 @@ export interface EnqueueProjectDirectorRunRequest {
   actor: AuthenticatedExternalActor
   idempotencyKey: string
   reason?: string
+  objective?: StrategicObjectiveId
+  destination?: string
   traceId?: string
 }
 
@@ -79,6 +87,8 @@ export function enqueueProjectDirectorRunService(dependencies: {
         baseVersionId,
         baseHash: request.baseHash,
         actorContextHash: audit.contextHash,
+        objective: request.objective,
+        destination: request.destination,
         ...(reason ? { reason } : {}),
       }),
       actorContextHash: audit.contextHash,
@@ -111,6 +121,34 @@ export function enqueueProjectDirectorRunService(dependencies: {
         currentBaseHash: context.currentVersion.baseHash,
       })
     }
+    const objective = resolveStrategicObjective(
+      request.objective ?? context.project.objective,
+    )
+    const objectiveBinding = bindDirectorObjective({
+      objective: objective.id,
+      ...(context.latestDirectorObjective
+        ? { previous: context.latestDirectorObjective }
+        : {}),
+    })
+    const objectiveChanged = objective.id !== context.project.objective
+    assertDomain(
+      !objectiveChanged || Boolean(reason),
+      'PRECONDITION_REQUIRED',
+      'Changing the strategic objective requires an explicit reason',
+    )
+    assertDomain(
+      objectiveChanged || request.destination === undefined,
+      'INVALID_ARGUMENT',
+      'destination is only accepted when the strategic objective changes',
+    )
+    if (objectiveChanged) {
+      createDesiredAction({
+        objective: objective.id,
+        ...(request.destination?.trim()
+          ? { destination: request.destination.trim() }
+          : {}),
+      })
+    }
 
     const resultVersionId = dependencies.createId('project-version')
     const createdAt = clock().toISOString()
@@ -132,6 +170,16 @@ export function enqueueProjectDirectorRunService(dependencies: {
         baseVersionId,
         baseHash: request.baseHash,
         resultVersionId,
+        baseObjective: context.project.objective,
+        objective: objective.id,
+        objectiveVersion: objectiveBinding.objectiveVersion,
+        rubricRef: objectiveBinding.rubricRef,
+        ...(objectiveBinding.supersedesRunId
+          ? { supersedesRunId: objectiveBinding.supersedesRunId }
+          : {}),
+        ...(request.destination?.trim()
+          ? { destination: request.destination.trim() }
+          : {}),
         ...(audit.delegatedUserId
           ? { delegatedUserId: audit.delegatedUserId }
           : {}),

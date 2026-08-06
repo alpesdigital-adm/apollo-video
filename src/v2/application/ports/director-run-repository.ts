@@ -7,15 +7,20 @@ import type { PublicEvent } from '../../domain/public-event.ts'
 import type { CommandArtifactInvalidationV1, CommandImpactOutputReference } from '../../domain/command-impact.ts'
 import type { DirectorRunImpactV1 } from '../../domain/director-run-impact.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type {
+  PreviousDirectorObjectiveBinding,
+  StrategicObjectiveId,
+} from '../../domain/strategic-objective.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
   project: Readonly<{
     id: string
-    objective: string
+    objective: StrategicObjectiveId
     format: string
     locale: string
   }>
+  latestDirectorObjective?: Readonly<PreviousDirectorObjectiveBinding>
   currentVersion: Readonly<ProjectVersion>
   brief: Readonly<Record<string, unknown>>
   policies: Readonly<Record<string, unknown>>

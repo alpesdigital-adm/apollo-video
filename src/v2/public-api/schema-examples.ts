@@ -5722,6 +5722,14 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         reason: 'Recompute the persisted editorial plan after transcript review.',
       },
     ],
+    'apollo://schemas/enqueue-project-director-run-request/v2': [
+      {
+        baseVersionId: 'project-version-base-example-1',
+        baseHash: 'b'.repeat(64),
+        objective: 'discovery',
+        reason: 'Recompute the persisted editorial plan for the explicit objective.',
+      },
+    ],
     'apollo://schemas/project-director-operation-enqueued/v1': [
       {
         data: { operation: queuedProjectDirectorOperationVisibleExample, replayed: false },
@@ -8299,6 +8307,42 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-workspace/v8': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'Anuncio de venda', status: 'reviewing-proxy',
+            objective: 'sale', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'reviewing-proxy', tone: 'warning',
+              progress: { mode: 'none' }, primaryAction: 'review-output',
+              availableActions: ['review-output'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-example-5', sequence: 5, baseHash: 'e'.repeat(64), createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          directorRuns: [{
+            id: 'director-run-example-2', status: 'succeeded',
+            plannerVersion: 'apollo-director-policy/v1', criticVersion: 'apollo-director-critic/v1',
+            objective: 'sale', objectiveVersion: 2, rubricRef: 'conversion-sale/v1',
+            supersedesRunId: 'director-run-example-1',
+            baseVersionId: 'project-version-example-4', resultVersionId: 'project-version-example-5',
+            treatmentSnapshotId: 'project-snapshot-treatment-2', storySnapshotId: 'project-snapshot-story-2',
+            qualitySnapshotId: 'project-snapshot-quality-2', qualityStatus: 'approved-with-warnings',
+            qualityScore: 0.9, decisionCount: 6, assumptionCount: 2,
+            subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
+          }],
+          commands: [], media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-created/v3': [
       {
         data: {
@@ -9248,6 +9292,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/apply-project-edit-command-request/v5': [
+      {
+        type: 'run-director',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        objective: 'sale',
+        destination: 'https://checkout.example/oferta',
+        reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
+      },
+    ],
     'apollo://schemas/project-edit-command-applied/v6': [
       {
         data: {
@@ -9281,6 +9335,63 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78 } },
             treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head' } },
             storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { blockCount: 3 } },
+            editPlan: {
+              snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
+              durationFrames: 2380, fps: 30, subtitleCueCount: 28,
+              transitionCount: 2, automaticZoom: false,
+            },
+            qualityReport: { snapshotId: 'project-snapshot-quality-1', report: { status: 'approved-with-warnings', score: 0.9 } },
+            decisions: [
+              { id: 'decision-narrative-linear' }, { id: 'decision-motion-none' },
+              { id: 'decision-layout-inset' }, { id: 'decision-subtitle-bottom' },
+            ],
+            assumptions: ['Face detector indisponivel; aplicar safe area conservadora.'],
+            impact: directorRunImpactExample,
+            invalidations: [directorRunInvalidationExample],
+            createdAt,
+          },
+          operation: queuedProjectProxyRenderOperationExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-edit-command-applied/v7': [
+      {
+        data: {
+          command: {
+            id: directorRunImpactExample.commandId, type: 'run-director',
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId, createdAt,
+          },
+          version: {
+            id: directorRunImpactExample.resultVersionId, sequence: 4,
+            parentVersionId: directorRunImpactExample.baseVersionId, baseHash: 'd'.repeat(64),
+            snapshotRefs: {
+              brief: 'project-snapshot-brief-2', perception: 'project-snapshot-perception-1',
+              treatment: 'project-snapshot-treatment-1', story: 'project-snapshot-story-1',
+              editPlan: 'project-snapshot-edit-plan-4', quality: 'project-snapshot-quality-1',
+              policies: 'project-snapshot-policies-1',
+            },
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          directorRun: {
+            id: 'director-run-example-2', status: 'planned',
+            plannerVersion: directorRunImpactExample.plannerVersion,
+            criticVersion: directorRunImpactExample.criticVersion,
+            objective: 'sale', objectiveVersion: 2,
+            rubricRef: 'conversion-sale/v1',
+            supersedesRunId: 'director-run-example-1',
+            baseVersionId: directorRunImpactExample.baseVersionId,
+            resultVersionId: directorRunImpactExample.resultVersionId,
+            perception: { snapshotId: 'project-snapshot-perception-1', summary: { speechCoverage: 0.78 } },
+            treatmentPlan: { snapshotId: 'project-snapshot-treatment-1', plan: { mode: 'talking-head', objective: 'sale' } },
+            storyPlan: { snapshotId: 'project-snapshot-story-1', plan: { blockCount: 3, objective: 'sale' } },
             editPlan: {
               snapshotId: 'project-snapshot-edit-plan-4', id: 'edit-plan-example-4',
               durationFrames: 2380, fps: 30, subtitleCueCount: 28,

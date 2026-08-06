@@ -63,26 +63,29 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '7.0.0')
-  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v6')
-  assert.equal(getPublicSchema('apollo://schemas/project-edit-command-applied/v5').ref, 'apollo://schemas/project-edit-command-applied/v5')
-
-  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v6').schema)
+  assert.equal(capability.version, '8.0.0')
+  assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v7')
   for (const previousRef of [
+    'apollo://schemas/project-edit-command-applied/v3',
     'apollo://schemas/project-edit-command-applied/v4',
     'apollo://schemas/project-edit-command-applied/v5',
-    'apollo://schemas/project-edit-command-applied/v3',
+    'apollo://schemas/project-edit-command-applied/v6',
   ]) {
-    const body = structuredClone(publicSchemaExamples(getPublicSchema(previousRef))[0])
+    assert.equal(getPublicSchema(previousRef).ref, previousRef)
+  }
+
+  const validate = addFormats(new Ajv2020({ strict: false, allErrors: true }))
+    .compile(getPublicSchema('apollo://schemas/project-edit-command-applied/v7').schema)
+  for (const example of publicSchemaExamples(getPublicSchema('apollo://schemas/project-edit-command-applied/v7'))) {
+    const body = structuredClone(example)
     body.data.version = presentProjectVersionV2(
       body.data.version,
       { current: true, previewAvailable: false },
     )
-    assert.equal(validate(body), true, `${previousRef}: ${JSON.stringify(validate.errors)}`)
+    assert.equal(validate(body), true, JSON.stringify(validate.errors))
     const mismatched = structuredClone(body)
     mismatched.data.version.visibleState.label = 'superseded'
-    assert.equal(validate(mismatched), false, previousRef)
+    assert.equal(validate(mismatched), false)
   }
 })
 

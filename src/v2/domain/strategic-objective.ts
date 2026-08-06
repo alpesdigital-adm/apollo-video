@@ -14,10 +14,63 @@ export const STRATEGIC_OBJECTIVES = [
 export type StrategicObjectiveId = (typeof STRATEGIC_OBJECTIVES)[number]['id']
 export type StrategicObjective = (typeof STRATEGIC_OBJECTIVES)[number]
 
+export interface DirectorObjectiveBinding {
+  objective: StrategicObjectiveId
+  rubricRef: string
+  objectiveVersion: number
+  supersedesRunId?: string
+}
+
+export interface PreviousDirectorObjectiveBinding extends DirectorObjectiveBinding {
+  runId: string
+  approved: boolean
+}
+
 export function resolveStrategicObjective(value: string): StrategicObjective {
   const objective = STRATEGIC_OBJECTIVES.find((candidate) => candidate.id === value)
   assertDomain(objective, 'INVALID_ARGUMENT', 'Unsupported strategic objective', { objective: value })
   return objective
+}
+
+export function bindDirectorObjective(input: {
+  objective: string
+  previous?: Readonly<PreviousDirectorObjectiveBinding>
+}): Readonly<DirectorObjectiveBinding> {
+  const objective = resolveStrategicObjective(input.objective)
+  const previous = input.previous
+  if (previous) {
+    const previousObjective = resolveStrategicObjective(previous.objective)
+    assertDomain(
+      previous.rubricRef === `${previousObjective.rubricId}/v1` &&
+        Number.isSafeInteger(previous.objectiveVersion) &&
+        previous.objectiveVersion >= 1,
+      'PERSISTENCE_CONFLICT',
+      'Previous Director objective binding is invalid',
+    )
+    if (previousObjective.id === objective.id) {
+      return Object.freeze({
+        objective: objective.id,
+        rubricRef: `${objective.rubricId}/v1`,
+        objectiveVersion: previous.objectiveVersion,
+      })
+    }
+    assertDomain(
+      previous.approved,
+      'PRECONDITION_REQUIRED',
+      'An unapproved Director objective must be revised in place before execution',
+    )
+    return Object.freeze({
+      objective: objective.id,
+      rubricRef: `${objective.rubricId}/v1`,
+      objectiveVersion: previous.objectiveVersion + 1,
+      supersedesRunId: previous.runId,
+    })
+  }
+  return Object.freeze({
+    objective: objective.id,
+    rubricRef: `${objective.rubricId}/v1`,
+    objectiveVersion: 1,
+  })
 }
 
 export interface DirectorRunObjective {
@@ -32,6 +85,7 @@ export interface DirectorRunObjective {
 
 export function createDirectorRunObjective(input: { runId: string; projectId: string; objective: string; version?: number; state?: 'draft' | 'approved'; supersedesRunId?: string }): Readonly<DirectorRunObjective> {
   const objective = resolveStrategicObjective(input.objective)
+  assertDomain(Number.isSafeInteger(input.version ?? 1) && (input.version ?? 1) >= 1, 'INVALID_ARGUMENT', 'Director objective version is invalid')
   return Object.freeze({ runId: input.runId, projectId: input.projectId, version: input.version ?? 1, objective: objective.id, rubricRef: `${objective.rubricId}/v1`, state: input.state ?? 'draft', ...(input.supersedesRunId ? { supersedesRunId: input.supersedesRunId } : {}) })
 }
 

@@ -147,6 +147,14 @@ export function runNextProjectDirectorOperationService(dependencies: {
           }),
         },
         allocatedResultVersionId: context.resultVersionId,
+        objective: context.objective,
+        expectedBaseObjective: context.baseObjective,
+        expectedObjectiveVersion: context.objectiveVersion,
+        expectedRubricRef: context.rubricRef,
+        ...(context.supersedesRunId
+          ? { expectedSupersedesRunId: context.supersedesRunId }
+          : {}),
+        ...(context.destination ? { destination: context.destination } : {}),
         operationFence: command(clock()),
         ...(context.reason ? { reason: context.reason } : {}),
       })

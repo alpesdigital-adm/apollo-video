@@ -5,6 +5,7 @@ import type { SubtitleAnchor, SubtitlePresetId } from './subtitle-system.ts'
 import type { TreatmentPlan } from './treatment-plan.ts'
 import type { ManualCropRegion } from './manual-editing.ts'
 import type { DirectorRunImpactV1 } from './director-run-impact.ts'
+import type { StrategicObjectiveId } from './strategic-objective.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -181,7 +182,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'sub
 }>
 
 export interface DirectorRun {
-  schemaVersion: 1
+  schemaVersion: 2
   id: string
   workspaceId: string
   projectId: string
@@ -191,6 +192,10 @@ export interface DirectorRun {
   status: 'planned' | 'rendering' | 'succeeded' | 'failed'
   plannerVersion: string
   criticVersion: string
+  objective: StrategicObjectiveId
+  objectiveVersion: number
+  rubricRef: string
+  supersedesRunId?: string
   perception: Readonly<DirectorPerceptionSnapshot>
   treatmentPlan: Readonly<TreatmentPlan> & Readonly<{ id: string }>
   storyPlan: Readonly<StoryPlan> & Readonly<{ id: string }>
@@ -203,13 +208,19 @@ export interface DirectorRun {
 }
 
 export interface RunDirectorCommandPayload {
-  schemaVersion: 2
+  schemaVersion: 3
   directorRunId: string
+  previousObjective: StrategicObjectiveId
+  objective: StrategicObjectiveId
+  objectiveVersion: number
+  rubricRef: string
+  supersedesRunId?: string
   plannerVersion: string
   criticVersion: string
   sourceTranscriptId: string
   sourceArtifactId: string
   snapshotRefs: Readonly<{
+    brief: string
     perception: string
     treatment: string
     story: string

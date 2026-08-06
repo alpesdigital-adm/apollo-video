@@ -307,6 +307,17 @@ O projeto deve aceitar uma seleção estruturada:
 - agendamento;
 - download de material.
 
+Implementação local parcial de FR-010: o objetivo selecionado é vinculado
+imutavelmente a cada `DirectorRun` por `objective`, `objectiveVersion` e
+`rubricRef`. Uma troca após run aprovada não altera o histórico: exige razão
+explícita, exige destino nos objetivos de conversão, cria novo brief,
+`ProjectVersion` e `DirectorRun`, e registra `supersedesRunId`. O mesmo binding é
+validado no domínio, worker, transação PostgreSQL, Command e resposta pública.
+As oito combinações objetivo/rubrica passam por regressão local no runtime; a
+jornada discovery→sale está preparada para PostgreSQL/HTTP, mas não foi
+executada neste ambiente. FR-010 continua aberto até E2E browser, implantação e
+aceite.
+
 ### FR-011 — Ação desejada
 
 Projetos de conversão devem poder registrar ação, destino, oferta e contexto.

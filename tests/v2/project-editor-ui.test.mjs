@@ -455,3 +455,17 @@ test('T-FR-230 project editor exposes the persisted proxy verdict and blocks fin
   assert.match(projectEditorSource, /proxyReview\?\.projectVersionId !== workspace\.version\?\.id \|\| !proxyReview\.finalAllowed/)
   assert.match(projectEditorSource, /Aguardando liberação do proxy/)
 })
+
+test('T-FR-010 project editor governs all strategic objectives and preserves retry identity', () => {
+  assert.match(projectEditorSource, /STRATEGIC_OBJECTIVES/)
+  assert.match(projectEditorSource, /data-testid="director-objective-governance"/)
+  assert.match(projectEditorSource, /setDirectorObjective/)
+  assert.match(projectEditorSource, /directorObjectiveReason/)
+  assert.match(projectEditorSource, /directorDestination/)
+  assert.match(projectEditorSource, /OBJECTIVES_REQUIRING_DESTINATION/)
+  assert.match(projectEditorSource, /objective: directorObjective/)
+  assert.match(projectEditorSource, /destination: objectiveChanged/)
+  assert.match(projectEditorSource, /directorIdempotencyKey\.current\?\.fingerprint/)
+  assert.match(projectEditorSource, /supersedesRunId/)
+  assert.match(projectEditorSource, /rubricRef/)
+})

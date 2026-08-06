@@ -1053,6 +1053,10 @@ model V2DirectorRun {
   status               String   @db.VarChar(32)
   plannerVersion       String   @db.VarChar(64)
   criticVersion        String   @db.VarChar(64)
+  objective            String   @db.VarChar(64)
+  objectiveVersion     Int
+  rubricRef            String   @db.VarChar(128)
+  supersedesRunId      String?  @db.VarChar(128)
   perceptionSnapshotId String   @db.VarChar(128)
   treatmentSnapshotId  String   @db.VarChar(128)
   storySnapshotId      String   @db.VarChar(128)
@@ -1078,6 +1082,9 @@ model V2DirectorRun {
   qualitySnapshot       V2ProjectSnapshot               @relation("DirectorRunQualitySnapshot", fields: [qualitySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   finalExportOperations V2ProjectFinalExportOperation[]
   operation             V2ProjectDirectorOperation?     @relation("DirectorOperationRun", fields: [operationId, workspaceId], references: [operationId, workspaceId], onDelete: Restrict)
+  supersedesRun         V2DirectorRun?                   @relation("DirectorRunSupersession", fields: [supersedesRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  supersededBy          V2DirectorRun[]                  @relation("DirectorRunSupersession")
+  supersedingOperations V2ProjectDirectorOperation[]     @relation("DirectorOperationSupersedes")
 
   @@unique([id, workspaceId])
   @@unique([id, projectId, workspaceId])
@@ -1085,6 +1092,7 @@ model V2DirectorRun {
   @@unique([resultVersionId, projectId, workspaceId])
   @@unique([operationId, workspaceId])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectId, objective, objectiveVersion], map: "director_runs_objective_revision_idx")
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("director_runs")
 }
@@ -1096,6 +1104,12 @@ model V2ProjectDirectorOperation {
   baseVersionId   String   @db.VarChar(128)
   baseHash        String   @db.Char(64)
   resultVersionId String   @db.VarChar(128)
+  baseObjective   String   @db.VarChar(64)
+  objective       String   @db.VarChar(64)
+  objectiveVersion Int
+  rubricRef       String   @db.VarChar(128)
+  supersedesRunId String?  @db.VarChar(128)
+  destination     String?  @db.VarChar(2048)
   delegatedUserId String?  @db.VarChar(128)
   reason           String?  @db.VarChar(1000)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
@@ -1104,6 +1118,7 @@ model V2ProjectDirectorOperation {
   project     V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   baseVersion V2ProjectVersion  @relation(fields: [baseVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   directorRun V2DirectorRun?    @relation("DirectorOperationRun")
+  supersedesRun V2DirectorRun?  @relation("DirectorOperationSupersedes", fields: [supersedesRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "project_director_ops_supersedes_run_fkey")
 
   @@unique([operationId, workspaceId])
   @@unique([workspaceId, projectId, resultVersionId])

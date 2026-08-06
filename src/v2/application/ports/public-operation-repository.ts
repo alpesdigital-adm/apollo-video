@@ -5,6 +5,7 @@ import type {
   PublicOperationStatus,
 } from '../../domain/public-operation.ts'
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
+import type { StrategicObjectiveId } from '../../domain/strategic-objective.ts'
 import type { RenderColorPipelineBinding } from '../resolve-render-color-pipelines.ts'
 
 export interface ArtifactRenderOperationContext {
@@ -117,6 +118,12 @@ export interface ProjectDirectorRunOperationContext {
   baseVersionId: string
   baseHash: string
   resultVersionId: string
+  baseObjective: StrategicObjectiveId
+  objective: StrategicObjectiveId
+  objectiveVersion: number
+  rubricRef: string
+  supersedesRunId?: string
+  destination?: string
   delegatedUserId?: string
   reason?: string
 }

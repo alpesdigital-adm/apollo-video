@@ -703,11 +703,11 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 
 ### F1.004 — Objetivo estratégico [FR-010]
 
-- [ ] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download. Evidência F1-004: catálogo canônico tipado contém os oito objetivos com identidade estável.
-- [ ] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo. Evidência F1-004: nova produção exige seleção visível, mostra orientação contextual e envia o objetivo junto da mídia.
-- [ ] Associar objetivo à rubrica correta no `DirectorRun`. Evidência F1-004: `createDirectorRunObjective` resolve `rubricRef` versionada por objetivo.
-- [ ] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run. Evidência F1-004: draft pode mudar na mesma run; approved exige novo id, incrementa versão e registra `supersedesRunId`.
-- [ ] Testar uma fixture por objetivo estratégico. Evidência F1-004: regressão percorre os oito objetivos e valida descrição, resultado e rubrica, além do fluxo de rerun.
+- [ ] Modelar descoberta, consciência, aquecimento, leads, venda, WhatsApp, agendamento e download. Parcial local F1.004: o catálogo canônico tipado contém os oito objetivos e o runtime do Diretor resolve cada identidade com sua rubrica; implantação e aceite permanecem pendentes.
+- [ ] Criar formulário inicial com descrição e exemplos de resultado de cada objetivo. Parcial local F1.004: criação e workspace exibem orientação contextual; o workspace envia objetivo, justificativa e destino pelo contrato público V2. Falta E2E browser executado, implantação e aceite.
+- [ ] Associar objetivo à rubrica correta no `DirectorRun`. Parcial local F1.004: `DirectorRun` schema v2 e PostgreSQL persistem objetivo, revisão, `rubricRef` e eventual `supersedesRunId`; TreatmentPlan, StoryPlan, Command e projeção pública são validados contra o mesmo binding. A jornada PostgreSQL/HTTP está preparada, mas não foi executada neste ambiente.
+- [ ] Impedir troca silenciosa depois da aprovação; gerar nova versão/re-run. Parcial local F1.004: mudança sobre run aprovada falha sem justificativa e, para conversão, sem destino; quando válida, cria brief, ProjectVersion e DirectorRun imutáveis, incrementa a revisão e aponta para a run substituída. Persistência usa CAS e falha fechado contra drift; falta execução PostgreSQL real, deploy e aceite.
+- [ ] Testar uma fixture por objetivo estratégico. Parcial local F1.004: regressões locais exercitam os oito objetivos dentro do Diretor e conferem rubrica, TreatmentPlan e StoryPlan; também cobrem retenção, mudança aprovada e rejeições. O teste integrado PostgreSQL/HTTP foi ampliado para discovery→sale, mas está skip-gated sem banco local.
 
 ### F1.005 — Rubricas estratégicas [FR-010]
 
