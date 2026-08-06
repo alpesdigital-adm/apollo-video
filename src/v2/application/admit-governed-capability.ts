@@ -42,7 +42,10 @@ export const DEFAULT_GOVERNANCE_LIMITS = Object.freeze({
 
 export const DEFAULT_GOVERNANCE_ANOMALY_POLICY =
   createGovernanceAnomalyPolicy({
-    requestMinimum: 20,
+    // A cold client has no baseline yet. One editor bootstrap fans out across
+    // multiple independent API-first projections, so the initial floor must
+    // accommodate a complete page load without disabling baseline detection.
+    requestMinimum: 100,
     requestBaselineMultiplierBps: 30_000,
     spendMinimumMinorUnits: 1_000,
     spendBaselineMultiplierBps: 30_000,
