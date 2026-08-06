@@ -610,10 +610,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(publicApplied.data.timeline.clips.find((clip) => clip.id === 'clip-2').sourceId, sourceB)
     const { readProjectWorkspaceService } = await import('../../src/v2/application/read-project-workspace.ts')
     const { PrismaProjectWorkspaceQueryRepository } = await import('../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts')
-    const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+    const { PrismaPublicOperationRepository: PrismaWorkspacePublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
     const workspaceProjection = await readProjectWorkspaceService({
       projects: new PrismaProjectWorkspaceQueryRepository(client),
-      operations: new PrismaPublicOperationRepository(client),
+      operations: new PrismaWorkspacePublicOperationRepository(client),
     })({ workspaceId, projectId })
     assert.equal(workspaceProjection.version.id, publicApplied.data.version.id)
 
