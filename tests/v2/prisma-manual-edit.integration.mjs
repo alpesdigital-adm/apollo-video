@@ -215,12 +215,12 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       workspaceAccessStatus: 'active',
       auditContext,
     })
+    const operationAuditContext = materializeActorAuditContext(authenticatedActor)
     const operationActorAudit = Object.freeze({
-      actorClientId: auditContext.clientId,
-      actorCredentialId: auditContext.credentialId,
-      actorEnvironment: auditContext.environment,
-      actorAuthenticationKind: auditContext.authenticationKind,
-      actorContextHash: auditContext.contextHash,
+      actorCredentialId: operationAuditContext.credentialId,
+      actorEnvironment: operationAuditContext.environment,
+      actorAuthenticationKind: operationAuditContext.authenticationKind,
+      actorContextHash: operationAuditContext.contextHash,
     })
     await client.v2Project.create({ data: {
       id: projectId, workspaceId, name: 'Manual Project', status: 'reviewing-proxy',
