@@ -8323,6 +8323,76 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/project-list/v5': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+      {
+        data: {
+          projects: [
+            {
+              id: projectId, workspaceId, name: 'Anúncio em processamento',
+              status: 'rendering-proxy',
+              currentVersionId: 'project-version-dashboard-1',
+              objective: 'discovery', format: '9:16', locale: 'pt-BR',
+              ownerId: 'client-example-1', createdAt,
+              visibleState: {
+                schemaVersion: 'visible-state/v1', label: 'rendering-proxy',
+                tone: 'info', progress: { mode: 'indeterminate' },
+                primaryAction: 'view-progress',
+                availableActions: ['view-progress'], terminal: false,
+              },
+              dashboard: {
+                schemaVersion: 'project-dashboard-summary/v1',
+                currentVersion: {
+                  id: 'project-version-dashboard-1', sequence: 2, createdAt,
+                },
+                latestOperation: {
+                  id: 'project-operation-dashboard-1',
+                  type: 'project-proxy-render', status: 'running',
+                  phase: 'rendering', progress: { completed: 40, unit: 'frames' },
+                  updatedAt: createdAt,
+                },
+                openReviewIssueCount: 0,
+                outputs: [], outputCount: 0, lastActivityAt: createdAt,
+              },
+            },
+            {
+              id: 'project-dashboard-completed-1', workspaceId,
+              name: 'Anúncio concluído', status: 'completed',
+              currentVersionId: 'project-version-dashboard-2',
+              objective: 'sale', format: '16:9', locale: 'pt-BR',
+              ownerId: 'client-example-1', createdAt,
+              visibleState: {
+                schemaVersion: 'visible-state/v1', label: 'completed',
+                tone: 'success', progress: { mode: 'complete', percent: 100 },
+                primaryAction: 'open-result',
+                availableActions: ['open-result'], terminal: true,
+              },
+              dashboard: {
+                schemaVersion: 'project-dashboard-summary/v1',
+                currentVersion: {
+                  id: 'project-version-dashboard-2', sequence: 4, createdAt,
+                },
+                latestOperation: {
+                  id: 'project-operation-dashboard-2',
+                  type: 'project-final-export', status: 'succeeded',
+                  phase: 'completed',
+                  progress: { completed: 240, total: 240, unit: 'frames' },
+                  updatedAt: createdAt,
+                },
+                openReviewIssueCount: 2,
+                outputs: [{
+                  artifactId: 'artifact-dashboard-final-1', aspectRatio: '16:9',
+                }],
+                outputCount: 1, lastActivityAt: createdAt,
+              },
+            },
+          ],
+          nextCursor: Buffer.from('project-dashboard-page-example')
+            .toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/production-batch-read/v1': [
       {
         data: { batch: productionBatchExample },

@@ -681,11 +681,11 @@ Incremento local F0.102: busca semântica, ingest/transcrição e os stages dur�
 
 ### F1.001 — Dashboard de projetos [FR-002]
 
-- [ ] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Evidência F1-001: `/api/projects` agrega job mais recente, versão/review explicitamente unknown e outputCount derivado, sem inventar registros ausentes.
-- [ ] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Evidência F1-001: dashboard dark editorial usa cards de produção, faixa de mídia, estado, etapa, outputs e barra somente com completed/total válidos.
-- [ ] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado. Evidência F1-001: máquina de apresentação deriva seis estados, empty state orienta o primeiro upload e cada estado possui linguagem/ação própria.
-- [ ] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso. Evidência F1-001: listener `apollo:project-updated` refaz a query; helper retorna progress `null` sem total medido e a UI mostra apenas a etapa atual.
-- [ ] Criar E2E para transições e ação recomendada em cada estado. Evidência F1-001: regressão determinística percorre draft, processing, review, failed, completed e archived, validando ações e ausência de progresso estimado.
+- [ ] Criar query agregada de projeto, versão atual, jobs, review issues e outputs. Parcial local F1.001: `GET /v1/projects` v3/project-list v5 consulta somente Postgres V2 e agrega a versão atual, operação pública durável mais recente, annotations abertas da versão corrente e outputs concluídos da versão corrente; ausências permanecem `null`/listas vazias e o domínio falha fechado contra relações inconsistentes. A jornada HTTP/PostgreSQL está preparada, mas não foi executada neste ambiente; implantação e aceite permanecem pendentes.
+- [ ] Implementar cards conforme referência visual, com progresso derivado de steps/items reais. Parcial local F1.001: os cards usam o agregado público para versão, etapa, review e outputs; barra e percentual só existem quando `completed` e `total` foram medidos. E2E visual/browser, implantação e aceite permanecem pendentes.
+- [ ] Exibir estados vazio, processando, aguardando revisão, falho, concluído e arquivado. Parcial local F1.001: a projeção pública fechada dirige linguagem e ação para todos os estados persistidos, e o dashboard mantém agrupamentos para vazio, produção, revisão, falha, conclusão e arquivo. E2E visual/browser, implantação e aceite permanecem pendentes.
+- [ ] Atualizar cards por eventos sem fabricar percentual quando o job não informa progresso. Parcial local F1.001: `apollo:project-updated` refaz a query sem cache, cancela a leitura anterior e ignora resposta fora de ordem; progresso sem total mostra fase e “sem total medido”, sem barra. Transporte integrado de eventos, E2E browser, implantação e aceite permanecem pendentes.
+- [ ] Criar E2E para transições e ação recomendada em cada estado. Parcial local F1.001: regressões de domínio, repositório, contrato e apresentação cobrem estados, ações, agregado e ausência de percentual fabricado; a jornada pública real foi ampliada para verificar o agregado persistido, mas PostgreSQL/HTTP e browser não foram executados neste ambiente. A caixa permanece aberta.
 
 ### F1.002 — Busca e filtros [FR-003]
 

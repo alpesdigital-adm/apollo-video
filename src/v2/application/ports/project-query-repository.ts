@@ -1,4 +1,4 @@
-import type { Project } from '../../domain/project.ts'
+import type { ProjectDashboardRecord } from '../../domain/project-dashboard.ts'
 
 export interface ProjectQueryRepository {
   listByWorkspace(input: {
@@ -15,5 +15,5 @@ export interface ProjectQueryRepository {
       createdTo?: string
       ownerId?: string
     }
-  }): Promise<readonly Project[]>
+  }): Promise<readonly ProjectDashboardRecord[]>
 }

@@ -325,6 +325,15 @@ Nunca reutilizar seleção batch invisível ao voltar ao editor individual.
 
 Cards mostram status real, percentuais baseados em steps/items, quality, outputs, comments e quick actions. Falha mostra etapa e ação. Concluído não significa publicado. Filtros e busca persistem na sessão do usuário.
 
+O agregado público corrente é versionado e deriva somente da persistência V2:
+versão atual, operação pública durável mais recente, pendências abertas de
+review e outputs concluídos da versão corrente. Ausência é representada como
+`null`, zero ou lista vazia; nunca como registro sintético. `completed` sem
+`total` apresenta fase e estado indeterminado, sem percentual ou progressbar.
+Eventos invalidam a consulta, que roda sem cache e cancela requests superados.
+Esta implementação permanece parcial até E2E visual/browser, transporte de
+eventos integrado, implantação e aceite.
+
 ## 25. Versões e compare
 
 - O operador escolhe explicitamente “antes” e “depois” entre as versões imutáveis do projeto.

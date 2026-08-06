@@ -21,6 +21,7 @@ import {
   presentProjectVisibleState,
 } from '../domain/visible-state.ts'
 import type { Project } from '../domain/project.ts'
+import type { ProjectDashboardRecord } from '../domain/project-dashboard.ts'
 import type { ProjectWorkspaceRecord } from '../application/ports/project-workspace-query-repository.ts'
 import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
@@ -190,6 +191,37 @@ export function presentProjectV2(
     currentVersionId: project.currentVersionId,
     createdAt: project.createdAt,
     visibleState: presentProjectVisibleState(project.status),
+  })
+}
+
+export function presentProjectDashboard(
+  record: Readonly<ProjectDashboardRecord>,
+) {
+  const latestOperation = record.dashboard.latestOperation
+  return Object.freeze({
+    ...presentProjectV2(record),
+    dashboard: Object.freeze({
+      schemaVersion: record.dashboard.schemaVersion,
+      currentVersion: record.dashboard.currentVersion
+        ? Object.freeze({ ...record.dashboard.currentVersion })
+        : null,
+      latestOperation: latestOperation
+        ? Object.freeze({
+            ...latestOperation,
+            ...(latestOperation.progress
+              ? { progress: Object.freeze({ ...latestOperation.progress }) }
+              : {}),
+            ...(latestOperation.error
+              ? { error: Object.freeze({ ...latestOperation.error }) }
+              : {}),
+          })
+        : null,
+      openReviewIssueCount: record.dashboard.openReviewIssueCount,
+      outputs: Object.freeze(record.dashboard.outputs.map((output) =>
+        Object.freeze({ ...output }))),
+      outputCount: record.dashboard.outputCount,
+      lastActivityAt: record.dashboard.lastActivityAt,
+    }),
   })
 }
 

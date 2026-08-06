@@ -16,7 +16,7 @@
     {
       "uiAction": "src/app/batches/page.tsx:1016",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -1334,9 +1334,9 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:147",
+      "uiAction": "src/app/ProjectsPageClient.tsx:190",
       "capabilityId": "apollo.projects.list",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -1354,7 +1354,7 @@
       ]
     },
     {
-      "uiAction": "src/app/ProjectsPageClient.tsx:221",
+      "uiAction": "src/app/ProjectsPageClient.tsx:277",
       "capabilityId": "apollo.projects.create",
       "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects",
@@ -1816,7 +1816,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-list/v4",
+      "outputSchemaRef": "apollo://schemas/project-list/v5",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

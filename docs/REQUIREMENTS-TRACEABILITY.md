@@ -142,6 +142,15 @@ Atualização local de resiliência em FR-243 — o worker do Diretor cobre rest
 | FR-010 | Objetivo estratégico | S1 | D0,D2,D6 | rubrica correta entra no DirectorRun | integration |
 | FR-011 | Ação desejada | S1 | D0,D2 | CTA/destino persistidos e validados | policy |
 | FR-012 | Briefing livre opcional | S1,S7 | D0,D6 | projeto segue com campo vazio | e2e |
+
+Atualização local parcial de FR-002 — `apollo.projects.list` v3/project-list v5
+publica a versão corrente, a operação pública durável mais recente, annotations
+abertas e outputs concluídos da versão atual, todos consultados do Postgres V2.
+O domínio recusa relações incoerentes e o cliente só exibe percentual com total
+medido; refresh por evento cancela a leitura anterior e rejeita resposta fora
+de ordem. Testes de domínio, repositório, contrato e apresentação passaram; a
+jornada HTTP/PostgreSQL foi ampliada, mas não executada neste ambiente. Faltam
+E2E visual/browser, lotes, qualidade, armazenamento/fila, implantação e aceite.
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |

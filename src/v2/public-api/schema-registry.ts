@@ -7389,6 +7389,125 @@ const searchableProjectSchemaV2 = {
   })),
 }
 
+const projectDashboardOperationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'type', 'status', 'phase', 'updatedAt'],
+  properties: {
+    id: idSchema,
+    type: {
+      enum: [
+        'artifact-render', 'media-ingest', 'project-proxy-render',
+        'project-final-export', 'source-cleanup', 'long-form-index',
+        'project-director-run',
+      ],
+    },
+    status: {
+      enum: [
+        'queued', 'running', 'waiting', 'retrying',
+        'succeeded', 'failed', 'canceled',
+      ],
+    },
+    phase: {
+      enum: [
+        'queued', 'materializing', 'rendering', 'assembling', 'probing',
+        'normalizing', 'transcribing', 'diarizing', 'chunking', 'indexing',
+        'directing', 'verifying', 'persisting', 'waiting', 'retrying',
+        'completed', 'failed', 'canceled',
+      ],
+    },
+    progress: {
+      type: 'object', additionalProperties: false, required: ['completed'],
+      properties: {
+        completed: { type: 'integer', minimum: 0, maximum: 2000000000 },
+        total: { type: 'integer', minimum: 1, maximum: 2000000000 },
+        unit: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+      },
+    },
+    error: {
+      type: 'object', additionalProperties: false,
+      required: ['code', 'retryable'],
+      properties: {
+        code: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+        retryable: { type: 'boolean' },
+      },
+    },
+    updatedAt: dateTimeSchema,
+  },
+  allOf: [
+    {
+      if: { properties: { status: { const: 'failed' } }, required: ['status'] },
+      then: {
+        properties: {
+          error: {
+            type: 'object', additionalProperties: false,
+            required: ['code', 'retryable'],
+            properties: {
+              code: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' },
+              retryable: { type: 'boolean' },
+            },
+          },
+        },
+        required: ['error'],
+      },
+      else: { not: { required: ['error'] } },
+    },
+  ],
+}
+
+const projectDashboardSummarySchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'currentVersion', 'latestOperation',
+    'openReviewIssueCount', 'outputs', 'outputCount', 'lastActivityAt',
+  ],
+  properties: {
+    schemaVersion: { const: 'project-dashboard-summary/v1' },
+    currentVersion: {
+      oneOf: [
+        { type: 'null' },
+        {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'sequence', 'createdAt'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            createdAt: dateTimeSchema,
+          },
+        },
+      ],
+    },
+    latestOperation: {
+      oneOf: [{ type: 'null' }, projectDashboardOperationSchema],
+    },
+    openReviewIssueCount: {
+      type: 'integer', minimum: 0, maximum: 2000000000,
+    },
+    outputs: {
+      type: 'array', maxItems: 1000, uniqueItems: true,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['artifactId', 'aspectRatio'],
+        properties: {
+          artifactId: idSchema,
+          aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+        },
+      },
+    },
+    outputCount: { type: 'integer', minimum: 0, maximum: 1000 },
+    lastActivityAt: dateTimeSchema,
+  },
+}
+
+const searchableProjectSchemaV3 = {
+  ...searchableProjectSchemaV2,
+  required: [...searchableProjectSchemaV2.required, 'dashboard'],
+  properties: {
+    ...searchableProjectSchemaV2.properties,
+    dashboard: projectDashboardSummarySchema,
+  },
+}
+
 const publicOperationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -13640,6 +13759,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['projects'],
       properties: {
         projects: { type: 'array', items: searchableProjectSchemaV2 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      },
+    }),
+  ),
+  defineSchema('project-list', 5, 'Dashboard-ready project list with durable aggregate evidence',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV3 },
         nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
       },
     }),

@@ -33,6 +33,23 @@ interface ProjectSummary {
   currentVersionId?: string
   createdAt: string
   visibleState: VisibleState
+  dashboard: {
+    schemaVersion: 'project-dashboard-summary/v1'
+    currentVersion: { id: string; sequence: number; createdAt: string } | null
+    latestOperation: {
+      id: string
+      type: string
+      status: string
+      phase: string
+      progress?: { completed: number; total?: number; unit?: string }
+      error?: { code: string; retryable: boolean }
+      updatedAt: string
+    } | null
+    openReviewIssueCount: number
+    outputs: { artifactId: string; aspectRatio: OutputAspectRatio }[]
+    outputCount: number
+    lastActivityAt: string
+  }
 }
 
 interface PublicApiEnvelope<T> {
@@ -100,6 +117,27 @@ const PROJECT_ACTION_LABELS: Partial<Record<VisibleStateAction, string>> = {
   'inspect-history': 'Ver histórico',
 }
 
+const OPERATION_PHASE_LABELS: Record<string, string> = {
+  queued: 'Na fila',
+  materializing: 'Preparando mídia',
+  rendering: 'Renderizando',
+  assembling: 'Montando',
+  probing: 'Validando mídia',
+  normalizing: 'Normalizando',
+  transcribing: 'Transcrevendo',
+  diarizing: 'Identificando vozes',
+  chunking: 'Segmentando',
+  indexing: 'Indexando',
+  directing: 'Direção editorial',
+  verifying: 'Verificando',
+  persisting: 'Salvando resultado',
+  waiting: 'Aguardando provider',
+  retrying: 'Tentando novamente',
+  completed: 'Etapa concluída',
+  failed: 'Etapa com falha',
+  canceled: 'Etapa cancelada',
+}
+
 function ApiIcon({ path, className = 'h-5 w-5' }: { path: string; className?: string }) {
   return (
     <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24">
@@ -141,11 +179,17 @@ export default function Dashboard() {
   const [destination, setDestination] = useState('')
 
   useEffect(() => {
-    const controller = new AbortController()
+    let activeController: AbortController | null = null
+    let requestSequence = 0
     async function loadProjects() {
+      activeController?.abort()
+      const controller = new AbortController()
+      activeController = controller
+      const sequence = ++requestSequence
       try {
         const response = await fetch('/v1/projects?limit=100', {
           signal: controller.signal,
+          cache: 'no-store',
           headers: { accept: 'application/json' },
         })
         if (response.status === 401) {
@@ -156,16 +200,28 @@ export default function Dashboard() {
         if (!response.ok || !payload.data) {
           throw new Error(errorMessage(payload, 'Não foi possível carregar os projetos.'))
         }
-        setProjects(payload.data.projects)
+        if (sequence === requestSequence) setProjects(payload.data.projects)
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
-        setNotice(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
+        if (sequence === requestSequence) {
+          setNotice(error instanceof Error ? error.message : 'Não foi possível carregar os projetos.')
+        }
       } finally {
-        if (!controller.signal.aborted) setLoading(false)
+        if (sequence === requestSequence && !controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
     void loadProjects()
-    return () => controller.abort()
+    const refreshFromProjectEvent = () => void loadProjects()
+    window.addEventListener('apollo:project-updated', refreshFromProjectEvent)
+    return () => {
+      window.removeEventListener(
+        'apollo:project-updated',
+        refreshFromProjectEvent,
+      )
+      activeController?.abort()
+    }
   }, [router])
 
   useEffect(() => {
@@ -238,11 +294,12 @@ export default function Dashboard() {
         router.replace('/login')
         return
       }
-      const payload = await response.json() as PublicApiEnvelope<{ project: ProjectSummary }>
+      const payload = await response.json() as PublicApiEnvelope<{
+        project: { id: string }
+      }>
       if (!response.ok || !payload.data) {
         throw new Error(errorMessage(payload, 'Não foi possível criar o projeto.'))
       }
-      setProjects((current) => [payload.data!.project, ...current.filter((item) => item.id !== payload.data!.project.id)])
       setComposerOpen(false)
       resetComposer()
       router.push(`/projects/${encodeURIComponent(payload.data.project.id)}`)
@@ -398,6 +455,16 @@ export default function Dashboard() {
                     const objectiveLabel = STRATEGIC_OBJECTIVES.find((item) => item.id === project.objective)?.label ?? 'Objetivo não informado'
                     const stateLabel = PROJECT_STATE_LABELS[project.visibleState.label] ?? project.visibleState.label
                     const actionLabel = PROJECT_ACTION_LABELS[project.visibleState.primaryAction] ?? 'Abrir workspace'
+                    const latestOperation = project.dashboard.latestOperation
+                    const measuredTotal = latestOperation?.progress?.total
+                    const measuredPercent = measuredTotal
+                      ? Math.min(100, Math.floor(
+                          latestOperation.progress!.completed * 100 / measuredTotal,
+                        ))
+                      : null
+                    const phaseLabel = latestOperation
+                      ? OPERATION_PHASE_LABELS[latestOperation.phase] ?? latestOperation.phase
+                      : 'Nenhuma operação iniciada'
                     return (
                       <article className="group overflow-hidden rounded-2xl border border-white/[0.075] bg-[#0b0b0b] transition hover:-translate-y-0.5 hover:border-[#d5a533]/30" key={project.id}>
                         <div className="relative h-24 overflow-hidden border-b border-white/[0.06] bg-[linear-gradient(130deg,#15130e_0%,#0e0e0e_48%,#11100d_100%)] px-5 py-4">
@@ -415,8 +482,47 @@ export default function Dashboard() {
                             </div>
                             <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] ${PROJECT_TONE_CLASSES[project.visibleState.tone]}`} data-state={project.visibleState.label}>{stateLabel}</span>
                           </div>
+                          <dl className="mt-4 grid grid-cols-3 gap-2 text-[10px]">
+                            <div className="rounded-lg bg-white/[0.025] px-2.5 py-2">
+                              <dt className="text-[#5f5b54]">Versão</dt>
+                              <dd className="mt-0.5 font-medium text-[#aaa49a]">{project.dashboard.currentVersion ? `v${project.dashboard.currentVersion.sequence}` : '—'}</dd>
+                            </div>
+                            <div className="rounded-lg bg-white/[0.025] px-2.5 py-2">
+                              <dt className="text-[#5f5b54]">Pendências</dt>
+                              <dd className="mt-0.5 font-medium tabular-nums text-[#aaa49a]">{project.dashboard.openReviewIssueCount}</dd>
+                            </div>
+                            <div className="rounded-lg bg-white/[0.025] px-2.5 py-2">
+                              <dt className="text-[#5f5b54]">Outputs</dt>
+                              <dd className="mt-0.5 font-medium tabular-nums text-[#aaa49a]">{project.dashboard.outputCount}</dd>
+                            </div>
+                          </dl>
+                          <div className="mt-4 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2.5">
+                            <div className="flex items-center justify-between gap-3 text-[10px]">
+                              <span className={latestOperation?.status === 'failed' ? 'text-[#df8787]' : 'text-[#858078]'}>{phaseLabel}</span>
+                              {measuredPercent !== null ? (
+                                <span className="tabular-nums text-[#aaa49a]">{measuredPercent}%</span>
+                              ) : latestOperation ? (
+                                <span className="text-[#5f5b54]">sem total medido</span>
+                              ) : null}
+                            </div>
+                            {measuredPercent !== null ? (
+                              <div
+                                aria-label={`Progresso medido de ${project.name}`}
+                                aria-valuemax={100}
+                                aria-valuemin={0}
+                                aria-valuenow={measuredPercent}
+                                className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.06]"
+                                role="progressbar"
+                              >
+                                <div className="h-full rounded-full bg-[#d5a535]" style={{ width: `${measuredPercent}%` }} />
+                              </div>
+                            ) : null}
+                            {latestOperation?.error ? (
+                              <p className="mt-1.5 text-[10px] text-[#9d7777]">{latestOperation.error.code}{latestOperation.error.retryable ? ' · recuperável' : ''}</p>
+                            ) : null}
+                          </div>
                           <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4">
-                            <p className="text-[11px] text-[#625f59]">Criado em {new Date(project.createdAt).toLocaleDateString('pt-BR')}</p>
+                            <p className="text-[11px] text-[#625f59]">Atividade em {new Date(project.dashboard.lastActivityAt).toLocaleDateString('pt-BR')}</p>
                             <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">{actionLabel} →</button>
                           </div>
                         </div>

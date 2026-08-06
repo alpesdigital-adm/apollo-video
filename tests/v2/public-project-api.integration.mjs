@@ -5303,6 +5303,24 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.ok(projectEvents.every((event) => event.actorClientId === apiClientId))
     assert.ok(projectEvents.every((event) => event.publishedAt === null))
 
+    const dashboardOperationAt = new Date()
+    await client.v2PublicOperation.create({
+      data: {
+        id: 'public-api-dashboard-operation-v2',
+        workspaceId,
+        projectId: created.data.project.id,
+        clientId: apiClientId,
+        actorEnvironment: apiEnvironment,
+        type: 'artifact-render', status: 'queued', phase: 'queued',
+        targetType: 'media-artifact', targetId: derivedArtifactId,
+        cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
+        idempotencyKey: 'public-api-dashboard-operation-v2',
+        requestFingerprint: sha('d'),
+        createdAt: dashboardOperationAt,
+        updatedAt: dashboardOperationAt,
+      },
+    })
+
     const listResponse = await fetch(`${baseUrl}/v1/projects?limit=20`, {
       headers: { authorization },
     })
@@ -5313,6 +5331,27 @@ test('authenticated public API manages projects, clients and artifact inspection
       new Set(list.data.projects.map((project) => project.id)),
       new Set([created.data.project.id, uiProjectCreated.data.project.id]),
     )
+    const dashboardProject = list.data.projects.find((project) =>
+      project.id === created.data.project.id)
+    assert.equal(
+      dashboardProject.dashboard.schemaVersion,
+      'project-dashboard-summary/v1',
+    )
+    assert.equal(
+      dashboardProject.dashboard.currentVersion.id,
+      noneProjectLut.data.version.id,
+    )
+    assert.equal(
+      dashboardProject.dashboard.latestOperation.id,
+      'public-api-dashboard-operation-v2',
+    )
+    assert.equal(
+      'progress' in dashboardProject.dashboard.latestOperation,
+      false,
+    )
+    assert.equal(dashboardProject.dashboard.openReviewIssueCount, 0)
+    assert.deepEqual(dashboardProject.dashboard.outputs, [])
+    assert.equal(dashboardProject.dashboard.outputCount, 0)
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({
       where: {

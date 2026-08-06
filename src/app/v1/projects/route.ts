@@ -18,7 +18,12 @@ import {
   resolveRequestId,
   respondPublicError,
 } from '@/v2/public-api/errors'
-import { presentProjectV2, presentProjectVersionV2, presentSuccess } from '@/v2/public-api/presenters'
+import {
+  presentProjectDashboard,
+  presentProjectV2,
+  presentProjectVersionV2,
+  presentSuccess,
+} from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +53,7 @@ export async function GET(request: NextRequest) {
     })
     return NextResponse.json(
       presentSuccess({
-        projects: result.projects.map(presentProjectV2),
+        projects: result.projects.map(presentProjectDashboard),
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       }),
       { headers: publicApiHeaders(requestId) },

@@ -242,6 +242,15 @@ O dashboard deve exibir:
 - atividade recente;
 - uso de armazenamento e fila.
 
+Estado local parcial de FR-002: a listagem pública v3 (`GET /v1/projects`,
+`project-list/v5`) deriva de Postgres V2 a versão corrente, a operação pública
+durável mais recente, pendências de review e outputs concluídos da versão atual.
+O dashboard só calcula percentual quando a operação fornece total medido e
+refaz a consulta sem cache após eventos, cancelando leituras superadas. Ainda
+faltam lotes, qualidade, armazenamento/fila, E2E visual/browser, execução da
+jornada HTTP/PostgreSQL preparada, implantação e aceite; FR-002 permanece
+aberto.
+
 ### FR-003 — Busca e filtros
 
 Busca por nome, campanha, objetivo, tags, pessoa, material, idioma, status e data.
