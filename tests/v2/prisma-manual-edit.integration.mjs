@@ -83,6 +83,14 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       where: { workspaceId, reusedFromOperationId: { not: null } },
     })
     await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
+    await client.v2DirectorRun.updateMany({
+      where: { workspaceId },
+      data: { operationId: null, supersedesRunId: null },
+    })
+    await client.v2ProjectDirectorOperation.updateMany({
+      where: { workspaceId },
+      data: { supersedesRunId: null },
+    })
     await client.v2ProjectDirectorOperation.deleteMany({ where: { workspaceId } })
     const directorRunIds = (await client.v2DirectorRun.findMany({
       where: { workspaceId },
