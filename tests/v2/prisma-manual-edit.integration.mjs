@@ -215,6 +215,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       workspaceAccessStatus: 'active',
       auditContext,
     })
+    const operationActorAudit = Object.freeze({
+      actorClientId: auditContext.clientId,
+      actorCredentialId: auditContext.credentialId,
+      actorEnvironment: auditContext.environment,
+      actorAuthenticationKind: auditContext.authenticationKind,
+      actorContextHash: auditContext.contextHash,
+    })
     await client.v2Project.create({ data: {
       id: projectId, workspaceId, name: 'Manual Project', status: 'reviewing-proxy',
       objective: 'discovery', format: '9:16', locale: 'pt-BR',
@@ -339,6 +346,17 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         })
       }
     }
+    const renderColorBindings = (...artifactIds) => stableSerialize(artifactIds.map((artifactId) => {
+      const compilation = colorCompilations.get(artifactId)
+      assert.ok(compilation)
+      return {
+        sourceArtifactId: artifactId,
+        sourceManifestId: `manifest-${artifactId}`,
+        compilationId: compilation.id,
+        compilationHash: compilation.compilationHash,
+        pipelineHash: compilation.pipeline.pipelineHash,
+      }
+    }))
     const { createMediaTranscript } = await import('../../src/v2/domain/media-transcript.ts')
     const currentTranscript = createMediaTranscript({
       language: 'pt-BR', text: 'Primeira frase Segunda', provider: 'groq', model: 'whisper-large-v3',
@@ -388,6 +406,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     } })
     await client.v2PublicOperation.create({ data: {
       id: completedProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
+      ...operationActorAudit,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
@@ -404,7 +423,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       operationId: completedProxyOperationId, workspaceId, projectId,
       projectVersionId: initialVersionId, editPlanSnapshotId: editPlanId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ completedProxyOperationId }),
+      colorPipelineBindingsJson: renderColorBindings(sourceA), inputHash: calculateVersionHash({ completedProxyOperationId }),
       outputArtifactId: completedProxyArtifactId,
       outputManifestId: completedProxyManifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
@@ -903,17 +922,10 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const selectionBaseVersion = persistedVersions.at(-1)
     const selectionBaseOperationId = `manual-selection-base-proxy-${suffix}`
     const selectionBaseFingerprint = calculateVersionHash({ selectionBaseOperationId })
-    const sourceAColorCompilation = colorCompilations.get(sourceA)
-    assert.ok(sourceAColorCompilation)
-    const selectionColorBindings = stableSerialize([{
-      sourceArtifactId: sourceA,
-      sourceManifestId: `manifest-${sourceA}`,
-      compilationId: sourceAColorCompilation.id,
-      compilationHash: sourceAColorCompilation.compilationHash,
-      pipelineHash: sourceAColorCompilation.pipeline.pipelineHash,
-    }])
+    const selectionColorBindings = renderColorBindings(sourceA, sourceB)
     await client.v2PublicOperation.create({ data: {
       id: selectionBaseOperationId, workspaceId, projectId, clientId: issued.client.id,
+      ...operationActorAudit,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
@@ -1050,6 +1062,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const transcriptBaseProxyOperationId = `manual-transcript-base-proxy-${suffix}`
     await client.v2PublicOperation.create({ data: {
       id: transcriptBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
+      ...operationActorAudit,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
@@ -1063,7 +1076,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       operationId: transcriptBaseProxyOperationId, workspaceId, projectId,
       projectVersionId: cropped.data.version.id, editPlanSnapshotId: cropVersion.editPlanSnapshotId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ transcriptBaseProxyOperationId, input: true }),
+      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ transcriptBaseProxyOperationId, input: true }),
       outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
@@ -1176,6 +1189,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     const directorBaseProxyOperationId = `manual-director-base-proxy-${suffix}`
     await client.v2PublicOperation.create({ data: {
       id: directorBaseProxyOperationId, workspaceId, projectId, clientId: issued.client.id,
+      ...operationActorAudit,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: completedProxyArtifactId,
       progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
@@ -1190,7 +1204,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       projectVersionId: transcriptApplied.data.version.id,
       editPlanSnapshotId: replacementVersion.editPlanSnapshotId,
       sourceArtifactId: sourceA, sourceManifestId: `manifest-${sourceA}`,
-      colorPipelineBindingsJson: '[]', inputHash: calculateVersionHash({ directorBaseProxyOperationId, input: true }),
+      colorPipelineBindingsJson: renderColorBindings(sourceA, sourceB), inputHash: calculateVersionHash({ directorBaseProxyOperationId, input: true }),
       outputArtifactId: completedProxyArtifactId, outputManifestId: completedProxyManifestId,
       originalFileName: `${completedProxyArtifactId}.mp4`, createdAt,
     } })
