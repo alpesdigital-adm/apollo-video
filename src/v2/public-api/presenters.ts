@@ -22,6 +22,7 @@ import {
 } from '../domain/visible-state.ts'
 import type { Project } from '../domain/project.ts'
 import type { ProjectDashboardRecord } from '../domain/project-dashboard.ts'
+import type { ProjectAdministrationResult } from '../application/ports/project-administration-repository.ts'
 import type { ProjectWorkspaceRecord } from '../application/ports/project-workspace-query-repository.ts'
 import type { ManualEditInvalidationView } from '../application/ports/manual-edit-repository.ts'
 import type {
@@ -221,7 +222,31 @@ export function presentProjectDashboard(
         Object.freeze({ ...output }))),
       outputCount: record.dashboard.outputCount,
       lastActivityAt: record.dashboard.lastActivityAt,
+      administrationRevision: record.dashboard.administrationRevision,
+      archivedFromStatus: record.dashboard.archivedFromStatus,
     }),
+  })
+}
+
+export function presentProjectAdministrationResult(
+  result: Readonly<ProjectAdministrationResult>,
+) {
+  return Object.freeze({
+    project: presentProjectV2(result.project),
+    administration: Object.freeze({
+      schemaVersion: 'project-administration-state/v1' as const,
+      revision: result.state.revision,
+      archivedFromStatus: result.state.archivedFromStatus ?? null,
+    }),
+    command: Object.freeze({
+      id: result.command.id,
+      action: result.command.action,
+      baseRevision: result.command.before.revision,
+      resultRevision: result.command.after.revision,
+      commandHash: result.command.commandHash,
+      occurredAt: result.command.occurredAt,
+    }),
+    replayed: result.replayed,
   })
 }
 

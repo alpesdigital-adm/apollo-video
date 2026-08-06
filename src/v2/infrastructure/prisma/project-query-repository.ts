@@ -173,6 +173,11 @@ export class PrismaProjectQueryRepository implements ProjectQueryRepository {
           aspectRatio: output.outputAspectRatio as OutputAspectRatio,
         })) ?? [],
         lastActivityAt,
+        administrationRevision: row.administrationRevision,
+        archivedFromStatus: row.archivedFromStatus as Exclude<
+          ProjectStatus,
+          'archived'
+        > | null,
       })
     })
   }

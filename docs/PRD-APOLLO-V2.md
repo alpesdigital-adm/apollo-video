@@ -242,8 +242,8 @@ O dashboard deve exibir:
 - atividade recente;
 - uso de armazenamento e fila.
 
-Estado local parcial de FR-002: a listagem pública v3 (`GET /v1/projects`,
-`project-list/v5`) deriva de Postgres V2 a versão corrente, a operação pública
+Estado local parcial de FR-002: a listagem pública v4 (`GET /v1/projects`,
+`project-list/v6`) deriva de Postgres V2 a versão corrente, a operação pública
 durável mais recente, pendências de review e outputs concluídos da versão atual.
 O dashboard só calcula percentual quando a operação fornece total medido e
 refaz a consulta sem cache após eventos, cancelando leituras superadas. Ainda
@@ -272,6 +272,18 @@ pendentes.
 - Arquivar.
 - Excluir respeitando lineage e referências.
 - Reprocessar etapa.
+
+Estado local parcial de FR-004: os cards expõem abrir, revisar, duplicar,
+renomear, arquivar e restaurar. Rename/archive/restore são Commands
+administrativos separados de edição editorial: usam `baseRevision`, CAS
+serializável, idempotência vinculada ao ator, hashes canônicos, evento público
+transacional e não criam ProjectVersion nem invalidam render. Archive exige
+confirmação humana e persiste o status anterior exato; restore falha fechado
+quando essa origem não existe. A UI não aplica projeção otimista: só reflete a
+resposta durável. Duplicate continua copy-on-write sobre snapshots/artifacts
+imutáveis. As jornadas HTTP/PostgreSQL estão preparadas, mas não foram executadas
+neste ambiente; faltam E2E browser, implantação e aceite. Excluir e reprocessar
+continuam fora deste slice e FR-004 permanece aberto.
 
 ---
 

@@ -91,6 +91,7 @@ import type { RenderInputAssetResolver } from '../application/ports/render-input
 import type { RenderInputAssetAvailability } from '../application/ports/render-reconstruction-readiness.ts'
 import type { ProjectCreationRepository } from '../application/ports/project-creation-repository.ts'
 import type { ProjectDuplicationRepository } from '../application/ports/project-duplication-repository.ts'
+import type { ProjectAdministrationRepository } from '../application/ports/project-administration-repository.ts'
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
@@ -210,6 +211,7 @@ import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
 import { PrismaProjectCreationRepository } from './prisma/project-creation-repository.ts'
 import { PrismaProjectDuplicationRepository } from './prisma/project-duplication-repository.ts'
+import { PrismaProjectAdministrationRepository } from './prisma/project-administration-repository.ts'
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
@@ -1485,6 +1487,10 @@ export function createProjectCreationRepository(): ProjectCreationRepository {
 
 export function createProjectDuplicationRepository(): ProjectDuplicationRepository {
   return new PrismaProjectDuplicationRepository(resolveV2Client())
+}
+
+export function createProjectAdministrationRepository(): ProjectAdministrationRepository {
+  return new PrismaProjectAdministrationRepository(resolveV2Client())
 }
 
 export function createProjectQueryRepository(): ProjectQueryRepository {

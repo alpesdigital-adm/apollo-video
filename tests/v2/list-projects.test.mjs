@@ -105,8 +105,9 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(publicProject.visibleState.label, 'draft')
 
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.list').version, '3.0.0')
-  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v5')
+  assert.equal(capabilities.get('apollo.projects.list').version, '4.0.0')
+  assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v6')
+  assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
   assert.equal(capabilities.get('apollo.projects.create').version, '4.0.0')
   assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')

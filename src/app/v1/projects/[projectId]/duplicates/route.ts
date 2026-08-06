@@ -7,7 +7,10 @@ import { DomainError } from '@/v2/domain/errors'
 import {
   createProjectDuplicationRepository,
 } from '@/v2/infrastructure/repository-factory'
-import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import {
+  assertExternalMutationOrigin,
+  authenticateExternalRequest,
+} from '@/v2/public-api/authentication'
 import {
   publicApiHeaders,
   resolveRequestId,
@@ -63,6 +66,7 @@ export async function POST(
   const requestId = resolveRequestId(request)
   try {
     const actor = await authenticateExternalRequest(request)
+    assertExternalMutationOrigin(request, actor)
     requireScope(actor, 'projects:write')
     const idempotencyKey =
       request.headers.get('idempotency-key')?.trim() ?? ''

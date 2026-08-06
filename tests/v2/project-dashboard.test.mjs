@@ -40,6 +40,13 @@ test('T-FR-236 dashboard consumes the public visible-state contract without infe
   assert.match(dashboardSource, /projectDashboardApiSearch/)
   assert.match(dashboardSource, /nextCursor/)
   assert.match(dashboardSource, /Carregar mais projetos/)
+  for (const action of ['Abrir', 'Revisar', 'Duplicar', 'Renomear', 'Arquivar', 'Restaurar']) {
+    assert.match(dashboardSource, new RegExp(`>${action}<`))
+  }
+  assert.match(dashboardSource, /administrationRevision/)
+  assert.match(dashboardSource, /archivedFromStatus/)
+  assert.match(dashboardSource, /confirmed: true/)
+  assert.doesNotMatch(dashboardSource, /optimisticProjectPatch/)
   assert.doesNotMatch(dashboardSource, /project\.name\.toLocaleLowerCase/)
 })
 
@@ -69,6 +76,8 @@ test('F1.001 dashboard aggregate exposes only measured progress and current-vers
     openReviewIssueCount: 2,
     outputs: [{ artifactId: 'artifact-dashboard-1', aspectRatio: '9:16' }],
     lastActivityAt: '2026-08-06T12:02:00.000Z',
+    administrationRevision: 1,
+    archivedFromStatus: null,
   })
   assert.equal(record.dashboard.outputCount, 1)
   assert.deepEqual(record.dashboard.latestOperation.progress, {
@@ -86,6 +95,7 @@ test('F1.001 dashboard aggregate exposes only measured progress and current-vers
       },
       latestOperation: null, openReviewIssueCount: 0, outputs: [],
       lastActivityAt: '2026-08-06T12:02:00.000Z',
+      administrationRevision: 1, archivedFromStatus: null,
     }),
     /current version is inconsistent/,
   )
@@ -106,6 +116,7 @@ test('F1.001 Prisma query aggregates the current version, latest real job, issue
           createdByType: 'api-client', createdById: 'client-dashboard-1',
           createdAt: new Date('2026-08-06T12:00:00.000Z'),
           updatedAt: new Date('2026-08-06T12:03:00.000Z'),
+          administrationRevision: 4, archivedFromStatus: null,
           currentVersion: {
             id: 'project-version-dashboard-1', sequence: 3,
             createdAt: new Date('2026-08-06T12:01:00.000Z'),
@@ -151,13 +162,15 @@ test('F1.001 Prisma query aggregates the current version, latest real job, issue
   assert.equal(record.dashboard.currentVersion.sequence, 3)
   assert.equal(record.dashboard.openReviewIssueCount, 2)
   assert.equal(record.dashboard.outputCount, 1)
+  assert.equal(record.dashboard.administrationRevision, 4)
+  assert.equal(record.dashboard.archivedFromStatus, null)
   assert.deepEqual(record.dashboard.latestOperation.progress, {
     completed: 240, total: 240, unit: 'frames',
   })
   assert.equal(record.dashboard.lastActivityAt, '2026-08-06T12:04:00.000Z')
 })
 
-test('F1.001 public project-list v5 validates the aggregate and rejects fabricated progress', () => {
+test('F1.003 public project-list v6 validates administration evidence and rejects fabricated progress', () => {
   const record = createProjectDashboardRecord({
     project: project(),
     currentVersion: {
@@ -171,13 +184,14 @@ test('F1.001 public project-list v5 validates the aggregate and rejects fabricat
     },
     openReviewIssueCount: 0, outputs: [],
     lastActivityAt: '2026-08-06T12:02:00.000Z',
+    administrationRevision: 1, archivedFromStatus: null,
   })
   const body = {
     data: { projects: [presentProjectDashboard(record)] },
     meta: { apiVersion: 'v1' },
   }
   const validate = addFormats(new Ajv2020({ strict: true, allErrors: true }))
-    .compile(getPublicSchema('apollo://schemas/project-list/v5').schema)
+    .compile(getPublicSchema('apollo://schemas/project-list/v6').schema)
   assert.equal(validate(body), true, JSON.stringify(validate.errors))
   const fabricated = structuredClone(body)
   fabricated.data.projects[0].dashboard.latestOperation.progress.percent = 60

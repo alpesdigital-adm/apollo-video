@@ -141,6 +141,7 @@ test('public event envelope is versioned, bounded and tied to the initial catalo
     [
       'project.created',
       'project.version.created',
+      'project.name.changed',
       'project.status.changed',
       'operation.status.changed',
       'operation.succeeded',
@@ -232,7 +233,7 @@ test('public event envelope is versioned, bounded and tied to the initial catalo
 
 test('T-FR-244 public event catalog crosses the shared application boundary without drift', () => {
   const catalog = readPublicEventCatalogService()()
-  assert.equal(catalog.envelopeSchemaRef, 'apollo://schemas/public-event/v1')
+  assert.equal(catalog.envelopeSchemaRef, 'apollo://schemas/public-event/v2')
   assert.deepEqual(catalog.events, PUBLIC_EVENT_CATALOG)
   assert.ok(Object.isFrozen(catalog))
   assert.ok(Object.isFrozen(catalog.events))

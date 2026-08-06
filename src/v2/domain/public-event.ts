@@ -80,6 +80,7 @@ function defineEventCatalog(
 export const PUBLIC_EVENT_CATALOG = defineEventCatalog([
   { type: 'project.created', version: '1.0.0', resourceType: 'project', description: 'A project was created.' },
   { type: 'project.version.created', version: '1.0.0', resourceType: 'project-version', description: 'An immutable project version was created.' },
+  { type: 'project.name.changed', version: '1.0.0', resourceType: 'project', description: 'A project name changed.' },
   { type: 'project.status.changed', version: '1.0.0', resourceType: 'project', description: 'A project status changed.' },
   { type: 'operation.status.changed', version: '1.0.0', resourceType: 'operation', description: 'A public operation changed status.' },
   { type: 'operation.succeeded', version: '1.0.0', resourceType: 'operation', description: 'A public operation completed successfully.' },

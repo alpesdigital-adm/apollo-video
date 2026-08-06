@@ -1698,12 +1698,12 @@
       "responseMediaType": "application/schema+json"
     },
     "apollo.events.catalog.read": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "none",
       "requiredScopes": [],
-      "outputSchemaRef": "apollo://schemas/event-catalog/v1",
+      "outputSchemaRef": "apollo://schemas/event-catalog/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/events/catalog"
@@ -2565,6 +2565,31 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.archive": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/archive-project-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-administration-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/archive"
+      },
+      "toolName": "apollo.projects.archive",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.artifact-invalidations.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -3250,14 +3275,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.list": {
-      "version": "3.0.0",
+      "version": "4.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/project-list/v5",
+      "outputSchemaRef": "apollo://schemas/project-list/v6",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects"
@@ -4346,6 +4371,31 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.rename": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/rename-project-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-administration-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/rename"
+      },
+      "toolName": "apollo.projects.rename",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.render-elements.resolve": {
       "version": "1.0.0",
       "exposure": "public",
@@ -4444,6 +4494,31 @@
           }
         }
       ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.restore": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/restore-project-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-administration-result/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/restore"
+      },
+      "toolName": "apollo.projects.restore",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.projects.review-patch-batches.apply": {
@@ -6317,14 +6392,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.webhooks.subscriptions.create": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "workspace-admin",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "webhooks:admin"
       ],
-      "inputSchemaRef": "apollo://schemas/create-webhook-subscription-request/v1",
+      "inputSchemaRef": "apollo://schemas/create-webhook-subscription-request/v2",
       "outputSchemaRef": "apollo://schemas/webhook-subscription-created/v1",
       "endpoint": {
         "method": "POST",
@@ -9590,6 +9665,23 @@
         "confirmed"
       ],
       "properties": {
+        "confirmed": {
+          "const": true
+        }
+      }
+    },
+    "apollo://schemas/archive-project-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "confirmed"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
         "confirmed": {
           "const": true
         }
@@ -33520,6 +33612,58 @@
         }
       }
     },
+    "apollo://schemas/create-webhook-subscription-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId",
+        "eventTypes"
+      ],
+      "properties": {
+        "endpointId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "project.created",
+              "project.version.created",
+              "project.name.changed",
+              "project.status.changed",
+              "operation.status.changed",
+              "operation.succeeded",
+              "operation.failed",
+              "annotation.created",
+              "annotation.resolved",
+              "quality.report.created",
+              "approval.changed",
+              "artifact.ready",
+              "artifact.rejected",
+              "budget.threshold.reached",
+              "client.suspended"
+            ]
+          }
+        },
+        "resourceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      }
+    },
     "apollo://schemas/decide-validation-envelope-reuse-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -35422,6 +35566,100 @@
                     "enum": [
                       "project.created",
                       "project.version.created",
+                      "project.status.changed",
+                      "operation.status.changed",
+                      "operation.succeeded",
+                      "operation.failed",
+                      "annotation.created",
+                      "annotation.resolved",
+                      "quality.report.created",
+                      "approval.changed",
+                      "artifact.ready",
+                      "artifact.rejected",
+                      "budget.threshold.reached",
+                      "client.suspended"
+                    ]
+                  },
+                  "version": {
+                    "const": "1.0.0"
+                  },
+                  "resourceType": {
+                    "type": "string",
+                    "enum": [
+                      "project",
+                      "project-version",
+                      "operation",
+                      "annotation",
+                      "quality-report",
+                      "approval",
+                      "media-artifact",
+                      "workspace",
+                      "api-client"
+                    ]
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/event-catalog/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "envelopeSchemaRef",
+            "events"
+          ],
+          "properties": {
+            "envelopeSchemaRef": {
+              "const": "apollo://schemas/public-event/v2"
+            },
+            "events": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "version",
+                  "resourceType",
+                  "description"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "project.created",
+                      "project.version.created",
+                      "project.name.changed",
                       "project.status.changed",
                       "operation.status.changed",
                       "operation.succeeded",
@@ -58431,6 +58669,886 @@
         }
       }
     },
+    "apollo://schemas/project-administration-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "administration",
+            "command",
+            "replayed"
+          ],
+          "properties": {
+            "project": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "name",
+                "status",
+                "createdAt",
+                "visibleState"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120
+                },
+                "status": {
+                  "enum": [
+                    "draft",
+                    "ingesting",
+                    "perceiving",
+                    "planning",
+                    "generating",
+                    "reviewing-assets",
+                    "rendering-proxy",
+                    "reviewing-proxy",
+                    "revising",
+                    "rendering-final",
+                    "completed",
+                    "failed",
+                    "canceled",
+                    "archived"
+                  ]
+                },
+                "currentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "objective": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                },
+                "format": {
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "4:5",
+                    "1:1",
+                    "21:9"
+                  ]
+                },
+                "locale": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 35
+                },
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "visibleState": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "label",
+                    "tone",
+                    "progress",
+                    "primaryAction",
+                    "availableActions",
+                    "terminal"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "visible-state/v1"
+                    },
+                    "label": {
+                      "enum": [
+                        "draft",
+                        "ingesting",
+                        "perceiving",
+                        "planning",
+                        "generating",
+                        "reviewing-assets",
+                        "rendering-proxy",
+                        "reviewing-proxy",
+                        "revising",
+                        "rendering-final",
+                        "completed",
+                        "failed",
+                        "canceled",
+                        "archived"
+                      ]
+                    },
+                    "tone": {
+                      "enum": [
+                        "neutral",
+                        "info",
+                        "warning",
+                        "danger",
+                        "success"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "not-started",
+                            "determinate",
+                            "indeterminate",
+                            "complete",
+                            "none"
+                          ]
+                        },
+                        "percent": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100
+                        }
+                      }
+                    },
+                    "primaryAction": {
+                      "enum": [
+                        "open-result",
+                        "view-progress",
+                        "review-output",
+                        "inspect-error",
+                        "inspect-history"
+                      ]
+                    },
+                    "availableActions": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "open-result",
+                          "view-progress",
+                          "review-output",
+                          "inspect-error",
+                          "inspect-history"
+                        ]
+                      }
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    }
+                  },
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "draft"
+                        },
+                        "tone": {
+                          "const": "neutral"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "not-started"
+                            },
+                            "percent": {
+                              "const": 0
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "percent"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "open-result"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "open-result"
+                          ]
+                        },
+                        "terminal": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "enum": [
+                            "ingesting",
+                            "perceiving",
+                            "planning",
+                            "generating",
+                            "rendering-proxy",
+                            "revising",
+                            "rendering-final"
+                          ]
+                        },
+                        "tone": {
+                          "const": "info"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "indeterminate"
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "view-progress"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "view-progress"
+                          ]
+                        },
+                        "terminal": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "enum": [
+                            "reviewing-assets",
+                            "reviewing-proxy"
+                          ]
+                        },
+                        "tone": {
+                          "const": "warning"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "none"
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "review-output"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "review-output"
+                          ]
+                        },
+                        "terminal": {
+                          "const": false
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "completed"
+                        },
+                        "tone": {
+                          "const": "success"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "complete"
+                            },
+                            "percent": {
+                              "const": 100
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "percent"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "open-result"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "open-result"
+                          ]
+                        },
+                        "terminal": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "const": "failed"
+                        },
+                        "tone": {
+                          "const": "danger"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "none"
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "inspect-error"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "inspect-error"
+                          ]
+                        },
+                        "terminal": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "enum": [
+                            "canceled",
+                            "archived"
+                          ]
+                        },
+                        "tone": {
+                          "const": "neutral"
+                        },
+                        "progress": {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "none"
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ]
+                        },
+                        "primaryAction": {
+                          "const": "inspect-history"
+                        },
+                        "availableActions": {
+                          "const": [
+                            "inspect-history"
+                          ]
+                        },
+                        "terminal": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "tone",
+                        "progress",
+                        "primaryAction",
+                        "availableActions",
+                        "terminal"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "draft"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "draft"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "ingesting"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "ingesting"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "perceiving"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "perceiving"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "planning"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "planning"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "generating"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "generating"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "reviewing-assets"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "reviewing-assets"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "rendering-proxy"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "rendering-proxy"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "reviewing-proxy"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "reviewing-proxy"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "revising"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "revising"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "rendering-final"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "rendering-final"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "completed"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "completed"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "failed"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "failed"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "canceled"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "canceled"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "archived"
+                      }
+                    }
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "visibleState": {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "archived"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "administration": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "revision",
+                "archivedFromStatus"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "project-administration-state/v1"
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "archivedFromStatus": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "enum": [
+                        "draft",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ]
+                    }
+                  ]
+                }
+              }
+            },
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "action",
+                "baseRevision",
+                "resultRevision",
+                "commandHash",
+                "occurredAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "action": {
+                  "enum": [
+                    "rename",
+                    "archive",
+                    "restore"
+                  ]
+                },
+                "baseRevision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "resultRevision": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "commandHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "occurredAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/project-artifact-invalidations/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -71633,6 +72751,1085 @@
                       "lastActivityAt": {
                         "type": "string",
                         "format": "date-time"
+                      }
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "draft"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "draft"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "ingesting"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "ingesting"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "perceiving"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "perceiving"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "planning"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "planning"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "generating"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "generating"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "reviewing-assets"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "reviewing-assets"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "rendering-proxy"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "rendering-proxy"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "reviewing-proxy"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "reviewing-proxy"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "revising"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "revising"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "rendering-final"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "rendering-final"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "completed"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "completed"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "failed"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "failed"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "canceled"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "canceled"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "archived"
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "visibleState": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "const": "archived"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1024
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-list/v6": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projects"
+          ],
+          "properties": {
+            "projects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "name",
+                  "status",
+                  "createdAt",
+                  "visibleState",
+                  "dashboard"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "status": {
+                    "enum": [
+                      "draft",
+                      "ingesting",
+                      "perceiving",
+                      "planning",
+                      "generating",
+                      "reviewing-assets",
+                      "rendering-proxy",
+                      "reviewing-proxy",
+                      "revising",
+                      "rendering-final",
+                      "completed",
+                      "failed",
+                      "canceled",
+                      "archived"
+                    ]
+                  },
+                  "currentVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "objective": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "format": {
+                    "enum": [
+                      "9:16",
+                      "16:9",
+                      "4:5",
+                      "1:1",
+                      "21:9"
+                    ]
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 35
+                  },
+                  "ownerId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "visibleState": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "label",
+                      "tone",
+                      "progress",
+                      "primaryAction",
+                      "availableActions",
+                      "terminal"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "visible-state/v1"
+                      },
+                      "label": {
+                        "enum": [
+                          "draft",
+                          "ingesting",
+                          "perceiving",
+                          "planning",
+                          "generating",
+                          "reviewing-assets",
+                          "rendering-proxy",
+                          "reviewing-proxy",
+                          "revising",
+                          "rendering-final",
+                          "completed",
+                          "failed",
+                          "canceled",
+                          "archived"
+                        ]
+                      },
+                      "tone": {
+                        "enum": [
+                          "neutral",
+                          "info",
+                          "warning",
+                          "danger",
+                          "success"
+                        ]
+                      },
+                      "progress": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "mode"
+                        ],
+                        "properties": {
+                          "mode": {
+                            "enum": [
+                              "not-started",
+                              "determinate",
+                              "indeterminate",
+                              "complete",
+                              "none"
+                            ]
+                          },
+                          "percent": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                          }
+                        }
+                      },
+                      "primaryAction": {
+                        "enum": [
+                          "open-result",
+                          "view-progress",
+                          "review-output",
+                          "inspect-error",
+                          "inspect-history"
+                        ]
+                      },
+                      "availableActions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "open-result",
+                            "view-progress",
+                            "review-output",
+                            "inspect-error",
+                            "inspect-history"
+                          ]
+                        }
+                      },
+                      "terminal": {
+                        "type": "boolean"
+                      }
+                    },
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "draft"
+                          },
+                          "tone": {
+                            "const": "neutral"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "not-started"
+                              },
+                              "percent": {
+                                "const": 0
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "percent"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "open-result"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "open-result"
+                            ]
+                          },
+                          "terminal": {
+                            "const": false
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "enum": [
+                              "ingesting",
+                              "perceiving",
+                              "planning",
+                              "generating",
+                              "rendering-proxy",
+                              "revising",
+                              "rendering-final"
+                            ]
+                          },
+                          "tone": {
+                            "const": "info"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "indeterminate"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "view-progress"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "view-progress"
+                            ]
+                          },
+                          "terminal": {
+                            "const": false
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "enum": [
+                              "reviewing-assets",
+                              "reviewing-proxy"
+                            ]
+                          },
+                          "tone": {
+                            "const": "warning"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "review-output"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "review-output"
+                            ]
+                          },
+                          "terminal": {
+                            "const": false
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "completed"
+                          },
+                          "tone": {
+                            "const": "success"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "complete"
+                              },
+                              "percent": {
+                                "const": 100
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "percent"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "open-result"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "open-result"
+                            ]
+                          },
+                          "terminal": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "const": "failed"
+                          },
+                          "tone": {
+                            "const": "danger"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "inspect-error"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "inspect-error"
+                            ]
+                          },
+                          "terminal": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "enum": [
+                              "canceled",
+                              "archived"
+                            ]
+                          },
+                          "tone": {
+                            "const": "neutral"
+                          },
+                          "progress": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "const": "none"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ]
+                          },
+                          "primaryAction": {
+                            "const": "inspect-history"
+                          },
+                          "availableActions": {
+                            "const": [
+                              "inspect-history"
+                            ]
+                          },
+                          "terminal": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "tone",
+                          "progress",
+                          "primaryAction",
+                          "availableActions",
+                          "terminal"
+                        ]
+                      }
+                    ]
+                  },
+                  "dashboard": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "currentVersion",
+                      "latestOperation",
+                      "openReviewIssueCount",
+                      "outputs",
+                      "outputCount",
+                      "lastActivityAt",
+                      "administrationRevision",
+                      "archivedFromStatus"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "project-dashboard-summary/v2"
+                      },
+                      "currentVersion": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "sequence",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "latestOperation": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id",
+                              "type",
+                              "status",
+                              "phase",
+                              "updatedAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "type": {
+                                "enum": [
+                                  "artifact-render",
+                                  "media-ingest",
+                                  "project-proxy-render",
+                                  "project-final-export",
+                                  "source-cleanup",
+                                  "long-form-index",
+                                  "project-director-run"
+                                ]
+                              },
+                              "status": {
+                                "enum": [
+                                  "queued",
+                                  "running",
+                                  "waiting",
+                                  "retrying",
+                                  "succeeded",
+                                  "failed",
+                                  "canceled"
+                                ]
+                              },
+                              "phase": {
+                                "enum": [
+                                  "queued",
+                                  "materializing",
+                                  "rendering",
+                                  "assembling",
+                                  "probing",
+                                  "normalizing",
+                                  "transcribing",
+                                  "diarizing",
+                                  "chunking",
+                                  "indexing",
+                                  "directing",
+                                  "verifying",
+                                  "persisting",
+                                  "waiting",
+                                  "retrying",
+                                  "completed",
+                                  "failed",
+                                  "canceled"
+                                ]
+                              },
+                              "progress": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "completed"
+                                ],
+                                "properties": {
+                                  "completed": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 2000000000
+                                  },
+                                  "total": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 2000000000
+                                  },
+                                  "unit": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                                  }
+                                }
+                              },
+                              "error": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "code",
+                                  "retryable"
+                                ],
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                                  },
+                                  "retryable": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "allOf": [
+                              {
+                                "if": {
+                                  "properties": {
+                                    "status": {
+                                      "const": "failed"
+                                    }
+                                  },
+                                  "required": [
+                                    "status"
+                                  ]
+                                },
+                                "then": {
+                                  "properties": {
+                                    "error": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "code",
+                                        "retryable"
+                                      ],
+                                      "properties": {
+                                        "code": {
+                                          "type": "string",
+                                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                                        },
+                                        "retryable": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "error"
+                                  ]
+                                },
+                                "else": {
+                                  "not": {
+                                    "required": [
+                                      "error"
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "openReviewIssueCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 2000000000
+                      },
+                      "outputs": {
+                        "type": "array",
+                        "maxItems": 1000,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "artifactId",
+                            "aspectRatio"
+                          ],
+                          "properties": {
+                            "artifactId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "aspectRatio": {
+                              "enum": [
+                                "9:16",
+                                "16:9",
+                                "4:5",
+                                "1:1",
+                                "21:9"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "outputCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "lastActivityAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "administrationRevision": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "archivedFromStatus": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "enum": [
+                              "draft",
+                              "completed",
+                              "failed",
+                              "canceled"
+                            ]
+                          }
+                        ]
                       }
                     }
                   }
@@ -99977,6 +102174,112 @@
         }
       }
     },
+    "apollo://schemas/public-event/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "version",
+        "workspaceId",
+        "occurredAt",
+        "resource",
+        "data"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "project.created",
+            "project.version.created",
+            "project.name.changed",
+            "project.status.changed",
+            "operation.status.changed",
+            "operation.succeeded",
+            "operation.failed",
+            "annotation.created",
+            "annotation.resolved",
+            "quality.report.created",
+            "approval.changed",
+            "artifact.ready",
+            "artifact.rejected",
+            "budget.threshold.reached",
+            "client.suspended"
+          ]
+        },
+        "version": {
+          "const": "1.0.0"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "userId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "project",
+                "project-version",
+                "operation",
+                "annotation",
+                "quality-report",
+                "approval",
+                "media-artifact",
+                "workspace",
+                "api-client"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 1024,
+          "additionalProperties": true
+        }
+      }
+    },
     "apollo://schemas/public-operation-detail/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -106716,6 +109019,25 @@
         }
       }
     },
+    "apollo://schemas/rename-project-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "name"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      }
+    },
     "apollo://schemas/render-element-hit-test/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -107430,6 +109752,19 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/restore-project-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     },

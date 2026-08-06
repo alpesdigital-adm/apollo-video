@@ -5006,10 +5006,30 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: { previousStatus: 'queued', status: 'running' },
       },
     ],
+    'apollo://schemas/public-event/v2': [
+      {
+        id: '123e4567-e89b-42d3-a456-426614174001',
+        type: 'project.name.changed', version: '1.0.0', workspaceId,
+        occurredAt: createdAt, sequence: 2, actor: { clientId },
+        resource: { type: 'project', id: projectId },
+        data: { action: 'rename', baseRevision: 1, resultRevision: 2 },
+      },
+    ],
     'apollo://schemas/event-catalog/v1': [
       {
         data: {
           envelopeSchemaRef: 'apollo://schemas/public-event/v1',
+          events: PUBLIC_EVENT_CATALOG.filter(
+            (descriptor) => descriptor.type !== 'project.name.changed',
+          ).map((descriptor) => ({ ...descriptor })),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/event-catalog/v2': [
+      {
+        data: {
+          envelopeSchemaRef: 'apollo://schemas/public-event/v2',
           events: PUBLIC_EVENT_CATALOG.map((descriptor) => ({ ...descriptor })),
         },
         meta: { apiVersion: 'v1' },
@@ -7141,6 +7161,13 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         resourceIds: ['artifact-example-1'],
       },
     ],
+    'apollo://schemas/create-webhook-subscription-request/v2': [
+      {
+        endpointId: webhookEndpointExample.id,
+        eventTypes: ['project.name.changed'],
+        resourceIds: [projectId],
+      },
+    ],
     'apollo://schemas/webhook-subscription-created/v1': [
       {
         data: { subscription: webhookSubscriptionExample, replayed: false },
@@ -7336,6 +7363,45 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             },
           },
           sharedArtifactIds: ['artifact-example-source-1'], copiedBytes: 0, replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/rename-project-request/v1': [
+      { baseRevision: 1, name: 'Anúncio de descoberta — versão curta' },
+    ],
+    'apollo://schemas/archive-project-request/v1': [
+      { baseRevision: 2, confirmed: true },
+    ],
+    'apollo://schemas/restore-project-request/v1': [
+      { baseRevision: 3 },
+    ],
+    'apollo://schemas/project-administration-result/v1': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId,
+            name: 'Anúncio de descoberta — versão curta', status: 'draft',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR',
+            ownerId: clientId, currentVersionId: 'project-version-example-1',
+            createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 },
+              primaryAction: 'open-result', availableActions: ['open-result'],
+              terminal: false,
+            },
+          },
+          administration: {
+            schemaVersion: 'project-administration-state/v1',
+            revision: 2, archivedFromStatus: null,
+          },
+          command: {
+            id: 'project-administration-example-1', action: 'rename',
+            baseRevision: 1, resultRevision: 2,
+            commandHash: 'c'.repeat(64), occurredAt: createdAt,
+          },
+          replayed: false,
         },
         meta: { apiVersion: 'v1' },
       },
@@ -8389,6 +8455,42 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           ],
           nextCursor: Buffer.from('project-dashboard-page-example')
             .toString('base64url'),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-list/v6': [
+      { data: { projects: [] }, meta: { apiVersion: 'v1' } },
+      {
+        data: {
+          projects: [{
+            id: projectId, workspaceId, name: 'Anúncio em processamento',
+            status: 'rendering-proxy',
+            currentVersionId: 'project-version-dashboard-1',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR',
+            ownerId: 'client-example-1', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'rendering-proxy',
+              tone: 'info', progress: { mode: 'indeterminate' },
+              primaryAction: 'view-progress',
+              availableActions: ['view-progress'], terminal: false,
+            },
+            dashboard: {
+              schemaVersion: 'project-dashboard-summary/v2',
+              currentVersion: {
+                id: 'project-version-dashboard-1', sequence: 2, createdAt,
+              },
+              latestOperation: {
+                id: 'project-operation-dashboard-1',
+                type: 'project-proxy-render', status: 'running',
+                phase: 'rendering', progress: { completed: 40, unit: 'frames' },
+                updatedAt: createdAt,
+              },
+              openReviewIssueCount: 0,
+              outputs: [], outputCount: 0, lastActivityAt: createdAt,
+              administrationRevision: 1, archivedFromStatus: null,
+            },
+          }],
         },
         meta: { apiVersion: 'v1' },
       },

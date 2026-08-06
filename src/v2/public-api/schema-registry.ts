@@ -6187,46 +6187,54 @@ const publicEventResourceTypes = [...new Set(
   PUBLIC_EVENT_CATALOG.map((descriptor) => descriptor.resourceType),
 )]
 const publicEventTypes = PUBLIC_EVENT_CATALOG.map((descriptor) => descriptor.type)
+const publicEventTypesV1 = publicEventTypes.filter(
+  (eventType) => eventType !== 'project.name.changed',
+)
 
-const publicEventSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['id', 'type', 'version', 'workspaceId', 'occurredAt', 'resource', 'data'],
-  properties: {
-    id: {
-      type: 'string',
-      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-    },
-    type: { type: 'string', enum: publicEventTypes },
-    version: { const: '1.0.0' },
-    workspaceId: idSchema,
-    occurredAt: dateTimeSchema,
-    sequence: { type: 'integer', minimum: 1 },
-    actor: {
-      type: 'object',
-      additionalProperties: false,
-      minProperties: 1,
-      properties: {
-        clientId: idSchema,
-        userId: idSchema,
+function publicEventSchemaFor(eventTypes: readonly string[]) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id', 'type', 'version', 'workspaceId', 'occurredAt', 'resource', 'data'],
+    properties: {
+      id: {
+        type: 'string',
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+      },
+      type: { type: 'string', enum: eventTypes },
+      version: { const: '1.0.0' },
+      workspaceId: idSchema,
+      occurredAt: dateTimeSchema,
+      sequence: { type: 'integer', minimum: 1 },
+      actor: {
+        type: 'object',
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          clientId: idSchema,
+          userId: idSchema,
+        },
+      },
+      resource: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'id'],
+        properties: {
+          type: { type: 'string', enum: publicEventResourceTypes },
+          id: idSchema,
+        },
+      },
+      data: {
+        type: 'object',
+        maxProperties: 1024,
+        additionalProperties: true,
       },
     },
-    resource: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['type', 'id'],
-      properties: {
-        type: { type: 'string', enum: publicEventResourceTypes },
-        id: idSchema,
-      },
-    },
-    data: {
-      type: 'object',
-      maxProperties: 1024,
-      additionalProperties: true,
-    },
-  },
+  }
 }
+
+const publicEventSchemaV1 = publicEventSchemaFor(publicEventTypesV1)
+const publicEventSchemaV2 = publicEventSchemaFor(publicEventTypes)
 
 function successSchema(data: Record<string, unknown>) {
   return {
@@ -7455,7 +7463,7 @@ const projectDashboardOperationSchema = {
   ],
 }
 
-const projectDashboardSummarySchema = {
+const projectDashboardSummarySchemaV1 = {
   type: 'object', additionalProperties: false,
   required: [
     'schemaVersion', 'currentVersion', 'latestOperation',
@@ -7504,9 +7512,74 @@ const searchableProjectSchemaV3 = {
   required: [...searchableProjectSchemaV2.required, 'dashboard'],
   properties: {
     ...searchableProjectSchemaV2.properties,
-    dashboard: projectDashboardSummarySchema,
+    dashboard: projectDashboardSummarySchemaV1,
   },
 }
+
+const projectDashboardSummarySchemaV2 = {
+  ...projectDashboardSummarySchemaV1,
+  required: [
+    ...projectDashboardSummarySchemaV1.required,
+    'administrationRevision', 'archivedFromStatus',
+  ],
+  properties: {
+    ...projectDashboardSummarySchemaV1.properties,
+    schemaVersion: { const: 'project-dashboard-summary/v2' },
+    administrationRevision: { type: 'integer', minimum: 1 },
+    archivedFromStatus: {
+      oneOf: [
+        { type: 'null' },
+        {
+          enum: ['draft', 'completed', 'failed', 'canceled'],
+        },
+      ],
+    },
+  },
+}
+
+const searchableProjectSchemaV4 = {
+  ...searchableProjectSchemaV2,
+  required: [...searchableProjectSchemaV2.required, 'dashboard'],
+  properties: {
+    ...searchableProjectSchemaV2.properties,
+    dashboard: projectDashboardSummarySchemaV2,
+  },
+}
+
+const projectAdministrationStateSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'revision', 'archivedFromStatus'],
+  properties: {
+    schemaVersion: { const: 'project-administration-state/v1' },
+    revision: { type: 'integer', minimum: 1 },
+    archivedFromStatus: projectDashboardSummarySchemaV2.properties.archivedFromStatus,
+  },
+}
+
+const projectAdministrationResultSchema = successSchema({
+  type: 'object', additionalProperties: false,
+  required: ['project', 'administration', 'command', 'replayed'],
+  properties: {
+    project: searchableProjectSchemaV2,
+    administration: projectAdministrationStateSchema,
+    command: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'id', 'action', 'baseRevision', 'resultRevision',
+        'commandHash', 'occurredAt',
+      ],
+      properties: {
+        id: idSchema,
+        action: { enum: ['rename', 'archive', 'restore'] },
+        baseRevision: { type: 'integer', minimum: 1 },
+        resultRevision: { type: 'integer', minimum: 2 },
+        commandHash: sha256Schema,
+        occurredAt: dateTimeSchema,
+      },
+    },
+    replayed: { type: 'boolean' },
+  },
+})
 
 const publicOperationSchema = {
   type: 'object',
@@ -12137,7 +12210,8 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  defineSchema('public-event', 1, 'Public event envelope', publicEventSchema),
+  defineSchema('public-event', 1, 'Public event envelope', publicEventSchemaV1),
+  defineSchema('public-event', 2, 'Public event envelope with project name changes', publicEventSchemaV2),
   defineSchema('event-catalog', 1, 'Public event catalog response',
     successSchema({
       type: 'object',
@@ -12145,6 +12219,32 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['envelopeSchemaRef', 'events'],
       properties: {
         envelopeSchemaRef: { const: 'apollo://schemas/public-event/v1' },
+        events: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'version', 'resourceType', 'description'],
+            properties: {
+              type: { type: 'string', enum: publicEventTypesV1 },
+              version: { const: '1.0.0' },
+              resourceType: { type: 'string', enum: publicEventResourceTypes },
+              description: { type: 'string', minLength: 1, maxLength: 512 },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('event-catalog', 2, 'Public event catalog response with project name changes',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['envelopeSchemaRef', 'events'],
+      properties: {
+        envelopeSchemaRef: { const: 'apollo://schemas/public-event/v2' },
         events: {
           type: 'array',
           minItems: 1,
@@ -13774,6 +13874,43 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('project-list', 6, 'Dashboard-ready project list with durable aggregate and administration fence evidence',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['projects'],
+      properties: {
+        projects: { type: 'array', items: searchableProjectSchemaV4 },
+        nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+      },
+    }),
+  ),
+  defineSchema('rename-project-request', 1, 'Revision-fenced project rename command', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision', 'name'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1 },
+      name: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+  }),
+  defineSchema('archive-project-request', 1, 'Revision-fenced project archive command with explicit confirmation', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision', 'confirmed'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1 },
+      confirmed: { const: true },
+    },
+  }),
+  defineSchema('restore-project-request', 1, 'Revision-fenced project restore command', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1 },
+    },
+  }),
+  defineSchema('project-administration-result', 1, 'Durable project administration command result',
+    projectAdministrationResultSchema,
+  ),
   defineSchema('public-operation-list', 7, 'Public operation list with honest actionable visible-state projections',
     successSchema({
       type: 'object',
@@ -14835,6 +14972,21 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     } }),
   ),
   defineSchema('create-webhook-subscription-request', 1, 'Create webhook subscription request', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['endpointId', 'eventTypes'],
+    properties: {
+      endpointId: idSchema,
+      eventTypes: {
+        type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
+        items: { type: 'string', enum: publicEventTypesV1 },
+      },
+      resourceIds: {
+        type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: idSchema,
+      },
+    },
+  }),
+  defineSchema('create-webhook-subscription-request', 2, 'Create webhook subscription request with project name changes', {
     type: 'object',
     additionalProperties: false,
     required: ['endpointId', 'eventTypes'],

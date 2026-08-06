@@ -1,6 +1,10 @@
 import { assertDomain } from './errors.ts'
 import { OUTPUT_ASPECT_RATIOS, type OutputAspectRatio } from './output-spec.ts'
-import type { Project } from './project.ts'
+import {
+  canTransitionProjectStatus,
+  PROJECT_STATUSES,
+  type Project,
+} from './project.ts'
 import {
   PERSISTED_PUBLIC_OPERATION_PHASES,
   PERSISTED_PUBLIC_OPERATION_TYPES,
@@ -11,7 +15,7 @@ import {
 } from './public-operation.ts'
 
 export const PROJECT_DASHBOARD_SCHEMA_VERSION =
-  'project-dashboard-summary/v1' as const
+  'project-dashboard-summary/v2' as const
 
 export interface ProjectDashboardCurrentVersion {
   id: string
@@ -46,6 +50,8 @@ export interface ProjectDashboardSummary {
   outputs: readonly Readonly<ProjectDashboardOutput>[]
   outputCount: number
   lastActivityAt: string
+  administrationRevision: number
+  archivedFromStatus: Exclude<Project['status'], 'archived'> | null
 }
 
 export type ProjectDashboardRecord = Readonly<Project> & Readonly<{
@@ -157,6 +163,8 @@ export function createProjectDashboardRecord(input: {
   openReviewIssueCount: number
   outputs: readonly ProjectDashboardOutput[]
   lastActivityAt: string
+  administrationRevision: number
+  archivedFromStatus: Exclude<Project['status'], 'archived'> | null
 }): ProjectDashboardRecord {
   assertDomain(
     Number.isSafeInteger(input.openReviewIssueCount) &&
@@ -164,6 +172,17 @@ export function createProjectDashboardRecord(input: {
       input.openReviewIssueCount <= MAX_COUNT,
     'INVALID_ARGUMENT',
     'project dashboard review issue count is invalid',
+  )
+  assertDomain(
+    Number.isSafeInteger(input.administrationRevision) &&
+      input.administrationRevision >= 1 &&
+      (input.archivedFromStatus === null ||
+        (input.project.status === 'archived' &&
+          PROJECT_STATUSES.includes(input.archivedFromStatus) &&
+          canTransitionProjectStatus(input.archivedFromStatus, 'archived'))) &&
+      (input.project.status === 'archived' || input.archivedFromStatus === null),
+    'INVALID_ARGUMENT',
+    'project dashboard administration state is invalid',
   )
   const dashboardOutputs = outputs(input.outputs)
   const lastActivityAt = instant(
@@ -185,6 +204,8 @@ export function createProjectDashboardRecord(input: {
       outputs: dashboardOutputs,
       outputCount: dashboardOutputs.length,
       lastActivityAt,
+      administrationRevision: input.administrationRevision,
+      archivedFromStatus: input.archivedFromStatus,
     }),
   })
 }

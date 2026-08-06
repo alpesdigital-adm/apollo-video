@@ -22,6 +22,7 @@ model V2Workspace {
 
   projects                               V2Project[]
   projectCreationCommands                V2ProjectCreationCommand[]
+  projectAdministrationCommands          V2ProjectAdministrationCommand[]
   snapshots                              V2ProjectSnapshot[]
   apiClients                             V2ApiClient[]
   apiAccessCommands                      V2ApiAccessCommand[]
@@ -194,6 +195,7 @@ model V2ApiClient {
   mediaArtifactLifecycleTransitions V2MediaArtifactLifecycleTransition[] @relation("MediaArtifactLifecycleTransitionActor")
   authoredAssetRightsChanges        V2AssetRightsChange[]                @relation("AssetRightsChangeExternalActor")
   authoredProjectCreationCommands   V2ProjectCreationCommand[]           @relation("ProjectCreationCommandActor")
+  authoredProjectAdministrationCommands V2ProjectAdministrationCommand[] @relation("ProjectAdministrationCommandActor")
   createdWebhookEndpoints         V2WebhookEndpoint[]              @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions     V2WebhookSubscription[]          @relation("WebhookSubscriptionCreator")
   proxyReviewDecisions            V2ProxyReviewDecision[]
@@ -499,6 +501,8 @@ model V2Project {
   ownerId                 String?  @db.VarChar(128)
   currentVersionId        String?  @db.VarChar(128)
   duplicatedFromProjectId String?  @db.VarChar(128)
+  administrationRevision  Int      @default(1)
+  archivedFromStatus      String?  @db.VarChar(32)
   createdByType           String   @db.VarChar(32)
   createdById             String   @db.VarChar(128)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
@@ -587,6 +591,7 @@ model V2Project {
   lutSelections                          V2ProjectLutSelection[]
   lutSelectionHead                       V2ProjectLutSelectionHead?
   creationCommand                        V2ProjectCreationCommand?
+  administrationCommands                V2ProjectAdministrationCommand[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -597,6 +602,49 @@ model V2Project {
   @@index([workspaceId, ownerId])
   @@index([workspaceId, duplicatedFromProjectId])
   @@map("projects")
+}
+
+model V2ProjectAdministrationCommand {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  action                   String   @db.VarChar(16)
+  beforeName               String   @db.VarChar(120)
+  afterName                String   @db.VarChar(120)
+  beforeStatus             String   @db.VarChar(32)
+  afterStatus              String   @db.VarChar(32)
+  beforeArchivedFromStatus String?  @db.VarChar(32)
+  afterArchivedFromStatus  String?  @db.VarChar(32)
+  baseRevision             Int
+  resultRevision           Int
+  confirmation             String   @db.VarChar(16)
+  actorClientId            String   @db.VarChar(80)
+  actorCredentialId        String   @db.VarChar(128)
+  actorEnvironment         String   @db.VarChar(16)
+  actorAuthenticationKind  String   @db.VarChar(16)
+  actorContextHash         String   @db.Char(64)
+  delegatedUserId          String?  @db.VarChar(128)
+  delegatedIdentityId      String?  @db.VarChar(128)
+  workspaceRole            String?  @db.VarChar(32)
+  idempotencyKey           String   @db.VarChar(128)
+  requestFingerprint       String   @db.Char(64)
+  resultHash               String   @db.Char(64)
+  commandHash              String   @db.Char(64)
+  eventId                  String   @unique @db.Uuid
+  occurredAt               DateTime @db.Timestamptz(3)
+
+  workspace   V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project     V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  actorClient V2ApiClient      @relation("ProjectAdministrationCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  event       V2PublicEventOutbox @relation(fields: [eventId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([eventId, workspaceId])
+  @@unique([workspaceId, actorContextHash, idempotencyKey])
+  @@unique([projectId, resultRevision])
+  @@index([workspaceId, projectId, occurredAt(sort: Desc)])
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)])
+  @@map("project_administration_commands")
 }
 
 model V2ProjectSnapshot {
@@ -5252,6 +5300,7 @@ model V2PublicEventOutbox {
 
   workspace         V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   webhookDeliveries V2WebhookDelivery[]
+  projectAdministrationCommand V2ProjectAdministrationCommand?
 
   @@unique([id, workspaceId])
   @@index([publishedAt, occurredAt, id])

@@ -44,7 +44,7 @@ interface ProjectSummary {
   createdAt: string
   visibleState: VisibleState
   dashboard: {
-    schemaVersion: 'project-dashboard-summary/v1'
+    schemaVersion: 'project-dashboard-summary/v2'
     currentVersion: { id: string; sequence: number; createdAt: string } | null
     latestOperation: {
       id: string
@@ -59,8 +59,15 @@ interface ProjectSummary {
     outputs: { artifactId: string; aspectRatio: OutputAspectRatio }[]
     outputCount: number
     lastActivityAt: string
+    administrationRevision: number
+    archivedFromStatus: string | null
   }
 }
+
+type QuickActionDialog = Readonly<{
+  kind: 'rename' | 'archive'
+  project: ProjectSummary
+}>
 
 interface PublicApiEnvelope<T> {
   data?: T
@@ -73,6 +80,10 @@ const DESTINATION_REQUIRED = new Set<StrategicObjectiveId>([
   'whatsapp',
   'booking',
   'download',
+])
+
+const ARCHIVABLE_PROJECT_STATUSES = new Set([
+  'draft', 'completed', 'failed', 'canceled',
 ])
 
 const OBJECTIVE_GROUPS = [
@@ -174,6 +185,7 @@ function projectBucket(visibleState: VisibleState): ProjectStateBucket {
 export default function Dashboard() {
   const router = useRouter()
   const idempotencyKey = useRef<string | null>(null)
+  const actionIdempotencyKeys = useRef(new Map<string, string>())
   const pageController = useRef<AbortController | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -183,6 +195,9 @@ export default function Dashboard() {
   const [refreshRevision, setRefreshRevision] = useState(0)
   const [creating, setCreating] = useState(false)
   const [composerOpen, setComposerOpen] = useState(false)
+  const [quickActionDialog, setQuickActionDialog] = useState<QuickActionDialog | null>(null)
+  const [quickActionName, setQuickActionName] = useState('')
+  const [actionBusyProjectId, setActionBusyProjectId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [filters, setFilters] = useState<ProjectDashboardFilters>({
     ...EMPTY_PROJECT_DASHBOARD_FILTERS,
@@ -415,6 +430,153 @@ export default function Dashboard() {
       setNotice(error instanceof Error ? error.message : 'Não foi possível criar o projeto.')
     } finally {
       setCreating(false)
+    }
+  }
+
+  function openQuickAction(kind: QuickActionDialog['kind'], project: ProjectSummary) {
+    setQuickActionName(kind === 'rename' ? project.name : '')
+    setQuickActionDialog({ kind, project })
+    setNotice(null)
+  }
+
+  function idempotencyKeyFor(intent: string): string {
+    const existing = actionIdempotencyKeys.current.get(intent)
+    if (existing) return existing
+    const created = globalThis.crypto.randomUUID()
+    actionIdempotencyKeys.current.set(intent, created)
+    return created
+  }
+
+  async function administerProject(
+    project: ProjectSummary,
+    action: 'rename' | 'archive' | 'restore',
+    nextName?: string,
+  ) {
+    if (actionBusyProjectId) return
+    setActionBusyProjectId(project.id)
+    setNotice(null)
+    const intent = [
+      'project-administration', project.id, action,
+      project.dashboard.administrationRevision, nextName ?? '',
+    ].join(':')
+    try {
+      const headers = {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'idempotency-key': idempotencyKeyFor(intent),
+      }
+      const body = JSON.stringify({
+        baseRevision: project.dashboard.administrationRevision,
+        ...(action === 'rename' ? { name: nextName } : {}),
+        ...(action === 'archive' ? { confirmed: true } : {}),
+      })
+      const response = action === 'rename'
+        ? await fetch(`/v1/projects/${encodeURIComponent(project.id)}/rename`, {
+            method: 'POST', headers, body,
+          })
+        : action === 'archive'
+          ? await fetch(`/v1/projects/${encodeURIComponent(project.id)}/archive`, {
+              method: 'POST', headers, body,
+            })
+          : await fetch(`/v1/projects/${encodeURIComponent(project.id)}/restore`, {
+              method: 'POST', headers, body,
+            })
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as PublicApiEnvelope<{
+        project: Pick<ProjectSummary, 'id' | 'name' | 'status' | 'visibleState'>
+        administration: {
+          revision: number
+          archivedFromStatus: string | null
+        }
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(errorMessage(payload, `Não foi possível ${action} o projeto.`))
+      }
+      const result = payload.data
+      actionIdempotencyKeys.current.delete(intent)
+      setProjects((current) => current.map((item) => item.id === project.id
+        ? {
+            ...item,
+            name: result.project.name,
+            status: result.project.status,
+            visibleState: result.project.visibleState,
+            dashboard: {
+              ...item.dashboard,
+              administrationRevision: result.administration.revision,
+              archivedFromStatus: result.administration.archivedFromStatus,
+            },
+          }
+        : item))
+      setQuickActionDialog(null)
+      setRefreshRevision((value) => value + 1)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'A ação do projeto falhou.')
+    } finally {
+      setActionBusyProjectId(null)
+    }
+  }
+
+  async function duplicateProject(project: ProjectSummary) {
+    if (actionBusyProjectId || !project.currentVersionId) return
+    setActionBusyProjectId(project.id)
+    setNotice(null)
+    try {
+      const workspaceResponse = await fetch(
+        `/v1/projects/${encodeURIComponent(project.id)}/workspace`,
+        { cache: 'no-store', headers: { accept: 'application/json' } },
+      )
+      if (workspaceResponse.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const workspacePayload = await workspaceResponse.json() as PublicApiEnvelope<{
+        version?: { id: string; baseHash: string }
+      }>
+      if (!workspaceResponse.ok || !workspacePayload.data?.version) {
+        throw new Error(errorMessage(workspacePayload, 'A versão atual não está disponível para duplicação.'))
+      }
+      const version = workspacePayload.data.version
+      const duplicateName = `${project.name.slice(0, 110).trimEnd()} — cópia`
+      const intent = [
+        'project-duplicate', project.id, version.id, version.baseHash,
+        duplicateName,
+      ].join(':')
+      const response = await fetch(
+        `/v1/projects/${encodeURIComponent(project.id)}/duplicates`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': idempotencyKeyFor(intent),
+          },
+          body: JSON.stringify({
+            expectedVersionId: version.id,
+            expectedVersionHash: version.baseHash,
+            name: duplicateName,
+          }),
+        },
+      )
+      if (response.status === 401) {
+        router.replace('/login')
+        return
+      }
+      const payload = await response.json() as PublicApiEnvelope<{
+        project: { id: string }
+      }>
+      if (!response.ok || !payload.data) {
+        throw new Error(errorMessage(payload, 'Não foi possível duplicar o projeto.'))
+      }
+      actionIdempotencyKeys.current.delete(intent)
+      setRefreshRevision((value) => value + 1)
+      router.push(`/projects/${encodeURIComponent(payload.data.project.id)}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Não foi possível duplicar o projeto.')
+    } finally {
+      setActionBusyProjectId(null)
     }
   }
 
@@ -682,9 +844,19 @@ export default function Dashboard() {
                               <p className="mt-1.5 text-[10px] text-[#9d7777]">{latestOperation.error.code}{latestOperation.error.retryable ? ' · recuperável' : ''}</p>
                             ) : null}
                           </div>
-                          <div className="mt-5 flex items-center justify-between border-t border-white/[0.06] pt-4">
-                            <p className="text-[11px] text-[#625f59]">Atividade em {new Date(project.dashboard.lastActivityAt).toLocaleDateString('pt-BR')}</p>
-                            <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">{actionLabel} →</button>
+                          <div className="mt-5 border-t border-white/[0.06] pt-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[11px] text-[#625f59]">Atividade em {new Date(project.dashboard.lastActivityAt).toLocaleDateString('pt-BR')}</p>
+                              <button className="text-xs font-semibold text-[#d6ac49] transition hover:text-[#f0ca6d]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">{actionLabel} →</button>
+                            </div>
+                            <div className="mt-3 grid grid-cols-3 gap-1.5 text-[10px]">
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}`)} type="button">Abrir</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c]" onClick={() => router.push(`/projects/${encodeURIComponent(project.id)}?mode=review`)} type="button">Revisar</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null || !project.currentVersionId} onClick={() => void duplicateProject(project)} type="button">Duplicar</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#d5a535]/30 hover:text-[#e4bd5c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null} onClick={() => openQuickAction('rename', project)} type="button">Renomear</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#c76c6c]/35 hover:text-[#df8c8c] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null || !ARCHIVABLE_PROJECT_STATUSES.has(project.status)} onClick={() => openQuickAction('archive', project)} title={ARCHIVABLE_PROJECT_STATUSES.has(project.status) ? 'Arquivar projeto' : 'Conclua ou cancele o processamento antes de arquivar'} type="button">Arquivar</button>
+                              <button className="rounded-lg border border-white/[0.07] px-2 py-1.5 text-[#aaa49a] transition hover:border-[#70b98b]/35 hover:text-[#80c99a] disabled:cursor-not-allowed disabled:opacity-35" disabled={actionBusyProjectId !== null || project.status !== 'archived' || !project.dashboard.archivedFromStatus} onClick={() => void administerProject(project, 'restore')} type="button">Restaurar</button>
+                            </div>
                           </div>
                         </div>
                       </article>
@@ -810,6 +982,44 @@ export default function Dashboard() {
                 <button className="h-11 rounded-xl px-4 text-sm text-[#8b877f] transition hover:bg-white/[0.04] hover:text-white disabled:opacity-40" disabled={creating} onClick={() => setComposerOpen(false)} type="button">Cancelar</button>
                 <button className="h-11 min-w-40 rounded-xl bg-[#e0af37] px-5 text-sm font-bold text-[#171207] transition hover:bg-[#edc34f] disabled:cursor-not-allowed disabled:opacity-45" disabled={creating || name.trim().length < 2 || (requiresDestination && !destination.trim())} type="submit">{creating ? 'Salvando direção…' : 'Criar e continuar'}</button>
               </div>
+            </div>
+          </form>
+        </div>
+      ) : null}
+      {quickActionDialog ? (
+        <div aria-labelledby="quick-action-title" aria-modal="true" className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4 backdrop-blur-sm" role="dialog">
+          <button aria-label="Fechar ação" className="absolute inset-0 cursor-default" disabled={actionBusyProjectId !== null} onClick={() => setQuickActionDialog(null)} type="button" />
+          <form
+            className="relative w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#0d0d0d] p-6 shadow-[0_24px_90px_rgba(0,0,0,.75)]"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void administerProject(
+                quickActionDialog.project,
+                quickActionDialog.kind,
+                quickActionDialog.kind === 'rename' ? quickActionName.trim() : undefined,
+              )
+            }}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b89034]">Administração auditável</p>
+            <h2 className="mt-2 text-xl font-semibold text-[#f1ede5]" id="quick-action-title">
+              {quickActionDialog.kind === 'rename' ? 'Renomear projeto' : 'Arquivar projeto'}
+            </h2>
+            {quickActionDialog.kind === 'rename' ? (
+              <label className="mt-5 block text-xs font-medium text-[#aaa59c]">
+                Nome
+                <input autoFocus className="mt-2 h-11 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-3 text-sm text-[#f2eee7] outline-none focus:border-[#d5a535]/55" maxLength={120} onChange={(event) => setQuickActionName(event.target.value)} value={quickActionName} />
+              </label>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-[#918c83]">
+                O projeto <strong className="font-semibold text-[#d5d0c7]">{quickActionDialog.project.name}</strong> sairá das filas ativas. O status atual será preservado exatamente para permitir restauração posterior.
+              </p>
+            )}
+            <p className="mt-4 text-[11px] leading-5 text-[#66625b]">A ação usa a revisão administrativa {quickActionDialog.project.dashboard.administrationRevision} e falha com segurança se o projeto mudar em outra sessão.</p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button className="h-10 rounded-xl px-4 text-sm text-[#8b877f] hover:bg-white/[0.04] disabled:opacity-40" disabled={actionBusyProjectId !== null} onClick={() => setQuickActionDialog(null)} type="button">Cancelar</button>
+              <button className={`h-10 rounded-xl px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${quickActionDialog.kind === 'archive' ? 'bg-[#a64f4f] text-white hover:bg-[#ba5b5b]' : 'bg-[#e0af37] text-[#171207] hover:bg-[#edc34f]'}`} disabled={actionBusyProjectId !== null || (quickActionDialog.kind === 'rename' && quickActionName.trim().length < 1)} type="submit">
+                {actionBusyProjectId ? 'Aplicando…' : quickActionDialog.kind === 'rename' ? 'Salvar nome' : 'Confirmar arquivamento'}
+              </button>
             </div>
           </form>
         </div>

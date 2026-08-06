@@ -143,7 +143,7 @@ Atualização local de resiliência em FR-243 — o worker do Diretor cobre rest
 | FR-011 | Ação desejada | S1 | D0,D2 | CTA/destino persistidos e validados | policy |
 | FR-012 | Briefing livre opcional | S1,S7 | D0,D6 | projeto segue com campo vazio | e2e |
 
-Atualização local parcial de FR-002 — `apollo.projects.list` v3/project-list v5
+Atualização local parcial de FR-002 — `apollo.projects.list` v4/project-list v6
 publica a versão corrente, a operação pública durável mais recente, annotations
 abertas e outputs concluídos da versão atual, todos consultados do Postgres V2.
 O domínio recusa relações incoerentes e o cliente só exibe percentual com total
@@ -160,6 +160,15 @@ requests e páginas superados são cancelados. Regressões locais cobrem combina
 isolamento de cursor, URL/sessão/API e zero results. A jornada HTTP/PostgreSQL foi
 ampliada, mas não executada; faltam índices de campanha/tags/pessoa/material,
 E2E browser, implantação e aceite.
+
+Atualização local parcial de FR-004 — os seis controles do card usam somente
+rotas públicas V2. Rename/archive/restore compartilham um application service e
+um repositório PostgreSQL serializável com revision CAS, idempotência por ator,
+Command imutável e outbox atômico; archive guarda o status anterior sem fallback
+fabricado. A UI é deliberadamente pessimista. Regressões locais cobrem domínio,
+contratos, paridade UI/API, escopo, replay e stale; as jornadas PostgreSQL/API
+de administração e duplicação copy-on-write estão preparadas, mas não executadas.
+Faltam browser, deploy e aceite, portanto FR-004 continua aberto.
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |

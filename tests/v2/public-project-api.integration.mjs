@@ -5335,7 +5335,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       project.id === created.data.project.id)
     assert.equal(
       dashboardProject.dashboard.schemaVersion,
-      'project-dashboard-summary/v1',
+      'project-dashboard-summary/v2',
     )
     assert.equal(
       dashboardProject.dashboard.currentVersion.id,
@@ -5352,6 +5352,8 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(dashboardProject.dashboard.openReviewIssueCount, 0)
     assert.deepEqual(dashboardProject.dashboard.outputs, [])
     assert.equal(dashboardProject.dashboard.outputCount, 0)
+    assert.equal(dashboardProject.dashboard.administrationRevision, 1)
+    assert.equal(dashboardProject.dashboard.archivedFromStatus, null)
 
     const firstProjectPageResponse = await fetch(
       `${baseUrl}/v1/projects?limit=1`,
@@ -5416,6 +5418,93 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(
       (await mismatchedProjectCursorResponse.json()).error.code,
       'INVALID_ARGUMENT',
+    )
+
+    const administrationUrl = `${baseUrl}/v1/projects/${created.data.project.id}`
+    const renameHeaders = {
+      authorization, 'content-type': 'application/json',
+      'idempotency-key': 'public-api-project-rename-1',
+    }
+    const renameRequest = () => fetch(`${administrationUrl}/rename`, {
+      method: 'POST', headers: renameHeaders,
+      body: JSON.stringify({ baseRevision: 1, name: 'Projeto renomeado' }),
+    })
+    const renameResponse = await renameRequest()
+    const renamed = await renameResponse.json()
+    assert.equal(renameResponse.status, 200)
+    assert.equal(renamed.data.project.name, 'Projeto renomeado')
+    assert.equal(renamed.data.administration.revision, 2)
+    assert.equal(renamed.data.command.action, 'rename')
+    assert.equal(renamed.data.replayed, false)
+    const renameReplayResponse = await renameRequest()
+    assert.equal(renameReplayResponse.status, 200)
+    assert.equal((await renameReplayResponse.json()).data.replayed, true)
+    const staleRenameResponse = await fetch(`${administrationUrl}/rename`, {
+      method: 'POST',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-project-rename-stale',
+      },
+      body: JSON.stringify({ baseRevision: 1, name: 'Nome obsoleto' }),
+    })
+    assert.equal(staleRenameResponse.status, 409)
+    assert.equal((await staleRenameResponse.json()).error.code, 'VERSION_CONFLICT')
+
+    const unconfirmedArchiveResponse = await fetch(`${administrationUrl}/archive`, {
+      method: 'POST',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-project-archive-unconfirmed',
+      },
+      body: JSON.stringify({ baseRevision: 2, confirmed: false }),
+    })
+    assert.equal(unconfirmedArchiveResponse.status, 422)
+    const archiveResponse = await fetch(`${administrationUrl}/archive`, {
+      method: 'POST',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-project-archive-1',
+      },
+      body: JSON.stringify({ baseRevision: 2, confirmed: true }),
+    })
+    const archived = await archiveResponse.json()
+    assert.equal(archiveResponse.status, 200)
+    assert.equal(archived.data.project.status, 'archived')
+    assert.equal(archived.data.administration.revision, 3)
+    assert.equal(archived.data.administration.archivedFromStatus, 'draft')
+    const restoreResponse = await fetch(`${administrationUrl}/restore`, {
+      method: 'POST',
+      headers: {
+        authorization, 'content-type': 'application/json',
+        'idempotency-key': 'public-api-project-restore-1',
+      },
+      body: JSON.stringify({ baseRevision: 3 }),
+    })
+    const restored = await restoreResponse.json()
+    assert.equal(restoreResponse.status, 200)
+    assert.equal(restored.data.project.status, 'draft')
+    assert.equal(restored.data.administration.revision, 4)
+    assert.equal(restored.data.administration.archivedFromStatus, null)
+    assert.equal(
+      await client.v2ProjectAdministrationCommand.count({
+        where: { projectId: created.data.project.id },
+      }),
+      3,
+    )
+    assert.deepEqual(
+      (await client.v2ProjectAdministrationCommand.findMany({
+        where: { projectId: created.data.project.id }, orderBy: { resultRevision: 'asc' },
+      })).map((command) => [command.action, command.baseRevision, command.resultRevision]),
+      [['rename', 1, 2], ['archive', 2, 3], ['restore', 3, 4]],
+    )
+    assert.equal(
+      await client.v2PublicEventOutbox.count({
+        where: {
+          workspaceId, resourceId: created.data.project.id,
+          type: { in: ['project.name.changed', 'project.status.changed'] },
+        },
+      }),
+      3,
     )
 
     const credentialBeforeExpiry = await client.v2ApiCredential.findUniqueOrThrow({

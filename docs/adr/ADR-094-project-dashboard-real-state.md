@@ -13,3 +13,11 @@ anterior é cancelada e respostas fora de ordem não alteram a tela. A projeçã
 pública fechada determina linguagem e ação recomendada. E2E visual/browser,
 execução da jornada HTTP/PostgreSQL preparada, implantação e aceite continuam
 pendentes.
+
+As ações administrativas do card usam um fence separado
+`administrationRevision`. Rename/archive/restore não são EditCommands porque não
+alteram timeline, snapshot editorial ou semântica de render; são Commands
+administrativos imutáveis, actor-bound e transacionais com o public-event
+outbox. Archive preserva `archivedFromStatus` e restore aceita somente esse valor
+registrado, nunca um default inventado. A UI aguarda o commit antes de mudar o
+card e então revalida o agregado público.

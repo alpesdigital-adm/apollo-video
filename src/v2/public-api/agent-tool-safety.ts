@@ -171,6 +171,18 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one reversible copy-on-write project while sharing immutable snapshots and artifact bytes.',
     },
+    'apollo.projects.rename': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Changes only the display name of one project through a revision-fenced and auditable command.',
+    },
+    'apollo.projects.archive': {
+      impact: 'destructive', confirmation: 'human-approval',
+      reason: 'Removes one project from active workflow views while preserving its exact prior status for an audited restore.',
+    },
+    'apollo.projects.restore': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Restores one archived project only to its durably recorded prior workflow status.',
+    },
     'apollo.projects.mvp-core-gates.run': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one immutable fail-closed audit report derived only from existing server-side evidence.',

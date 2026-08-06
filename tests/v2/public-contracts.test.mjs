@@ -198,15 +198,15 @@ test('public error catalog classifies every public code exactly once and fails c
 })
 
 test('public event schema and catalog expose the same versioned event types', () => {
-  const eventSchema = getPublicSchema('apollo://schemas/public-event/v1').schema
-  const catalogSchema = getPublicSchema('apollo://schemas/event-catalog/v1').schema
+  const eventSchema = getPublicSchema('apollo://schemas/public-event/v2').schema
+  const catalogSchema = getPublicSchema('apollo://schemas/event-catalog/v2').schema
   const eventTypes = PUBLIC_EVENT_CATALOG.map((event) => event.type)
 
   assert.deepEqual(eventSchema.properties.type.enum, eventTypes)
   assert.deepEqual(catalogSchema.properties.data.properties.events.items.properties.type.enum, eventTypes)
   assert.equal(
     catalogSchema.properties.data.properties.envelopeSchemaRef.const,
-    'apollo://schemas/public-event/v1',
+    'apollo://schemas/public-event/v2',
   )
 })
 

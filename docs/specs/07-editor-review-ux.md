@@ -343,6 +343,15 @@ consulta. Troca de filtro cancela request/paginação anterior; “carregar mais
 deduplica por Project ID. Contadores informam que cobrem somente resultados
 carregados quando há outra página.
 
+Quick actions operam exclusivamente pela API pública. Abrir e revisar são
+navegação; duplicar obtém a identidade imutável da versão corrente e cria um
+fork copy-on-write. Rename/archive/restore usam uma revisão administrativa
+independente da timeline: o servidor aplica CAS serializável e persiste antes de
+a UI atualizar. Archive sempre pede confirmação e registra o status anterior
+exato; restore fica indisponível quando não existe essa evidência. Nenhuma dessas
+ações cria versão editorial ou invalida artifact. Não há estado otimista neste
+fluxo: falha mantém o card intacto e mostra o erro retornado pelo contrato.
+
 ## 25. Versões e compare
 
 - O operador escolhe explicitamente “antes” e “depois” entre as versões imutáveis do projeto.
