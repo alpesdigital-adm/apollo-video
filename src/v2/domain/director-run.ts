@@ -6,7 +6,9 @@ import type { TreatmentPlan } from './treatment-plan.ts'
 import type { ManualCropRegion } from './manual-editing.ts'
 import type { DirectorRunImpactV1 } from './director-run-impact.ts'
 import type { StrategicObjectiveId } from './strategic-objective.ts'
+import type { DesiredActionReference } from './desired-action.ts'
 import type { QualityReport as StrategicQualityReport } from './strategic-rubric.ts'
+import { calculateCanonicalHash } from './canonical-hash.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -118,6 +120,15 @@ export interface DirectedTransition {
   reason: string
 }
 
+export interface DirectedCtaOverlay {
+  id: string
+  kind: 'cta'
+  desiredActionRef: Readonly<DesiredActionReference>
+  startFrame: number
+  endFrame: number
+  text: string
+}
+
 export interface DirectorQualityIssue {
   code: string
   severity: 'hard' | 'warning'
@@ -131,6 +142,7 @@ export interface DirectorQualityIssue {
 export interface DirectorQualityReport {
   schemaVersion: 'director-quality-report/v2'
   id: string
+  desiredActionRef: Readonly<DesiredActionReference>
   status: 'approved' | 'approved-with-warnings' | 'blocked'
   score: number
   strategic: Readonly<StrategicQualityReport>
@@ -147,10 +159,12 @@ export interface DirectorQualityReport {
   evaluatedAt: string
 }
 
-export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'subtitleTracks' | 'effectTracks' | 'subtitlePolicy'> & Readonly<{
+export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'overlayTracks' | 'subtitleTracks' | 'effectTracks' | 'subtitlePolicy'> & Readonly<{
   storyPlanId: string
   treatmentPlanId: string
   directorRunId: string
+  desiredActionRef: Readonly<DesiredActionReference>
+  overlayTracks: readonly Readonly<DirectedCtaOverlay>[]
   subtitleTracks: readonly Readonly<{
     id: string
     kind: 'captions'
@@ -159,6 +173,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'sub
     faceProtection: true
     maxLines: 2
     maxCharactersPerBlock: number
+    desiredActionRef: Readonly<DesiredActionReference>
     cues: readonly Readonly<DirectedSubtitleCue>[]
   }>[]
   effectTracks: readonly never[]
@@ -256,6 +271,15 @@ export function validateDirectorDecisions(input: readonly DirectorDecision[]): r
 export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<DirectedEditPlan> {
   assertDomain(plan.schemaVersion === 2 && plan.state === 'compiled', 'INVALID_RENDER_INPUT', 'Director EditPlan must be compiled')
   assertDomain(plan.storyPlanId.trim().length > 0 && plan.treatmentPlanId.trim().length > 0 && plan.directorRunId.trim().length > 0, 'INVALID_RENDER_INPUT', 'Director EditPlan references are incomplete')
+  assertDomain(
+    plan.desiredActionRef.schemaVersion === 'desired-action-ref/v1' &&
+      plan.desiredActionRef.actionHash === calculateCanonicalHash(plan.desiredActionRef.action) &&
+      plan.desiredActionRef.id === `desired-action-${plan.desiredActionRef.actionHash.slice(0, 24)}` &&
+      plan.subtitleTracks.every((track) => track.desiredActionRef.id === plan.desiredActionRef.id) &&
+      plan.overlayTracks.every((track) => track.desiredActionRef.id === plan.desiredActionRef.id),
+    'INVALID_RENDER_INPUT',
+    'Director consumers do not share the canonical desired action reference',
+  )
   assertDomain(plan.movementPolicy.automaticZoom === false && plan.movementPolicy.protectedOpeningFrames >= Math.round(plan.fps * 4), 'INVALID_RENDER_INPUT', 'Opening motion protection is invalid')
   assertDomain(plan.effectTracks.length === 0, 'INVALID_RENDER_INPUT', 'Unjustified camera effects are forbidden')
   const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
@@ -274,6 +298,15 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
     assertDomain(cue.text.trim().length > 0 && cue.text.length <= plan.subtitlePolicy.maxCharactersPerBlock, 'INVALID_RENDER_INPUT', 'Subtitle cue text is outside policy')
     assertDomain(cue.anchor === 'bottom', 'INVALID_RENDER_INPUT', 'Subtitle cue must use the face-safe fallback anchor')
     if (index > 0) assertDomain(cue.startFrame >= cues[index - 1]!.endFrame, 'INVALID_RENDER_INPUT', 'Subtitle cues cannot overlap')
+  }
+  for (const overlay of plan.overlayTracks) {
+    assertDomain(
+      overlay.kind === 'cta' && overlay.text.trim().length > 0 &&
+        overlay.startFrame >= 0 && overlay.endFrame > overlay.startFrame &&
+        overlay.endFrame <= plan.durationFrames,
+      'INVALID_RENDER_INPUT',
+      'Desired action overlay is invalid',
+    )
   }
   return Object.freeze(plan)
 }

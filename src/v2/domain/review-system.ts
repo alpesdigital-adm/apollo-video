@@ -261,6 +261,7 @@ export function buildRenderElementMap(input: {
     crop?: Readonly<{ x: number; y: number; width: number; height: number }>
   }>[]
   subtitleCues?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
+  ctaOverlays?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
 }): Readonly<RenderElementMap> {
   assertDomain(
@@ -367,6 +368,32 @@ export function buildRenderElementMap(input: {
       zIndex: 20,
       opacity: 1,
       priority: 300,
+    })))
+  }
+  for (const overlay of input.ctaOverlays ?? []) {
+    const clip = input.clips.find((item) =>
+      overlay.startFrame < item.timelineOutFrame &&
+      overlay.endFrame > item.timelineInFrame)
+    if (!clip) continue
+    const width = Math.round(input.canvas.width * 0.78)
+    const height = Math.max(48, Math.round(input.canvas.height * 0.09))
+    const bounds = Object.freeze({
+      x: Math.round((input.canvas.width - width) / 2),
+      y: Math.round(input.canvas.height * 0.08),
+      width,
+      height,
+    })
+    elements.push(...elementFrames(overlay.startFrame, overlay.endFrame, (frame) => ({
+      elementId: `cta:${overlay.id}`,
+      type: 'cta',
+      clipId: clip.id,
+      sceneId: `scene:${clip.id}`,
+      sourceId: overlay.id,
+      frame,
+      bounds,
+      zIndex: 30,
+      opacity: 1,
+      priority: 400,
     })))
   }
   return validateRenderElementMap({

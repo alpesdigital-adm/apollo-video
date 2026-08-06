@@ -47,7 +47,7 @@ import {
 } from '../../domain/project.ts'
 import { resolveStrategicObjective } from '../../domain/strategic-objective.ts'
 import { bindDirectorObjective } from '../../domain/strategic-objective.ts'
-import { createDesiredAction } from '../../domain/desired-action.ts'
+import { parseDesiredAction } from '../../domain/desired-action.ts'
 import {
   persistPublicEvents,
   type PublicEventOutboxTransaction,
@@ -545,9 +545,9 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
     !validDirectorObjectiveBinding(directorDetail) ||
     (directorDetail.supersedesRunId !== null &&
       !ID_PATTERN.test(directorDetail.supersedesRunId)) ||
-    (directorDetail.destination !== null &&
-      (directorDetail.destination.trim().length < 1 ||
-        directorDetail.destination.length > 2048)) ||
+    (directorDetail.desiredActionJson !== null &&
+      (directorDetail.desiredActionJson.length < 2 ||
+        directorDetail.desiredActionJson.length > 8192)) ||
     (directorDetail.reason !== null &&
       (directorDetail.reason.trim().length < 1 || directorDetail.reason.length > 1000)) ||
     (directorDetail.delegatedUserId !== null &&
@@ -836,8 +836,11 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         ...(directorDetail!.supersedesRunId
           ? { supersedesRunId: directorDetail!.supersedesRunId }
           : {}),
-        ...(directorDetail!.destination
-          ? { destination: directorDetail!.destination }
+        ...(directorDetail!.desiredActionJson
+          ? { desiredAction: parseDesiredAction(
+              JSON.parse(directorDetail!.desiredActionJson) as unknown,
+              resolveStrategicObjective(directorDetail!.objective).id,
+            ) }
           : {}),
         ...(directorDetail!.delegatedUserId
           ? { delegatedUserId: directorDetail!.delegatedUserId }
@@ -1310,9 +1313,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         !validDirectorObjectiveBinding(directorContext) ||
         (directorContext.supersedesRunId !== undefined &&
           !ID_PATTERN.test(directorContext.supersedesRunId)) ||
-        (directorContext.destination !== undefined &&
-          (directorContext.destination.trim().length < 1 ||
-            directorContext.destination.length > 2048)) ||
+        (directorContext.desiredAction !== undefined &&
+          stableSerialize(parseDesiredAction(
+            directorContext.desiredAction,
+            directorContext.objective,
+          )) !== stableSerialize(directorContext.desiredAction)) ||
         (directorContext.reason !== undefined &&
           (directorContext.reason.trim().length < 1 || directorContext.reason.length > 1000)) ||
         (directorContext.delegatedUserId !== undefined &&
@@ -1566,6 +1571,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             : undefined
           const binding = bindDirectorObjective({
             objective: directorContext.objective,
+            supersede: directorContext.desiredAction !== undefined,
             ...(latestRun
               ? {
                   previous: {
@@ -1593,17 +1599,12 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
             'PERSISTENCE_CONFLICT',
             'Director objective transition is inconsistent',
           )
-          if (directorContext.objective !== directorContext.baseObjective) {
-            createDesiredAction({
-              objective: directorContext.objective,
-              ...(directorContext.destination
-                ? { destination: directorContext.destination }
-                : {}),
-            })
-          } else if (directorContext.destination !== undefined) {
+          if (directorContext.desiredAction !== undefined) {
+            parseDesiredAction(directorContext.desiredAction, directorContext.objective)
+          } else if (directorContext.objective !== directorContext.baseObjective) {
             throw new DomainError(
-              'INVALID_ARGUMENT',
-              'Director destination is only valid for an objective change',
+              'PERSISTENCE_CONFLICT',
+              'Director objective change has no canonical desired action',
             )
           }
         }
@@ -1765,7 +1766,9 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               objectiveVersion: directorContext!.objectiveVersion,
               rubricRef: directorContext!.rubricRef,
               supersedesRunId: directorContext!.supersedesRunId,
-              destination: directorContext!.destination,
+              desiredActionJson: directorContext!.desiredAction
+                ? stableSerialize(directorContext!.desiredAction)
+                : undefined,
               delegatedUserId: directorContext!.delegatedUserId,
               reason: directorContext!.reason,
               createdAt: new Date(input.operation.createdAt),

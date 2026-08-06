@@ -1,4 +1,5 @@
 import { DomainError } from './errors.ts'
+import type { DesiredActionReference } from './desired-action.ts'
 
 export type StoryRole = 'hook' | 'context' | 'argument' | 'proof' | 'cta'
 export interface StoryBlock {
@@ -7,10 +8,11 @@ export interface StoryBlock {
   presentation: 'source-video' | 'voiceover' | 'cold-open-reference'; sourceRangeId?: string
 }
 export interface StoryAct { id: string; role: 'opening' | 'development' | 'resolution'; blockIds: readonly string[] }
-export interface StoryPlan { schemaVersion: 1; objective: string; targetDurationMs: { min: number; max: number }; acts: readonly StoryAct[]; blocks: readonly StoryBlock[] }
+export interface StoryPlan { schemaVersion: 1 | 2; objective: string; desiredActionRef?: Readonly<DesiredActionReference>; targetDurationMs: { min: number; max: number }; acts: readonly StoryAct[]; blocks: readonly StoryBlock[] }
 
 export function validateStoryPlan(plan: StoryPlan): Readonly<{ plan: StoryPlan; estimatedDurationMs: number; readyForEditPlan: true }> {
   const byId = new Map(plan.blocks.map((block) => [block.id, block]))
+  if (plan.schemaVersion === 2 && !plan.desiredActionRef) throw new DomainError('INVALID_ARGUMENT', 'Story requires a canonical desired action reference')
   if (!plan.blocks.length || !plan.acts.length) throw new DomainError('INVALID_ARGUMENT', 'Story requires acts and blocks')
   const ordered = plan.acts.flatMap((act) => act.blockIds.map((id) => byId.get(id) ?? (() => { throw new DomainError('INVALID_ARGUMENT', `Act references missing block ${id}`) })()))
   if (new Set(ordered.map((block) => block.id)).size !== plan.blocks.length) throw new DomainError('INVALID_ARGUMENT', 'Every story block must be covered exactly once')
@@ -18,7 +20,7 @@ export function validateStoryPlan(plan: StoryPlan): Readonly<{ plan: StoryPlan; 
     if (block.durationTargetMs.min < 0 || block.durationTargetMs.min > block.durationTargetMs.ideal || block.durationTargetMs.ideal > block.durationTargetMs.max) throw new DomainError('INVALID_ARGUMENT', `Invalid duration target for ${block.id}`)
     for (const dependency of block.dependencies) if (!byId.has(dependency)) throw new DomainError('INVALID_ARGUMENT', `Missing dependency ${dependency}`)
     if (block.content.claimIds.length && block.role === 'proof' && !block.content.proofIds.length) throw new DomainError('INVALID_ARGUMENT', 'Proof claims require proof context')
-    if (block.role === 'cta' && !block.content.ctaId) throw new DomainError('INVALID_ARGUMENT', 'CTA block requires structured CTA')
+    if (block.role === 'cta' && (!block.content.ctaId || (plan.desiredActionRef && block.content.ctaId !== plan.desiredActionRef.id))) throw new DomainError('INVALID_ARGUMENT', 'CTA block requires its canonical desired action reference')
     if (block.presentation === 'cold-open-reference' && !block.sourceRangeId) throw new DomainError('INVALID_ARGUMENT', 'Cold open must reference a source range')
   }
   const estimatedDurationMs = ordered.reduce((sum, block) => sum + block.durationTargetMs.ideal, 0)

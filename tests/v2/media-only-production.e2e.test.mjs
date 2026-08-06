@@ -16,6 +16,6 @@ test('media-only journey advances from uploaded media to a proxy with explicit l
 })
 
 test('media-only treatment blocks unsupported offer and claim', () => {
-  const analysis = { mode: 'media-only', objective: 'sale', action: createDesiredAction({ objective: 'sale', destination: 'https://checkout.test' }), mediaRefs: ['artifact:1'], assumptions: [] }
+  const analysis = { mode: 'media-only', objective: 'sale', action: createDesiredAction({ objective: 'sale', desiredAction: { destination: { type: 'url', value: 'https://checkout.test' } } }), mediaRefs: ['artifact:1'], assumptions: [] }
   assert.throws(() => inferMediaOnlyTreatment({ analysis, observedClaims: ['garantia de 7 dias'], proposedClaims: ['resultado garantido'], perceptionConfidence: .9 }), /unsupported offer or claim/)
 })

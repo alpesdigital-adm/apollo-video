@@ -109,7 +109,7 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
   assert.equal(capabilities.get('apollo.projects.list').outputSchemaRef, 'apollo://schemas/project-list/v6')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v5').ref, 'apollo://schemas/project-list/v5')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v4').ref, 'apollo://schemas/project-list/v4')
-  assert.equal(capabilities.get('apollo.projects.create').version, '4.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
   assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
   assert.equal(getPublicSchema('apollo://schemas/project-list/v3').ref, 'apollo://schemas/project-list/v3')
   assert.equal(getPublicSchema('apollo://schemas/project-created/v2').ref, 'apollo://schemas/project-created/v2')
@@ -128,7 +128,7 @@ test('T-FR-236 projects every persisted project phase into a fail-closed public 
 
 test('T-FR-236 exposes the current version state on create and duplicate responses', () => {
   const capabilities = new Map(FOUNDATION_CAPABILITIES.map((item) => [item.id, item]))
-  assert.equal(capabilities.get('apollo.projects.create').version, '4.0.0')
+  assert.equal(capabilities.get('apollo.projects.create').version, '5.0.0')
   assert.equal(capabilities.get('apollo.projects.create').outputSchemaRef, 'apollo://schemas/project-created/v4')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').version, '2.0.0')
   assert.equal(capabilities.get('apollo.projects.duplicates.create').outputSchemaRef, 'apollo://schemas/project-duplicated/v2')

@@ -6,8 +6,13 @@ import type {
   PublicOperationRepository,
 } from './ports/public-operation-repository.ts'
 import { projectDirectorRequestFingerprint } from './run-project-director.ts'
-import { calculateVersionHash } from './version-hash.ts'
-import { createDesiredAction } from '../domain/desired-action.ts'
+import { calculateVersionHash, stableSerialize } from './version-hash.ts'
+import {
+  createDesiredAction,
+  parseDesiredAction,
+  type DesiredAction,
+  type DesiredActionInput,
+} from '../domain/desired-action.ts'
 import {
   bindDirectorObjective,
   resolveStrategicObjective,
@@ -30,7 +35,7 @@ export interface EnqueueProjectDirectorRunRequest {
   idempotencyKey: string
   reason?: string
   objective?: StrategicObjectiveId
-  destination?: string
+  desiredAction?: Readonly<DesiredActionInput>
   traceId?: string
 }
 
@@ -80,6 +85,18 @@ export function enqueueProjectDirectorRunService(dependencies: {
       'INVALID_PUBLIC_OPERATION',
       'Director delegated user is invalid',
     )
+    const requestedDesiredAction: Readonly<DesiredAction> | undefined =
+      request.desiredAction && request.objective
+        ? createDesiredAction({
+            objective: request.objective,
+            desiredAction: request.desiredAction,
+          })
+        : undefined
+    assertDomain(
+      request.desiredAction === undefined || request.objective !== undefined,
+      'INVALID_ARGUMENT',
+      'desiredAction requires an explicit strategic objective',
+    )
     const requestFingerprint = calculateVersionHash({
       request: projectDirectorRequestFingerprint({
         workspaceId,
@@ -88,7 +105,7 @@ export function enqueueProjectDirectorRunService(dependencies: {
         baseHash: request.baseHash,
         actorContextHash: audit.contextHash,
         objective: request.objective,
-        destination: request.destination,
+        desiredAction: requestedDesiredAction,
         ...(reason ? { reason } : {}),
       }),
       actorContextHash: audit.contextHash,
@@ -124,31 +141,30 @@ export function enqueueProjectDirectorRunService(dependencies: {
     const objective = resolveStrategicObjective(
       request.objective ?? context.project.objective,
     )
+    const currentDesiredAction = parseDesiredAction(
+      context.brief.desiredAction,
+      context.project.objective,
+    )
+    const objectiveChanged = objective.id !== context.project.objective
+    const desiredAction = requestedDesiredAction ?? (
+      objectiveChanged
+        ? createDesiredAction({ objective: objective.id })
+        : currentDesiredAction
+    )
+    const directionChanged = objectiveChanged ||
+      stableSerialize(desiredAction) !== stableSerialize(currentDesiredAction)
     const objectiveBinding = bindDirectorObjective({
       objective: objective.id,
       ...(context.latestDirectorObjective
         ? { previous: context.latestDirectorObjective }
         : {}),
+      supersede: directionChanged,
     })
-    const objectiveChanged = objective.id !== context.project.objective
     assertDomain(
-      !objectiveChanged || Boolean(reason),
+      !directionChanged || Boolean(reason),
       'PRECONDITION_REQUIRED',
-      'Changing the strategic objective requires an explicit reason',
+      'Changing the strategic objective or desired action requires an explicit reason',
     )
-    assertDomain(
-      objectiveChanged || request.destination === undefined,
-      'INVALID_ARGUMENT',
-      'destination is only accepted when the strategic objective changes',
-    )
-    if (objectiveChanged) {
-      createDesiredAction({
-        objective: objective.id,
-        ...(request.destination?.trim()
-          ? { destination: request.destination.trim() }
-          : {}),
-      })
-    }
 
     const resultVersionId = dependencies.createId('project-version')
     const createdAt = clock().toISOString()
@@ -177,9 +193,7 @@ export function enqueueProjectDirectorRunService(dependencies: {
         ...(objectiveBinding.supersedesRunId
           ? { supersedesRunId: objectiveBinding.supersedesRunId }
           : {}),
-        ...(request.destination?.trim()
-          ? { destination: request.destination.trim() }
-          : {}),
+        ...(directionChanged ? { desiredAction } : {}),
         ...(audit.delegatedUserId
           ? { delegatedUserId: audit.delegatedUserId }
           : {}),

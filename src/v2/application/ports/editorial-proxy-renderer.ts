@@ -1,11 +1,11 @@
 import type { EditorialCutClip } from '../apply-editorial-cut-command.ts'
-import type { DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
+import type { DirectedCtaOverlay, DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.4.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.4.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.1.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.5.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.5.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.2.0'
 
 export interface EditorialProxyRenderResult {
   outputPath: string
@@ -31,6 +31,7 @@ export interface EditorialProxyRenderer {
     format: string
     outputSpec?: { width: number; height: number; fps: number }
     subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
+    ctaOverlays?: readonly Readonly<DirectedCtaOverlay>[]
     transitions?: readonly Readonly<DirectedTransition>[]
     composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
     rangeReuse?: Readonly<{

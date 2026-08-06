@@ -338,7 +338,9 @@ test('T-FR-222 completes the public MVP Core journey with real 9:16 and 16:9 MP4
           objective,
           format,
           locale: 'pt-BR',
-          ...(destination ? { destination } : {}),
+          ...(destination ? { desiredAction: {
+            destination: { type: 'url', value: destination },
+          } } : {}),
         },
       })).payload
     }

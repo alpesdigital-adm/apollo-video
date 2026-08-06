@@ -1109,7 +1109,7 @@ model V2ProjectDirectorOperation {
   objectiveVersion Int
   rubricRef       String   @db.VarChar(128)
   supersedesRunId String?  @db.VarChar(128)
-  destination     String?  @db.VarChar(2048)
+  desiredActionJson String? @db.Text
   delegatedUserId String?  @db.VarChar(128)
   reason           String?  @db.VarChar(1000)
   createdAt        DateTime @default(now()) @db.Timestamptz(3)

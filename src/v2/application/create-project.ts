@@ -1,6 +1,9 @@
 import { assertDomain } from '../domain/errors.ts'
 import type { CommandActor } from '../domain/edit-command.ts'
-import { createDesiredAction } from '../domain/desired-action.ts'
+import {
+  createDesiredAction,
+  type DesiredActionInput,
+} from '../domain/desired-action.ts'
 import {
   createOutputSpec,
   OUTPUT_PRESETS,
@@ -44,7 +47,7 @@ export interface CreateProjectRequest {
   format: OutputAspectRatio
   locale?: string
   briefing?: string
-  destination?: string
+  desiredAction?: Readonly<DesiredActionInput>
   actor: AuthenticatedExternalActor
   idempotency: {
     clientId: string
@@ -79,7 +82,7 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
     })
     const desiredAction = createDesiredAction({
       objective: objective.id,
-      destination: request.destination,
+      ...(request.desiredAction ? { desiredAction: request.desiredAction } : {}),
     })
     const productionBrief = createProductionBrief({ ownerText: request.briefing })
     const ttlSeconds = request.idempotency.ttlSeconds ?? DEFAULT_IDEMPOTENCY_TTL_SECONDS

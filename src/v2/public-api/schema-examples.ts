@@ -5730,6 +5730,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         reason: 'Recompute the persisted editorial plan for the explicit objective.',
       },
     ],
+    'apollo://schemas/enqueue-project-director-run-request/v3': [
+      {
+        baseVersionId: 'project-version-base-example-1',
+        baseHash: 'b'.repeat(64),
+        objective: 'sale',
+        desiredAction: {
+          destination: { type: 'url', value: 'https://checkout.example/oferta' },
+          verbalCta: 'Garanta sua vaga',
+          visualCta: 'Comprar agora',
+          disclosures: ['Condições no site'],
+        },
+        reason: 'Conduzir a direção aprovada para a oferta explícita.',
+      },
+    ],
     'apollo://schemas/project-director-operation-enqueued/v1': [
       {
         data: { operation: queuedProjectDirectorOperationVisibleExample, replayed: false },
@@ -7430,6 +7444,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           sharedArtifactIds: ['artifact-example-source-1'], copiedBytes: 0, replayed: false,
         },
         meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-project-request/v3': [
+      {
+        name: 'Campanha de venda', objective: 'sale', format: '9:16', locale: 'pt-BR',
+        briefing: 'Apresentar a oferta com ritmo natural e sem efeitos gratuitos.',
+        desiredAction: {
+          destination: { type: 'url', value: 'https://checkout.example/oferta' },
+          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
+          disclosures: ['Condições no site'],
+        },
       },
     ],
     'apollo://schemas/rename-project-request/v1': [
@@ -9356,6 +9381,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         baseHash: 'e'.repeat(64),
         objective: 'sale',
         destination: 'https://checkout.example/oferta',
+        reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
+      },
+    ],
+    'apollo://schemas/apply-project-edit-command-request/v6': [
+      {
+        type: 'run-director',
+        baseVersionId: 'project-version-example-5',
+        baseHash: 'e'.repeat(64),
+        objective: 'sale',
+        desiredAction: {
+          destination: { type: 'url', value: 'https://checkout.example/oferta' },
+          verbalCta: 'Garanta sua vaga', visualCta: 'Comprar agora',
+          disclosures: ['Condições no site'],
+        },
         reason: 'A direção aprovada agora precisa conduzir à oferta explícita.',
       },
     ],

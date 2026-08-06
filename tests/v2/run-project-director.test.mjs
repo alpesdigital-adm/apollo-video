@@ -191,7 +191,15 @@ class InMemoryDirectorRepository {
         desiredAction: createDesiredAction({
           objective: this.projectObjective,
           ...(['lead-generation', 'sale', 'whatsapp', 'booking', 'download'].includes(this.projectObjective)
-            ? { destination: 'https://destination.example/action' }
+            ? { desiredAction: { destination: {
+                type: {
+                  'lead-generation': 'url', sale: 'url', whatsapp: 'whatsapp',
+                  booking: 'calendar', download: 'file',
+                }[this.projectObjective],
+                value: this.projectObjective === 'whatsapp'
+                  ? '+5511999999999'
+                  : 'https://destination.example/action',
+              } } }
             : {}),
         }),
         productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
@@ -372,7 +380,12 @@ test('approved strategic objective change creates a new brief, version and super
     baseVersionId: first.version.id,
     baseHash: first.version.baseHash,
     objective: 'sale',
-    destination: 'https://checkout.example/oferta',
+    desiredAction: {
+      destination: { type: 'url', value: 'https://checkout.example/oferta' },
+      verbalCta: 'Compre',
+      visualCta: 'Comprar agora',
+      disclosures: ['Condições no site'],
+    },
     reason: 'A campanha aprovada agora precisa levar a uma oferta explícita.',
     idempotency: { key: 'director-objective-change-sale' },
   }))
@@ -394,7 +407,40 @@ test('approved strategic objective change creates a new brief, version and super
   ).contentJson)
   assert.equal(brief.objective, 'sale')
   assert.equal(brief.desiredAction.kind, 'buy')
+  assert.equal(brief.desiredAction.visualCta, 'Comprar agora')
   assert.equal(brief.objectiveChange.supersedesRunId, first.run.id)
+  const actionRef = changed.run.storyPlan.desiredActionRef
+  assert.equal(actionRef.id, changed.run.editPlan.desiredActionRef.id)
+  assert.equal(actionRef.id, changed.run.editPlan.subtitleTracks[0].desiredActionRef.id)
+  assert.equal(actionRef.id, changed.run.editPlan.overlayTracks[0].desiredActionRef.id)
+  assert.equal(actionRef.id, changed.run.qualityReport.desiredActionRef.id)
+  assert.equal(changed.run.editPlan.overlayTracks[0].text, 'Comprar agora')
+})
+
+test('approved Desired Action change supersedes the run without changing objective', async () => {
+  const { repository, service } = fixture({ projectObjective: 'sale', ctaText: 'Compre' })
+  const first = await service(request({ objective: 'sale' }))
+  const changed = await service(request({
+    baseVersionId: first.version.id,
+    baseHash: first.version.baseHash,
+    objective: 'sale',
+    desiredAction: {
+      destination: { type: 'url', value: 'https://checkout.example/nova-oferta' },
+      verbalCta: 'Compre',
+      visualCta: 'Ver nova oferta',
+    },
+    reason: 'A oferta aprovada mudou de destino e texto visual.',
+    idempotency: { key: 'director-desired-action-change-sale' },
+  }))
+  assert.equal(changed.run.objective, 'sale')
+  assert.equal(changed.run.objectiveVersion, 2)
+  assert.equal(changed.run.supersedesRunId, first.run.id)
+  assert.notEqual(changed.command.payload.snapshotRefs.brief, first.command.payload.snapshotRefs.brief)
+  const brief = JSON.parse(repository.lastBundle.snapshots.find(
+    (snapshot) => snapshot.kind === 'brief',
+  ).contentJson)
+  assert.equal(brief.desiredAction.destination.value, 'https://checkout.example/nova-oferta')
+  assert.equal(brief.desiredAction.visualCta, 'Ver nova oferta')
 })
 
 test('objective change fails before persistence without reason or required destination', async () => {
@@ -405,7 +451,9 @@ test('objective change fails before persistence without reason or required desti
       baseVersionId: first.version.id,
       baseHash: first.version.baseHash,
       objective: 'sale',
-      destination: 'https://checkout.example/oferta',
+      desiredAction: {
+        destination: { type: 'url', value: 'https://checkout.example/oferta' },
+      },
       reason: ' ',
       idempotency: { key: 'director-objective-change-no-reason' },
     })),

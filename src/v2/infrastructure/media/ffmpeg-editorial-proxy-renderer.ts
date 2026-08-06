@@ -58,6 +58,7 @@ function buildAssSubtitles(input: {
   height: number
   fps: number
   cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
+  ctaOverlays?: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['ctaOverlays']>
 }): string {
   const fontSize = Math.max(
     32,
@@ -77,6 +78,8 @@ function buildAssSubtitles(input: {
             : `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.08)})}`
     return `Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${override}${wrapAssText(cue.text)}`
   })
+  const ctaEvents = (input.ctaOverlays ?? []).map((overlay) =>
+    `Dialogue: 1,${assTimestamp(overlay.startFrame, input.fps)},${assTimestamp(overlay.endFrame, input.fps)},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`)
   return [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -88,10 +91,12 @@ function buildAssSubtitles(input: {
     '[V4+ Styles]',
     'Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding',
     `Style: Default,Arial,${fontSize},&H00FFFFFF,&H0038AFE1,&H00111111,&H78000000,-1,0,0,0,100,100,0,0,3,1,0,2,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
+    `Style: CTA,Arial,${Math.max(28, Math.round(fontSize * 0.82))},&H00111111,&H00111111,&H00FFFFFF,&H00E1AF38,-1,0,0,0,100,100,0,0,3,2,0,8,${marginHorizontal},${marginHorizontal},${marginVertical},1`,
     '',
     '[Events]',
     'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
     ...events,
+    ...ctaEvents,
     '',
   ].join('\n')
 }
@@ -292,6 +297,17 @@ function sliceRenderRange(input: EditorialRenderInput, range: {
         })]
       : []
   })
+  const ctaOverlays = input.ctaOverlays?.flatMap((overlay) => {
+    const overlapStart = Math.max(range.startFrame, overlay.startFrame)
+    const overlapEnd = Math.min(range.endFrame, overlay.endFrame)
+    return overlapEnd > overlapStart
+      ? [Object.freeze({
+          ...overlay,
+          startFrame: overlapStart - range.startFrame,
+          endFrame: overlapEnd - range.startFrame,
+        })]
+      : []
+  })
   const transitions = input.transitions
     ?.filter((transition) =>
       transition.atFrame > range.startFrame && transition.atFrame < range.endFrame)
@@ -312,6 +328,7 @@ function sliceRenderRange(input: EditorialRenderInput, range: {
   return Object.freeze({
     clips: Object.freeze(clips),
     ...(subtitleCues ? { subtitleCues: Object.freeze(subtitleCues) } : {}),
+    ...(ctaOverlays ? { ctaOverlays: Object.freeze(ctaOverlays) } : {}),
     ...(transitions ? { transitions: Object.freeze(transitions) } : {}),
   })
 }
@@ -463,6 +480,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       ? slices.map((slice, index) => Object.freeze({
         clips: slice.clips,
         subtitleCues: slice.subtitleCues,
+        ctaOverlays: slice.ctaOverlays,
         transitions: slice.transitions,
         outputPath: join(directory, `editorial-proxy-range${suffix(index)}.mp4`),
         subtitlePath: join(directory, `captions${suffix(index)}.ass`),
@@ -470,6 +488,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       : [Object.freeze({
         clips: input.clips,
         subtitleCues: input.subtitleCues,
+        ctaOverlays: input.ctaOverlays,
         transitions: input.transitions,
         outputPath,
         subtitlePath: join(directory, 'captions.ass'),
@@ -533,14 +552,15 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       const verticalPosition = input.composition?.verticalPosition ?? 0.5
       filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
       filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
-      if (composition.subtitleCues?.length) {
+      if (composition.subtitleCues?.length || composition.ctaOverlays?.length) {
         await writeFile(
           composition.subtitlePath,
           buildAssSubtitles({
             width,
             height,
             fps: outputFps,
-            cues: composition.subtitleCues,
+            cues: composition.subtitleCues ?? [],
+            ctaOverlays: composition.ctaOverlays,
           }),
           'utf8',
         )
@@ -685,6 +705,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       ])),
       clips: input.clips,
       subtitleCues: input.subtitleCues,
+      ctaOverlays: input.ctaOverlays,
       composition: input.composition,
     })
     return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap })

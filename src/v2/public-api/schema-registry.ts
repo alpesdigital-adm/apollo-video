@@ -27,6 +27,51 @@ const strategicObjectiveSchema = {
     'sale', 'whatsapp', 'booking', 'download',
   ],
 } as const
+const desiredActionInputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    destination: {
+      type: 'object', additionalProperties: false, required: ['type', 'value'],
+      properties: {
+        type: { enum: ['url', 'handle', 'whatsapp', 'calendar', 'file'] },
+        value: { type: 'string', minLength: 1, maxLength: 2048 },
+      },
+    },
+    verbalCta: { type: 'string', minLength: 1, maxLength: 160 },
+    visualCta: { type: 'string', minLength: 1, maxLength: 160 },
+    disclosures: {
+      type: 'array', maxItems: 12, uniqueItems: true,
+      items: { type: 'string', minLength: 1, maxLength: 300 },
+    },
+  },
+} as const
+const desiredActionObjectiveRequirements = [
+  ['lead-generation', 'url'], ['sale', 'url'], ['whatsapp', 'whatsapp'],
+  ['booking', 'calendar'], ['download', 'file'],
+].map(([objective, destinationType]) => ({
+  if: {
+    type: 'object',
+    required: ['objective'],
+    properties: { objective: { const: objective } },
+  },
+  then: {
+    type: 'object',
+    required: ['desiredAction'],
+    properties: {
+      desiredAction: {
+        type: 'object',
+        required: ['destination'],
+        properties: {
+          destination: {
+            type: 'object',
+            properties: { type: { const: destinationType } },
+          },
+        },
+      },
+    },
+  },
+}))
 const directorQualityCriterionSchema = {
   enum: [
     'hook-clarity', 'problem-recognition', 'trust-building', 'offer-clarity',
@@ -18943,6 +18988,19 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     ],
   }),
+  defineSchema('create-project-request', 3, 'Create project request with canonical Desired Action inputs', {
+    type: 'object', additionalProperties: false,
+    required: ['name', 'objective', 'format'],
+    properties: {
+      name: { type: 'string', minLength: 2, maxLength: 120 },
+      objective: strategicObjectiveSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      briefing: { type: 'string', maxLength: 10000 },
+      desiredAction: desiredActionInputSchema,
+    },
+    allOf: desiredActionObjectiveRequirements,
+  }),
   defineSchema('apply-project-edit-command-request', 5, 'Typed project edit command with objective-bound DirectorRun supersession', {
     type: 'object', additionalProperties: false,
     required: ['type', 'baseVersionId', 'baseHash'],
@@ -19001,6 +19059,57 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
       },
     ],
+  }),
+  defineSchema('apply-project-edit-command-request', 6, 'Typed project edit command with canonical Desired Action inputs', {
+    type: 'object', additionalProperties: false,
+    required: ['type', 'baseVersionId', 'baseHash'],
+    properties: {
+      type: { enum: ['remove-spoken-content', 'replace-source-transcript', 'run-director'] },
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      sourceTranscriptId: idSchema,
+      expectedTranscriptHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      desiredAction: desiredActionInputSchema,
+      rules: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['id', 'label', 'alternatives'],
+          properties: {
+            id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' }, label: { type: 'string', minLength: 1, maxLength: 160 },
+            alternatives: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+          },
+        },
+      },
+      exclusionOverrides: {
+        type: 'array', minItems: 1, maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['sourceStartSeconds', 'sourceEndSeconds', 'ruleIds', 'reason'],
+          properties: {
+            sourceStartSeconds: { type: 'number', minimum: 0 }, sourceEndSeconds: { type: 'number', exclusiveMinimum: 0 },
+            ruleIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{1,63}$' } },
+            reason: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    oneOf: [
+      { required: ['sourceTranscriptId', 'rules'], properties: {
+        type: { const: 'remove-spoken-content' }, sourceTranscriptId: {}, rules: {},
+        expectedTranscriptHash: false, objective: false, desiredAction: false,
+      } },
+      { required: ['sourceTranscriptId', 'expectedTranscriptHash'], properties: {
+        type: { const: 'replace-source-transcript' }, sourceTranscriptId: {}, expectedTranscriptHash: {},
+        rules: false, exclusionOverrides: false, objective: false, desiredAction: false,
+      } },
+      { required: ['objective'], properties: {
+        type: { const: 'run-director' }, objective: {}, desiredAction: {},
+        sourceTranscriptId: false, expectedTranscriptHash: false,
+        rules: false, exclusionOverrides: false,
+      } },
+    ],
+    allOf: desiredActionObjectiveRequirements,
   }),
   defineSchema('project-edit-command-applied', 1, 'Applied project edit command response',
     successSchema({
@@ -19534,6 +19643,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       destination: { type: 'string', minLength: 1, maxLength: 2048 },
       reason: { type: 'string', minLength: 1, maxLength: 1000 },
     },
+  }),
+  defineSchema('enqueue-project-director-run-request', 3, 'Enqueue an objective-bound Director run with canonical Desired Action inputs', {
+    type: 'object', additionalProperties: false,
+    required: ['baseVersionId', 'baseHash', 'objective'],
+    properties: {
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      objective: strategicObjectiveSchema,
+      desiredAction: desiredActionInputSchema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    allOf: desiredActionObjectiveRequirements,
   }),
   defineSchema('project-director-operation-enqueued', 1, 'Durable Director operation accepted for asynchronous execution',
     successSchema({

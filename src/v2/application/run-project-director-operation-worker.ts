@@ -154,7 +154,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
         ...(context.supersedesRunId
           ? { expectedSupersedesRunId: context.supersedesRunId }
           : {}),
-        ...(context.destination ? { destination: context.destination } : {}),
+        ...(context.desiredAction ? { desiredAction: context.desiredAction } : {}),
         operationFence: command(clock()),
         ...(context.reason ? { reason: context.reason } : {}),
       })

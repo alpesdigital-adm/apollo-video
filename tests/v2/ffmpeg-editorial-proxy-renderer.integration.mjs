@@ -11,6 +11,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createManualCommandImpact, createReviewPatchCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { createDesiredAction, createDesiredActionReference } from '../../src/v2/domain/desired-action.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import { materializePatchEditPlan } from '../../src/v2/domain/review-system.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
@@ -48,6 +49,69 @@ function colorCompilation(artifactId) {
     ],
   })
 }
+
+test('T-FR-011 renderer materializes the canonical visual CTA and maps its exact frames', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-desired-action-render-'))
+  const sourcePath = join(root, 'source.mp4')
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=3',
+      '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+      '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-ar', '48000', sourcePath,
+    ], { windowsHide: true })
+    const action = createDesiredAction({
+      objective: 'sale',
+      desiredAction: {
+        destination: { type: 'url', value: 'https://checkout.example/oferta' },
+        verbalCta: 'Compre agora', visualCta: 'COMPRAR AGORA',
+        disclosures: ['Condições no site'],
+      },
+    })
+    const desiredActionRef = createDesiredActionReference(action)
+    const renderer = new FfmpegEditorialProxyRenderer({
+      workRoot: join(root, 'work'), ffmpegPath,
+    })
+    const result = await renderer.render({
+      operationId: 'desired-action-render-test', renderKind: 'proxy',
+      sources: [{
+        artifactId: 'artifact-cta-source', path: sourcePath, mediaType: 'video',
+        colorPipelineCompilation: colorCompilation('artifact-cta-source'),
+      }],
+      clips: [{
+        id: 'clip-cta-source', sourceArtifactId: 'artifact-cta-source',
+        sourceInFrame: 0, sourceOutFrame: 90,
+        timelineInFrame: 0, timelineOutFrame: 90, rate: 1,
+      }],
+      fps: 30, format: '16:9',
+      ctaOverlays: [{
+        id: `overlay-${desiredActionRef.id}`, kind: 'cta', desiredActionRef,
+        startFrame: 60, endFrame: 90, text: action.visualCta,
+      }],
+    })
+    const sample = (second) => execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', String(second),
+      '-i', result.outputPath, '-frames:v', '1',
+      '-vf', 'crop=760:110:100:20', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], { windowsHide: true })
+    const countNonBlack = (buffer) => {
+      let pixels = 0
+      for (let index = 0; index < buffer.length; index += 3) {
+        if (buffer[index] + buffer[index + 1] + buffer[index + 2] > 90) pixels += 1
+      }
+      return pixels
+    }
+    assert.ok(countNonBlack(sample(2.5)) > countNonBlack(sample(1)) + 500)
+    const ctaElements = result.renderElementMap.elements.filter((item) => item.type === 'cta')
+    assert.equal(ctaElements.length, 30)
+    assert.equal(ctaElements[0].frame, 60)
+    assert.equal(ctaElements.at(-1).frame, 89)
+    assert.equal(ctaElements.every((item) => item.sourceId === `overlay-${desiredActionRef.id}`), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('T-FR-221 renderer materializes B-roll video while preserving source-master audio', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-multisource-render-'))

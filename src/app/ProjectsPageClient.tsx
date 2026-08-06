@@ -82,6 +82,14 @@ const DESTINATION_REQUIRED = new Set<StrategicObjectiveId>([
   'download',
 ])
 
+const DESTINATION_TYPE_BY_OBJECTIVE: Readonly<Partial<Record<
+  StrategicObjectiveId,
+  'url' | 'whatsapp' | 'calendar' | 'file'
+>>> = {
+  'lead-generation': 'url', sale: 'url', whatsapp: 'whatsapp',
+  booking: 'calendar', download: 'file',
+}
+
 const ARCHIVABLE_PROJECT_STATUSES = new Set([
   'draft', 'completed', 'failed', 'canceled',
 ])
@@ -208,6 +216,9 @@ export default function Dashboard() {
   const [locale, setLocale] = useState('pt-BR')
   const [briefing, setBriefing] = useState('')
   const [destination, setDestination] = useState('')
+  const [verbalCta, setVerbalCta] = useState('')
+  const [visualCta, setVisualCta] = useState('')
+  const [disclosures, setDisclosures] = useState('')
 
   useEffect(() => {
     const resolveFromLocation = (includeSession: boolean) => {
@@ -378,6 +389,9 @@ export default function Dashboard() {
     setLocale('pt-BR')
     setBriefing('')
     setDestination('')
+    setVerbalCta('')
+    setVisualCta('')
+    setDisclosures('')
     idempotencyKey.current = null
   }
 
@@ -385,6 +399,10 @@ export default function Dashboard() {
     event.preventDefault()
     const normalizedName = name.trim()
     const normalizedDestination = destination.trim()
+    const normalizedVerbalCta = verbalCta.trim()
+    const normalizedVisualCta = visualCta.trim()
+    const normalizedDisclosures = disclosures.split('\n')
+      .map((item) => item.trim()).filter(Boolean)
     if (normalizedName.length < 2) {
       setNotice('Dê um nome com pelo menos 2 caracteres para a produção.')
       return
@@ -410,7 +428,21 @@ export default function Dashboard() {
           format,
           locale,
           ...(briefing.trim() ? { briefing: briefing.trim() } : {}),
-          ...(normalizedDestination ? { destination: normalizedDestination } : {}),
+          ...(
+            normalizedDestination || normalizedVerbalCta ||
+            normalizedVisualCta || normalizedDisclosures.length
+              ? { desiredAction: {
+                  ...(normalizedDestination ? { destination: {
+                    type: DESTINATION_TYPE_BY_OBJECTIVE[objective] ??
+                      (normalizedDestination.startsWith('@') ? 'handle' : 'url'),
+                    value: normalizedDestination,
+                  } } : {}),
+                  ...(normalizedVerbalCta ? { verbalCta: normalizedVerbalCta } : {}),
+                  ...(normalizedVisualCta ? { visualCta: normalizedVisualCta } : {}),
+                  ...(normalizedDisclosures.length ? { disclosures: normalizedDisclosures } : {}),
+                } }
+              : {}
+          ),
         }),
       })
       if (response.status === 401) {
@@ -908,7 +940,7 @@ export default function Dashboard() {
                             const item = STRATEGIC_OBJECTIVES.find((candidate) => candidate.id === id)!
                             const selected = objective === id
                             return (
-                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(id); setDestination('') }} type="button">
+                              <button aria-pressed={selected} className={`rounded-xl border px-3.5 py-3 text-left transition ${selected ? 'border-[#d5a535]/55 bg-[#d5a535]/[0.09]' : 'border-white/[0.07] bg-[#090909] hover:border-white/[0.15]'}`} key={id} onClick={() => { setObjective(id); setDestination(''); setVerbalCta(''); setVisualCta(''); setDisclosures('') }} type="button">
                                 <span className={`block text-sm font-medium ${selected ? 'text-[#edc45d]' : 'text-[#c5c0b7]'}`}>{item.label}</span>
                                 <span className="mt-1 block text-[11px] leading-4 text-[#69665f]">{item.description}</span>
                               </button>
@@ -924,10 +956,28 @@ export default function Dashboard() {
                   <label className="block">
                     <span className="text-xs font-semibold text-[#c8c2b8]">Destino da ação</span>
                     <span className="ml-2 text-[10px] text-[#77736c]">obrigatório para {selectedObjective.label.toLocaleLowerCase('pt-BR')}</span>
-                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" onChange={(event) => setDestination(event.target.value)} placeholder={objective === 'whatsapp' ? 'Número, link ou instrução para WhatsApp' : objective === 'booking' ? 'Agenda ou identificador do calendário' : objective === 'download' ? 'Material ou arquivo de destino' : 'https://seu-dominio.com/...'} required value={destination} />
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={2048} onChange={(event) => setDestination(event.target.value)} placeholder={objective === 'whatsapp' ? '+5511999999999 ou https://wa.me/...' : objective === 'booking' ? 'https://agenda.example/...' : objective === 'download' ? 'https://arquivos.example/material.pdf' : 'https://seu-dominio.com/...'} required value={destination} />
                     {['lead-generation', 'sale'].includes(objective) ? <span className="mt-1.5 block text-[10px] text-[#68645d]">Para links externos, use HTTPS.</span> : null}
                   </label>
                 ) : null}
+
+                <div className="grid gap-4 sm:grid-cols-2" data-testid="desired-action-fields">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">CTA verbal</span>
+                    <span className="ml-2 text-[10px] text-[#77736c]">opcional, não será inventado</span>
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVerbalCta(event.target.value)} placeholder="Ex.: Agende sua conversa" value={verbalCta} />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">CTA visual</span>
+                    <span className="ml-2 text-[10px] text-[#77736c]">opcional</span>
+                    <input className="mt-2 h-12 w-full rounded-xl border border-white/[0.09] bg-[#080808] px-4 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={160} onChange={(event) => setVisualCta(event.target.value)} placeholder="Ex.: Saiba mais" value={visualCta} />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-semibold text-[#c8c2b8]">Disclosures</span>
+                    <span className="ml-2 text-[10px] text-[#77736c]">um por linha, opcional</span>
+                    <textarea className="mt-2 min-h-20 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-3 text-sm text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55" maxLength={2000} onChange={(event) => setDisclosures(event.target.value)} placeholder="Condições no site" value={disclosures} />
+                  </label>
+                </div>
 
                 <label className="block">
                   <span className="text-xs font-semibold text-[#c8c2b8]">Briefing para o Diretor</span>

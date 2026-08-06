@@ -35,6 +35,7 @@ export function resolveStrategicObjective(value: string): StrategicObjective {
 export function bindDirectorObjective(input: {
   objective: string
   previous?: Readonly<PreviousDirectorObjectiveBinding>
+  supersede?: boolean
 }): Readonly<DirectorObjectiveBinding> {
   const objective = resolveStrategicObjective(input.objective)
   const previous = input.previous
@@ -48,6 +49,19 @@ export function bindDirectorObjective(input: {
       'Previous Director objective binding is invalid',
     )
     if (previousObjective.id === objective.id) {
+      if (input.supersede) {
+        assertDomain(
+          previous.approved,
+          'PRECONDITION_REQUIRED',
+          'An unapproved Director direction must be revised in place before execution',
+        )
+        return Object.freeze({
+          objective: objective.id,
+          rubricRef: `${objective.rubricId}/v1`,
+          objectiveVersion: previous.objectiveVersion + 1,
+          supersedesRunId: previous.runId,
+        })
+      }
       return Object.freeze({
         objective: objective.id,
         rubricRef: `${objective.rubricId}/v1`,

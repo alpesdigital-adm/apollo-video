@@ -13,9 +13,12 @@ import {
 import { createEditCommand } from '../domain/edit-command.ts'
 import {
   createDesiredAction,
+  createDesiredActionReference,
+  parseDesiredAction,
   validateDesiredActionAlignment,
   type DesiredAction,
-  type DesiredActionDestinationType,
+  type DesiredActionReference,
+  type DesiredActionInput,
 } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { createPerceptionTimeline, type PerceptionObservation } from '../domain/perception-timeline.ts'
@@ -67,7 +70,7 @@ export interface RunProjectDirectorRequest {
   }>
   reason?: string
   objective?: StrategicObjectiveId
-  destination?: string
+  desiredAction?: Readonly<DesiredActionInput>
   expectedObjectiveVersion?: number
   expectedRubricRef?: string
   expectedSupersedesRunId?: string
@@ -81,7 +84,7 @@ export function projectDirectorRequestFingerprint(input: {
   baseHash: string
   reason?: string
   objective?: StrategicObjectiveId
-  destination?: string
+  desiredAction?: Readonly<DesiredActionInput>
   actorContextHash: string
   operationId?: string
 }): string {
@@ -94,7 +97,7 @@ export function projectDirectorRequestFingerprint(input: {
     plannerVersion: PROJECT_DIRECTOR_PLANNER_VERSION,
     criticVersion: PROJECT_DIRECTOR_CRITIC_VERSION,
     objective: input.objective ?? null,
-    destination: input.destination?.trim() || null,
+    desiredAction: input.desiredAction ?? null,
     actorContextHash: input.actorContextHash,
     execution: input.operationId
       ? { kind: 'public-operation-worker', operationId: input.operationId }
@@ -230,6 +233,7 @@ function buildStoryPlan(input: {
   id: string
   objective: string
   desiredAction: Readonly<DesiredAction>
+  desiredActionRef: Readonly<DesiredActionReference>
   ctaPresent: boolean
   clips: readonly Readonly<{
     id: string
@@ -259,7 +263,7 @@ function buildStoryPlan(input: {
       durationTargetMs: { min: Math.max(1, durationMs - 1_000), ideal: durationMs, max: durationMs + 1_000 },
       content: {
         claimIds: [], qualifierIds: [], proofIds: [],
-        ...(isCta ? { ctaId: `desired-action:${input.desiredAction.kind}` } : {}),
+        ...(isCta ? { ctaId: input.desiredActionRef.id } : {}),
       },
       presentation: 'source-video',
       sourceRangeId: clip.id,
@@ -271,8 +275,9 @@ function buildStoryPlan(input: {
   const durationMs = Math.max(1, Math.round(input.durationFrames / input.fps * 1000))
   const plan: StoryPlan & { id: string } = {
     id: input.id,
-    schemaVersion: 1,
+    schemaVersion: 2,
     objective: input.objective,
+    desiredActionRef: input.desiredActionRef,
     targetDurationMs: { min: Math.max(1, durationMs - 1_000), max: durationMs + 1_000 },
     acts: [
       { id: 'opening', role: 'opening', blockIds: opening },
@@ -340,76 +345,11 @@ function normalizedSpeech(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
-const desiredActionDestinationTypes = new Set<DesiredActionDestinationType>([
-  'url', 'handle', 'whatsapp', 'calendar', 'file',
-])
-
 function desiredActionFromBrief(
   brief: Readonly<Record<string, unknown>>,
   objective: StrategicObjectiveId,
 ): Readonly<DesiredAction> {
-  const stored = brief.desiredAction
-  assertDomain(
-    typeof stored === 'object' && stored !== null && !Array.isArray(stored),
-    'PERSISTENCE_CONFLICT',
-    'Project brief has no structured desired action',
-  )
-  const record = stored as Record<string, unknown>
-  const destination = record.destination
-  assertDomain(
-    destination === undefined ||
-      (typeof destination === 'object' && destination !== null && !Array.isArray(destination)),
-    'PERSISTENCE_CONFLICT',
-    'Project desired action destination is invalid',
-  )
-  const destinationRecord = destination as Record<string, unknown> | undefined
-  const destinationType = destinationRecord?.type
-  assertDomain(
-    destinationType === undefined ||
-      (typeof destinationType === 'string' &&
-        desiredActionDestinationTypes.has(destinationType as DesiredActionDestinationType)),
-    'PERSISTENCE_CONFLICT',
-    'Project desired action destination type is invalid',
-  )
-  assertDomain(
-    destinationRecord?.value === undefined || typeof destinationRecord.value === 'string',
-    'PERSISTENCE_CONFLICT',
-    'Project desired action destination value is invalid',
-  )
-  assertDomain(
-    record.verbalCta === undefined || typeof record.verbalCta === 'string',
-    'PERSISTENCE_CONFLICT',
-    'Project verbal CTA is invalid',
-  )
-  assertDomain(
-    record.visualCta === undefined || typeof record.visualCta === 'string',
-    'PERSISTENCE_CONFLICT',
-    'Project visual CTA is invalid',
-  )
-  assertDomain(
-    Array.isArray(record.disclosures) &&
-      record.disclosures.every((item) => typeof item === 'string'),
-    'PERSISTENCE_CONFLICT',
-    'Project desired action disclosures are invalid',
-  )
-  const action = createDesiredAction({
-    objective,
-    ...(typeof destinationRecord?.value === 'string'
-      ? { destination: destinationRecord.value }
-      : {}),
-    ...(typeof destinationType === 'string'
-      ? { destinationType: destinationType as DesiredActionDestinationType }
-      : {}),
-    ...(typeof record.verbalCta === 'string' ? { verbalCta: record.verbalCta } : {}),
-    ...(typeof record.visualCta === 'string' ? { visualCta: record.visualCta } : {}),
-    disclosures: record.disclosures as string[],
-  })
-  assertDomain(
-    record.kind === action.kind && validateDesiredActionAlignment({ objective, action }).valid,
-    'PERSISTENCE_CONFLICT',
-    'Project desired action does not match its strategic objective',
-  )
-  return action
+  return parseDesiredAction(brief.desiredAction, objective)
 }
 
 function hasObservableCta(
@@ -436,6 +376,7 @@ function buildQualityReport(input: {
   objective: StrategicObjectiveId
   rubricRef: string
   desiredAction: Readonly<DesiredAction>
+  desiredActionRef: Readonly<DesiredActionReference>
   ctaPresent: boolean
   hasSelectedInsert: boolean
   transcriptId: string
@@ -480,7 +421,19 @@ function buildQualityReport(input: {
     hardChecks.timelineContinuous
   const legibility = hardChecks.subtitlesFaceSafe && hardChecks.subtitlesBounded
   const structuredCta = input.storyPlan.blocks.some((block) =>
-    block.role === 'cta' && Boolean(block.content.ctaId))
+    block.role === 'cta' && block.content.ctaId === input.desiredActionRef.id)
+  assertDomain(
+    input.storyPlan.desiredActionRef?.id === input.desiredActionRef.id &&
+      input.plan.desiredActionRef.id === input.desiredActionRef.id,
+    'INVALID_RENDER_INPUT',
+    'Director consumers do not share the canonical desired action reference',
+  )
+  const desiredActionAlignment = validateDesiredActionAlignment({
+    objective: input.objective,
+    action: input.desiredAction,
+    spokenCta: allSubtitleText,
+  })
+  const ctaAligned = desiredActionAlignment.valid
   const rubric = resolveStrategicRubric(input.objective)
   assertDomain(
     input.rubricRef === `${rubric.id}/v${rubric.version}`,
@@ -514,9 +467,10 @@ function buildQualityReport(input: {
         `edit-plan:${input.plan.id}:selected-proof-insert=${input.hasSelectedInsert}`,
         'semantic-proxy:no-commercial-causality',
       ]],
-      'cta-clarity': [structuredCta && input.ctaPresent ? 100 : 0, [
+      'cta-clarity': [structuredCta && input.ctaPresent && ctaAligned ? 100 : 0, [
         `story:${input.storyPlan.id}:structured-cta=${structuredCta}`,
         `desired-action:${input.desiredAction.kind}:observable-cta=${input.ctaPresent}`,
+        `desired-action:${input.desiredActionRef.actionHash}:alignment=${desiredActionAlignment.issues.join(',') || 'valid'}`,
       ]],
       'friction-reduction': [hasDestination ? 90 : input.desiredAction.kind === 'continue-viewing' ? 85 : 0, [
         `desired-action:${input.desiredAction.kind}:destination=${hasDestination}`,
@@ -545,7 +499,7 @@ function buildQualityReport(input: {
       narrativeIntegrity,
       legibility,
       rights: rightsPassed,
-      ctaPresent: input.ctaPresent && structuredCta,
+      ctaPresent: input.ctaPresent && structuredCta && ctaAligned,
     },
     gateEvidence: {
       'narrative-integrity': [`edit-plan:${input.plan.id}:narrative=${narrativeIntegrity}`],
@@ -553,7 +507,7 @@ function buildQualityReport(input: {
       'rights-compliance': [input.sourceRights.state === 'present'
         ? `rights:${input.sourceRights.snapshotId}:eligible=${rightsPassed}`
         : 'rights:missing'],
-      'cta-required': [`story:${input.storyPlan.id}:cta=${input.ctaPresent && structuredCta}`],
+      'cta-required': [`story:${input.storyPlan.id}:cta=${input.ctaPresent && structuredCta && ctaAligned}`],
     },
     evaluatedAt: input.evaluatedAt,
   })
@@ -596,6 +550,7 @@ function buildQualityReport(input: {
   return Object.freeze({
     schemaVersion: 'director-quality-report/v2' as const,
     id: input.id,
+    desiredActionRef: input.desiredActionRef,
     status: blocked ? 'blocked' as const : issues.length ? 'approved-with-warnings' as const : 'approved' as const,
     score: strategic.score / 100,
     strategic,
@@ -668,7 +623,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       workspaceId, projectId, baseVersionId, baseHash: request.baseHash,
       reason: request.reason,
       objective: request.objective,
-      destination: request.destination,
+      desiredAction: request.desiredAction,
       actorContextHash: authenticationAudit.contextHash,
       ...(request.operationFence
         ? { operationId: request.operationFence.operationId }
@@ -696,13 +651,32 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const objective = resolveStrategicObjective(
       request.objective ?? context.project.objective,
     )
+    const currentDesiredAction = desiredActionFromBrief(
+      context.brief,
+      context.project.objective,
+    )
+    const requestedDesiredAction = request.desiredAction
+      ? createDesiredAction({
+          objective: objective.id,
+          desiredAction: request.desiredAction,
+        })
+      : undefined
+    const objectiveChanged = objective.id !== context.project.objective
+    const desiredAction = requestedDesiredAction ?? (
+      objectiveChanged
+        ? createDesiredAction({ objective: objective.id })
+        : currentDesiredAction
+    )
+    const desiredActionChanged = stableSerialize(desiredAction) !==
+      stableSerialize(currentDesiredAction)
+    const directionChanged = objectiveChanged || desiredActionChanged
     const objectiveBinding = bindDirectorObjective({
       objective: objective.id,
       ...(context.latestDirectorObjective
         ? { previous: context.latestDirectorObjective }
         : {}),
+      supersede: directionChanged,
     })
-    const objectiveChanged = objective.id !== context.project.objective
     if (request.operationFence) {
       assertDomain(
         request.expectedBaseObjective === context.project.objective &&
@@ -723,26 +697,9 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       )
     }
     assertDomain(
-      !objectiveChanged || Boolean(request.reason?.trim()),
+      !directionChanged || Boolean(request.reason?.trim()),
       'PRECONDITION_REQUIRED',
-      'Changing the strategic objective requires an explicit reason',
-    )
-    assertDomain(
-      objectiveChanged || request.destination === undefined,
-      'INVALID_ARGUMENT',
-      'destination is only accepted when the strategic objective changes',
-    )
-    const changedDesiredAction = objectiveChanged
-      ? createDesiredAction({
-          objective: objective.id,
-          ...(request.destination?.trim()
-            ? { destination: request.destination.trim() }
-            : {}),
-        })
-      : undefined
-    const desiredAction = changedDesiredAction ?? desiredActionFromBrief(
-      context.brief,
-      objective.id,
+      'Changing the strategic objective or desired action requires an explicit reason',
     )
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
@@ -753,6 +710,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       desiredAction,
       context.editPlan.retimedTranscript.words,
     )
+    const desiredActionRef = createDesiredActionReference(desiredAction)
     const createdAt = dependencies.clock().toISOString()
     const directorRunId = dependencies.createId('director-run')
     const commandId = dependencies.createId('edit-command')
@@ -767,7 +725,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       context.currentVersion.snapshotRefs.brief ?? '',
       'briefSnapshotId',
     )
-    const briefSnapshotId = objectiveChanged
+    const briefSnapshotId = directionChanged
       ? dependencies.createId('project-snapshot')
       : currentBriefSnapshotId
     const perception = buildPerception({
@@ -797,6 +755,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       id: storyPlanId,
       objective: objective.id,
       desiredAction,
+      desiredActionRef,
       ctaPresent,
       clips,
       fps: context.editPlan.fps,
@@ -836,10 +795,22 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       storyPlanId,
       treatmentPlanId,
       directorRunId,
+      desiredActionRef,
+      overlayTracks: desiredAction.visualCta
+        ? Object.freeze([Object.freeze({
+            id: `overlay-${desiredActionRef.id}`,
+            kind: 'cta' as const,
+            desiredActionRef,
+            startFrame: Math.max(0, context.editPlan.durationFrames - Math.round(context.editPlan.fps * 3)),
+            endFrame: context.editPlan.durationFrames,
+            text: desiredAction.visualCta,
+          })])
+        : Object.freeze([]),
       subtitleTracks: Object.freeze([Object.freeze({
         id: 'track-captions-pt-br', kind: 'captions' as const, presetId: 'clean-color' as const,
         anchor: 'bottom' as const, faceProtection: true as const, maxLines: 2 as const,
         maxCharactersPerBlock: SUBTITLE_MAX_CHARACTERS, cues: subtitleCues,
+        desiredActionRef,
       })]),
       effectTracks: Object.freeze([]),
       transitions,
@@ -864,6 +835,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       objective: objective.id,
       rubricRef: objectiveBinding.rubricRef,
       desiredAction,
+      desiredActionRef,
       ctaPresent,
       hasSelectedInsert,
       transcriptId: context.transcript.id,
@@ -886,12 +858,12 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const storySnapshotId = dependencies.createId('project-snapshot')
     const editPlanSnapshotId = dependencies.createId('project-snapshot')
     const qualitySnapshotId = dependencies.createId('project-snapshot')
-    const objectiveBrief = objectiveChanged
+    const objectiveBrief = directionChanged
       ? Object.freeze({
           ...context.brief,
           schemaVersion: 2,
           objective: objective.id,
-          desiredAction: changedDesiredAction,
+          desiredAction,
           objectiveChange: Object.freeze({
             from: context.project.objective,
             to: objective.id,

@@ -259,6 +259,38 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(repository.lastBundle.auditCommand.commandHash.length, 64)
 })
 
+test('create project persists the complete canonical Desired Action without inventing fields', async () => {
+  const { repository, service } = createFixture()
+  await service(request({
+    objective: 'sale',
+    desiredAction: {
+      destination: { type: 'url', value: ' https://checkout.example/oferta ' },
+      verbalCta: ' Compre agora ',
+      visualCta: ' Ver oferta ',
+      disclosures: ['Condições no site'],
+    },
+    idempotency: { clientId: 'client-1', key: 'create-project-sale' },
+  }))
+  const brief = JSON.parse(repository.lastBundle.snapshots.find(
+    (snapshot) => snapshot.kind === 'brief',
+  ).contentJson)
+  assert.deepEqual(brief.desiredAction, {
+    schemaVersion: 1,
+    kind: 'buy',
+    destination: { type: 'url', value: 'https://checkout.example/oferta' },
+    verbalCta: 'Compre agora',
+    visualCta: 'Ver oferta',
+    disclosures: ['Condições no site'],
+  })
+  await assert.rejects(
+    () => service(request({
+      objective: 'sale',
+      idempotency: { clientId: 'client-1', key: 'create-project-sale-missing' },
+    })),
+    (error) => error instanceof DomainError && error.code === 'INVALID_ARGUMENT',
+  )
+})
+
 test('same idempotency key and payload replays the original result', async () => {
   const { repository, service } = createFixture()
   const first = await service(request())

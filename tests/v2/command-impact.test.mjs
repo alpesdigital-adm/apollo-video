@@ -63,7 +63,7 @@ function impactActor() {
 
 test('T-FR-236 exposes the resulting Command version as the current project head', () => {
   const capability = FOUNDATION_CAPABILITIES.find((item) => item.id === 'apollo.projects.commands.apply')
-  assert.equal(capability.version, '8.0.0')
+  assert.equal(capability.version, '9.0.0')
   assert.equal(capability.outputSchemaRef, 'apollo://schemas/project-edit-command-applied/v7')
   for (const previousRef of [
     'apollo://schemas/project-edit-command-applied/v3',

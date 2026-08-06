@@ -143,6 +143,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         source.editPlan.movementPolicy.protectedOpeningFrames < Math.round(source.editPlan.fps * 4)
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Compiled EditPlan is not safe to render')
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
+      const ctaOverlays = (source.editPlan.overlayTracks ?? []).filter(
+        (track) => 'kind' in track && track.kind === 'cta',
+      )
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       await enter('rendering')
@@ -171,7 +174,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         lutPaths: materializedLut.lutPaths,
-        clips, fps: source.editPlan.fps, format: source.format, subtitleCues, transitions, ...(composition ? { composition } : {}),
+        clips, fps: source.editPlan.fps, format: source.format, subtitleCues,
+        ...(ctaOverlays.length ? { ctaOverlays } : {}),
+        transitions, ...(composition ? { composition } : {}),
         ...(source.rangeReuse ? {
           rangeReuse: {
             ...source.rangeReuse,

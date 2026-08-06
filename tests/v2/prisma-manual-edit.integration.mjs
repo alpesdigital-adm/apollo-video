@@ -1354,7 +1354,9 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
         baseVersionId: lutSelectionApplied.data.version.id,
         baseHash: lutSelectionApplied.data.version.baseHash,
         objective: 'sale',
-        destination: 'https://example.com/checkout',
+        desiredAction: {
+          destination: { type: 'url', value: 'https://example.com/checkout' },
+        },
         reason: 'Comprovar enqueue, lease e commit transacional do Diretor assíncrono.',
       }),
     })

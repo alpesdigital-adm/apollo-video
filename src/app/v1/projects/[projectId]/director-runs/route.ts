@@ -22,6 +22,7 @@ import {
   presentSuccess,
 } from '@/v2/public-api/presenters'
 import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
+import { parseDesiredActionInput } from '@/v2/domain/desired-action'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,15 +46,14 @@ export async function POST(
     }
     const record = body as Record<string, unknown>
     if (Object.keys(record).some((key) =>
-      !['baseVersionId', 'baseHash', 'reason', 'objective', 'destination'].includes(key))) {
+      !['baseVersionId', 'baseHash', 'reason', 'objective', 'desiredAction'].includes(key))) {
       throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (
       typeof record.baseVersionId !== 'string' ||
       typeof record.baseHash !== 'string' ||
       (record.reason !== undefined && typeof record.reason !== 'string') ||
-      (record.objective !== undefined && typeof record.objective !== 'string') ||
-      (record.destination !== undefined && typeof record.destination !== 'string')
+      (record.objective !== undefined && typeof record.objective !== 'string')
     ) throw new DomainError('INVALID_ARGUMENT', 'Director operation request is invalid')
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
     const { projectId } = await context.params
@@ -73,8 +73,8 @@ export async function POST(
       ...(record.objective !== undefined
         ? { objective: record.objective as StrategicObjectiveId }
         : {}),
-      ...(typeof record.destination === 'string' && record.destination.trim()
-        ? { destination: record.destination.trim() }
+      ...(record.desiredAction !== undefined
+        ? { desiredAction: parseDesiredActionInput(record.desiredAction) }
         : {}),
       ...(record.reason !== undefined ? { reason: record.reason } : {}),
     })

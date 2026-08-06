@@ -5,6 +5,10 @@ import { requireScope } from '@/v2/application/authenticate-api-client'
 import { createProjectService } from '@/v2/application/create-project'
 import { listProjectsService } from '@/v2/application/list-projects'
 import { DomainError } from '@/v2/domain/errors'
+import {
+  parseDesiredActionInput,
+  type DesiredActionInput,
+} from '@/v2/domain/desired-action'
 import type { OutputAspectRatio } from '@/v2/domain/output-spec'
 import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import {
@@ -76,12 +80,20 @@ export async function POST(request: NextRequest) {
       format?: unknown
       locale?: unknown
       briefing?: unknown
-      destination?: unknown
+      desiredAction?: unknown
     }
     try {
       body = (await request.json()) as typeof body
     } catch {
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new DomainError('INVALID_ARGUMENT', 'Request body must be an object')
+    }
+    if (!Object.keys(body).every((key) => [
+      'name', 'objective', 'format', 'locale', 'briefing', 'desiredAction',
+    ].includes(key))) {
+      throw new DomainError('INVALID_ARGUMENT', 'Request body contains an unsupported field')
     }
     if (typeof body.name !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'name must be a string')
@@ -92,14 +104,17 @@ export async function POST(request: NextRequest) {
     if (typeof body.format !== 'string') {
       throw new DomainError('INVALID_ARGUMENT', 'format must be a string')
     }
-    for (const field of ['locale', 'briefing', 'destination'] as const) {
+    for (const field of ['locale', 'briefing'] as const) {
       if (body[field] !== undefined && typeof body[field] !== 'string') {
         throw new DomainError('INVALID_ARGUMENT', `${field} must be a string`)
       }
     }
     const locale = typeof body.locale === 'string' ? body.locale : undefined
     const briefing = typeof body.briefing === 'string' ? body.briefing : undefined
-    const destination = typeof body.destination === 'string' ? body.destination : undefined
+    let desiredAction: DesiredActionInput | undefined
+    if (body.desiredAction !== undefined) {
+      desiredAction = parseDesiredActionInput(body.desiredAction)
+    }
 
     const createProject = createProjectService({
       repository: createProjectCreationRepository(),
@@ -114,7 +129,7 @@ export async function POST(request: NextRequest) {
       format: body.format as OutputAspectRatio,
       ...(locale ? { locale } : {}),
       ...(briefing ? { briefing } : {}),
-      ...(destination ? { destination } : {}),
+      ...(desiredAction ? { desiredAction } : {}),
       actor,
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
