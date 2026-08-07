@@ -331,6 +331,17 @@ visual do projeto real de recuperação.
 
 Projetos de conversão devem poder registrar ação, destino, oferta e contexto.
 
+Evidência de implementação e integração de 2026-08-07: `DesiredAction/v1`
+normaliza destino, CTA verbal/visual e disclosures sem inferir valores; uma
+referência content-addressed única atravessa brief, StoryPlan, EditPlan,
+subtitle, overlay, critic e renderer. O run remoto `f1006-20260807-r7`, no SHA
+`2e797c6`, aprovou 148 migrations do zero, build e as jornadas `T-FR-220` e
+`T-FR-216` sobre PostgreSQL/API/worker/Chromium, incluindo persistência e
+rehidratação da mesma ação. O golden FFmpeg local comprovou o CTA visual em 30
+frames exatos. Estado: especificado, implementado, integrado e testado em E2E
+controlado; não implantado nem aceito, pois a VPS descartável foi destruída ao
+fim do teste e ainda falta revisão do projeto real de recuperação.
+
 ### FR-012 — Briefing livre opcional
 
 O usuário pode escrever um prompt livre com tom, duração, fontes obrigatórias, fontes proibidas, restrições, quantidade de variações, formatos e instruções editoriais.

@@ -736,6 +736,25 @@ revisão visual do projeto real e aceite do proprietário ainda não ocorreram.
 - [ ] Disponibilizar CTA estruturado para StoryPlan, subtitle, overlay e critic. Evidência F1-006: os quatro consumers recebem a mesma referência canônica, impedindo divergência entre fala e visual.
 - [ ] Testar mismatch entre objetivo, CTA falado e destino configurado. Evidência F1-006: critic determinístico sinaliza action, spoken CTA e destination sem propor valor inventado.
 
+Evidência integrada F1.006 (2026-08-07): os commits `c3529ed`, `f1d58e5` e
+`2e797c6` entregam `DesiredAction/v1` na criação/edição, contratos públicos,
+PostgreSQL, operação durável do Diretor, StoryPlan, EditPlan, subtitle, overlay,
+critic e renderer FFmpeg. Localmente, 1.184/1.184 testes e o golden FFmpeg 7/7
+passaram; o CTA visual ocupou exatamente 30 frames e o RenderElementMap apontou
+os mesmos frames. Na VPS isolada, o run supervisionado
+`f1006-20260807-r7` aplicou 148 migrations do zero, compilou o Next e aprovou
+`T-FR-220` e `T-FR-216` com API, Postgres, worker e Chromium reais. A jornada
+persistiu destino, CTA visual e disclosure, e comprovou a mesma referência
+content-addressed no StoryPlan, EditPlan, overlay e QualityReport. O E2E também
+revelou e corrigiu a duplicação indevida de snapshots entre projetos: o clone
+agora preserva conteúdo/hash imutáveis sob novas identidades project-scoped,
+enquanto compartilha apenas artifacts sem copiar mídia. Postflight: zero
+conexões, containers, redes e processos do run. A VPS foi destruída após o
+teste; o snapshot `sbapollovideo-apollo-e2e-20260806-2fe010b` (imagem
+`240076873`) permanece disponível. As quatro caixas continuam abertas porque
+o produto não ficou implantado e esta entrega ainda não recebeu aceite do
+proprietário nem revisão visual no projeto real de recuperação.
+
 ### F1.007 — Briefing livre opcional [FR-012]
 
 - [ ] Adicionar briefing opcional sem bloquear avanço quando vazio. Evidência F1-007: nova produção contém textarea opcional e o domínio produz estado válido na ausência.

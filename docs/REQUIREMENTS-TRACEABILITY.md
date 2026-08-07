@@ -140,8 +140,14 @@ Atualização local de resiliência em FR-243 — o worker do Diretor cobre rest
 | FR-003 | Busca e filtros | S7 | D0,D6 | filtros combinados retornam projetos | integration |
 | FR-004 | Ações rápidas | S7 | D0,D3,D6 | abrir/revisar/duplicar/arquivar funcionam | e2e |
 | FR-010 | Objetivo estratégico | S1 | D0,D2,D6 | rubrica correta entra no DirectorRun | integration |
-| FR-011 | Ação desejada | S1 | D0,D2 | CTA/destino persistidos e validados | policy |
+| FR-011 | Ação desejada | S1 | D0,D2 | CTA/destino persistidos e validados | e2e |
 | FR-012 | Briefing livre opcional | S1,S7 | D0,D6 | projeto segue com campo vazio | e2e |
+
+FR-011 possui evidência controlada no SHA `2e797c6`: golden FFmpeg local 7/7 e
+run remoto `f1006-20260807-r7` com schema limpo, API, Postgres, worker e Chromium.
+Destino, CTA visual e disclosure foram reidratados com a mesma referência em
+StoryPlan/EditPlan/overlay/QualityReport. O requisito permanece aberto até
+implantação, revisão visual do projeto real e aceite do proprietário.
 
 Atualização local parcial de FR-002 — `apollo.projects.list` v4/project-list v6
 publica a versão corrente, a operação pública durável mais recente, annotations
