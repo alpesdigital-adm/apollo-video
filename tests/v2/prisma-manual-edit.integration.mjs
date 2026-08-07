@@ -1576,7 +1576,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       }),
     })
     const forgedTrustPayload = await forgedTrustBoundary.json()
-    assert.equal(forgedTrustBoundary.status, 400, JSON.stringify(forgedTrustPayload))
+    assert.equal(forgedTrustBoundary.status, 422, JSON.stringify(forgedTrustPayload))
     assert.equal(forgedTrustPayload.error.code, 'INVALID_ARGUMENT')
     await context.close()
     await browser.close()
