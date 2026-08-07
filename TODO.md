@@ -816,7 +816,18 @@ ser reconciliados com o contrato canônico antes do fechamento integral.
 - [ ] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia. Evidência F1-009: factory media-only rejeita briefing presente e exige ao menos uma referência de mídia.
 - [ ] Inferir TreatmentPlan com assumptions explícitas e confidence reduzida quando necessário. Evidência F1-009: plano preliminar carrega assumptions e limita confidence a 0,65.
 - [ ] Bloquear inferências de oferta/claim não sustentadas pelo material. Evidência F1-009: qualquer claim proposto fora do conjunto observado falha antes do render.
-- [ ] Criar E2E do upload ao proxy sem briefing livre. Evidência F1-009: jornada fake controlada percorre media ref, análise, plano e artifact proxy sem briefing.
+- [ ] Criar E2E do upload ao proxy sem briefing livre. Evidência F1-009: jornada PostgreSQL + workers + FFmpeg percorre upload, ingest, análise, plano e artifact proxy sem briefing.
+
+Evidência controlada F1.009: os commits `37de03b`, `7f494d0`, `68979c4`,
+`8a4055c` e `4e5fa18` integram o modo ao Director e ao `TreatmentPlan v2`,
+fazem hidratação fail-closed e alinham o seed à autenticação atual. O run remoto
+`f1009-20260807-r4` aplicou 148 migrations e passou 1/1 sobre PostgreSQL,
+ingest/worker e FFmpeg reais: `mode=media-only`, confidence `0,65`, um claim
+observado, zero proposto e MP4 540×960 de 6 s com SHA-256
+`62a0730f3fa319af8d16b1b792725b70b9e2f867a7db8b18f81bb6120fb66b3f`.
+O postflight registrou zero processos, conexões e containers órfãos; a VPS
+`590675434` foi destruída com confirmação HTTP 404. As quatro caixas permanecem
+abertas porque não houve implantação em produção nem aceite do proprietário.
 
 ### F1.010 — Override por projeto [FR-021]
 

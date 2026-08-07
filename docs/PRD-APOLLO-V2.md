@@ -391,6 +391,12 @@ reconciliação explícita, sem ampliação silenciosa do schema.
 
 Na ausência de briefing livre, o Diretor deve continuar usando objetivo estruturado, perfil do workspace e inferência do material.
 
+Evidência controlada em 2026-08-07: o run `f1009-20260807-r4` executou o fluxo
+sem briefing sobre PostgreSQL, ingest e render FFmpeg reais. O `TreatmentPlan v2`
+persistido declarou `media-only`, confidence `0,65`, assumptions explícitas,
+um claim observado e nenhum claim proposto; o proxy 540×960 de 6 s foi
+materializado e verificado por hash. A capacidade ainda aguarda deploy e aceite.
+
 ## 7.2.1 Rubricas por objetivo estratégico
 
 O objetivo não é apenas metadata. Ele altera planejamento, escolha de cenas, crítico e definição de sucesso.

@@ -209,6 +209,12 @@ mesmo `outputHash`; o E2E também revelou e validou a correção da invariante d
 Brief Snapshot no Prisma. Faltam deploy, aceite e reconciliação dos atributos
 amplos de FR-013 que ainda não pertencem aos sete campos canônicos.
 
+Evidência controlada FR-014/F1.009: o commit `4e5fa18`, sobre a integração
+iniciada em `37de03b`, passou o run remoto `f1009-20260807-r4` com 148
+migrations, PostgreSQL, ingest/worker e FFmpeg reais. O tratamento persistido
+ficou em `media-only`, confidence `0,65`, um claim observado e zero proposto; o
+proxy 540×960/6 s foi verificado por SHA-256. Faltam deploy e aceite.
+
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |
