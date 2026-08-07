@@ -10,6 +10,8 @@ import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
+import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import {
   advancePublicOperationPhase,
@@ -146,6 +148,8 @@ class InMemoryDirectorRepository {
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
+    this.ownerText = options.ownerText ?? 'Tom: direto, natural e sem efeitos gratuitos.'
+    this.guardrails = options.guardrails ?? []
     this.ctaText = Object.hasOwn(options, 'ctaText')
       ? options.ctaText
       : ({
@@ -202,9 +206,9 @@ class InMemoryDirectorRepository {
               } } }
             : {}),
         }),
-        productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
+        productionBrief: createProductionBrief({ ownerText: this.ownerText }),
       },
-      policies: { automaticZoom: false, faceProtection: true },
+      policies: { automaticZoom: false, faceProtection: true, guardrails: this.guardrails },
       editPlan: compiledEditorialPlan(this.selectedInsert, this.ctaText),
       currentDurationFrames: 300,
       proxyVariantId: '9:16',
@@ -262,6 +266,7 @@ function fixture(options = {}) {
       return `${kind}-${next}`
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
   })
   return { repository, service }
 }
@@ -296,8 +301,16 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(result.run.objectiveVersion, 1)
   assert.equal(result.run.rubricRef, 'awareness-discovery/v1')
   assert.equal(result.command.payload.previousObjective, 'discovery')
-  assert.equal(result.command.payload.snapshotRefs.brief, 'snapshot-brief-1')
-  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['perception', 'treatment', 'story', 'edit-plan', 'quality-report'])
+  assert.equal(result.command.payload.snapshotRefs.brief, 'project-snapshot-1')
+  assert.deepEqual(repository.lastBundle.snapshots.map((snapshot) => snapshot.kind), ['brief', 'perception', 'treatment', 'story', 'edit-plan', 'quality-report'])
+  const briefSnapshot = repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'brief')
+  const persistedBrief = JSON.parse(briefSnapshot.contentJson)
+  assert.equal(briefSnapshot.contentSchemaVersion, 3)
+  assert.equal(persistedBrief.briefCompilation.audit.promptVersion, 'brief-compiler/v1')
+  assert.equal(persistedBrief.briefCompilation.audit.modelVersion, '1.0.0')
+  assert.deepEqual(persistedBrief.briefCompilation.compiled.fields.tone, ['direto, natural e sem efeitos gratuitos'])
+  assert.ok(result.run.decisions.some((decision) =>
+    decision.evidenceRefs.includes(persistedBrief.briefCompilation.audit.outputHash)))
   assert.equal(result.run.perception.timeline.observations.length, compiledEditorialPlan().retimedTranscript.words.length)
   assert.equal(result.run.treatmentPlan.patternBreaks.allowed.includes('zoom'), false)
   assert.equal(result.run.storyPlan.blocks.length, 3)
@@ -346,6 +359,19 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
     () => parseDirectorRunImpact({ ...result.impact, impactHash: 'f'.repeat(64) }),
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
+})
+
+test('Director blocks material brief conflicts before creating or persisting plans', async () => {
+  const { repository, service } = fixture({
+    ownerText: 'Tom: formal. Tom: totalmente informal.',
+  })
+  await assert.rejects(
+    () => service(request({ idempotency: { key: 'director-conflicting-brief' } })),
+    (error) => error instanceof DomainError &&
+      error.code === 'PRECONDITION_REQUIRED' &&
+      error.details.conflicts.some((item) => item.code === 'contradiction'),
+  )
+  assert.equal(repository.lastBundle, undefined)
 })
 
 test('Director binds every strategic objective to its canonical rubric in runtime plans', async () => {
@@ -742,6 +768,7 @@ test('Director worker fences the atomic commit and settles the allocated version
     clock: () => new Date('2026-08-03T22:40:01.000Z'),
     createId: (kind) => `${kind}-worker-${++counter}`,
     createEventId: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
     leaseDurationMs: 30_000,
     heartbeatIntervalMs: 10_000,
   })
@@ -869,6 +896,7 @@ function resilientDirectorWorker(harness, directorRuns, clock) {
     createId: (kind) => `${kind}-resilience-${++counter}`,
     createEventId: () =>
       `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
     leaseDurationMs: 10_000,
     heartbeatIntervalMs: 1_000,
     retryBaseDelayMs: 1,

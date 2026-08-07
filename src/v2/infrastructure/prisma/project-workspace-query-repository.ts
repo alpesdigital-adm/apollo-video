@@ -4,6 +4,7 @@ import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord } fro
 import { DomainError } from '../../domain/errors.ts'
 import { PROJECT_STATUSES, type ProjectStatus } from '../../domain/project.ts'
 import { parseProductionBrief } from '../../domain/production-brief.ts'
+import { parseBriefCompilation } from '../../application/compile-brief.ts'
 
 function hydrateProjectStatus(value: string): ProjectStatus {
   if (!PROJECT_STATUSES.includes(value as ProjectStatus)) {
@@ -119,6 +120,9 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
       : undefined
     if (brief) {
       brief.productionBrief = parseProductionBrief(brief.productionBrief)
+      if (brief.briefCompilation !== undefined) {
+        brief.briefCompilation = parseBriefCompilation(brief.briefCompilation)
+      }
     }
     const videoTracks = editPlan && Array.isArray(editPlan.videoTracks) ? editPlan.videoTracks : []
     const clipCount = videoTracks.reduce((total, track) => {

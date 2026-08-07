@@ -42,7 +42,9 @@ import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
+import { parseProductionBrief } from '../domain/production-brief.ts'
 import { canonicalProjectMutationAudit } from './project-analysis-execution.ts'
+import type { BriefCompilation } from './compile-brief.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -111,6 +113,10 @@ export interface RunProjectDirectorDependencies {
   clock: () => Date
   createId: (kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot') => string
   createEventId: () => string
+  compileBrief: (input: {
+    text: string
+    guardrails?: readonly string[]
+  }) => Promise<Readonly<BriefCompilation>>
 }
 
 function normalizedIdentifier(value: string, field: string): string {
@@ -296,6 +302,7 @@ function buildDecisions(input: {
   editPlanRef: string
   policyRef: string
   hasSelectedInsert: boolean
+  briefCompilationRef?: string
 }): readonly Readonly<DirectorDecision>[] {
   return validateDirectorDecisions([
     {
@@ -307,13 +314,13 @@ function buildDecisions(input: {
     {
       id: 'decision-motion-none', category: 'movement', choice: 'no_effect',
       reason: 'The owner requested a direct, natural tone and no semantic event justifies camera simulation.',
-      evidenceRefs: [input.briefRef, input.policyRef], confidence: 0.99,
+      evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.policyRef], confidence: 0.99,
       alternatives: ['single-punch-in-after-opening'],
     },
     {
       id: 'decision-layout-inset', category: 'layout', choice: 'landscape-inset-on-blurred-source',
       reason: 'Preserves the full head and shoulders in 9:16 without the aggressive crop that previously cut the face.',
-      evidenceRefs: [input.briefRef, input.editPlanRef], confidence: 0.92,
+      evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef], confidence: 0.92,
       alternatives: ['center-crop', 'top-aligned-inset'],
     },
     {
@@ -701,6 +708,29 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       'PRECONDITION_REQUIRED',
       'Changing the strategic objective or desired action requires an explicit reason',
     )
+    const productionBrief = parseProductionBrief(context.brief.productionBrief)
+    const policyGuardrails = context.policies.guardrails
+    assertDomain(
+      Array.isArray(policyGuardrails) && policyGuardrails.every((item) => typeof item === 'string'),
+      'PERSISTENCE_CONFLICT',
+      'Stored project policy guardrails are invalid',
+    )
+    const briefCompilation = productionBrief.ownerInput
+      ? await dependencies.compileBrief({
+          text: productionBrief.ownerInput.text,
+          guardrails: policyGuardrails,
+        })
+      : undefined
+    assertDomain(
+      !briefCompilation?.compiled.requiresReview,
+      'PRECONDITION_REQUIRED',
+      'Material brief conflicts require owner review before Director execution',
+      {
+        conflicts: briefCompilation?.compiled.conflicts
+          .filter((item) => item.material)
+          .map((item) => ({ code: item.code, message: item.message })) ?? [],
+      },
+    )
     const clips = context.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
     assertDomain(clips.length > 0 && context.editPlan.retimedTranscript.words.length > 0, 'INVALID_COMMAND', 'Director requires a compiled editorial timeline and retimed transcript')
     const hasSelectedInsert = clips.some(
@@ -725,7 +755,8 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       context.currentVersion.snapshotRefs.brief ?? '',
       'briefSnapshotId',
     )
-    const briefSnapshotId = directionChanged
+    const briefChanged = directionChanged || briefCompilation !== undefined
+    const briefSnapshotId = briefChanged
       ? dependencies.createId('project-snapshot')
       : currentBriefSnapshotId
     const perception = buildPerception({
@@ -767,12 +798,16 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       editPlanRef: context.currentVersion.snapshotRefs.editPlan,
       policyRef: context.currentVersion.snapshotRefs.policies,
       hasSelectedInsert,
+      ...(briefCompilation
+        ? { briefCompilationRef: briefCompilation.audit.outputHash }
+        : {}),
     })
     const assumptions = Object.freeze([
       'Face detector evidence is unavailable; use a conservative caption-safe region below the source inset.',
       hasSelectedInsert
         ? 'The selected insert already passed the asset-selection and rights gates.'
         : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
+      ...(briefCompilation?.compiled.assumptions ?? []),
     ])
     const subtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
@@ -858,32 +893,35 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
     const storySnapshotId = dependencies.createId('project-snapshot')
     const editPlanSnapshotId = dependencies.createId('project-snapshot')
     const qualitySnapshotId = dependencies.createId('project-snapshot')
-    const objectiveBrief = directionChanged
+    const compiledBrief = briefChanged
       ? Object.freeze({
           ...context.brief,
-          schemaVersion: 2,
+          schemaVersion: briefCompilation ? 3 : 2,
           objective: objective.id,
           desiredAction,
-          objectiveChange: Object.freeze({
-            from: context.project.objective,
-            to: objective.id,
-            objectiveVersion: objectiveBinding.objectiveVersion,
-            rubricRef: objectiveBinding.rubricRef,
-            supersedesRunId: objectiveBinding.supersedesRunId,
-            reason: request.reason!.trim(),
-            changedAt: createdAt,
-          }),
+          ...(briefCompilation ? { briefCompilation } : {}),
+          ...(directionChanged
+            ? { objectiveChange: Object.freeze({
+                from: context.project.objective,
+                to: objective.id,
+                objectiveVersion: objectiveBinding.objectiveVersion,
+                rubricRef: objectiveBinding.rubricRef,
+                supersedesRunId: objectiveBinding.supersedesRunId,
+                reason: request.reason!.trim(),
+                changedAt: createdAt,
+              }) }
+            : {}),
         })
       : undefined
     const snapshots = Object.freeze([
-      ...(objectiveBrief
+      ...(compiledBrief
         ? [snapshot({
             id: briefSnapshotId,
             workspaceId,
             projectId,
             kind: 'brief',
-            contentSchemaVersion: 2,
-            value: objectiveBrief,
+            contentSchemaVersion: briefCompilation ? 3 : 2,
+            value: compiledBrief,
             createdAt,
           })]
         : []),

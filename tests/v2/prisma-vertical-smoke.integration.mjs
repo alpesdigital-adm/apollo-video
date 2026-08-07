@@ -37,6 +37,7 @@ import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/ap
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts'
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
+import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
 import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
 import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
@@ -303,6 +304,7 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
         return `vertical-${kind}-${next}`
       },
       createEventId: randomUUID,
+      compileBrief: createEvidenceBoundBriefCompiler(),
     })({
       workspaceId,
       projectId: seed.project.id,

@@ -121,7 +121,7 @@ const outputSpecSchema = {
     deliveryProfileId: idSchema,
   },
 } as const
-const projectBriefSchema = {
+const projectBriefSchemaV9 = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'objective', 'desiredAction', 'outputSpec', 'productionBrief', 'createdAt'],
   properties: {
@@ -147,6 +147,81 @@ const projectBriefSchema = {
       properties: { objectiveChange: {} },
     },
   }],
+} as const
+const compiledBriefFieldsSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['audience', 'offer', 'constraints', 'mustUse', 'avoid', 'tone', 'successCriteria'],
+  properties: Object.fromEntries([
+    'audience', 'offer', 'constraints', 'mustUse', 'avoid', 'tone', 'successCriteria',
+  ].map((field) => [field, {
+    type: 'array', maxItems: 32, uniqueItems: true,
+    items: { type: 'string', minLength: 1, maxLength: 500 },
+  }])),
+} as const
+const briefCompilationSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'compiled', 'audit'],
+  properties: {
+    schemaVersion: { const: 1 },
+    compiled: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'fields', 'evidence', 'conflicts', 'requiresReview', 'assumptions'],
+      properties: {
+        schemaVersion: { const: 1 }, fields: compiledBriefFieldsSchema,
+        evidence: {
+          type: 'array', maxItems: 128,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['field', 'start', 'end', 'quote', 'confidence'],
+            properties: {
+              field: { enum: ['audience', 'offer', 'constraints', 'mustUse', 'avoid', 'tone', 'successCriteria'] },
+              start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1 },
+              quote: { type: 'string', minLength: 1 }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+            },
+          },
+        },
+        conflicts: {
+          type: 'array', maxItems: 32,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['code', 'message', 'material', 'evidence'],
+            properties: {
+              code: { enum: ['contradiction', 'guardrail-conflict', 'unsupported-claim'] },
+              message: { type: 'string', minLength: 1, maxLength: 1000 }, material: { type: 'boolean' },
+              evidence: { type: 'array', maxItems: 128, uniqueItems: true, items: { type: 'integer', minimum: 0 } },
+            },
+          },
+        },
+        requiresReview: { type: 'boolean' },
+        assumptions: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+      },
+    },
+    audit: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'promptVersion', 'modelId', 'modelVersion', 'compilerSchemaVersion', 'inputHash', 'inputRedacted', 'outputRedacted', 'outputHash'],
+      properties: {
+        schemaVersion: { const: 1 }, promptVersion: { type: 'string', pattern: '^brief-compiler/v[1-9][0-9]*$' },
+        modelId: { type: 'string', minLength: 1 }, modelVersion: { type: 'string', minLength: 1 },
+        compilerSchemaVersion: { const: 1 }, inputHash: sha256Schema, inputRedacted: { type: 'string' },
+        outputRedacted: { type: 'string' }, outputHash: sha256Schema,
+      },
+    },
+  },
+} as const
+const projectBriefSchema = {
+  ...projectBriefSchemaV9,
+  properties: {
+    ...projectBriefSchemaV9.properties,
+    schemaVersion: { enum: [1, 2, 3] },
+    briefCompilation: briefCompilationSchema,
+  },
+  allOf: [
+    ...projectBriefSchemaV9.allOf,
+    {
+      if: { properties: { schemaVersion: { const: 3 } } },
+      then: { required: ['briefCompilation'], properties: { briefCompilation: {} } },
+    },
+  ],
 } as const
 const desiredActionObjectiveRequirements = [
   ['lead-generation', 'url'], ['sale', 'url'], ['whatsapp', 'whatsapp'],
@@ -17971,12 +18046,14 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  ...([8, 9] as const).map((version) => defineSchema(
+  ...([8, 9, 10] as const).map((version) => defineSchema(
     'project-workspace',
     version,
     version === 8
       ? 'Project workspace with objective-bound DirectorRun history'
-      : 'Project workspace with canonical optional production brief',
+      : version === 9
+        ? 'Project workspace with canonical optional production brief'
+        : 'Project workspace with evidence-bound compiled production brief',
     successSchema({
       type: 'object', additionalProperties: false,
       required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
@@ -17992,7 +18069,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
         brief: version === 8
           ? { type: 'object', additionalProperties: true }
-          : projectBriefSchema,
+          : version === 9 ? projectBriefSchemaV9 : projectBriefSchema,
         editPlan: {
           type: 'object', additionalProperties: false,
           required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],

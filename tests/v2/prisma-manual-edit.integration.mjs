@@ -155,7 +155,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       }),
       createdAt: createdAt.toISOString(),
     }
-    const policies = { schemaVersion: 1, state: 'configured', createdAt: createdAt.toISOString() }
+    const policies = { schemaVersion: 1, state: 'configured', guardrails: [], createdAt: createdAt.toISOString() }
     const editPlan = {
       schemaVersion: 2,
       state: 'compiled',
@@ -1386,11 +1386,13 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
 
     const { runNextProjectDirectorOperationService } = await import('../../src/v2/application/run-project-director-operation-worker.ts')
     const { PrismaPublicOperationRepository } = await import('../../src/v2/infrastructure/prisma/public-operation-repository.ts')
+    const { createEvidenceBoundBriefCompiler } = await import('../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts')
     const runNextDirector = runNextProjectDirectorOperationService({
       operations: new PrismaPublicOperationRepository(client),
       directorRuns: new PrismaDirectorRunRepository(client),
       createId: (kind) => `${kind}-async-${suffix}-${randomUUID()}`,
       createEventId: randomUUID,
+      compileBrief: createEvidenceBoundBriefCompiler(),
     })
     const asyncDirectorOutcome = await runNextDirector(`director-worker-${suffix}`)
     const asyncDirectorSettlement = await client.v2PublicOperation.findUniqueOrThrow({
@@ -1442,6 +1444,30 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(storedEditPlan.subtitleTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.overlayTracks[0].desiredActionRef.id, storedStoryPlan.desiredActionRef.id)
     assert.equal(storedEditPlan.overlayTracks[0].text, 'Garanta sua vaga')
+    const storedAsyncVersion = await client.v2ProjectVersion.findUniqueOrThrow({
+      where: { id: allocatedResultVersionId },
+      include: { briefSnapshot: true },
+    })
+    const compiledBriefSnapshot = JSON.parse(storedAsyncVersion.briefSnapshot.contentJson)
+    assert.equal(storedAsyncVersion.briefSnapshot.schemaVersion, 3)
+    assert.equal(compiledBriefSnapshot.briefCompilation.audit.promptVersion, 'brief-compiler/v1')
+    assert.equal(compiledBriefSnapshot.briefCompilation.audit.modelId, 'apollo-evidence-bound-brief-compiler')
+    assert.equal(compiledBriefSnapshot.briefCompilation.audit.modelVersion, '1.0.0')
+    assert.equal(compiledBriefSnapshot.briefCompilation.compiled.requiresReview, false)
+    assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.audience, ['equipes criativas'])
+    assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.offer, ['demonstraÃ§Ã£o'])
+    assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.tone, ['direto'])
+    assert.match(compiledBriefSnapshot.briefCompilation.audit.inputHash, /^[a-f0-9]{64}$/)
+    assert.match(compiledBriefSnapshot.briefCompilation.audit.outputHash, /^[a-f0-9]{64}$/)
+    const compiledWorkspaceResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/workspace`, {
+      headers: { authorization, accept: 'application/json' },
+    })
+    const compiledWorkspace = await compiledWorkspaceResponse.json()
+    assert.equal(compiledWorkspaceResponse.status, 200, JSON.stringify(compiledWorkspace))
+    assert.equal(
+      compiledWorkspace.data.brief.briefCompilation.audit.outputHash,
+      compiledBriefSnapshot.briefCompilation.audit.outputHash,
+    )
     const qualityResponse = await fetch(
       `${baseUrl}/v1/projects/${projectId}/director-runs/${storedAsyncOperation.projectDirectorRun.directorRun.id}/quality-report`,
       { headers: { authorization } },

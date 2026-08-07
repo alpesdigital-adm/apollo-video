@@ -5,6 +5,7 @@ import type {
 } from './ports/public-operation-repository.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
 import { runProjectDirectorService } from './run-project-director.ts'
+import type { BriefCompilation } from './compile-brief.ts'
 
 export interface ProjectDirectorOperationWorkerOutcome {
   operationId: string
@@ -24,6 +25,10 @@ export function runNextProjectDirectorOperationService(dependencies: {
     kind: 'director-run' | 'edit-command' | 'project-version' | 'project-snapshot',
   ) => string
   createEventId: () => string
+  compileBrief: (input: {
+    text: string
+    guardrails?: readonly string[]
+  }) => Promise<Readonly<BriefCompilation>>
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
   retryBaseDelayMs?: number
@@ -134,6 +139,7 @@ export function runNextProjectDirectorOperationService(dependencies: {
         clock,
         createId: dependencies.createId,
         createEventId: dependencies.createEventId,
+        compileBrief: dependencies.compileBrief,
       })({
         workspaceId: claimed.operation.workspaceId,
         projectId: context.projectId,

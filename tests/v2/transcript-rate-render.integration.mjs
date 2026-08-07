@@ -23,6 +23,8 @@ import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   advancePublicOperationPhase,
   retryOrFailPublicOperation,
@@ -357,9 +359,9 @@ class DirectorRepository {
       brief: {
         objective: 'discovery',
         desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
+        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
       },
-      policies: { automaticZoom: false, faceProtection: true },
+      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,
       proxyVariantId: '9:16',
@@ -439,6 +441,7 @@ async function directRetimedPlan(options) {
       return `${kind}-${options.suffix}-${next}`
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
   })
   const directed = await runDirector({
     workspaceId: WORKSPACE_ID, projectId: PROJECT_ID,

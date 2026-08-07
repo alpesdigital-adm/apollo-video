@@ -24,6 +24,7 @@ import {
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import type { StrategicObjectiveId } from '@/v2/domain/strategic-objective'
 import { parseDesiredActionInput } from '@/v2/domain/desired-action'
+import { createEvidenceBoundBriefCompiler } from '@/v2/infrastructure/brief/evidence-bound-brief-compiler-model'
 import {
   presentProjectVersionV2,
   presentPublicOperation,
@@ -112,6 +113,7 @@ export async function POST(
         clock: () => new Date(),
         createId: (kind) => `${kind}-${randomUUID()}`,
         createEventId: randomUUID,
+        compileBrief: createEvidenceBoundBriefCompiler(),
       })({
         workspaceId: actor.workspaceId,
         projectId,

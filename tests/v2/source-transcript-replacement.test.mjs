@@ -9,6 +9,8 @@ import { runProjectDirectorService } from '../../src/v2/application/run-project-
 import { calculateVersionHash, stableSerialize } from '../../src/v2/application/version-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
+import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   createSourceTranscriptArtifactInvalidations,
   materializeSourceTranscriptReplacement,
@@ -449,9 +451,9 @@ class DirectorRepository {
       brief: {
         objective: 'discovery',
         desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
-        productionBrief: { ownerInput: { text: 'Tom direto, natural e sem efeitos gratuitos.' } },
+        productionBrief: createProductionBrief({ ownerText: 'Tom: direto, natural e sem efeitos gratuitos.' }),
       },
-      policies: { automaticZoom: false, faceProtection: true },
+      policies: { automaticZoom: false, faceProtection: true, guardrails: [] },
       editPlan: this.editPlan,
       currentDurationFrames: this.editPlan.durationFrames,
       proxyVariantId: '9:16',
@@ -542,6 +544,7 @@ test('T-FR-233 replaced transcript with retimed frames survives the snapshot and
       return `${kind}-${next}`
     },
     createEventId: () => `00000000-0000-4000-8000-${String(++event).padStart(12, '0')}`,
+    compileBrief: createEvidenceBoundBriefCompiler(),
   })
   const run = await runDirector({
     workspaceId: 'workspace-transcript', projectId: 'project-transcript',

@@ -25,6 +25,7 @@ import { runNextProjectFinalExportOperationService } from '../application/run-pr
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
+import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
   produceContiguousEvaluationsService,
@@ -1377,6 +1378,7 @@ export function createProjectDirectorWorker(
     clock,
     createId: (kind) => `${kind}-${randomUUID()}`,
     createEventId: randomUUID,
+    compileBrief: createEvidenceBoundBriefCompiler(),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0
       ? { leaseDurationMs: configuredLease }
       : {}),
