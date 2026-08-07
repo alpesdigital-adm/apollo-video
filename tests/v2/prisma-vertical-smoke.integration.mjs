@@ -107,7 +107,7 @@ async function createFixture(path) {
   ], { windowsHide: true, timeout: 120_000 })
 }
 
-test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and renders a proxy', {
+test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing, directs media-only and renders a proxy', {
   timeout: 240_000,
 }, async (t) => {
   if (process.env.APOLLO_V2_VERTICAL_SMOKE !== '1') {
@@ -467,6 +467,26 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       assert.equal(new Set(pair.map((event) => event.jobId)).size, 1)
       assert.equal(pair.every((event) => event.workspaceId === workspaceId), true)
     }
+    t.diagnostic(JSON.stringify({
+      directorRunId: directed.run.id,
+      projectVersionId: noLut.version.id,
+      treatmentSnapshotId: directed.command.payload.snapshotRefs.treatment,
+      treatment: {
+        mode: directed.run.treatmentPlan.mode,
+        confidence: directed.run.treatmentPlan.confidence,
+        observedClaimCount: directed.run.treatmentPlan.claimPolicy.observedClaims.length,
+        proposedClaimCount: directed.run.treatmentPlan.claimPolicy.proposedClaims.length,
+      },
+      proxyOperationId: enqueued.operation.id,
+      outputManifestId: completed.context.outputManifestId,
+      artifact: {
+        sha256: outputManifestDocument.artifact.sha256,
+        byteSize: outputManifestDocument.artifact.byteSize,
+        width: outputProbe.width,
+        height: outputProbe.height,
+        durationSeconds: outputProbe.duration,
+      },
+    }))
   } finally {
     await prisma.v2Workspace.deleteMany({ where: { id: workspaceId } }).catch(() => undefined)
     await prisma.$disconnect()
