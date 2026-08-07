@@ -243,7 +243,11 @@ function isPrismaCode(error: unknown, code: string): boolean {
 }
 
 export class PrismaProjectPolicyOverridesRepository implements ProjectPolicyOverridesRepository {
-  constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient = getV2PostgresClient()) {
+    this.client = client
+  }
 
   async findIdempotent(input: { workspaceId: string; projectId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2EditCommand.findUnique({
