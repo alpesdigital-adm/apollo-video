@@ -717,7 +717,7 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           bundle.run.objectiveVersion !== objectiveBinding.objectiveVersion ||
           bundle.run.rubricRef !== objectiveBinding.rubricRef ||
           bundle.run.supersedesRunId !== objectiveBinding.supersedesRunId ||
-          changedObjective !== briefSnapshotChanged ||
+          (changedObjective && !briefSnapshotChanged) ||
           (briefSnapshotChanged && proposedBrief?.kind !== 'brief')
         ) throw new DomainError(
           'VERSION_CONFLICT',
