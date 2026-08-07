@@ -55,7 +55,7 @@ const ffmpegPath = require('ffmpeg-static')
 const execFileAsync = promisify(execFile)
 
 function monotonicClock() {
-  let now = Date.parse('2026-08-02T18:00:00.000Z')
+  let now = Date.now() - 1_000
   return () => new Date((now += 10))
 }
 
