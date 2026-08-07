@@ -237,7 +237,7 @@ export async function seedV2ProjectSource({
   const operation = await enqueueMediaIngestService({
     operations,
     clock,
-  })({ upload: verifiedUpload })
+  })({ upload: verifiedUpload, actor })
   const brief = await client.v2ProjectSnapshot.findUnique({
     where: { id: project.version.snapshotRefs.brief },
     select: { contentJson: true, contentHash: true },
