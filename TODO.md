@@ -762,6 +762,21 @@ proprietário nem revisão visual no projeto real de recuperação.
 - [ ] Exibir resumo estruturado e assumptions antes de geração cara. Evidência F1-007: painel mostra resumo e lacunas antes do upload; estado mantém `readyForExpensiveGeneration: false`.
 - [ ] Criar E2E com briefing completo, parcial e ausente. Evidência F1-007: regressão valida os três caminhos, trust boundary e assumptions explícitas.
 
+Evidência integrada F1.007 (2026-08-07): os commits `9525f10` e `0281a7a`
+entregam `ProductionBrief/v1` canônico na criação e leitura do projeto, prévia
+estruturada na UI, persistência PostgreSQL fail-closed e contrato público
+`project-workspace/v9`. Localmente, 1.188/1.188 testes, arquitetura, linguagem
+de domínio, schema V2 (151 tabelas, 785 índices e 580 FKs), contratos públicos
+(204 capabilities, 387 schemas e 435 exemplos), typecheck e build Next passaram.
+Na VPS descartável criada do snapshot `240076873`, o run supervisionado
+`f1007-20260807-r3` aplicou 148 migrations em banco limpo, compilou o Next e
+aprovou `T-FR-216` 1/1 através de API, PostgreSQL e Chromium. A prova criou e
+releu projetos com briefing completo, parcial e ausente, confirmou coverage,
+assumptions, `readyForExpensiveGeneration: false`, trust `owner-authorized` e
+rejeição de fronteira forjada. Postflight: zero sessões, containers, redes e
+processos; a VPS `590548058` foi destruída. As quatro caixas continuam abertas
+porque o resultado não foi implantado nem aceito pelo proprietário.
+
 ### F1.008 — Brief Compiler [FR-013]
 
 - [ ] Definir schema para audience, offer, constraints, must-use, avoid, tone e success criteria. Evidência F1-008: `CompiledBrief/v1` exige os sete campos como coleções delimitadas.

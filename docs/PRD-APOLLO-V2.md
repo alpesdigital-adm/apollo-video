@@ -348,6 +348,14 @@ O usuário pode escrever um prompt livre com tom, duração, fontes obrigatória
 
 O campo não é obrigatório.
 
+Evidência integrada de 2026-08-07: `ProductionBrief/v1` preserva separadamente
+texto `owner-authorized` e contexto de mídia `untrusted-media-derived`, expõe
+coverage/assumptions antes de geração cara e permanece canônico no PostgreSQL e
+no contrato público `project-workspace/v9`. O run remoto supervisionado
+`f1007-20260807-r3`, no SHA `0281a7a`, aprovou os caminhos completo, parcial e
+ausente por API e Chromium sobre banco criado do zero. Estado: especificado,
+implementado, integrado e testado em E2E controlado; não implantado nem aceito.
+
 ### FR-013 — Brief Compiler
 
 O texto livre deve ser compilado para uma interpretação estruturada contendo:

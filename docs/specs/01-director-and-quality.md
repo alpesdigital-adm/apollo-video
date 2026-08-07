@@ -179,6 +179,14 @@ persistido. Isso comprova integração/E2E do slice, não implantação ou aceit
 - Preferências aprendidas.
 - Objective secundário.
 
+O briefing livre é materializado como `ProductionBrief/v1`: texto do owner usa
+trust `owner-authorized`; conteúdo derivado de mídia permanece apenas como ref
+`untrusted-media-derived`. A UI apresenta summary, coverage e assumptions com
+`readyForExpensiveGeneration: false` antes de iniciar trabalho caro. Evidência
+controlada: o run `f1007-20260807-r3` no SHA `0281a7a` aprovou, via API,
+PostgreSQL e Chromium, os caminhos completo, parcial e ausente. Isso comprova
+integração/E2E, não implantação ou aceite.
+
 ### 7.3 Conflitos
 
 | Conflito | Resolução padrão |

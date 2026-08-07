@@ -143,6 +143,12 @@ Atualização local de resiliência em FR-243 — o worker do Diretor cobre rest
 | FR-011 | Ação desejada | S1 | D0,D2 | CTA/destino persistidos e validados | e2e |
 | FR-012 | Briefing livre opcional | S1,S7 | D0,D6 | projeto segue com campo vazio | e2e |
 
+FR-012 possui evidência controlada nos SHAs `9525f10` e `0281a7a`: o run remoto
+`f1007-20260807-r3` aplicou 148 migrations e aprovou API, Postgres e Chromium
+para briefings completo, parcial e ausente, inclusive trust boundary,
+assumptions e bloqueio de geração cara. O requisito permanece aberto até
+implantação e aceite do proprietário.
+
 FR-011 possui evidência controlada no SHA `2e797c6`: golden FFmpeg local 7/7 e
 run remoto `f1006-20260807-r7` com schema limpo, API, Postgres, worker e Chromium.
 Destino, CTA visual e disclosure foram reidratados com a mesma referência em
