@@ -572,6 +572,73 @@ interface WorkspaceData {
   operationIds: string[]
   operations: PublicOperation[]
 }
+type ProjectPolicyElement = 'logo' | 'instagramHandle' | 'youtubeHandle' | 'professionalName' | 'companyName' | 'intro' | 'colors' | 'guardrails' | 'subtitleStyle' | 'gradePreset'
+type ProjectPolicyValue = string | string[] | { assetId: string; checksum: string; rightsId: string }
+interface ProjectPolicyOverridesData {
+  version: { id: string; sequence: number; baseHash: string; createdAt: string }
+  policySnapshot: { id: string; contentSchemaVersion: number; contentHash: string }
+  workspaceDefaults: Partial<Record<ProjectPolicyElement, ProjectPolicyValue>>
+  overrides: Record<ProjectPolicyElement, { mode: 'inherit' } | { mode: 'none' } | { mode: 'custom'; value: ProjectPolicyValue }>
+  resolved: Record<ProjectPolicyElement, { value: ProjectPolicyValue | null; origin: 'workspace' | 'project-none' | 'project-custom' }>
+}
+
+const PROJECT_POLICY_LABELS: Readonly<Record<ProjectPolicyElement, string>> = {
+  logo: 'Logo',
+  instagramHandle: 'Instagram',
+  youtubeHandle: 'YouTube',
+  professionalName: 'Profissional',
+  companyName: 'Empresa',
+  intro: 'Intro',
+  colors: 'Cores',
+  guardrails: 'Guardrails',
+  subtitleStyle: 'Legenda',
+  gradePreset: 'Color grade',
+}
+const PROJECT_POLICY_ELEMENTS = Object.keys(PROJECT_POLICY_LABELS) as ProjectPolicyElement[]
+const PROJECT_POLICY_ORIGIN_LABELS = {
+  workspace: 'Workspace',
+  'project-none': 'Desativado no projeto',
+  'project-custom': 'Personalizado no projeto',
+} as const
+
+function projectPolicyValueLabel(value: ProjectPolicyValue | null): string {
+  if (value === null) return 'Nenhum'
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'Lista vazia'
+  return `Asset ${value.assetId}`
+}
+
+function ProjectPolicyStatus({ policy }: { policy: ProjectPolicyOverridesData | null }) {
+  return (
+    <details className="group relative hidden lg:block" data-testid="project-policy-overrides">
+      <summary className="cursor-pointer list-none rounded-lg border border-white/[0.07] px-2.5 py-1.5 text-[10px] text-[#a09a90] transition hover:border-white/[0.16] hover:text-[#f3efe7]">
+        Marca e políticas
+      </summary>
+      <div className="absolute right-0 top-10 z-50 w-[390px] rounded-xl border border-white/[0.1] bg-[#10100f] p-4 shadow-2xl shadow-black/60">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#d4aa48]">Política resolvida</p>
+          <span className="text-[9px] text-[#666159]">{policy ? `Snapshot v${policy.policySnapshot.contentSchemaVersion}` : 'Carregando'}</span>
+        </div>
+        {policy ? (
+          <ul className="mt-3 grid grid-cols-2 gap-2">
+            {PROJECT_POLICY_ELEMENTS.map((element) => {
+              const resolved = policy.resolved[element]
+              return (
+                <li className="min-w-0 rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2" data-origin={resolved.origin} key={element}>
+                  <p className="text-[9px] uppercase tracking-[0.12em] text-[#706b63]">{PROJECT_POLICY_LABELS[element]}</p>
+                  <p className="mt-1 truncate text-[11px] text-[#d5cfc5]" title={projectPolicyValueLabel(resolved.value)}>{projectPolicyValueLabel(resolved.value)}</p>
+                  <p className={`mt-1 text-[9px] ${resolved.origin === 'project-none' ? 'text-[#d97d75]' : resolved.origin === 'project-custom' ? 'text-[#d8ad49]' : 'text-[#6f9f7d]'}`}>
+                    {PROJECT_POLICY_ORIGIN_LABELS[resolved.origin]}
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+        ) : <p className="mt-3 text-xs text-[#777169]">Política indisponível.</p>}
+      </div>
+    </details>
+  )
+}
 interface ReviewSessionData {
   currentProjectVersionId: string; projectVersionId: string; proxyArtifactId: string; proxyUrl: string; proxyHash: string; fps: number;
   resolution: { width: number; height: number }; durationFrames: number; stale: boolean
@@ -971,6 +1038,7 @@ export default function ProjectWorkspacePage() {
     key: string
   } | null>(null)
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null)
+  const [projectPolicy, setProjectPolicy] = useState<ProjectPolicyOverridesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
   const [rightsConfirmed, setRightsConfirmed] = useState(false)
@@ -1084,11 +1152,19 @@ export default function ProjectWorkspacePage() {
 
   const loadWorkspace = useCallback(async (quiet = false) => {
     try {
-      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/workspace`, { headers: { accept: 'application/json' }, cache: 'no-store' })
+      const encodedProjectId = encodeURIComponent(projectId)
+      const [response, policyResponse] = await Promise.all([
+        fetch(`/v1/projects/${encodedProjectId}/workspace`, { headers: { accept: 'application/json' }, cache: 'no-store' }),
+        fetch(`/v1/projects/${encodedProjectId}/policy-overrides`, { headers: { accept: 'application/json' }, cache: 'no-store' }),
+      ])
       if (response.status === 401) { router.replace('/login'); return }
+      if (policyResponse.status === 401) { router.replace('/login'); return }
       const payload = await response.json() as ApiEnvelope<WorkspaceData>
+      const policyPayload = await policyResponse.json() as ApiEnvelope<ProjectPolicyOverridesData>
       if (!response.ok || !payload.data) throw new Error(apiError(payload, 'Não foi possível carregar o workspace.'))
+      if (!policyResponse.ok || !policyPayload.data) throw new Error(apiError(policyPayload, 'Não foi possível carregar a política do projeto.'))
       setWorkspace(payload.data)
+      setProjectPolicy(policyPayload.data)
       const latest = payload.data.operations[0]
       if (latest?.type === 'media-ingest' && latest.status === 'succeeded') {
         const pending = pendingUpload.current
@@ -3062,6 +3138,7 @@ export default function ProjectWorkspacePage() {
           <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#f3efe7]">{workspace.project.name}</p><p className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-[#68645d]">Workspace de direção · versão {workspace.version?.sequence ?? 1}</p></div>
         </div>
         <div className="flex items-center gap-2">
+          <ProjectPolicyStatus policy={projectPolicy} />
           <span className="hidden rounded-lg border border-[#d8a936]/20 bg-[#d8a936]/[0.07] px-2.5 py-1.5 text-[10px] font-semibold text-[#d5ad4d] sm:block">{workspace.project.format ?? '—'}</span>
           <span className="hidden items-center gap-2 rounded-lg border border-white/[0.07] px-2.5 py-1.5 text-[10px] text-[#77736b] md:flex"><i className="h-1.5 w-1.5 rounded-full bg-[#5fbd7e]" /> API V2</span>
           <LogoutButton />

@@ -7292,6 +7292,132 @@ const projectLutSelectionResultSchemaV3 = {
   },
 }
 
+const projectPolicyElements = [
+  'logo', 'instagramHandle', 'youtubeHandle', 'professionalName', 'companyName',
+  'intro', 'colors', 'guardrails', 'subtitleStyle', 'gradePreset',
+] as const
+const projectPolicyAssetValueSchema = {
+  type: 'object', additionalProperties: false, required: ['assetId', 'checksum', 'rightsId'],
+  properties: { assetId: idSchema, checksum: sha256Schema, rightsId: idSchema },
+} as const
+const projectPolicyValueSchemas = {
+  logo: projectPolicyAssetValueSchema,
+  instagramHandle: { type: 'string', pattern: '^@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' },
+  youtubeHandle: { type: 'string', pattern: '^@[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' },
+  professionalName: { type: 'string', minLength: 1, maxLength: 240 },
+  companyName: { type: 'string', minLength: 1, maxLength: 240 },
+  intro: projectPolicyAssetValueSchema,
+  colors: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^#[0-9a-f]{6}$' } },
+  guardrails: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 240 } },
+  subtitleStyle: { enum: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'] },
+  gradePreset: { enum: ['natural', 'cinema', 'quente', 'frio', 'off'] },
+} as const
+function projectPolicyOverrideSchema(element: typeof projectPolicyElements[number]) {
+  return {
+    oneOf: [
+      { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'inherit' } } },
+      { type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { const: 'none' } } },
+      { type: 'object', additionalProperties: false, required: ['mode', 'value'], properties: { mode: { const: 'custom' }, value: projectPolicyValueSchemas[element] } },
+    ],
+  }
+}
+const projectPolicyOverridesSchema = {
+  type: 'object', additionalProperties: false, required: [...projectPolicyElements],
+  properties: Object.fromEntries(projectPolicyElements.map((element) => [element, projectPolicyOverrideSchema(element)])),
+}
+const projectPolicyOverridesInputSchema = {
+  ...projectPolicyOverridesSchema,
+  required: [],
+}
+const workspaceProjectPolicyValuesSchema = {
+  type: 'object', additionalProperties: false,
+  properties: Object.fromEntries(projectPolicyElements.map((element) => [element, projectPolicyValueSchemas[element]])),
+}
+const resolvedProjectPolicySchema = {
+  type: 'object', additionalProperties: false, required: [...projectPolicyElements],
+  properties: Object.fromEntries(projectPolicyElements.map((element) => [element, {
+    type: 'object', additionalProperties: false, required: ['value', 'origin'],
+    properties: {
+      value: { anyOf: [projectPolicyValueSchemas[element], { type: 'null' }] },
+      origin: { enum: ['workspace', 'project-none', 'project-custom'] },
+    },
+  }])),
+}
+const projectPolicyVersionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'sequence', 'baseHash', 'createdAt', 'visibleState'],
+  properties: {
+    id: idSchema, sequence: { type: 'integer', minimum: 1 }, parentVersionId: idSchema,
+    baseHash: sha256Schema, createdAt: dateTimeSchema,
+    visibleState: currentProjectVersionVisibleStateSchema,
+  },
+}
+const currentProjectPolicyOverridesSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['version', 'policySnapshot', 'workspaceDefaults', 'overrides', 'resolved'],
+  properties: {
+    version: projectPolicyVersionSchema,
+    policySnapshot: {
+      type: 'object', additionalProperties: false, required: ['id', 'contentSchemaVersion', 'contentHash'],
+      properties: { id: idSchema, contentSchemaVersion: { enum: [1, 2] }, contentHash: sha256Schema },
+    },
+    workspaceDefaults: workspaceProjectPolicyValuesSchema,
+    overrides: projectPolicyOverridesSchema,
+    resolved: resolvedProjectPolicySchema,
+  },
+}
+const projectPolicyOverridesImpactSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId',
+    'policySnapshotId', 'policySnapshotHash', 'previousResolvedHash', 'resultResolvedHash',
+    'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds',
+    'affectedArtifacts', 'requiredRecomputations', 'renderSemanticsChanged',
+    'renderBlockedUntilDirectorRun', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'project-policy-overrides-impact/v1' },
+    commandId: idSchema, commandType: { const: 'set-project-policy-overrides' },
+    baseVersionId: idSchema, resultVersionId: idSchema, policySnapshotId: idSchema,
+    policySnapshotHash: sha256Schema, previousResolvedHash: sha256Schema, resultResolvedHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, prefixItems: [{ const: 'project-policy-overrides' }], items: false },
+    dependencyTypes: commandImpactSchema.properties.dependencyTypes,
+    affectedRanges: { ...commandImpactSchema.properties.affectedRanges, minItems: 0, maxItems: 1 },
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    requiredRecomputations: {
+      type: 'array', minItems: 5, maxItems: 5,
+      prefixItems: [{ const: 'treatment' }, { const: 'story' }, { const: 'edit-plan' }, { const: 'proxy' }, { const: 'final' }], items: false,
+    },
+    renderSemanticsChanged: { type: 'boolean' }, renderBlockedUntilDirectorRun: { const: true }, impactHash: sha256Schema,
+  },
+}
+const projectPolicyOverridesResultSchema = {
+  ...currentProjectPolicyOverridesSchema,
+  required: [
+    'command', ...currentProjectPolicyOverridesSchema.required, 'impact', 'invalidations',
+    'nextRequiredCapability', 'replayed',
+  ],
+  properties: {
+    ...currentProjectPolicyOverridesSchema.properties,
+    command: {
+      type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'author', 'createdAt'],
+      properties: {
+        id: idSchema, type: { const: 'set-project-policy-overrides' }, baseVersionId: idSchema,
+        author: {
+          type: 'object', additionalProperties: false, required: ['type', 'id'],
+          properties: { type: { const: 'api-client' }, id: idSchema, delegatedUserId: idSchema },
+        },
+        reason: { type: 'string', minLength: 1, maxLength: 1000 }, createdAt: dateTimeSchema,
+      },
+    },
+    impact: projectPolicyOverridesImpactSchema,
+    invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+    nextRequiredCapability: { const: 'apollo.projects.commands.apply:run-director' },
+    replayed: { type: 'boolean' },
+  },
+}
+
 function currentProjectVersionResultSchema(snapshotRefNames: readonly string[]) {
   return {
     type: 'object',
@@ -20558,6 +20684,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('project-lut-selection-response', 3, 'Current project LUT selection with explicit current ProjectVersion state', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV3] } },
   })),
+  defineSchema('project-policy-overrides-impact', 1, 'Content-addressed deferred impact of resolved project policy overrides', projectPolicyOverridesImpactSchema),
+  defineSchema('project-policy-overrides-set-request', 1, 'Replace the complete project override set through an immutable EditCommand', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'overrides'],
+    properties: {
+      baseVersionId: idSchema,
+      baseHash: sha256Schema,
+      overrides: projectPolicyOverridesInputSchema,
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  }),
+  defineSchema('project-policy-overrides-response', 1, 'Current version-bound project policy values, overrides and resolved origins', successSchema(currentProjectPolicyOverridesSchema)),
+  defineSchema('project-policy-overrides-applied', 1, 'Applied project policy EditCommand, immutable Policy Snapshot and deferred render impact', successSchema(projectPolicyOverridesResultSchema)),
   defineSchema('project-final-export-request', 1, 'Approve and export the current project version', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'projectVersionHash', 'format', 'approval'],

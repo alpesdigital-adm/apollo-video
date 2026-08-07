@@ -37,6 +37,10 @@ import {
   parseProjectLutSelectionImpact,
 } from '../../src/v2/domain/project-lut-selection-impact.ts'
 import {
+  createProjectPolicyOverridesImpact,
+  parseProjectPolicyOverridesImpact,
+} from '../../src/v2/domain/project-policy-overrides-impact.ts'
+import {
   createSourceTranscriptReplacementImpact,
   parseSourceTranscriptReplacementImpact,
 } from '../../src/v2/domain/source-transcript-replacement.ts'
@@ -185,6 +189,20 @@ function sourceTranscriptImpact() {
   })
 }
 
+function projectPolicyImpact() {
+  return createProjectPolicyOverridesImpact({
+    commandId: 'edit-command-registry-project-policy',
+    baseVersionId,
+    resultVersionId,
+    policySnapshotId: 'project-policy-snapshot-registry-1',
+    policySnapshotHash: hashA,
+    previousResolvedHash: hashA,
+    resultResolvedHash: hashB,
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
 function compareActionImpact(action = 'accept') {
   return createCompareActionImpact({
     commandId: 'edit-command-registry-compare',
@@ -204,6 +222,7 @@ const IMPACT_FIXTURES = {
   'run-director': { build: directorRunImpact, parse: parseDirectorRunImpact },
   'set-project-lut-selection': { build: () => lutSelectionImpact(), parse: parseProjectLutSelectionImpact },
   'replace-source-transcript': { build: sourceTranscriptImpact, parse: parseSourceTranscriptReplacementImpact },
+  'set-project-policy-overrides': { build: projectPolicyImpact, parse: parseProjectPolicyOverridesImpact },
 }
 
 function command(type, overrides = {}) {
@@ -225,7 +244,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 8)
+  assert.equal(EDIT_COMMAND_TYPES.length, 9)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -309,7 +328,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 8, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 9, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -363,7 +382,7 @@ test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
 })
 
 test('T-F0-027 deferred types enqueue no render before their unblocking event', () => {
-  assert.deepEqual([...editCommandTypesByRenderPolicy('deferred')], ['replace-source-transcript'])
+  assert.deepEqual([...editCommandTypesByRenderPolicy('deferred')], ['replace-source-transcript', 'set-project-policy-overrides'])
   const policy = editCommandPolicy('replace-source-transcript')
   assert.equal(policy.deferralReason, 'director-run')
 
@@ -374,6 +393,13 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
   assert.deepEqual([...impact.requiredRecomputations], ['perception', 'treatment', 'story', 'edit-plan', 'proxy', 'final'])
   const parsed = parseSourceTranscriptReplacementImpact(JSON.parse(JSON.stringify(impact)))
   assert.equal(Object.hasOwn(parsed, 'minimalRenders'), false)
+
+  const policyImpact = projectPolicyImpact()
+  assert.equal(editCommandPolicy('set-project-policy-overrides').deferralReason, 'director-run')
+  assert.equal(policyImpact.renderBlockedUntilDirectorRun, true)
+  assert.equal(Object.hasOwn(policyImpact, 'minimalRenders'), false)
+  assert.deepEqual([...policyImpact.requiredRecomputations], ['treatment', 'story', 'edit-plan', 'proxy', 'final'])
+  assert.equal(parseProjectPolicyOverridesImpact(JSON.parse(JSON.stringify(policyImpact))).impactHash, policyImpact.impactHash)
 
   // The LUT selection defers within full-timeline until a timeline exists.
   assert.equal(editCommandPolicy('set-project-lut-selection').deferralReason, 'timeline')

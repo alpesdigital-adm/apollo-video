@@ -20,6 +20,7 @@ import { runNextMediaIngestOperationService } from '../../src/v2/application/run
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { setProjectPolicyOverridesService } from '../../src/v2/application/project-policy-overrides.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createWorkspace } from '../../src/v2/domain/workspace.ts'
@@ -41,6 +42,7 @@ import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/br
 import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
 import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
 import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
+import { PrismaProjectPolicyOverridesRepository } from '../../src/v2/infrastructure/prisma/project-policy-overrides-repository.ts'
 import { PrismaProjectMediaRepository } from '../../src/v2/infrastructure/prisma/project-media-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
 import { PrismaProxyReviewRepository } from '../../src/v2/infrastructure/prisma/proxy-review-repository.ts'
@@ -439,6 +441,58 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     assert.equal(await prisma.v2RenderElementMap.count({
       where: { workspaceId, projectId: seed.project.id, projectVersionId: noLut.version.id },
     }), 1)
+
+    const inheritedPolicyBefore = await prisma.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: noLut.version.snapshotRefs.policies },
+      select: { id: true, contentJson: true, contentHash: true },
+    })
+    const policyRepository = new PrismaProjectPolicyOverridesRepository(prisma)
+    const policyResult = await setProjectPolicyOverridesService({
+      repository: policyRepository,
+      createId: (kind) => `vertical-policy-${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
+      clock,
+    })({
+      workspaceId,
+      projectId: seed.project.id,
+      baseVersionId: noLut.version.id,
+      baseHash: noLut.version.baseHash,
+      overrides: {
+        logo: { mode: 'none' },
+        instagramHandle: { mode: 'none' },
+        youtubeHandle: { mode: 'inherit' },
+        professionalName: { mode: 'custom', value: 'Apollo Vertical Smoke' },
+      },
+      actor: proxyActor,
+      idempotencyKey: 'vertical-smoke-policy-overrides-v1',
+      reason: 'Disable project-only branding while preserving workspace policy.',
+    })
+    assert.equal(policyResult.command.type, 'set-project-policy-overrides')
+    assert.equal(policyResult.version.parentVersionId, noLut.version.id)
+    assert.equal(policyResult.policySnapshot.contentSchemaVersion, 2)
+    assert.deepEqual(policyResult.resolved.logo, { value: null, origin: 'project-none' })
+    assert.deepEqual(policyResult.resolved.instagramHandle, { value: null, origin: 'project-none' })
+    assert.deepEqual(policyResult.resolved.professionalName, { value: 'Apollo Vertical Smoke', origin: 'project-custom' })
+    assert.equal(policyResult.impact.renderBlockedUntilDirectorRun, true)
+    assert.equal(policyResult.invalidations.length, 1)
+    assert.equal(policyResult.invalidations[0].artifactId, completed.context.outputArtifactId)
+    assert.equal(await prisma.v2ProjectProxyRenderOperation.count({
+      where: { workspaceId, projectId: seed.project.id, projectVersionId: policyResult.version.id },
+    }), 0, 'policy Command must not enqueue a render before DirectorRun')
+    const inheritedPolicyAfter = await prisma.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: inheritedPolicyBefore.id },
+      select: { id: true, contentJson: true, contentHash: true },
+    })
+    assert.deepEqual(inheritedPolicyAfter, inheritedPolicyBefore, 'project override must not mutate the inherited workspace policy snapshot')
+    const currentPolicy = await policyRepository.readCurrent({ workspaceId, projectId: seed.project.id })
+    assert.equal(currentPolicy.version.id, policyResult.version.id)
+    assert.equal(currentPolicy.policySnapshot.id, policyResult.policySnapshot.id)
+    assert.deepEqual(currentPolicy.overrides.logo, { mode: 'none' })
+    assert.deepEqual(currentPolicy.resolved.professionalName, { value: 'Apollo Vertical Smoke', origin: 'project-custom' })
+    const storedPolicyContent = JSON.parse(policyResult.policySnapshot.contentJson)
+    assert.deepEqual(storedPolicyContent.workspaceDefaults.guardrails, [])
+    assert.equal(storedPolicyContent.overrides.logo.mode, 'none')
+    assert.equal(storedPolicyContent.resolved.logo.origin, 'project-none')
     const spans = telemetryEvents.filter((event) =>
       event.schemaVersion === 'public-operation-span-telemetry/v1')
     assert.deepEqual(

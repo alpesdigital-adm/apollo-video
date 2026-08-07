@@ -1503,6 +1503,76 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(asyncDirectorReplay.data.replayed, true)
     assert.equal(asyncDirectorReplay.data.operation.id, storedAsyncOperation.id)
 
+    const inheritedPolicySnapshot = await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: storedAsyncVersion.policiesSnapshotId },
+      select: { id: true, contentJson: true, contentHash: true },
+    })
+    const policyRequest = {
+      baseVersionId: storedAsyncVersion.id,
+      baseHash: storedAsyncVersion.baseHash,
+      overrides: {
+        logo: { mode: 'none' },
+        instagramHandle: { mode: 'none' },
+        youtubeHandle: { mode: 'inherit' },
+        professionalName: { mode: 'custom', value: 'Apollo Policy E2E' },
+        subtitleStyle: { mode: 'custom', value: 'clean-color' },
+      },
+      reason: 'Comprovar override isolado no projeto.',
+    }
+    const setPolicy = () => fetch(`${baseUrl}/v1/projects/${projectId}/policy-overrides`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'idempotency-key': `f1010-policy-${suffix}`,
+      },
+      body: JSON.stringify(policyRequest),
+    })
+    const policyResponse = await setPolicy()
+    const policyApplied = await policyResponse.json()
+    assert.equal(policyResponse.status, 201, JSON.stringify(policyApplied))
+    assert.equal(policyApplied.data.command.type, 'set-project-policy-overrides')
+    assert.equal(policyApplied.data.version.parentVersionId, storedAsyncVersion.id)
+    assert.equal(policyApplied.data.policySnapshot.contentSchemaVersion, 2)
+    assert.deepEqual(policyApplied.data.resolved.logo, { value: null, origin: 'project-none' })
+    assert.deepEqual(policyApplied.data.resolved.instagramHandle, { value: null, origin: 'project-none' })
+    assert.deepEqual(policyApplied.data.resolved.professionalName, { value: 'Apollo Policy E2E', origin: 'project-custom' })
+    assert.equal(policyApplied.data.nextRequiredCapability, 'apollo.projects.commands.apply:run-director')
+    assert.equal(policyApplied.data.impact.renderBlockedUntilDirectorRun, true)
+    assert.equal(await client.v2ProjectProxyRenderOperation.count({
+      where: { workspaceId, projectId, projectVersionId: policyApplied.data.version.id },
+    }), 0)
+    assert.deepEqual(await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: inheritedPolicySnapshot.id },
+      select: { id: true, contentJson: true, contentHash: true },
+    }), inheritedPolicySnapshot, 'project override must not mutate the inherited policy snapshot')
+    const policyReplayResponse = await setPolicy()
+    const policyReplay = await policyReplayResponse.json()
+    assert.equal(policyReplayResponse.status, 200, JSON.stringify(policyReplay))
+    assert.equal(policyReplay.data.replayed, true)
+    assert.equal(policyReplay.data.command.id, policyApplied.data.command.id)
+    const currentPolicyResponse = await fetch(`${baseUrl}/v1/projects/${projectId}/policy-overrides`, {
+      headers: { authorization, accept: 'application/json' },
+    })
+    const currentPolicy = await currentPolicyResponse.json()
+    assert.equal(currentPolicyResponse.status, 200, JSON.stringify(currentPolicy))
+    assert.equal(currentPolicy.data.version.id, policyApplied.data.version.id)
+    assert.equal(currentPolicy.data.policySnapshot.id, policyApplied.data.policySnapshot.id)
+    assert.equal(currentPolicy.data.resolved.logo.origin, 'project-none')
+
+    await page.goto(`${baseUrl}/projects/${projectId}`)
+    const policyStatus = page.getByTestId('project-policy-overrides')
+    await policyStatus.waitFor({ state: 'visible', timeout: 10_000 })
+    await policyStatus.locator('summary').click()
+    const policyStatusText = await policyStatus.textContent()
+    assert.match(policyStatusText, /Logo/u)
+    assert.match(policyStatusText, /Desativado no projeto/u)
+    assert.match(policyStatusText, /Apollo Policy E2E/u)
+    assert.match(policyStatusText, /Personalizado no projeto/u)
+    assert.equal(await policyStatus.locator('[data-origin="project-none"]').count() >= 2, true)
+    assert.equal(await policyStatus.locator('[data-origin="project-custom"]').count() >= 2, true)
+
     async function createBriefingProject(label, briefing, key) {
       const response = await fetch(`${baseUrl}/v1/projects`, {
         method: 'POST',

@@ -5036,6 +5036,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.policy-overrides.read', version: '1.0.0', title: 'Read project policy overrides',
+    description: 'Reads all ten allowlisted brand and guardrail values from the current immutable Policy Snapshot, including each resolved origin.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/project-policy-overrides-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/policy-overrides' }, toolName: 'apollo.projects.policy-overrides.read',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.policy-overrides.set', version: '1.0.0', title: 'Set project policy overrides',
+    description: 'Creates a typed EditCommand, immutable Policy Snapshot and ProjectVersion for the complete override set; rendering remains fail-closed until a new DirectorRun recompiles policy-dependent plans.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/project-policy-overrides-set-request/v1', outputSchemaRef: 'apollo://schemas/project-policy-overrides-applied/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/policy-overrides' }, toolName: 'apollo.projects.policy-overrides.set',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.clients.list',
     version: '2.0.0',
     title: 'List API clients',

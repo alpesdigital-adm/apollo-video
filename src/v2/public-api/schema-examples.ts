@@ -1,5 +1,6 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
+import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -4938,6 +4939,83 @@ const currentProjectVersionVisibleStateExample = {
   schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
   progress: { mode: 'none' }, primaryAction: 'open-result',
   availableActions: ['open-result'], terminal: false,
+}
+const projectPolicyWorkspaceDefaultsExample = {
+  logo: { assetId: 'asset-brand-logo-example', checksum: '1'.repeat(64), rightsId: 'rights-brand-logo-example' },
+  instagramHandle: '@apollo.workspace',
+  youtubeHandle: '@apollo-video',
+  professionalName: 'Apollo Studio',
+  companyName: 'Alpes Digital',
+  colors: ['#d9ad44', '#070707'],
+  guardrails: ['Nunca cobrir rosto ou olhos com legenda.'],
+  subtitleStyle: 'clean-color',
+  gradePreset: 'natural',
+}
+const projectPolicyOverridesExample = {
+  logo: { mode: 'none' },
+  instagramHandle: { mode: 'none' },
+  youtubeHandle: { mode: 'inherit' },
+  professionalName: { mode: 'custom', value: 'Apollo Video' },
+  companyName: { mode: 'inherit' },
+  intro: { mode: 'inherit' },
+  colors: { mode: 'inherit' },
+  guardrails: { mode: 'custom', value: ['Preservar safe area vertical.'] },
+  subtitleStyle: { mode: 'custom', value: 'kinetic' },
+  gradePreset: { mode: 'inherit' },
+} as const
+const projectPolicyResolvedExample = {
+  logo: { value: null, origin: 'project-none' },
+  instagramHandle: { value: null, origin: 'project-none' },
+  youtubeHandle: { value: '@apollo-video', origin: 'workspace' },
+  professionalName: { value: 'Apollo Video', origin: 'project-custom' },
+  companyName: { value: 'Alpes Digital', origin: 'workspace' },
+  intro: { value: null, origin: 'workspace' },
+  colors: { value: ['#d9ad44', '#070707'], origin: 'workspace' },
+  guardrails: { value: ['Preservar safe area vertical.'], origin: 'project-custom' },
+  subtitleStyle: { value: 'kinetic', origin: 'project-custom' },
+  gradePreset: { value: 'natural', origin: 'workspace' },
+} as const
+const projectPolicyImpactExample = createProjectPolicyOverridesImpact({
+  commandId: 'project-policy-command-example-1',
+  baseVersionId: 'project-version-example-1',
+  resultVersionId: 'project-version-policy-example-2',
+  policySnapshotId: 'project-policy-snapshot-example-2',
+  policySnapshotHash: '2'.repeat(64),
+  previousResolvedHash: '3'.repeat(64),
+  resultResolvedHash: '4'.repeat(64),
+  durationFrames: 180,
+  outputReferences: [],
+})
+const currentProjectPolicyExample = {
+  version: {
+    id: projectPolicyImpactExample.resultVersionId, sequence: 2,
+    parentVersionId: projectPolicyImpactExample.baseVersionId,
+    baseHash: '5'.repeat(64), createdAt,
+    visibleState: currentProjectVersionVisibleStateExample,
+  },
+  policySnapshot: {
+    id: projectPolicyImpactExample.policySnapshotId,
+    contentSchemaVersion: 2,
+    contentHash: projectPolicyImpactExample.policySnapshotHash,
+  },
+  workspaceDefaults: projectPolicyWorkspaceDefaultsExample,
+  overrides: projectPolicyOverridesExample,
+  resolved: projectPolicyResolvedExample,
+}
+const projectPolicyAppliedExample = {
+  command: {
+    id: projectPolicyImpactExample.commandId,
+    type: 'set-project-policy-overrides',
+    baseVersionId: projectPolicyImpactExample.baseVersionId,
+    author: { type: 'api-client', id: clientId },
+    reason: 'Ocultar logo e Instagram somente neste projeto.',
+    createdAt,
+  },
+  ...currentProjectPolicyExample,
+  impact: projectPolicyImpactExample,
+  invalidations: [],
+  nextRequiredCapability: 'apollo.projects.commands.apply:run-director',
+  replayed: false,
 }
 const projectLutSelectionExampleV3 = {
   ...projectLutSelectionExampleV2,
@@ -10250,6 +10328,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       { data: { result: projectLutSelectionExampleV3 }, meta: { apiVersion: 'v1' } },
       { data: { result: projectLutSelectionDeferredExampleV3 }, meta: { apiVersion: 'v1' } },
     ],
+    'apollo://schemas/project-policy-overrides-impact/v1': [projectPolicyImpactExample],
+    'apollo://schemas/project-policy-overrides-set-request/v1': [{
+      baseVersionId: projectPolicyImpactExample.baseVersionId,
+      baseHash: 'a'.repeat(64),
+      overrides: projectPolicyOverridesExample,
+      reason: 'Ocultar logo e Instagram somente neste projeto.',
+    }],
+    'apollo://schemas/project-policy-overrides-response/v1': [{ data: currentProjectPolicyExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/project-policy-overrides-applied/v1': [{ data: projectPolicyAppliedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
         data: { review: proxyReviewExample },

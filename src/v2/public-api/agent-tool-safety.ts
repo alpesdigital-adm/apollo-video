@@ -279,6 +279,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable ProjectVersion that pins an existing authorized LUT version or explicit none; it starts no render or provider work.',
     },
+    'apollo.projects.policy-overrides.set': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',
+    },
     'apollo.projects.proof-integrity-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Evaluates existing ProofNeed, recipe, evidence and current authorization hashes, persists an immutable fail-closed decision and starts no provider, render or media materialization work.',

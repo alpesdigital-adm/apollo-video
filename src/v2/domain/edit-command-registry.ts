@@ -31,6 +31,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'director-run-impact/v1',
   'source-transcript-replacement-impact/v1',
   'project-lut-selection-impact/v1',
+  'project-policy-overrides-impact/v1',
   'compare-action-impact/v1',
 ] as const
 export type EditCommandImpactSchema = (typeof EDIT_COMMAND_IMPACT_SCHEMAS)[number]
@@ -120,6 +121,16 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     deferralReason: 'director-run',
     evidence: 'source-transcript-replacement.ts:31 renderBlockedUntilDirectorRun is the literal '
       + 'true and the impact declares no minimalRenders field at all',
+  }),
+  'set-project-policy-overrides': Object.freeze({
+    renderPolicy: 'deferred',
+    impactSchema: 'project-policy-overrides-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: true,
+    deferralReason: 'director-run',
+    evidence: 'project-policy-overrides-impact.ts:21 declares renderBlockedUntilDirectorRun true; '
+      + 'resolved policy changes invalidate existing outputs but no render is enqueued before a '
+      + 'new DirectorRun recompiles treatment, story and edit plan',
   }),
   'compare-action': Object.freeze({
     renderPolicy: 'no-render',
