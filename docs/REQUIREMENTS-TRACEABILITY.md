@@ -215,9 +215,17 @@ migrations, PostgreSQL, ingest/worker e FFmpeg reais. O tratamento persistido
 ficou em `media-only`, confidence `0,65`, um claim observado e zero proposto; o
 proxy 540×960/6 s foi verificado por SHA-256. Faltam deploy e aceite.
 
+Evidência controlada FR-021/F1.010: os commits `f0b0dd5` e `51f38a6`
+passaram o run remoto `f1010-20260807-r4` com 149 migrations e 2/2 jornadas
+reais. PostgreSQL preservou Command, versão e Policy Snapshot; a API GET/POST e
+o editor em Chromium exibiram valor/origem e desativaram logo/handles sem
+alterar defaults do workspace nem enfileirar render antes do DirectorRun. O
+postflight ficou em zero e a VPS foi destruída. Faltam F0.002 para os defaults
+completos do Brand Kit, deploy e aceite.
+
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
-| FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |
+| FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration/e2e |
 | FR-030 | Tipos de entrada | S3 | D1,D6 | vídeo/áudio/imagem entram no ingest | e2e |
 | FR-040 | Media Library | S3 | D0,D1,D6 | assets indexados e navegáveis | e2e |
 | FR-042 | MediaSegment | S3 | D0,D1 | range reutiliza master | integration |

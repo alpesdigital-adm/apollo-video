@@ -500,7 +500,17 @@ O workspace pode armazenar:
 
 ### FR-021 — Override por projeto
 
-Cada projeto terá `inherit`, `none` ou `custom`, além de overrides por elemento.
+Cada projeto terá `inherit`, `none` ou `custom` por elemento allowlisted.
+A resolução devolve sempre o valor efetivo e a origem `workspace`,
+`project-none` ou `project-custom`; o resultado normalizado integra o Policy
+Snapshot imutável da versão. Mudança de origem sem mudança do valor efetivo não
+invalida render; mudança do valor efetivo é diferida até o próximo DirectorRun.
+
+Evidência controlada em 2026-08-07: os commits `f0b0dd5` e `51f38a6`
+expõem GET/POST públicos, persistência PostgreSQL e estado resolvido no editor.
+O run descartável `f1010-20260807-r4` passou as jornadas vertical e browser
+com 149 migrations e postflight sem órfãos. FR-021 continua não entregue até
+deploy/aceite, e a herança de todos os valores do Brand Kit depende de F0.002.
 
 ### FR-022 — Guardrails estruturados
 

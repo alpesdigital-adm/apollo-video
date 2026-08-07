@@ -836,6 +836,23 @@ abertas porque não houve implantação em produção nem aceite do proprietári
 - [ ] Persistir override no Policy Snapshot da versão. Evidência F1-010: snapshot version-bound armazena overrides normalizados com hash SHA-256; endpoint por projeto persiste configuração.
 - [ ] Testar desativação de logo/handles em um projeto sem alterar o workspace. Evidência F1-010: regressão prova `project-none`, `project-custom`, herança e imutabilidade do workspace.
 
+Evidência controlada F1.010: os commits `f0b0dd5` e `51f38a6` integram
+dez elementos allowlisted, resolução por valor/origem, Policy Snapshot
+content-addressed e os endpoints públicos GET/POST ao runtime V2. O run remoto
+`f1010-20260807-r4` aplicou 149 migrations e passou 2/2 sobre PostgreSQL,
+FFmpeg, API, Next e Chromium reais: a jornada vertical produziu proxy
+540×960/6 s com SHA-256
+`62a0730f3fa319af8d16b1b792725b70b9e2f867a7db8b18f81bb6120fb66b3f`;
+a jornada do editor comprovou `project-none` para logo/handles, valor/origem
+resolvidos, snapshots/Commands imutáveis e ausência de render prematuro. O
+arquivo de evidência tem SHA-256
+`5c2df393fd6f491a00d447ff71b79639854f557ec5fcdac49706a9311a86a57d`.
+O postflight registrou zero processos, browsers, conexões e containers órfãos;
+a VPS `590801795` foi destruída com confirmação HTTP 404. As quatro caixas
+permanecem abertas porque não houve implantação em produção nem aceite do
+proprietário; os defaults completos do Brand Kit do workspace ainda dependem
+de F0.002.
+
 ### F1.011 — Tipos de entrada [FR-030]
 
 - [ ] Criar upload direto para vídeo, áudio e imagem com MIME/extension sniffing. Evidência F1-011: biblioteca aceita três kinds e valida assinatura binária, extensão e MIME declarado antes de gravar.
