@@ -174,7 +174,7 @@ export async function seedV2ProjectSource({
   const transfers = new PrismaMediaTransferRepository(client)
   const begun = await beginMediaUploadService({ repository: transfers, clock })({
     workspaceId: input.workspaceId,
-    clientId: input.clientId,
+    actor,
     projectId: project.project.id,
     fileName: basename(input.sourceFile),
     rightsConfirmed: true,
@@ -191,7 +191,7 @@ export async function seedV2ProjectSource({
       repository: transfers,
       signer,
       clock,
-    })({ workspaceId: input.workspaceId, clientId: input.clientId, uploadId: verifiedUpload.id })
+    })({ workspaceId: input.workspaceId, actor, uploadId: verifiedUpload.id })
     const receive = receiveMediaUploadContentService({ repository: transfers, storage, clock })
     if (issued.session.mode === 'single') {
       await receive({
@@ -200,6 +200,7 @@ export async function seedV2ProjectSource({
         uploadId: verifiedUpload.id,
         mode: 'single',
         maxParts: 1,
+        sessionExpiresAt: issued.session.expiresAt,
         mimeType: input.sourceMime,
         expectedSha256: checksum,
         body: contentStream(input.sourceFile),
@@ -216,6 +217,7 @@ export async function seedV2ProjectSource({
           uploadId: verifiedUpload.id,
           mode: 'multipart',
           maxParts: issued.session.maxParts,
+          sessionExpiresAt: issued.session.expiresAt,
           partNumber,
           mimeType: input.sourceMime,
           expectedSha256: checksum,
@@ -228,7 +230,7 @@ export async function seedV2ProjectSource({
       repository: transfers,
       verifier: storage,
       clock,
-    })({ workspaceId: input.workspaceId, clientId: input.clientId, uploadId: verifiedUpload.id })).upload
+    })({ workspaceId: input.workspaceId, actor, uploadId: verifiedUpload.id })).upload
   }
 
   const operations = new PrismaPublicOperationRepository(client)
