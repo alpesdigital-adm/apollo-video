@@ -1455,7 +1455,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(compiledBriefSnapshot.briefCompilation.audit.modelVersion, '1.0.0')
     assert.equal(compiledBriefSnapshot.briefCompilation.compiled.requiresReview, false)
     assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.audience, ['equipes criativas'])
-    assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.offer, ['demonstraÃ§Ã£o'])
+    assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.offer, ['demonstra\u00e7\u00e3o'])
     assert.deepEqual(compiledBriefSnapshot.briefCompilation.compiled.fields.tone, ['direto'])
     assert.match(compiledBriefSnapshot.briefCompilation.audit.inputHash, /^[a-f0-9]{64}$/)
     assert.match(compiledBriefSnapshot.briefCompilation.audit.outputHash, /^[a-f0-9]{64}$/)
