@@ -376,6 +376,17 @@ O texto livre deve ser compilado para uma interpretação estruturada contendo:
 - conflicts;
 - confidence.
 
+Evidência controlada F1.008 (2026-08-07): `CompiledBrief/v1` foi integrado ao
+Diretor e ao worker durável nos SHAs `b28c3f8`, `9d4adc2` e `be4138e`. O run
+remoto `f1008-20260807-r9` aplicou 148 migrations do zero e comprovou por
+PostgreSQL, API e Chromium que campos evidence-bound, conflitos, audit e hashes
+atravessam um Brief Snapshot imutável e `project-workspace/v10`. Conflito
+material bloqueia antes do planejamento. Estado: especificado, implementado,
+integrado e testado em E2E controlado; não implantado nem aceito. O contrato
+atual canoniza audience, offer, constraints, mustUse, avoid, tone e
+successCriteria; os demais atributos listados em FR-013 ainda exigem
+reconciliação explícita, sem ampliação silenciosa do schema.
+
 ### FR-014 — Modo media-only
 
 Na ausência de briefing livre, o Diretor deve continuar usando objetivo estruturado, perfil do workspace e inferência do material.

@@ -187,6 +187,15 @@ controlada: o run `f1007-20260807-r3` no SHA `0281a7a` aprovou, via API,
 PostgreSQL e Chromium, os caminhos completo, parcial e ausente. Isso comprova
 integração/E2E, não implantação ou aceite.
 
+Quando há texto `owner-authorized`, o Diretor executa o `CompiledBrief/v1`
+antes de perception e planning. A compilação usa somente spans exatos da fonte,
+persiste versões/hashes/redações no Brief Snapshot `v3`, propaga o `outputHash`
+para as decisões e assumptions para o EditPlan, e bloqueia conflitos materiais
+antes de qualquer plano ou commit. Evidência controlada: o run remoto
+`f1008-20260807-r9` no SHA `be4138e` atravessou worker, PostgreSQL, API e
+Chromium e releu o mesmo hash por `project-workspace/v10`. O estado ainda não é
+implantado nem aceito.
+
 ### 7.3 Conflitos
 
 | Conflito | Resolução padrão |

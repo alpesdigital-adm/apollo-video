@@ -201,6 +201,14 @@ imutável e leitura pública do QualityReport. Postflight: zero backends do
 `application_name` e zero contêineres do run. Deploy, projeto real visual e
 aceite seguem pendentes; FR-010 permanece aberto.
 
+Evidência controlada FR-013/F1.008: os SHAs `b28c3f8`, `9d4adc2` e `be4138e`
+integram o compilador evidence-bound ao Diretor/worker, Brief Snapshot `v3` e
+`project-workspace/v10`. O run remoto `f1008-20260807-r9` passou 1/1 com 148
+migrations, PostgreSQL, API e Chromium, incluindo persistência/releitura do
+mesmo `outputHash`; o E2E também revelou e validou a correção da invariante de
+Brief Snapshot no Prisma. Faltam deploy, aceite e reconciliação dos atributos
+amplos de FR-013 que ainda não pertencem aos sete campos canônicos.
+
 | FR-013 | Brief Compiler | S1 | D2,D7 | prompt vira estrutura/conflicts | unit/golden |
 | FR-014 | Modo media-only | S1 | D2 | tratamento é inferido sem freeform | e2e |
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration |

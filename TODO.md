@@ -785,6 +785,32 @@ porque o resultado não foi implantado nem aceito pelo proprietário.
 - [ ] Versionar prompt/model/schema e salvar entrada/saída redigida. Evidência F1-008: audit registra versões, hashes e cópias redigidas de e-mail/telefone.
 - [ ] Criar golden set de briefings ambíguos, maliciosos e contraditórios. Evidência F1-008: conjunto canônico contém os três casos e regressões impedem evidência fabricada/prompt override.
 
+Evidência integrada F1.008 (2026-08-07): os commits `b28c3f8`, `9d4adc2` e
+`be4138e` conectam o `CompiledBrief/v1` ao Diretor síncrono e ao worker durável,
+persistem compilação/audit em Brief Snapshot imutável `v3` e publicam a leitura
+exata por `project-workspace/v10`. O adaptador evidence-bound extrai os sete
+campos somente de spans exatos do canal `owner-authorized`, limita coleções,
+versiona prompt/model/schema, redige e-mail/telefone, valida hashes no read e
+bloqueia conflitos materiais antes de perception/plan/persistência. Localmente,
+1.191/1.191 testes, goldens FFmpeg 2/2, arquitetura, linguagem de domínio,
+schema V2 (151 tabelas, 785 índices e 580 FKs), contratos públicos (204
+capabilities, 388 schemas e 436 exemplos), typecheck e build Next passaram.
+Na VPS descartável criada do snapshot `240076873`, o run supervisionado
+`f1008-20260807-r9` no SHA `be4138e` aplicou 148 migrations pgvector do zero e
+aprovou `T-FR-216` 1/1 através de worker, PostgreSQL, API Next e Chromium. O
+mesmo `outputHash`, campos audience/offer/tone e versões do compilador foram
+comprovados no snapshot persistido e na API. O E2E detectou a hipótese incorreta
+de que todo novo Brief Snapshot mudava o objetivo; `9d4adc2` corrigiu a
+invariante e o run final provou a regressão. Evidência r9 SHA-256
+`1E5D4978D25C1A46DE82640D9621AC90CE4D93CF3F887DDB6089933742096E47`;
+build remoto r8 SHA-256
+`B6476FFDD10B9B2F63188F0C1E4F7ABF54FD28313D83E8BE31A87A314F421758`.
+Postflight interno e independente: zero processos, sessões e containers do
+run; a VPS `590554460` foi destruída com confirmação HTTP 404. As cinco caixas
+continuam abertas porque não houve implantação/aceite e os campos adicionais do
+escopo amplo de FR-013 (por exemplo duração, ritmo e permissões) ainda precisam
+ser reconciliados com o contrato canônico antes do fechamento integral.
+
 ### F1.009 — Modo media-only [FR-014]
 
 - [ ] Detectar ausência de briefing e iniciar análise somente com objetivo, ação e mídia. Evidência F1-009: factory media-only rejeita briefing presente e exige ao menos uma referência de mídia.
