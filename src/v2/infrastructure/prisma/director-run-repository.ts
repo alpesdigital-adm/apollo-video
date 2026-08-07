@@ -23,7 +23,7 @@ import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
 import { requireEditCommandType } from '../../domain/edit-command-registry.ts'
 import { DomainError } from '../../domain/errors.ts'
 import type { StoryPlan } from '../../domain/story-plan.ts'
-import type { TreatmentPlan } from '../../domain/treatment-plan.ts'
+import { validateTreatmentPlan, type TreatmentPlan } from '../../domain/treatment-plan.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../domain/director-run-impact.ts'
@@ -212,7 +212,9 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
     createdAt: row.resultVersion.createdAt.toISOString(),
   })
   const perception = parseRecord(row.perceptionSnapshot.contentJson, 'Director perception') as unknown as DirectorPerceptionSnapshot
-  const treatmentPlan = parseRecord(row.treatmentSnapshot.contentJson, 'TreatmentPlan') as unknown as TreatmentPlan & { id: string }
+  const treatmentPlanRecord = parseRecord(row.treatmentSnapshot.contentJson, 'TreatmentPlan') as unknown as TreatmentPlan & { id: string }
+  validateTreatmentPlan(treatmentPlanRecord)
+  const treatmentPlan = Object.freeze(treatmentPlanRecord)
   const storyPlan = parseRecord(row.storySnapshot.contentJson, 'StoryPlan') as unknown as StoryPlan & { id: string }
   const editPlan = parseRecord(row.editPlanSnapshot.contentJson, 'Director EditPlan') as unknown as DirectedEditPlan
   const qualityReport = parseDirectorQualityReport({

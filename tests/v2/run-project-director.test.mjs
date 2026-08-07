@@ -148,7 +148,9 @@ class InMemoryDirectorRepository {
     this.projectObjective = options.projectObjective ?? 'discovery'
     this.latestDirectorObjective = options.latestDirectorObjective
     this.selectedInsert = options.selectedInsert ?? false
-    this.ownerText = options.ownerText ?? 'Tom: direto, natural e sem efeitos gratuitos.'
+    this.ownerText = Object.hasOwn(options, 'ownerText')
+      ? options.ownerText
+      : 'Tom: direto, natural e sem efeitos gratuitos.'
     this.guardrails = options.guardrails ?? []
     this.ctaText = Object.hasOwn(options, 'ctaText')
       ? options.ctaText
@@ -580,6 +582,22 @@ test('Director V2 preserves a selected B-roll insert with bound source audio and
     decision.category === 'insert' && decision.choice === 'use_selected_insert'), true)
   assert.equal(result.run.assumptions.some((assumption) =>
     assumption.includes('asset-selection') && assumption.includes('rights')), true)
+})
+
+test('Director V2 persists an evidence-bound media-only treatment before proxy enqueue', async () => {
+  const { repository, service } = fixture({ ownerText: undefined })
+  const result = await service(request({ idempotency: { key: 'director-media-only' } }))
+
+  assert.equal(result.run.treatmentPlan.schemaVersion, 2)
+  assert.equal(result.run.treatmentPlan.mode, 'media-only')
+  assert.equal(result.run.treatmentPlan.confidence, .65)
+  assert.equal(result.run.treatmentPlan.grammar.primary, 'speaker')
+  assert.ok(result.run.treatmentPlan.assumptions.includes('briefing-absent'))
+  assert.ok(result.run.treatmentPlan.assumptions.includes('treatment-derived-from-observed-media'))
+  assert.ok(result.run.treatmentPlan.claimPolicy.observedClaims.includes('Comunicar bem muda resultados.'))
+  assert.deepEqual(result.run.treatmentPlan.claimPolicy.proposedClaims, [])
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'treatment').contentSchemaVersion, 2)
+  assert.match(result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason, /No owner brief/u)
 })
 
 test('Director V2 still requests one full proxy without fabricating stale artifacts when the base has no completed outputs', async () => {

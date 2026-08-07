@@ -222,7 +222,6 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
         objective: 'discovery',
         format: '9:16',
         locale: 'pt-BR',
-        briefing: 'Preservar a fala e evitar qualquer movimento de câmera sem justificativa.',
       },
       environment: {
         ...process.env,
@@ -315,6 +314,12 @@ test('T-F0-030 real PostgreSQL vertical smoke uploads, normalizes, directs and r
       reason: 'Compile the deterministic vertical smoke plan.',
     })
     assert.equal(directed.run.status, 'planned')
+    assert.equal(directed.run.treatmentPlan.mode, 'media-only')
+    assert.equal(directed.run.treatmentPlan.confidence, .65)
+    assert.equal(directed.run.treatmentPlan.grammar.primary, 'speaker')
+    assert.ok(directed.run.treatmentPlan.assumptions.includes('briefing-absent'))
+    assert.ok(directed.run.treatmentPlan.claimPolicy.observedClaims.length > 0)
+    assert.deepEqual(directed.run.treatmentPlan.claimPolicy.proposedClaims, [])
     assert.equal(directed.run.editPlan.movementPolicy.automaticZoom, false)
     assert.ok(directed.run.editPlan.subtitleTracks[0].cues.length > 0)
     const lutSelections = new PrismaProjectLutSelectionRepository(prisma)

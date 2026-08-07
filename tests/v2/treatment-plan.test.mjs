@@ -14,3 +14,23 @@ test('T-FR-060 validates deterministic limits and provides 16 golden objective/m
   assert.equal(new Set(TREATMENT_GOLDEN_PLANS.map((plan) => `${plan.objective}:${plan.mode}`)).size, 16)
   assert.throws(() => validateTreatmentPlan({ ...createTreatmentPlan(input), patternBreaks: { maxPer30s: 9, allowed: [] } }), /limit/)
 })
+
+test('FR-014 validates media-only confidence, assumptions and observed claim boundary', () => {
+  const plan = createTreatmentPlan({
+    ...input,
+    mode: 'media-only',
+    mediaOnly: {
+      confidence: .65,
+      assumptions: ['briefing-absent', 'treatment-derived-from-observed-media'],
+      observedClaims: ['Resultado observado.'],
+      proposedClaims: ['Resultado observado.'],
+    },
+  })
+  assert.equal(plan.schemaVersion, 2)
+  assert.equal(plan.confidence, .65)
+  assert.equal(plan.grammar.primary, 'speaker')
+  assert.throws(() => validateTreatmentPlan({ ...plan, confidence: .66 }), /confidence-limited/)
+  assert.throws(() => validateTreatmentPlan({ ...plan, claimPolicy: { ...plan.claimPolicy, proposedClaims: ['Resultado garantido.'] } }), /unsupported offer or claim/)
+  assert.throws(() => validateTreatmentPlan({ ...plan, claimPolicy: undefined }), /claim policy/)
+  assert.throws(() => createTreatmentPlan({ ...input, mode: 'media-only' }), /requires exact media-only evidence/)
+})

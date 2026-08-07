@@ -45,6 +45,7 @@ import type { ApiAccessAuditContext } from '../domain/api-access-control.ts'
 import { parseProductionBrief } from '../domain/production-brief.ts'
 import { canonicalProjectMutationAudit } from './project-analysis-execution.ts'
 import type { BriefCompilation } from './compile-brief.ts'
+import { createMediaOnlyAnalysis, inferMediaOnlyTreatment } from './media-only-production.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -195,6 +196,20 @@ function buildPerception(input: {
   })
 }
 
+function observedTranscriptStatements(words: readonly Readonly<{ text: string }>[]): readonly string[] {
+  const statements: string[] = []
+  let current: string[] = []
+  for (const word of words) {
+    current.push(word.text)
+    if (/[.!?]$/u.test(word.text) || current.length >= 12) {
+      statements.push(current.join(' ').replace(/\s+/g, ' ').trim())
+      current = []
+    }
+  }
+  if (current.length > 0) statements.push(current.join(' ').replace(/\s+/g, ' ').trim())
+  return Object.freeze(statements.filter(Boolean))
+}
+
 function buildSubtitleCues(input: {
   words: readonly Readonly<{
     text: string
@@ -303,6 +318,7 @@ function buildDecisions(input: {
   policyRef: string
   hasSelectedInsert: boolean
   briefCompilationRef?: string
+  mediaOnly: boolean
 }): readonly Readonly<DirectorDecision>[] {
   return validateDirectorDecisions([
     {
@@ -313,7 +329,9 @@ function buildDecisions(input: {
     },
     {
       id: 'decision-motion-none', category: 'movement', choice: 'no_effect',
-      reason: 'The owner requested a direct, natural tone and no semantic event justifies camera simulation.',
+      reason: input.mediaOnly
+        ? 'No owner brief or observed semantic event justifies camera simulation; the conservative media-only choice is no effect.'
+        : 'The owner requested a direct, natural tone and no semantic event justifies camera simulation.',
       evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.policyRef], confidence: 0.99,
       alternatives: ['single-punch-in-after-opening'],
     },
@@ -766,9 +784,28 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       transcript: context.transcript,
       words: context.editPlan.retimedTranscript.words,
     })
+    const mediaOnlyAnalysis = productionBrief.ownerInput
+      ? undefined
+      : createMediaOnlyAnalysis({
+          brief: productionBrief,
+          objective: objective.id,
+          action: desiredAction,
+          mediaRefs: [...new Set(context.editPlan.videoTracks.flatMap((track) =>
+            track.clips.map((clip) => clip.sourceArtifactId)))],
+        })
+    const mediaOnlyTreatment = mediaOnlyAnalysis
+      ? inferMediaOnlyTreatment({
+          analysis: mediaOnlyAnalysis,
+          observedClaims: observedTranscriptStatements(context.editPlan.retimedTranscript.words),
+          proposedClaims: [],
+          perceptionConfidence: perception.summary.confidence,
+        })
+      : undefined
     const treatmentBase = createTreatmentPlan({
       objective: objective.id,
-      mode: hasSelectedInsert &&
+      mode: mediaOnlyTreatment
+        ? 'media-only'
+        : hasSelectedInsert &&
         clips.every((clip) => Boolean(clip.audioSourceArtifactId))
         ? 'visual-montage'
         : 'talking-head',
@@ -780,6 +817,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         speakerCoverage: perception.summary.speechCoverage,
         visualVariety: 0,
       },
+      ...(mediaOnlyTreatment ? { mediaOnly: mediaOnlyTreatment } : {}),
     })
     const treatmentPlan = Object.freeze({ id: treatmentPlanId, ...treatmentBase })
     const storyPlan = buildStoryPlan({
@@ -801,14 +839,16 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       ...(briefCompilation
         ? { briefCompilationRef: briefCompilation.audit.outputHash }
         : {}),
+      mediaOnly: Boolean(mediaOnlyTreatment),
     })
-    const assumptions = Object.freeze([
+    const assumptions = Object.freeze([...new Set([
       'Face detector evidence is unavailable; use a conservative caption-safe region below the source inset.',
       hasSelectedInsert
         ? 'The selected insert already passed the asset-selection and rights gates.'
         : 'No rights-approved B-roll candidate is linked; omission is safer than an irrelevant insert.',
       ...(briefCompilation?.compiled.assumptions ?? []),
-    ])
+      ...(mediaOnlyTreatment?.assumptions ?? []),
+    ])])
     const subtitleCues = buildSubtitleCues({
       words: context.editPlan.retimedTranscript.words,
       durationFrames: context.editPlan.durationFrames,
@@ -926,7 +966,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
           })]
         : []),
       snapshot({ id: perceptionSnapshotId, workspaceId, projectId, kind: 'perception', contentSchemaVersion: 1, value: perception, createdAt }),
-      snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: 1, value: treatmentPlan, createdAt }),
+      snapshot({ id: treatmentSnapshotId, workspaceId, projectId, kind: 'treatment', contentSchemaVersion: treatmentPlan.schemaVersion, value: treatmentPlan, createdAt }),
       snapshot({ id: storySnapshotId, workspaceId, projectId, kind: 'story', contentSchemaVersion: 1, value: storyPlan, createdAt }),
       snapshot({ id: editPlanSnapshotId, workspaceId, projectId, kind: 'edit-plan', contentSchemaVersion: 2, value: editPlan, createdAt }),
       snapshot({ id: qualitySnapshotId, workspaceId, projectId, kind: 'quality-report', contentSchemaVersion: 2, value: qualityReport, createdAt }),
