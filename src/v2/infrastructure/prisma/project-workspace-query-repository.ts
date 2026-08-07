@@ -3,6 +3,7 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord } from '../../application/ports/project-workspace-query-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { PROJECT_STATUSES, type ProjectStatus } from '../../domain/project.ts'
+import { parseProductionBrief } from '../../domain/production-brief.ts'
 
 function hydrateProjectStatus(value: string): ProjectStatus {
   if (!PROJECT_STATUSES.includes(value as ProjectStatus)) {
@@ -113,6 +114,12 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
     const editPlan = project.currentVersion
       ? parseJson(project.currentVersion.editPlanSnapshot.contentJson, 'project EditPlan')
       : undefined
+    const brief = project.currentVersion
+      ? parseJson(project.currentVersion.briefSnapshot.contentJson, 'project brief')
+      : undefined
+    if (brief) {
+      brief.productionBrief = parseProductionBrief(brief.productionBrief)
+    }
     const videoTracks = editPlan && Array.isArray(editPlan.videoTracks) ? editPlan.videoTracks : []
     const clipCount = videoTracks.reduce((total, track) => {
       if (typeof track !== 'object' || track === null || Array.isArray(track)) return total
@@ -172,7 +179,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         createdAt: project.createdAt.toISOString(),
       }),
       ...(project.currentVersion ? { version: Object.freeze({ id: project.currentVersion.id, sequence: project.currentVersion.sequence, baseHash: project.currentVersion.baseHash, createdAt: project.currentVersion.createdAt.toISOString() }) } : {}),
-      ...(project.currentVersion ? { brief: parseJson(project.currentVersion.briefSnapshot.contentJson, 'project brief') } : {}),
+      ...(brief ? { brief: Object.freeze(brief) } : {}),
       ...(editPlan ? { editPlan: Object.freeze({
         id: typeof editPlan.id === 'string' ? editPlan.id : project.currentVersion!.editPlanSnapshotId,
         state: typeof editPlan.state === 'string' ? editPlan.state : 'unknown',

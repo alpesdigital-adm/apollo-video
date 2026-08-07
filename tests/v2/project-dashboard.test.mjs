@@ -15,6 +15,15 @@ const dashboardSource = readFileSync(
   'utf8',
 )
 
+test('T-FR-012 project creation previews canonical briefing coverage before submission', () => {
+  assert.match(dashboardSource, /createProductionBrief\(\{ ownerText: briefing \}\)/)
+  assert.match(dashboardSource, /data-testid="production-brief-preview"/)
+  assert.match(dashboardSource, /data-testid="production-brief-preview-summary"/)
+  assert.match(dashboardSource, /data-testid="production-brief-preview-coverage"/)
+  assert.match(dashboardSource, /data-testid="production-brief-preview-assumptions"/)
+  assert.match(dashboardSource, /Geração ainda não iniciada/)
+})
+
 test('T-FR-236 dashboard consumes the public visible-state contract without inferring legacy statuses', () => {
   assert.match(dashboardSource, /visibleState: VisibleState/)
   assert.match(dashboardSource, /projectBucket\(project\.visibleState\)/)

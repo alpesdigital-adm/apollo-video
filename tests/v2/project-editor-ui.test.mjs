@@ -15,6 +15,17 @@ const dockerfileSource = readFileSync(
   'utf8',
 )
 
+test('T-FR-012 project editor shows persisted owner trust, summary and assumptions', () => {
+  assert.match(projectEditorSource, /parseProductionBrief\(workspace\?\.brief\?\.productionBrief\)/)
+  assert.match(projectEditorSource, /data-testid="production-brief-state"/)
+  assert.match(projectEditorSource, /data-testid="production-brief-summary"/)
+  assert.match(projectEditorSource, /data-testid="production-brief-coverage"/)
+  assert.match(projectEditorSource, /data-testid="production-brief-assumptions"/)
+  assert.match(projectEditorSource, /Owner autorizado/)
+  assert.match(projectEditorSource, /Media-only/)
+  assert.match(projectEditorSource, /Nenhuma geração cara foi iniciada por esta leitura/)
+})
+
 test('project editor prioritizes the version-bound review artifact with the approved final as fallback', () => {
   assert.match(
     projectEditorSource,

@@ -235,6 +235,10 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(result.version.snapshotRefs.editPlan, repository.lastBundle.snapshots[1].id)
   const brief = JSON.parse(repository.lastBundle.snapshots[0].contentJson)
   assert.equal(brief.productionBrief.ownerInput.trust, 'owner-authorized')
+  assert.deepEqual(brief.productionBrief.summary.coverage, {
+    audience: true, offer: true, tone: true,
+  })
+  assert.deepEqual(brief.productionBrief.assumptions, [])
   assert.equal(brief.outputSpec.aspectRatio, '9:16')
   assert.equal(brief.objective, 'discovery')
   assert.deepEqual(
@@ -258,6 +262,38 @@ test('create project persists an initial version and immutable snapshots', async
   assert.equal(repository.lastBundle.auditCommand.versionId, result.version.id)
   assert.equal(repository.lastBundle.auditCommand.requestFingerprint.length, 64)
   assert.equal(repository.lastBundle.auditCommand.commandHash.length, 64)
+})
+
+test('create project persists partial and absent briefing as explicit non-generating states', async () => {
+  const partialFixture = createFixture()
+  await partialFixture.service(request({
+    briefing: 'Público: equipes de marketing.',
+  }))
+  const partial = JSON.parse(
+    partialFixture.repository.lastBundle.snapshots[0].contentJson,
+  ).productionBrief
+  assert.deepEqual(partial.summary.coverage, {
+    audience: true, offer: false, tone: false,
+  })
+  assert.deepEqual(partial.assumptions, [
+    'offer-not-specified', 'tone-not-specified',
+  ])
+  assert.equal(partial.readyForExpensiveGeneration, false)
+
+  const absentFixture = createFixture()
+  const first = await absentFixture.service(request({ briefing: undefined }))
+  const replay = await absentFixture.service(request({ briefing: '   ' }))
+  const absent = JSON.parse(
+    absentFixture.repository.lastBundle.snapshots[0].contentJson,
+  ).productionBrief
+  assert.equal(absent.ownerInput, undefined)
+  assert.deepEqual(absent.assumptions, [
+    'briefing-absent', 'audience-not-specified',
+    'offer-not-specified', 'tone-not-specified',
+  ])
+  assert.equal(absent.summary.supplied, false)
+  assert.equal(replay.replayed, true)
+  assert.equal(replay.project.id, first.project.id)
 })
 
 test('create project persists the complete canonical Desired Action without inventing fields', async () => {

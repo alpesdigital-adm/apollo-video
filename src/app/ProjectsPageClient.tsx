@@ -14,6 +14,7 @@ import {
   OUTPUT_ASPECT_RATIOS,
   type OutputAspectRatio,
 } from '@/v2/domain/output-spec'
+import { createProductionBrief } from '@/v2/domain/production-brief'
 import type {
   VisibleState,
   VisibleStateAction,
@@ -165,6 +166,13 @@ const OPERATION_PHASE_LABELS: Record<string, string> = {
   completed: 'Etapa concluída',
   failed: 'Etapa com falha',
   canceled: 'Etapa cancelada',
+}
+
+const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
+  'briefing-absent': 'Briefing livre não informado',
+  'audience-not-specified': 'Público não especificado',
+  'offer-not-specified': 'Oferta não especificada',
+  'tone-not-specified': 'Tom não especificado',
 }
 
 function ApiIcon({ path, className = 'h-5 w-5' }: { path: string; className?: string }) {
@@ -614,6 +622,10 @@ export default function Dashboard() {
 
   const selectedObjective = STRATEGIC_OBJECTIVES.find((item) => item.id === objective)!
   const requiresDestination = DESTINATION_REQUIRED.has(objective)
+  const productionBriefPreview = useMemo(
+    () => createProductionBrief({ ownerText: briefing }),
+    [briefing],
+  )
   const hasProjects = projects.length > 0
   const hasActiveFilters = hasProjectDashboardFilters(
     normalizeProjectDashboardFilters(filters),
@@ -985,6 +997,25 @@ export default function Dashboard() {
                   <textarea className="mt-2 min-h-32 w-full resize-y rounded-xl border border-white/[0.09] bg-[#080808] p-4 text-sm leading-6 text-[#f2eee7] outline-none transition placeholder:text-[#55524d] focus:border-[#d5a535]/55 focus:ring-2 focus:ring-[#d5a535]/10" maxLength={10000} onChange={(event) => setBriefing(event.target.value)} placeholder="Público, oferta, tom, restrições, referências, elementos que devem ou não aparecer..." value={briefing} />
                   <span className="mt-1.5 flex justify-between text-[10px] text-[#625f59]"><span>Se ficar vazio, o Diretor registra explicitamente as premissas ausentes.</span><span>{briefing.length}/10.000</span></span>
                 </label>
+                <section className="rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="production-brief-preview">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]">Prévia estruturada</p>
+                    <span className="rounded-md border border-white/[0.08] px-2 py-1 text-[9px] text-[#77736c]">Geração ainda não iniciada</span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#aaa49a]" data-testid="production-brief-preview-summary">{productionBriefPreview.summary.text}</p>
+                  <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-preview-coverage">
+                    {Object.entries(productionBriefPreview.summary.coverage).map(([field, covered]) => (
+                      <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
+                        {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
+                      </span>
+                    ))}
+                  </div>
+                  {productionBriefPreview.assumptions.length ? (
+                    <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-preview-assumptions">
+                      {productionBriefPreview.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
+                    </ul>
+                  ) : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-preview-assumptions">Sem lacunas básicas detectadas.</p>}
+                </section>
               </div>
 
               <aside className="border-t border-white/[0.07] bg-[#0a0a0a] px-5 py-6 sm:px-7 lg:border-l lg:border-t-0">

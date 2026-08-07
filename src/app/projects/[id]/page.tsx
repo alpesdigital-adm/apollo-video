@@ -10,6 +10,14 @@ import {
   STRATEGIC_OBJECTIVES,
   type StrategicObjectiveId,
 } from '@/v2/domain/strategic-objective'
+import { parseProductionBrief } from '@/v2/domain/production-brief'
+
+const PRODUCTION_BRIEF_ASSUMPTION_LABELS: Readonly<Record<string, string>> = {
+  'briefing-absent': 'Briefing livre não informado',
+  'audience-not-specified': 'Público não especificado',
+  'offer-not-specified': 'Oferta não especificada',
+  'tone-not-specified': 'Tom não especificado',
+}
 
 const OBJECTIVES_REQUIRING_DESTINATION = new Set<StrategicObjectiveId>([
   'lead-generation',
@@ -3023,13 +3031,14 @@ export default function ProjectWorkspacePage() {
         ['verifying', 'Controle de qualidade', 'Alinhamento de duração'], ['persisting', 'Lineage e direitos', 'Vínculo ao projeto'],
       ]
   const currentStep = activeOperation ? pipelineSteps.findIndex(([phase]) => phase === activeOperation.phase) : -1
-  const productionBrief = workspace?.brief?.productionBrief
-  const ownerInput = typeof productionBrief === 'object' && productionBrief !== null && !Array.isArray(productionBrief)
-    ? (productionBrief as Record<string, unknown>).ownerInput
-    : undefined
-  const briefText = typeof ownerInput === 'object' && ownerInput !== null && !Array.isArray(ownerInput) && typeof (ownerInput as Record<string, unknown>).text === 'string'
-    ? (ownerInput as Record<string, unknown>).text as string
-    : ''
+  const productionBrief = useMemo(() => {
+    try {
+      return parseProductionBrief(workspace?.brief?.productionBrief)
+    } catch {
+      return undefined
+    }
+  }, [workspace?.brief])
+  const briefText = productionBrief?.ownerInput?.text ?? ''
   const manualDurationMs = Math.max(
     1,
     ...(manualTimeline?.timeline.clips.map((clip) => clip.endMs) ?? [1]),
@@ -3070,9 +3079,25 @@ export default function ProjectWorkspacePage() {
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Formato mestre</dt><dd className="mt-1.5 flex items-center gap-2 text-sm text-[#d1cbc1]"><span className="grid h-7 w-7 place-items-center rounded-md border border-[#d9a937]/25 text-[9px] text-[#d9ad48]">{workspace.project.format}</span> Canvas e áreas seguras</dd></div>
             <div><dt className="text-[9px] uppercase tracking-[0.16em] text-[#625f58]">Idioma</dt><dd className="mt-1.5 text-sm text-[#d1cbc1]">{workspace.project.locale ?? 'pt-BR'}</dd></div>
           </dl>
-          <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4">
-            <p className="text-[9px] uppercase tracking-[0.16em] text-[#6c685f]">Briefing do diretor</p>
-            <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]">{briefText || 'Nenhuma instrução adicional. O diretor deverá declarar as premissas antes do plano editorial.'}</p>
+          <div className="mt-7 rounded-xl border border-white/[0.07] bg-white/[0.025] p-4" data-testid="production-brief-state">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[9px] uppercase tracking-[0.16em] text-[#6c685f]">Briefing do diretor</p>
+              <span className="text-[9px] text-[#5fbd7e]">{productionBrief?.ownerInput ? 'Owner autorizado' : 'Media-only'}</span>
+            </div>
+            <p className="mt-3 whitespace-pre-wrap text-xs leading-5 text-[#969188]" data-testid="production-brief-summary">{(productionBrief?.summary.text ?? briefText) || 'Briefing persistido indisponível.'}</p>
+            <div className="mt-3 flex flex-wrap gap-1.5" data-testid="production-brief-coverage">
+              {Object.entries(productionBrief?.summary.coverage ?? {}).map(([field, covered]) => (
+                <span className={`rounded-md border px-2 py-1 text-[9px] ${covered ? 'border-[#5fbd7e]/25 text-[#74c98f]' : 'border-white/[0.07] text-[#716d65]'}`} key={field}>
+                  {field === 'audience' ? 'Público' : field === 'offer' ? 'Oferta' : 'Tom'}: {covered ? 'informado' : 'ausente'}
+                </span>
+              ))}
+            </div>
+            {productionBrief?.assumptions.length ? (
+              <ul className="mt-3 space-y-1 text-[10px] text-[#8f897f]" data-testid="production-brief-assumptions">
+                {productionBrief.assumptions.map((assumption) => <li key={assumption}>• {PRODUCTION_BRIEF_ASSUMPTION_LABELS[assumption]}</li>)}
+              </ul>
+            ) : <p className="mt-3 text-[10px] text-[#74c98f]" data-testid="production-brief-assumptions">Sem lacunas básicas detectadas.</p>}
+            <p className="mt-3 border-t border-white/[0.06] pt-3 text-[9px] text-[#68645d]">Nenhuma geração cara foi iniciada por esta leitura.</p>
           </div>
           <div className="mt-5 rounded-xl border border-[#d9a43a]/20 bg-[#d9a43a]/[0.035] p-4" data-testid="director-objective-governance">
             <label className="block text-[9px] font-semibold uppercase tracking-[0.16em] text-[#b58d31]" htmlFor="director-objective">

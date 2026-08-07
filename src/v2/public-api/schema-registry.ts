@@ -46,6 +46,108 @@ const desiredActionInputSchema = {
     },
   },
 } as const
+const desiredActionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'kind', 'disclosures'],
+  properties: {
+    schemaVersion: { const: 1 },
+    kind: { enum: ['continue-viewing', 'submit-lead', 'buy', 'message-whatsapp', 'book', 'download'] },
+    destination: desiredActionInputSchema.properties.destination,
+    verbalCta: desiredActionInputSchema.properties.verbalCta,
+    visualCta: desiredActionInputSchema.properties.visualCta,
+    disclosures: desiredActionInputSchema.properties.disclosures,
+  },
+} as const
+const productionBriefSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'summary', 'assumptions', 'readyForExpensiveGeneration'],
+  properties: {
+    schemaVersion: { const: 1 },
+    ownerInput: {
+      type: 'object', additionalProperties: false, required: ['text', 'trust'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 10000 },
+        trust: { const: 'owner-authorized' },
+      },
+    },
+    ingestedContext: {
+      type: 'object', additionalProperties: false, required: ['ref', 'trust'],
+      properties: {
+        ref: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{2,255}$' },
+        trust: { const: 'untrusted-media-derived' },
+      },
+    },
+    summary: {
+      type: 'object', additionalProperties: false,
+      required: ['text', 'supplied', 'coverage'],
+      properties: {
+        text: { type: 'string', minLength: 1, maxLength: 280 },
+        supplied: { type: 'boolean' },
+        coverage: {
+          type: 'object', additionalProperties: false,
+          required: ['audience', 'offer', 'tone'],
+          properties: {
+            audience: { type: 'boolean' }, offer: { type: 'boolean' }, tone: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    assumptions: {
+      type: 'array', maxItems: 4, uniqueItems: true,
+      items: { enum: ['briefing-absent', 'audience-not-specified', 'offer-not-specified', 'tone-not-specified'] },
+    },
+    readyForExpensiveGeneration: { const: false },
+  },
+} as const
+const outputSpecSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea'],
+  properties: {
+    schemaVersion: { const: 1 }, id: idSchema,
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+    width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 },
+    fps: { type: 'integer', minimum: 1, maximum: 120 },
+    safeArea: {
+      type: 'object', additionalProperties: false,
+      required: ['top', 'right', 'bottom', 'left'],
+      properties: {
+        top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+        left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+      },
+    },
+    deliveryProfileId: idSchema,
+  },
+} as const
+const projectBriefSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'objective', 'desiredAction', 'outputSpec', 'productionBrief', 'createdAt'],
+  properties: {
+    schemaVersion: { enum: [1, 2] }, objective: strategicObjectiveSchema,
+    desiredAction: desiredActionSchema, outputSpec: outputSpecSchema,
+    productionBrief: productionBriefSchema, createdAt: dateTimeSchema,
+    objectiveChange: {
+      type: 'object', additionalProperties: false,
+      required: ['from', 'to', 'objectiveVersion', 'rubricRef', 'reason', 'changedAt'],
+      properties: {
+        from: strategicObjectiveSchema, to: strategicObjectiveSchema,
+        objectiveVersion: { type: 'integer', minimum: 2 },
+        rubricRef: { type: 'string', pattern: '^[a-z0-9-]+/v[1-9][0-9]*$' },
+        supersedesRunId: idSchema,
+        reason: { type: 'string', minLength: 1, maxLength: 1000 }, changedAt: dateTimeSchema,
+      },
+    },
+  },
+  allOf: [{
+    if: { properties: { schemaVersion: { const: 2 } } },
+    then: {
+      required: ['objectiveChange'],
+      properties: { objectiveChange: {} },
+    },
+  }],
+} as const
 const desiredActionObjectiveRequirements = [
   ['lead-generation', 'url'], ['sale', 'url'], ['whatsapp', 'whatsapp'],
   ['booking', 'calendar'], ['download', 'file'],
@@ -17869,7 +17971,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  defineSchema('project-workspace', 8, 'Project workspace with objective-bound DirectorRun history',
+  ...([8, 9] as const).map((version) => defineSchema(
+    'project-workspace',
+    version,
+    version === 8
+      ? 'Project workspace with objective-bound DirectorRun history'
+      : 'Project workspace with canonical optional production brief',
     successSchema({
       type: 'object', additionalProperties: false,
       required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
@@ -17883,7 +17990,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             createdAt: dateTimeSchema, visibleState: currentProjectVersionVisibleStateSchema,
           },
         },
-        brief: { type: 'object', additionalProperties: true },
+        brief: version === 8
+          ? { type: 'object', additionalProperties: true }
+          : projectBriefSchema,
         editPlan: {
           type: 'object', additionalProperties: false,
           required: ['id', 'state', 'fps', 'durationFrames', 'clipCount', 'cutCount', 'automaticZoom', 'subtitleFaceProtection'],
@@ -17957,7 +18066,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         operations: { type: 'array', maxItems: 1000, items: publicOperationSchemaV7 },
       },
     }),
-  ),
+  )),
   defineSchema('production-batch-mutated', 2, 'Created or mutated production batch with aggregate and per-item visible state',
     successSchema({
       type: 'object',

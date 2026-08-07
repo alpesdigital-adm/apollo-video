@@ -36,6 +36,7 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
+  const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const { parseCompareActionImpact } = await import('../../src/v2/domain/compare-action-impact.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
@@ -139,6 +140,19 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
       schemaVersion: 1,
       objective: 'discovery',
       desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+      outputSpec: {
+        schemaVersion: 1,
+        id: `manual-output-spec-${suffix}`,
+        locale: 'pt-BR',
+        aspectRatio: '9:16',
+        width: 1080,
+        height: 1920,
+        fps: 30,
+        safeArea: { top: 0.05, right: 0.05, bottom: 0.08, left: 0.05 },
+      },
+      productionBrief: createProductionBrief({
+        ownerText: 'Público: equipes criativas. Oferta: demonstração. Tom: direto.',
+      }),
       createdAt: createdAt.toISOString(),
     }
     const policies = { schemaVersion: 1, state: 'configured', createdAt: createdAt.toISOString() }
@@ -1462,6 +1476,108 @@ test('T-FR-216 manual editing persists optimistic Commands, immutable undo/redo 
     assert.equal(asyncDirectorReplayResponse.status, 202, JSON.stringify(asyncDirectorReplay))
     assert.equal(asyncDirectorReplay.data.replayed, true)
     assert.equal(asyncDirectorReplay.data.operation.id, storedAsyncOperation.id)
+
+    async function createBriefingProject(label, briefing, key) {
+      const response = await fetch(`${baseUrl}/v1/projects`, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({
+          name: `F1.007 ${label}`,
+          objective: 'discovery',
+          format: '9:16',
+          locale: 'pt-BR',
+          ...(briefing === undefined ? {} : { briefing }),
+        }),
+      })
+      const payload = await response.json()
+      assert.equal(response.status, 201, `${JSON.stringify(payload)}\n${serverLogs.slice(-4_000)}`)
+      return payload.data.project.id
+    }
+
+    const briefingCases = [
+      {
+        label: 'completo',
+        briefing: 'Público: gestores de produto. Oferta: guia prático. Tom: direto.',
+        coverage: { audience: true, offer: true, tone: true },
+        assumptions: [],
+        trustLabel: 'Owner autorizado',
+      },
+      {
+        label: 'parcial',
+        briefing: 'Público: equipes clínicas.',
+        coverage: { audience: true, offer: false, tone: false },
+        assumptions: ['offer-not-specified', 'tone-not-specified'],
+        trustLabel: 'Owner autorizado',
+      },
+      {
+        label: 'ausente',
+        briefing: undefined,
+        coverage: { audience: false, offer: false, tone: false },
+        assumptions: [
+          'briefing-absent',
+          'audience-not-specified',
+          'offer-not-specified',
+          'tone-not-specified',
+        ],
+        trustLabel: 'Media-only',
+      },
+    ]
+
+    for (const briefingCase of briefingCases) {
+      const briefingProjectId = await createBriefingProject(
+        briefingCase.label,
+        briefingCase.briefing,
+        `f1007-${briefingCase.label}-${suffix}`,
+      )
+      const workspaceResponse = await fetch(
+        `${baseUrl}/v1/projects/${briefingProjectId}/workspace`,
+        { headers: { authorization, accept: 'application/json' } },
+      )
+      const workspaceRead = await workspaceResponse.json()
+      assert.equal(workspaceResponse.status, 200, JSON.stringify(workspaceRead))
+      const productionBrief = workspaceRead.data.brief.productionBrief
+      assert.deepEqual(productionBrief.summary.coverage, briefingCase.coverage)
+      assert.deepEqual(productionBrief.assumptions, briefingCase.assumptions)
+      assert.equal(productionBrief.readyForExpensiveGeneration, false)
+      assert.equal(productionBrief.ownerInput?.trust, briefingCase.briefing === undefined
+        ? undefined
+        : 'owner-authorized')
+
+      await page.goto(`${baseUrl}/projects/${briefingProjectId}`)
+      const briefingState = page.getByTestId('production-brief-state')
+      await briefingState.waitFor({ state: 'visible', timeout: 10_000 })
+      assert.match(await briefingState.textContent(), new RegExp(briefingCase.trustLabel, 'u'))
+      assert.equal(
+        (await page.getByTestId('production-brief-assumptions').textContent())?.trim().length > 0,
+        true,
+      )
+      assert.match(
+        await briefingState.textContent(),
+        /Nenhuma geração cara foi iniciada por esta leitura\./u,
+      )
+    }
+
+    const forgedTrustBoundary = await fetch(`${baseUrl}/v1/projects`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `f1007-forged-trust-${suffix}`,
+      },
+      body: JSON.stringify({
+        name: 'F1.007 trust boundary forgery',
+        objective: 'discovery',
+        format: '9:16',
+        productionBrief: { ownerInput: { trust: 'owner-authorized' } },
+      }),
+    })
+    const forgedTrustPayload = await forgedTrustBoundary.json()
+    assert.equal(forgedTrustBoundary.status, 400, JSON.stringify(forgedTrustPayload))
+    assert.equal(forgedTrustPayload.error.code, 'INVALID_ARGUMENT')
     await context.close()
     await browser.close()
     browser = undefined

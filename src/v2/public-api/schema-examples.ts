@@ -19,6 +19,29 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const canonicalProjectBriefExample = {
+  schemaVersion: 1,
+  objective: 'discovery',
+  desiredAction: { schemaVersion: 1, kind: 'continue-viewing', disclosures: [] },
+  outputSpec: {
+    schemaVersion: 1, id: 'output-9x16-pt-br', locale: 'pt-BR',
+    aspectRatio: '9:16', width: 1080, height: 1920, fps: 30,
+    safeArea: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+  },
+  productionBrief: {
+    schemaVersion: 1,
+    ownerInput: {
+      text: 'Público: gestores. Oferta: guia. Tom: direto.',
+      trust: 'owner-authorized',
+    },
+    summary: {
+      text: 'Público: gestores. Oferta: guia. Tom: direto.', supplied: true,
+      coverage: { audience: true, offer: true, tone: true },
+    },
+    assumptions: [], readyForExpensiveGeneration: false,
+  },
+  createdAt,
+}
 const workspaceLutCubeExample = 'TITLE "Coração 🎞️"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n0 0 1\n0 1 0\n0 1 1\n1 0 0\n1 0 1\n1 1 0\n1 1 1\n'
 const workspaceLutExample = {
   id: 'lut-cinema-example', workspaceId, status: 'active',
@@ -8421,6 +8444,33 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             subtitleCueCount: 28, transitionCount: 2, automaticZoom: false, createdAt,
           }],
           commands: [], media: [], transcripts: [], operationIds: [], operations: [],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-workspace/v9': [
+      {
+        data: {
+          project: {
+            id: projectId, workspaceId, name: 'Anuncio com briefing estruturado', status: 'draft',
+            objective: 'discovery', format: '9:16', locale: 'pt-BR', createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'draft', tone: 'neutral',
+              progress: { mode: 'not-started', percent: 0 }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          version: {
+            id: 'project-version-example-brief-1', sequence: 1,
+            baseHash: 'f'.repeat(64), createdAt,
+            visibleState: {
+              schemaVersion: 'visible-state/v1', label: 'current', tone: 'info',
+              progress: { mode: 'none' }, primaryAction: 'open-result',
+              availableActions: ['open-result'], terminal: false,
+            },
+          },
+          brief: canonicalProjectBriefExample,
+          commands: [], directorRuns: [], media: [], transcripts: [], operationIds: [], operations: [],
         },
         meta: { apiVersion: 'v1' },
       },
