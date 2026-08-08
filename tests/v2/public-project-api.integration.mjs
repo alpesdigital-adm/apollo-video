@@ -1339,6 +1339,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       data: {
         id: 'public-api-client-kill-operation-v2', workspaceId, clientId: apiClientId,
         type: 'artifact-render', status: 'queued', phase: 'queued',
+        progressCompleted: 0, progressTotal: 4, progressUnit: 'render',
         targetType: 'media-artifact', targetId: derivedArtifactId,
         cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
         idempotencyKey: 'public-api-client-kill-operation-v2', requestFingerprint: sha('1'),
@@ -1505,6 +1506,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       data: {
         id: 'public-api-workspace-kill-operation-v2', workspaceId, clientId: apiClientId,
         type: 'artifact-render', status: 'queued', phase: 'queued',
+        progressCompleted: 0, progressTotal: 4, progressUnit: 'render',
         targetType: 'media-artifact', targetId: sourceArtifactId,
         cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
         idempotencyKey: 'public-api-workspace-kill-operation-v2', requestFingerprint: sha('2'),
@@ -5313,6 +5315,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         clientId: apiClientId,
         actorEnvironment: apiEnvironment,
         type: 'artifact-render', status: 'queued', phase: 'queued',
+        progressCompleted: 0, progressTotal: 4, progressUnit: 'render',
         targetType: 'media-artifact', targetId: derivedArtifactId,
         cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
         idempotencyKey: 'public-api-dashboard-operation-v2',
