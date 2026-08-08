@@ -234,6 +234,9 @@ test('authenticated public API manages projects, clients and artifact inspection
     await client.v2RecipeParameterPayload.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
+    await client.v2ProjectAdministrationCommand.deleteMany({
+      where: { workspaceId: { in: workspaceIds } },
+    })
     await client.v2PublicEventOutbox.deleteMany({
       where: { workspaceId: { in: workspaceIds } },
     })
