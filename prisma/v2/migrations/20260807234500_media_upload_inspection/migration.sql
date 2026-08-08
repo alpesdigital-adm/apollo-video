@@ -15,5 +15,10 @@ ALTER TABLE "media_uploads"
     ("inspectionStatus" = 'quarantined' AND "detectedMimeType" IS NOT NULL AND "detectedExtension" IS NOT NULL AND "inspectionErrorJson" IS NOT NULL AND "inspectedAt" IS NOT NULL)
   );
 
+ALTER TABLE "media_upload_audit_entries"
+  DROP CONSTRAINT "media_upload_audit_entries_action_check",
+  ADD CONSTRAINT "media_upload_audit_entries_action_check"
+    CHECK ("action" IN ('begin', 'session-issue', 'part-record', 'complete', 'abort', 'inspect'));
+
 CREATE INDEX "media_uploads_workspaceId_inspectionStatus_createdAt_idx"
   ON "media_uploads"("workspaceId", "inspectionStatus", "createdAt" DESC);

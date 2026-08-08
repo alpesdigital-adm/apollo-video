@@ -147,6 +147,18 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
   const s3 = useS3 ? createArtifactS3ClientFromEnvironment(process.env) : undefined
   const storage = s3 ? new S3VerifiedMediaStorage(localStorage, s3) : localStorage
   const operations = new PrismaPublicOperationRepository(prisma)
+  const observedIngestFailures = []
+  const diagnosticOperations = new Proxy(operations, {
+    get(target, property) {
+      if (property === 'failOrRetry') return async (input) => {
+        observedIngestFailures.push(input.error)
+        process.stderr.write(`[vertical-smoke ingest failure] ${JSON.stringify(input.error)}\n`)
+        return target.failOrRetry(input)
+      }
+      const value = target[property]
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
   const artifacts = new PrismaMediaArtifactRepository(prisma)
   const telemetryEvents = []
   const telemetry = {
@@ -185,7 +197,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     })
 
     const ingest = runNextMediaIngestOperationService({
-      operations,
+      operations: diagnosticOperations,
       telemetry,
       uploads: new PrismaMediaTransferRepository(prisma),
       artifacts,
@@ -271,6 +283,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     }
     assert.equal(ingestOutcome.status, 'succeeded')
     assert.equal(seed.ingestOperation.status, 'succeeded')
+    assert.deepEqual(observedIngestFailures, [])
 
     const transfers = new PrismaMediaTransferRepository(prisma)
     const mediaActor = Object.freeze({ ...proxyActor, scopes: new Set(['media:write']) })
