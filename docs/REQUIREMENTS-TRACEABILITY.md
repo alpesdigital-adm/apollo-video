@@ -242,6 +242,15 @@ roles de projeto. O golden complementar aprovou mismatch/corrupção acionável 
 ausência de promoção. Build Linux e postflight passaram; a VPS `590809693` foi
 destruída. O requisito segue aberto por falta de deploy/aceite e de browser
 offline real para a jornada de falha de rede.
+
+Evidência remota parcial FR-040/F1.012: os commits `093272d` e `80fd193`
+passaram o run `f1012-20260808-r1` com 151 migrations, PostgreSQL 17, API
+pública e Chromium. Cursor e filtros ficaram isolados por workspace; rights
+ausentes/restritos bloquearam uso; attach 201 e replay 200 convergiram para uma
+referência `selected-insert`, sem alterar bytes nem multiplicar a identidade do
+artifact. Build Linux e postflight passaram, e a VPS `590921960` foi destruída
+com confirmação HTTP 404. FR-040 segue aberto por MediaSegment, previews
+derivados reais, deploy e aceite.
 | FR-060 | TreatmentPlan | S1 | D2 | objetivo produz gramática/energy policy | golden |
 | FR-061 | StoryPlan | S1 | D2 | atos/blocos/dependências persistidos | golden |
 | FR-062 | Alternativas de montagem | S1 | D2 | ao menos candidatos elegíveis são comparados | integration |

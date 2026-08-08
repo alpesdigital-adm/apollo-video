@@ -28,7 +28,7 @@ Incluído:
 
 Não incluído:
 
-- UI completa da biblioteca;
+- UI avançada além da navegação, filtros e reuso por referência de F1.012;
 - algoritmo editorial do Diretor;
 - provider internals;
 - autorização legal automática;
@@ -49,6 +49,18 @@ Não incluído:
 11. Toda geração aprovada pode ser catalogada.
 12. Reuso precisa preservar validation envelope e qualifiers.
 13. Conteúdo importado nunca vira instrução do sistema.
+
+### 3.1 Slice integrado F1.012
+
+A Media Library v1 usa `V2MediaLibraryEntry` como metadata pesquisável ligada
+por FK ao `V2MediaArtifact` imutável. O cursor inclui `createdAt`, artifact ID e
+fingerprint do workspace/filtros; não pode ser reaproveitado em outra consulta.
+Pessoa e tema são filtrados server-side. A condição jurídica é calculada pelo
+snapshot atual com `evaluateAssetUse(..., use: 'editorial-reuse')`; ausência de
+rights é revisão, nunca autorização. O attach revalida artifact, estado, rights
+e locale do projeto numa transação serializável e cria somente um
+`V2ProjectMediaAsset(role='selected-insert')`. `MediaSegment` continua reservado
+para F1.013 e não é simulado por artifact ou arquivo recortado.
 
 ## 4. Modelo de entidades
 

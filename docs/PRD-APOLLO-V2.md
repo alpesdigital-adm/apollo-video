@@ -591,6 +591,14 @@ Cada ativo deve registrar origem, autorização, escopo de uso, restrições e e
 
 Biblioteca global por workspace, pesquisável e reutilizável.
 
+Estado integrado parcial (F1.012, 2026-08-08): artifacts V2 imutáveis são
+catalogados no ingest, listados por cursor na API pública e filtrados no
+servidor por kind, pessoa, tema e elegibilidade de rights para
+`editorial-reuse`. O editor insere um artifact elegível por referência
+`selected-insert`, sem copiar bytes. O run remoto `f1012-20260808-r1` comprovou
+PostgreSQL, HTTP e Chromium; permanecem pendentes MediaSegment (FR-042),
+previews derivados reais, deploy e aceite.
+
 ### FR-041 — Tipos de ativos
 
 - VideoAsset.

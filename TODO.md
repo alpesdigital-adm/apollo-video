@@ -877,11 +877,24 @@ machine, ainda não por browser offline real.
 
 ### F1.012 — Media Library v1 [FR-040]
 
-- [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: consulta por cursor no domínio e paginação externa por offset/limit na biblioteca legada.
+- [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: API pública V2 usa cursor opaco ligado a `createdAt + artifactId` e ao fingerprint dos filtros; `segment` permanece sem resultados até F1.013 materializar sua entidade própria.
 - [ ] Implementar detalhes, thumbnail/waveform, status, origem e rights. Evidência F1-012: item canônico separa preview, condição técnica, origem e elegibilidade jurídica.
-- [ ] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: endpoint `POST /api/assets/{id}/attach` persiste somente referência deduplicada no projeto.
+- [ ] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: `POST /v1/projects/{projectId}/media-library-attachments` persiste somente `selected-insert` deduplicado para o artifact imutável.
 - [ ] Implementar filtros mínimos por kind, pessoa, tema e status de direito. Evidência F1-012: filtros são server-side e isolados pelo workspace no domínio.
 - [ ] Testar navegação, reuso e bloqueio de asset restrito. Evidência F1-012/T-FR-040: regressão cobre páginas, filtros, isolamento, referência sem cópia e bloqueio de rights.
+
+Evidência remota parcial F1.012 (run `f1012-20260808-r1`, commits `093272d` e
+`80fd193`): PostgreSQL 17 + pgvector aplicou 151 migrations do zero e aprovou
+o teste Prisma para cursor/filtros, isolamento entre workspaces, rights e attach
+idempotente. O Next compilou em Linux e o Chromium real comprovou login,
+listagem de quatro assets, filtro `Ana Martins + Liberado`, bloqueio visual de
+rights ausentes/restritos, attach HTTP 201 e replay HTTP 200. O banco reteve
+uma única referência `selected-insert`, preservou `byteSize=81000000` e uma só
+identidade de conteúdo. Postflight: browser e túnel fechados, PID do Next
+encerrado, zero sessões da aplicação, container do run removido; VPS
+`590921960` destruída com confirmação HTTP 404. As cinco caixas permanecem
+abertas: F1.013 ainda deve integrar `MediaSegment`, previews derivados reais
+ainda não foram gerados/inspecionados e não houve deploy nem aceite.
 
 ### F1.013 — MediaSegment [FR-042]
 
