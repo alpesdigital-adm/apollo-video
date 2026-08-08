@@ -328,6 +328,9 @@ test('completed ingest persists immutable source and proxy color probes atomical
     v2ProjectMediaAsset: {
       async upsert() { return {} },
     },
+    v2MediaLibraryEntry: {
+      async upsert() { return {} },
+    },
     v2MediaTranscript: {
       async findUnique() { return null },
       async create() { return {} },

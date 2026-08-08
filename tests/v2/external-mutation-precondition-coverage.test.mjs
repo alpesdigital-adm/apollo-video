@@ -254,6 +254,9 @@ const coverage = Object.freeze({
   'apollo.projects.asset-selections.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds projectVersionId/projectVersionHash and the serializable commit rechecks current version, artifacts and rights snapshots',
   },
+  'apollo.projects.media-library.attach': {
+    mode: 'natural-idempotent-create', evidence: 'the unique project/artifact/selected-insert reference is a natural idempotency key and the serializable transaction rechecks project locale, artifact lifecycle and current rights',
+  },
   'apollo.projects.quality-iterations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds project version, proxy revision/hash, asset selections, rubric evidence, reference dataset and fixed budget; serializable commit rechecks all server evidence',
   },
@@ -510,6 +513,9 @@ test('every external mutation has an explicit precondition strategy', () => {
     if (decision.mode === 'idempotent-create') {
       assert.equal(capability.idempotency, 'required')
     }
+    if (decision.mode === 'natural-idempotent-create') {
+      assert.equal(capability.idempotency, 'natural')
+    }
     if (decision.mode === 'read-only-preflight') {
       assert.equal(capability.operationKind, 'preflight')
     }
@@ -528,6 +534,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 2,
     'explicit-precondition': 9,
     'idempotent-create': 48,
+    'natural-idempotent-create': 1,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 10,

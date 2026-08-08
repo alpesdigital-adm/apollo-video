@@ -10,6 +10,7 @@ import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
 import type { MediaColorProbe } from '../../domain/color-and-export.ts'
 import { createProjectVersion } from '../../domain/project-version.ts'
+import { mediaLibrarySearchField } from '../../domain/media-library.ts'
 
 function colorProbeData(probe: Readonly<MediaColorProbe>) {
   const { probeHash, ...content } = probe
@@ -178,6 +179,18 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
           update: {},
         })
       }
+      const emptyPeople = mediaLibrarySearchField([], 'people')
+      const emptyTopics = mediaLibrarySearchField([], 'topics')
+      await transaction.v2MediaLibraryEntry.upsert({
+        where: { artifactId: input.sourceArtifactId },
+        create: {
+          artifactId: input.sourceArtifactId, workspaceId: input.workspaceId,
+          label: input.originalFileName, peopleJson: stableSerialize(emptyPeople.values), peopleSearch: emptyPeople.search,
+          topicsJson: stableSerialize(emptyTopics.values), topicsSearch: emptyTopics.search,
+          originType: 'upload', createdAt: new Date(input.createdAt),
+        },
+        update: {},
+      })
       const existingTranscript = await transaction.v2MediaTranscript.findUnique({ where: { id: input.transcriptId } })
       if (existingTranscript) {
         if (
@@ -317,6 +330,18 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
           id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId,
           artifactId: input.artifactId, uploadId: input.uploadId, role: `source-${input.mediaType}`,
           originalFileName: input.originalFileName, createdAt: new Date(input.createdAt),
+        },
+        update: {},
+      })
+      const emptyPeople = mediaLibrarySearchField([], 'people')
+      const emptyTopics = mediaLibrarySearchField([], 'topics')
+      await transaction.v2MediaLibraryEntry.upsert({
+        where: { artifactId: input.artifactId },
+        create: {
+          artifactId: input.artifactId, workspaceId: input.workspaceId,
+          label: input.originalFileName, peopleJson: stableSerialize(emptyPeople.values), peopleSearch: emptyPeople.search,
+          topicsJson: stableSerialize(emptyTopics.values), topicsSearch: emptyTopics.search,
+          originType: 'upload', createdAt: new Date(input.createdAt),
         },
         update: {},
       })

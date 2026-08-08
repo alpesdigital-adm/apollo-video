@@ -85,6 +85,7 @@ import type { MaterializationAuthorizationRepository } from '../application/port
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
+import type { MediaLibraryRepository } from '../application/ports/media-library-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
@@ -209,6 +210,7 @@ import { PrismaMaterializationAuthorizationRepository } from './prisma/materiali
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
+import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -718,6 +720,10 @@ export function createMaterializationAuthorizationRepository(): MaterializationA
 
 export function createMediaArtifactQueryRepository(): MediaArtifactQueryRepository {
   return new PrismaMediaArtifactRepository(resolveV2Client())
+}
+
+export function createMediaLibraryRepository(): MediaLibraryRepository {
+  return new PrismaMediaLibraryRepository(resolveV2Client())
 }
 
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {

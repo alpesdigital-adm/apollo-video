@@ -12536,7 +12536,68 @@ const governanceAdmissionScopeDecisionSchemaV2 = {
   },
 }
 
+const mediaLibraryItemDataSchema = {
+      type: 'object', additionalProperties: false,
+      required: ['id', 'workspaceId', 'kind', 'label', 'people', 'topics', 'status', 'rights', 'origin', 'preview', 'technical', 'createdAt'],
+      properties: {
+        id: idSchema, workspaceId: idSchema,
+        kind: { enum: ['video', 'audio', 'image', 'segment'] },
+        label: { type: 'string', minLength: 1, maxLength: 240 },
+        people: { type: 'array', maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 120 } },
+        topics: { type: 'array', maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 120 } },
+        status: { enum: ['processing', 'usable', 'failed'] },
+        rights: {
+          type: 'object', additionalProperties: false, required: ['status', 'reasonCodes'],
+          properties: {
+            status: { enum: ['eligible', 'review', 'restricted', 'expired'] }, snapshotId: idSchema,
+            reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', minLength: 3, maxLength: 96 } },
+          },
+        },
+        origin: {
+          type: 'object', additionalProperties: false, required: ['type'],
+          properties: { type: { enum: ['upload', 'generated', 'derived'] }, parentArtifactId: idSchema },
+        },
+        preview: {
+          type: 'object', additionalProperties: false, required: ['thumbnail', 'waveform'],
+          properties: {
+            thumbnail: { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { enum: ['available', 'unavailable'] }, artifactId: idSchema } },
+            waveform: { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { enum: ['available', 'unavailable'] }, artifactId: idSchema } },
+          },
+        },
+        technical: {
+          type: 'object', additionalProperties: false, required: ['mediaType', 'container', 'byteSize'],
+          properties: { mediaType: { enum: ['video', 'audio', 'image'] }, container: { type: 'string', minLength: 1, maxLength: 32 }, byteSize: { type: 'string', pattern: '^[1-9][0-9]*$' } },
+        },
+        createdAt: dateTimeSchema,
+      },
+} as const
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('media-library-item', 1, 'Media library item response',
+    successSchema(mediaLibraryItemDataSchema),
+  ),
+  defineSchema('media-library-page', 1, 'Media library page response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['items', 'nextCursor'],
+      properties: {
+        items: { type: 'array', maxItems: 100, items: mediaLibraryItemDataSchema },
+        nextCursor: { type: ['string', 'null'], minLength: 8, maxLength: 512 },
+      },
+    }),
+  ),
+  defineSchema('media-library-attachment-request', 1, 'Media library attachment request', {
+    type: 'object', additionalProperties: false, required: ['artifactId'], properties: { artifactId: idSchema },
+  }),
+  defineSchema('media-library-attachment', 1, 'Media library attachment response',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['id', 'projectId', 'workspaceId', 'artifactId', 'role', 'bytesDuplicated', 'replayed', 'createdAt'],
+      properties: {
+        id: idSchema, projectId: idSchema, workspaceId: idSchema, artifactId: idSchema,
+        role: { const: 'selected-insert' }, bytesDuplicated: { const: false }, replayed: { type: 'boolean' }, createdAt: dateTimeSchema,
+      },
+    }),
+  ),
   defineSchema('health-response', 1, 'Health response',
     successSchema({
       type: 'object',

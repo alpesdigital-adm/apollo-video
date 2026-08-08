@@ -422,6 +422,10 @@ export function createFoundationAgentToolSafety(
     'apollo.artifacts.download-grants.revoke': {
       impact: 'bounded', confirmation: 'none', reason: 'Revokes one short-lived authorization owned by the authenticated client.',
     },
+    'apollo.projects.media-library.attach': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Adds one rights-cleared immutable artifact reference to one project without copying or deleting media bytes.',
+    },
     'apollo.clients.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Creates a new machine identity with workspace-scoped API permissions.',

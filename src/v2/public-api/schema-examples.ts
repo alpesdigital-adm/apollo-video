@@ -5034,6 +5034,45 @@ const projectLutSelectionDeferredExampleV3 = {
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/media-library-item/v1': [
+      {
+        data: {
+          id: artifactId, workspaceId, kind: 'video', label: 'Entrevista principal.mp4',
+          people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+          rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+          origin: { type: 'upload' },
+          preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+          technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' }, createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-library-page/v1': [
+      {
+        data: {
+          items: [{
+            id: artifactId, workspaceId, kind: 'video', label: 'Entrevista principal.mp4',
+            people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+            rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+            origin: { type: 'upload' },
+            preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+            technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' }, createdAt,
+          }],
+          nextCursor: null,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-library-attachment-request/v1': [{ artifactId }],
+    'apollo://schemas/media-library-attachment/v1': [
+      {
+        data: {
+          id: '123e4567-e89b-42d3-a456-426614174077', projectId, workspaceId, artifactId,
+          role: 'selected-insert', bytesDuplicated: false, replayed: false, createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/health-response/v1': [
       {
         data: { service: 'apollo-video', status: 'ok' },
