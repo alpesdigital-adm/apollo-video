@@ -1266,6 +1266,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       data: {
         status: 'suspended',
         suspendedAt: new Date(subscriptionChangedAt.getTime() + 1_750),
+        updatedAt: new Date(subscriptionChangedAt.getTime() + 1_750),
       },
     })
     await assert.rejects(
@@ -1281,7 +1282,11 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     )
     await client.v2WebhookEndpoint.update({
       where: { id: endpoint.id },
-      data: { status: 'active', suspendedAt: null },
+      data: {
+        status: 'active',
+        suspendedAt: null,
+        updatedAt: new Date(subscriptionChangedAt.getTime() + 1_900),
+      },
     })
     const resumed = await subscriptionCommands.setStatus({
       administration: statusAdministration({
