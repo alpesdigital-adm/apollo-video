@@ -996,7 +996,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     )
     assert.deepEqual(
       openApi.paths['/v1/operations'].get.parameters.map((parameter) => parameter.name),
-      ['limit', 'after', 'status', 'type', 'targetId'],
+      ['limit', 'after', 'status', 'type', 'projectId', 'targetId'],
     )
     assert.equal(
       openApi.paths['/v1/operations/dead-letter'].get['x-apollo-capability-id'],
