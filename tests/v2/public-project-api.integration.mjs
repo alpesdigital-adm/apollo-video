@@ -4331,7 +4331,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(renderOperation.data.operation.phase, 'queued')
     assert.deepEqual(renderOperation.data.operation.progress, {
       completed: 0,
-      total: 1,
+      total: 4,
       unit: 'render',
     })
     assert.deepEqual(renderOperation.data.operation.target, {
