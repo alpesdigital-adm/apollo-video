@@ -1359,6 +1359,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         }
 
         let reusedColorPipelineBindingsJson: string | undefined
+        let ingestUploadKind: 'video' | 'audio' | 'image' | undefined
         if (ingestContext) {
           const upload = await transaction.v2MediaUpload.findFirst({
             where: {
@@ -1369,11 +1370,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               status: 'verified',
               rightsConfirmed: true,
             },
-            select: { id: true, fileName: true },
+            select: { id: true, fileName: true, kind: true },
           })
           if (!upload || upload.fileName !== ingestContext.originalFileName) {
             throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified upload cannot be attached to this ingest operation')
           }
+          if (!['video', 'audio', 'image'].includes(upload.kind)) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Verified upload kind is invalid')
+          }
+          ingestUploadKind = upload.kind as 'video' | 'audio' | 'image'
         }
         if (projectRenderContext) {
           const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
@@ -1667,16 +1672,30 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               originalFileName: ingestContext!.originalFileName,
             },
           })
-          const project = await transaction.v2Project.updateMany({
-            where: {
-              id: ingestContext!.projectId,
-              workspaceId: input.operation.workspaceId,
-              status: { in: projectStatusTransitionSources('ingesting') },
-            },
-            data: { status: 'ingesting' },
-          })
-          if (project.count !== 1) {
-            throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter ingesting from its current status')
+          if (ingestUploadKind === 'video') {
+            const project = await transaction.v2Project.updateMany({
+              where: {
+                id: ingestContext!.projectId,
+                workspaceId: input.operation.workspaceId,
+                status: { in: projectStatusTransitionSources('ingesting') },
+              },
+              data: { status: 'ingesting' },
+            })
+            if (project.count !== 1) {
+              throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Project cannot enter ingesting from its current status')
+            }
+          } else {
+            const project = await transaction.v2Project.findFirst({
+              where: {
+                id: ingestContext!.projectId,
+                workspaceId: input.operation.workspaceId,
+                status: { notIn: ['canceled', 'archived'] },
+              },
+              select: { id: true },
+            })
+            if (!project) {
+              throw new DomainError('PROJECT_TRANSITION_REJECTED', 'Supplemental media cannot be attached to a closed project')
+            }
           }
         } else if (projectRenderContext || projectReuseContext) {
           const context = projectRenderContext ?? projectReuseContext!

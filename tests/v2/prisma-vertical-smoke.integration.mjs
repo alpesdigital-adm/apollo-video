@@ -285,6 +285,9 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     assert.equal(seed.ingestOperation.status, 'succeeded')
     assert.deepEqual(observedIngestFailures, [])
 
+    const projectStatusBeforeLibrary = (await prisma.v2Project.findUniqueOrThrow({
+      where: { id: seed.project.id }, select: { status: true },
+    })).status
     const transfers = new PrismaMediaTransferRepository(prisma)
     const mediaActor = Object.freeze({ ...proxyActor, scopes: new Set(['media:write']) })
     const uploadSigner = createMediaUploadSessionSignerFromEnvironment({
@@ -323,6 +326,10 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       })
       assert.equal(asset.role, role)
       assert.equal(asset.artifact.mediaType, kind)
+      const project = await prisma.v2Project.findUniqueOrThrow({
+        where: { id: seed.project.id }, select: { status: true },
+      })
+      assert.equal(project.status, projectStatusBeforeLibrary)
     }
     await uploadLibraryInput({ path: libraryFixtures.audio, kind: 'audio', mimeType: 'audio/wav', role: 'source-audio' })
     await uploadLibraryInput({ path: libraryFixtures.image, kind: 'image', mimeType: 'image/jpeg', role: 'source-image' })
