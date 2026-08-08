@@ -2961,7 +2961,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       },
     })
     const discardedReplayResponse = await replayWebhookRequest('public-webhook-replay-loss-1')
-    assert.equal(discardedReplayResponse.status, 202)
+    assert.equal(discardedReplayResponse.status, 202, serverDiagnostics)
     const recoveredReplayResponse = await replayWebhookRequest('public-webhook-replay-loss-1')
     const recoveredReplay = await recoveredReplayResponse.json()
     assert.equal(recoveredReplayResponse.status, 200)
