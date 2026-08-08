@@ -3353,6 +3353,13 @@ test('authenticated public API manages projects, clients and artifact inspection
       { length: 10 },
       (_, index) => `public-governance-anomaly-operation-${index}`,
     )
+    const childOperationAudit = createApiAccessAuditContext({
+      clientId: childCreated.data.client.id,
+      credentialId: childCreated.data.credential.id,
+      workspaceId,
+      environment: apiEnvironment,
+      authenticationKind: 'bearer',
+    })
     const anomalyNow = new Date()
     const anomalyStartedAt = new Date(anomalyNow.getTime() - 1_000)
     await client.v2PublicOperation.createMany({
@@ -3362,7 +3369,10 @@ test('authenticated public API manages projects, clients and artifact inspection
           id,
           workspaceId,
           clientId: childCreated.data.client.id,
+          actorCredentialId: childOperationAudit.credentialId,
           actorEnvironment: apiEnvironment,
+          actorAuthenticationKind: 'bearer',
+          actorContextHash: childOperationAudit.contextHash,
           type: 'artifact-render',
           status: failed ? 'failed' : 'succeeded',
           phase: failed ? 'failed' : 'completed',
