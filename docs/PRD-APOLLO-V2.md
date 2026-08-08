@@ -596,8 +596,8 @@ catalogados no ingest, listados por cursor na API pública e filtrados no
 servidor por kind, pessoa, tema e elegibilidade de rights para
 `editorial-reuse`. O editor insere um artifact elegível por referência
 `selected-insert`, sem copiar bytes. O run remoto `f1012-20260808-r1` comprovou
-PostgreSQL, HTTP e Chromium; permanecem pendentes MediaSegment (FR-042),
-previews derivados reais, deploy e aceite.
+PostgreSQL, HTTP e Chromium. F1.013 integrou MediaSegment por asset; permanecem
+pendentes sua paginação na consulta global, previews derivados reais, deploy e aceite.
 
 ### FR-041 — Tipos de ativos
 
@@ -611,6 +611,14 @@ previews derivados reais, deploy e aceite.
 ### FR-042 — MediaSegment
 
 Segmentos semânticos apontam para ranges dentro de masters, evitando milhares de arquivos recortados.
+
+Estado integrado parcial (F1.013, 2026-08-08): `V2MediaSegment` persiste ranges
+virtuais imutáveis, inclusive sobrepostos e nested, com FKs de workspace/asset,
+hash canônico e `physicalObjectKey` obrigatoriamente nulo. A API pública lista e
+cria segmentos por asset. Quando um consumer exige bytes, o adapter FFmpeg gera
+um derivative content-addressed com receita `extract-range/v1`, manifest e
+lineage sem alterar o master. O run `f1013-20260808-r1` comprovou PostgreSQL do
+zero, HTTP real e MP4 real; faltam paginação global, deploy e aceite.
 
 ### FR-043 — SpeechSegment
 

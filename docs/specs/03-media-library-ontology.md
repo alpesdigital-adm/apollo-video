@@ -59,8 +59,19 @@ Pessoa e tema são filtrados server-side. A condição jurídica é calculada pe
 snapshot atual com `evaluateAssetUse(..., use: 'editorial-reuse')`; ausência de
 rights é revisão, nunca autorização. O attach revalida artifact, estado, rights
 e locale do projeto numa transação serializável e cria somente um
-`V2ProjectMediaAsset(role='selected-insert')`. `MediaSegment` continua reservado
-para F1.013 e não é simulado por artifact ou arquivo recortado.
+`V2ProjectMediaAsset(role='selected-insert')`. Segmentos são entidades virtuais
+próprias de F1.013 e não são simulados por artifact ou arquivo recortado.
+
+### 3.2 Slice integrado F1.013
+
+`V2MediaSegment` referencia workspace, artifact e parent segment opcional. O
+banco valida `0 <= startMs < endMs <= sourceDurationMs` e força
+`physicalObjectKey IS NULL`. Identidade/replay usam hash canônico; a transação
+serializável relê duração do manifest e limites do parent. A API pública por
+asset cria e lista os ranges. `materializeMediaSegmentDerivativeService` não
+faz trabalho para consumer virtual; para consumer físico, materializa o source,
+verifica seu hash antes/depois, extrai por FFmpeg e persiste novo artifact,
+manifest `extract-range/v1`, lineage e registro convergente por consumer.
 
 ## 4. Modelo de entidades
 
@@ -257,23 +268,23 @@ Campos observados: OCR text, transcript words, dimensions, detected objects. Cam
 ```ts
 interface MediaSegment {
   id: string
-  assetId: string
+  workspaceId: string
+  parentAssetId: string
   parentSegmentId?: string
-  segmentType: string
-  sourceRange: { startFrame: number; endFrame: number }
-  handles: { preRollFrames: number; postRollFrames: number }
-  exactText?: string
-  normalizedText?: string
-  roles: Observation<string[]>[]
-  topics: Observation<string[]>[]
-  standaloneScore: number
-  contextDependency: number
-  editabilityScore: number
-  technicalQualityScore: number
-  rightsId: string
-  embeddingIds: string[]
+  label: string
+  description: string
+  semanticRange: { startMs: number; endMs: number }
+  sourceTimeMapping: { sourceStartMs: number; sourceEndMs: number; rate: 1 }
+  sourceDurationMs: number
+  physicalObjectKey: null
+  segmentHash: string
+  createdAt: string
 }
 ```
+
+Speech/Evidence/ValidatedSegment adicionam texto, handles, observations,
+scores, rights e embeddings em suas entidades especializadas; esses campos não
+são inventados no range virtual base.
 
 ## 12. Boundary rules
 

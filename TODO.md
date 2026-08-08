@@ -877,7 +877,7 @@ machine, ainda não por browser offline real.
 
 ### F1.012 — Media Library v1 [FR-040]
 
-- [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: API pública V2 usa cursor opaco ligado a `createdAt + artifactId` e ao fingerprint dos filtros; `segment` permanece sem resultados até F1.013 materializar sua entidade própria.
+- [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012/F1-013: API pública V2 usa cursor opaco ligado a `createdAt + artifactId` e ao fingerprint dos filtros; segmentos reais já existem na API por asset, mas ainda não participam da paginação unificada do workspace.
 - [ ] Implementar detalhes, thumbnail/waveform, status, origem e rights. Evidência F1-012: item canônico separa preview, condição técnica, origem e elegibilidade jurídica.
 - [ ] Permitir inserir asset elegível no projeto sem duplicar bytes. Evidência F1-012: `POST /v1/projects/{projectId}/media-library-attachments` persiste somente `selected-insert` deduplicado para o artifact imutável.
 - [ ] Implementar filtros mínimos por kind, pessoa, tema e status de direito. Evidência F1-012: filtros são server-side e isolados pelo workspace no domínio.
@@ -893,15 +893,26 @@ uma única referência `selected-insert`, preservou `byteSize=81000000` e uma s�
 identidade de conteúdo. Postflight: browser e túnel fechados, PID do Next
 encerrado, zero sessões da aplicação, container do run removido; VPS
 `590921960` destruída com confirmação HTTP 404. As cinco caixas permanecem
-abertas: F1.013 ainda deve integrar `MediaSegment`, previews derivados reais
-ainda não foram gerados/inspecionados e não houve deploy nem aceite.
+abertas: a paginação unificada ainda deve incluir `MediaSegment`, previews
+derivados reais ainda não foram gerados/inspecionados e não houve deploy nem aceite.
 
 ### F1.013 — MediaSegment [FR-042]
 
-- [ ] Modelar range semântico, label, description, parent asset e time mapping. Evidência F1-013: `MediaSegment` preserva identidade, semântica e mapeamento 1:1 para source time.
-- [ ] Criar segmento sem recortar fisicamente o master. Evidência F1-013: criação persiste somente range virtual com `physicalObjectKey: null` e API externa por asset.
-- [ ] Materializar derivative somente quando um consumer exigir. Evidência F1-013: materializador retorna `null` para consumo virtual ou receita `extract-range/v1` com source imutável.
-- [ ] Testar segmentos sobrepostos, nested e limite exato do asset. Evidência F1-013/T-FR-042: regressão cobre sobreposição, nesting, borda integral e range inválido.
+- [ ] Modelar range semântico, label, description, parent asset e time mapping. Evidência F1-013 (`3d0f2fe`): `V2MediaSegment` é content-addressed, liga parent asset/segment por FK e preserva mapeamento 1:1 para source time.
+- [ ] Criar segmento sem recortar fisicamente o master. Evidência F1-013: `GET/POST /v1/media/library/{artifactId}/segments` persiste somente range virtual e a migration força `physicalObjectKey IS NULL`.
+- [ ] Materializar derivative somente quando um consumer exigir. Evidência F1-013: consumo virtual retorna `null`; demanda física executa FFmpeg, promove artifact/manifest `extract-range/v1` e lineage para o source imutável.
+- [ ] Testar segmentos sobrepostos, nested e limite exato do asset. Evidência F1-013/T-FR-042: domínio, PostgreSQL, HTTP e MP4 real cobrem sobreposição, nesting, borda integral, range inválido e replay.
+
+Evidência remota parcial F1.013 (run `f1013-20260808-r1`, commit `3d0f2fe`):
+PostgreSQL 17 + pgvector aplicou 152 migrations do zero; o teste Prisma aprovou
+overlap, nesting, limite exato, replay e isolamento sem mudar `byteSize` do
+master. A API real respondeu 201/200 para criação/replay, 200 para três ranges
+e 404 fora do workspace. O golden FFmpeg Linux produziu MP4 de 2,75 s com
+manifest/lineage e hash do master idêntico antes/depois. Suíte local 1212/1212,
+contratos 211/402/450/168, typecheck e builds Windows/Linux passaram. Postflight:
+zero sessões, processos e containers; VPS `590928921` destruída com confirmação
+HTTP 404. As quatro caixas permanecem abertas: não houve deploy/aceite e a
+Media Library global ainda não pagina segmentos junto com assets.
 
 ### F1.014 — Image Library v1 [FR-047]
 

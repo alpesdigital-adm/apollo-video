@@ -228,7 +228,7 @@ completos do Brand Kit, deploy e aceite.
 | FR-021 | Override por projeto | S7 | D0,D7 | inherit/none/custom resolvem por elemento | integration/e2e |
 | FR-030 | Tipos de entrada | S3 | D1,D6 | vídeo/áudio/imagem entram no ingest | e2e |
 | FR-040 | Media Library | S3 | D0,D1,D6 | assets indexados e navegáveis | e2e |
-| FR-042 | MediaSegment | S3 | D0,D1 | range reutiliza master | integration |
+| FR-042 | MediaSegment | S3 | D0,D1 | range virtual reutiliza master; bytes só sob demanda | integration/e2e |
 | FR-047 | Image Library | S3 | D1,D6 | OCR/descrição/busca/reuse | e2e |
 | FR-049 | Catalogação automática | S3 | D1,D4 | asset aprovado entra no índice | integration |
 | FR-050 | PerceptionTimeline | S1,S3 | D1,D2 | timeline agrega sinais mínimos | golden |
@@ -249,8 +249,17 @@ pública e Chromium. Cursor e filtros ficaram isolados por workspace; rights
 ausentes/restritos bloquearam uso; attach 201 e replay 200 convergiram para uma
 referência `selected-insert`, sem alterar bytes nem multiplicar a identidade do
 artifact. Build Linux e postflight passaram, e a VPS `590921960` foi destruída
-com confirmação HTTP 404. FR-040 segue aberto por MediaSegment, previews
-derivados reais, deploy e aceite.
+com confirmação HTTP 404. FR-040 segue aberto pela inclusão dos segmentos na
+paginação global, previews derivados reais, deploy e aceite.
+
+Evidência remota parcial FR-042/F1.013: o commit `3d0f2fe` passou o run
+`f1013-20260808-r1` com 152 migrations, PostgreSQL 17, API HTTP e FFmpeg reais.
+Criação/replay/listagem responderam 201/200/200; isolamento respondeu 404.
+Overlap, nesting e limite exato persistiram como ranges virtuais, enquanto a
+extração explícita gerou MP4 de 2,75 s com artifact, manifest e lineage e
+preservou hash/bytes do master. Build Linux e postflight passaram; a VPS
+`590928921` foi destruída com confirmação HTTP 404. FR-042 segue aberto sem
+deploy/aceite e FR-040 ainda precisa incluir segmentos na paginação global.
 | FR-060 | TreatmentPlan | S1 | D2 | objetivo produz gramática/energy policy | golden |
 | FR-061 | StoryPlan | S1 | D2 | atos/blocos/dependências persistidos | golden |
 | FR-062 | Alternativas de montagem | S1 | D2 | ao menos candidatos elegíveis são comparados | integration |
