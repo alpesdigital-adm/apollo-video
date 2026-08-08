@@ -414,7 +414,7 @@ export class PrismaWebhookSecurityRepository
           workspaceId: command.workspaceId,
           status: 'pending-verification',
         },
-        data: { status: 'active', verifiedAt },
+        data: { status: 'active', verifiedAt, updatedAt: verifiedAt },
       })
       if (endpoint.count !== 1) {
         throw new DomainError('PERSISTENCE_CONFLICT', 'Webhook endpoint state changed during challenge')
@@ -425,7 +425,7 @@ export class PrismaWebhookSecurityRepository
           workspaceId: command.workspaceId,
           status: 'pending-verification',
         },
-        data: { status: 'active' },
+        data: { status: 'active', updatedAt: verifiedAt },
       })
       await transaction.v2WebhookAdministrationCommand.create({
         data: webhookAdministrationCommandData(command.administration),
