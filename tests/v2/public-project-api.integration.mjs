@@ -284,6 +284,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       clock: () => new Date('2026-07-12T16:01:00.000Z'),
     })({
       id: apiClientId,
+      credentialId: 'public-api-credential-v2',
       workspaceId,
       name: 'Public API Test Client',
       environment: apiEnvironment,
