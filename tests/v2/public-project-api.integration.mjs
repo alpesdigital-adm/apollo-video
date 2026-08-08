@@ -2147,7 +2147,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       await client.v2WebhookSigningSecret.count({
         where: { workspaceId, endpointId: recoveredEndpoint.data.endpoint.id },
       }),
-      2,
+      4,
     )
     assert.equal(
       await client.v2WebhookSigningSecret.count({
