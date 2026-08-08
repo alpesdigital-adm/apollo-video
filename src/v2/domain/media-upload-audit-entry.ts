@@ -10,6 +10,7 @@ export const MEDIA_UPLOAD_AUDIT_ACTIONS = [
   'part-record',
   'complete',
   'abort',
+  'inspect',
 ] as const
 
 export type MediaUploadAuditAction = (typeof MEDIA_UPLOAD_AUDIT_ACTIONS)[number]

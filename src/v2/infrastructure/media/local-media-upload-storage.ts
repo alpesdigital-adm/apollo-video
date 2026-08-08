@@ -190,11 +190,26 @@ export class LocalMediaUploadStorage implements MediaUploadContentStorage, Media
     })
   }
 
+  async quarantineSource(upload: Readonly<MediaUpload>, parts: readonly Readonly<MediaUploadPart>[] = []) {
+    if (upload.status !== 'verified' || upload.actualSha256 !== upload.expectedSha256) {
+      throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Only verified media can enter quarantine inspection')
+    }
+    const source = await this.verifiedSourcePath(upload, parts)
+    const target = join(this.uploadDirectory(upload.id), `${upload.actualSha256}.${extensionFor(upload)}.quarantine`)
+    await copyFile(source, target)
+    const metadata = await stat(target)
+    if (!metadata.isFile() || metadata.size.toString() !== upload.actualByteSize || await calculateFileSha256(target) !== upload.actualSha256) {
+      await rm(target, { force: true }).catch(() => undefined)
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Quarantine copy failed immutable identity verification')
+    }
+    return Object.freeze({ path: target, byteSize: metadata.size, sha256: upload.actualSha256 })
+  }
+
   async promoteMaster(upload: Readonly<MediaUpload>, parts: readonly Readonly<MediaUploadPart>[] = []) {
     if (upload.status !== 'verified' || upload.actualSha256 !== upload.expectedSha256) {
       throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Only verified media can become a master artifact')
     }
-    const source = await this.verifiedSourcePath(upload, parts)
+    const source = (await this.quarantineSource(upload, parts)).path
     return this.promote({
       workspaceId: upload.workspaceId,
       sourcePath: source,

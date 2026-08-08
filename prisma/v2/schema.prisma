@@ -393,6 +393,12 @@ model V2MediaUpload {
   actualSha256       String?   @db.Char(64)
   actualByteSize     BigInt?
   verifiedAt         DateTime? @db.Timestamptz(3)
+  inspectionStatus   String    @default("pending") @db.VarChar(16)
+  detectedMimeType   String?   @db.VarChar(160)
+  detectedExtension  String?   @db.VarChar(8)
+  probeJson           String?   @db.Text
+  inspectionErrorJson String?  @db.Text
+  inspectedAt        DateTime? @db.Timestamptz(3)
   expiresAt          DateTime  @db.Timestamptz(3)
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)

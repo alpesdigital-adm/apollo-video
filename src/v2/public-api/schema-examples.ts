@@ -6870,6 +6870,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/begin-media-upload-request/v2': [
       { projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64) },
     ],
+    'apollo://schemas/begin-media-upload-request/v3': [
+      { projectId, fileName: 'locucao.wav', rightsConfirmed: true, kind: 'audio', size: '1048576', mimeType: 'audio/wav', checksum: 'b'.repeat(64) },
+    ],
     'apollo://schemas/media-upload-begun/v1': [
       {
         data: {
@@ -6893,6 +6896,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           },
           replayed: false,
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-upload-begun/v3': [
+      {
+        data: { upload: { id: '123e4567-e89b-42d3-a456-426614174001', projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '104857600', mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'pending-session', inspectionStatus: 'pending', expiresAt: '2026-07-16T22:30:00.000Z', createdAt }, replayed: false },
         meta: { apiVersion: 'v1' },
       },
     ],
@@ -6938,6 +6947,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           parts: [{ uploadId: '123e4567-e89b-42d3-a456-426614174001', partNumber: 1, byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64), recordedAt: createdAt }],
           missingPartNumbers: [2],
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-upload-detail/v3': [
+      {
+        data: { upload: { id: '123e4567-e89b-42d3-a456-426614174001', projectId, fileName: 'gravacao-bruta.mp4', rightsConfirmed: true, kind: 'video', size: '134217728', mimeType: 'video/mp4', checksum: 'a'.repeat(64), status: 'uploading', inspectionStatus: 'pending', expiresAt: '2026-07-16T22:30:00.000Z', createdAt }, parts: [{ uploadId: '123e4567-e89b-42d3-a456-426614174001', partNumber: 1, byteSize: '67108864', etag: '"partetag001"', checksum: 'b'.repeat(64), recordedAt: createdAt }], missingPartNumbers: [2] },
         meta: { apiVersion: 'v1' },
       },
     ],

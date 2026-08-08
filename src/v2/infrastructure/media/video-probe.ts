@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 
 import { DomainError } from '../../domain/errors.ts'
+import { evaluateMediaProbe, sniffMediaInput, type MediaIngestDecision } from '../../domain/media-input.ts'
+import type { MediaUpload } from '../../domain/media-transfer.ts'
 import type {
   DetectedMediaColor,
 } from '../../domain/color-and-export.ts'
@@ -265,4 +268,71 @@ export async function probeVideo(
     color: detectedColor(video!),
     producer,
   })
+}
+
+export interface UploadedMediaInspection extends MediaIngestDecision {
+  sourcePath: string
+}
+
+export async function inspectUploadedMedia(
+  filePath: string,
+  upload: Readonly<MediaUpload>,
+  options: { signal?: AbortSignal; environment?: NodeJS.ProcessEnv } = {},
+): Promise<Readonly<UploadedMediaInspection>> {
+  if (!isAbsolute(filePath)) throw new DomainError('INVALID_ARGUMENT', 'Media inspection path must be absolute')
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+    const prefix = Buffer.alloc(64)
+    const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0)
+    const media = sniffMediaInput({
+      filename: upload.fileName ?? `upload.${upload.mimeType.split('/')[1] ?? 'bin'}`,
+      declaredMime: upload.mimeType,
+      bytes: prefix.subarray(0, bytesRead),
+      byteSize: Number(upload.byteSize),
+    })
+    let probe
+    if (media.kind === 'video') {
+      const video = await probeVideo(filePath, { signal: options.signal, environment: options.environment, requireAudio: true })
+      probe = { codec: video.codec, duration: video.duration, width: video.width, height: video.height }
+    } else {
+      const binary = resolveBinary(options.environment ?? process.env)
+      const { stdout } = await execFileAsync(binary, [
+        '-v', 'error', '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height,duration', '-of', 'json', filePath,
+      ], { windowsHide: true, timeout: DEFAULT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, signal: options.signal, encoding: 'utf8' })
+      const payload = JSON.parse(stdout) as { streams?: Array<Record<string, unknown>>; format?: Record<string, unknown> }
+      const stream = payload.streams?.find((item) => item.codec_type === (media.kind === 'audio' ? 'audio' : 'video'))
+      probe = media.kind === 'audio'
+        ? { codec: token(stream?.codec_name) ?? '', duration: positiveNumber(payload.format?.duration) || positiveNumber(stream?.duration) }
+        : { codec: token(stream?.codec_name) ?? '', width: positiveNumber(stream?.width), height: positiveNumber(stream?.height) }
+    }
+    const decision = evaluateMediaProbe(media, probe)
+    return Object.freeze({ ...decision, sourcePath: filePath })
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'INVALID_ARGUMENT') {
+      return Object.freeze({
+        status: 'quarantined' as const,
+        sourcePath: filePath,
+        media: Object.freeze({ kind: upload.kind, mimeType: upload.mimeType, extension: upload.fileName?.split('.').pop()?.toLowerCase() ?? 'unknown' }),
+        error: Object.freeze({
+          code: 'CORRUPT_OR_MISMATCHED_MEDIA',
+          message: 'A assinatura, a extensão e o MIME do arquivo não correspondem ou o conteúdo está corrompido.',
+          action: 'Reexporte o arquivo no formato indicado pela extensão e tente novamente.',
+        }),
+      })
+    }
+    if ((error as NodeJS.ErrnoException).name === 'AbortError') throw error
+    return Object.freeze({
+      status: 'quarantined' as const,
+      sourcePath: filePath,
+      media: Object.freeze({ kind: upload.kind, mimeType: upload.mimeType, extension: upload.fileName?.split('.').pop()?.toLowerCase() ?? 'unknown' }),
+      error: Object.freeze({
+        code: 'MEDIA_PROBE_FAILED',
+        message: 'Não foi possível validar codec, duração ou dimensões da mídia.',
+        action: 'Reexporte o arquivo com um codec suportado e tente novamente.',
+      }),
+    })
+  } finally {
+    await handle?.close().catch(() => undefined)
+  }
 }

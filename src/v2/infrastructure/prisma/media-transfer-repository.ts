@@ -15,6 +15,7 @@ import {
 import { createApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ApiEnvironment } from '../../domain/api-client.ts'
 import type { WorkspaceMemberRole } from '../../domain/workspace-member.ts'
+import { stableSerialize } from '../../domain/canonical-hash.ts'
 
 function auditEntryData(entry: Readonly<MediaUploadAuditEntry>) {
   return {
@@ -119,21 +120,33 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
   }
 
   private present(row: V2MediaUpload) {
-    return createMediaUpload({
-      id: row.id, workspaceId: row.workspaceId, clientId: row.clientId,
-      ...(row.projectId ? { projectId: row.projectId } : {}),
-      ...(row.fileName ? { fileName: row.fileName } : {}),
-      rightsConfirmed: row.rightsConfirmed,
-      kind: row.kind as MediaUploadKind, byteSize: row.byteSize.toString(), mimeType: row.mimeType,
-      expectedSha256: row.expectedSha256, status: row.status as MediaUploadStatus,
-      expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
-      ...(row.sessionMode ? { sessionMode: row.sessionMode as 'single' | 'multipart' } : {}),
-      ...(row.partSize ? { partSize: row.partSize.toString() } : {}),
-      ...(row.sessionExpiresAt ? { sessionExpiresAt: row.sessionExpiresAt.toISOString() } : {}),
-      ...(row.actualSha256 ? { actualSha256: row.actualSha256 } : {}),
-      ...(row.actualByteSize ? { actualByteSize: row.actualByteSize.toString() } : {}),
-      ...(row.verifiedAt ? { verifiedAt: row.verifiedAt.toISOString() } : {}),
-    })
+    try {
+      const probe = row.probeJson ? JSON.parse(row.probeJson) as NonNullable<ReturnType<typeof createMediaUpload>['probe']> : undefined
+      const inspectionError = row.inspectionErrorJson ? JSON.parse(row.inspectionErrorJson) as NonNullable<ReturnType<typeof createMediaUpload>['inspectionError']> : undefined
+      return createMediaUpload({
+        id: row.id, workspaceId: row.workspaceId, clientId: row.clientId,
+        ...(row.projectId ? { projectId: row.projectId } : {}),
+        ...(row.fileName ? { fileName: row.fileName } : {}),
+        rightsConfirmed: row.rightsConfirmed,
+        kind: row.kind as MediaUploadKind, byteSize: row.byteSize.toString(), mimeType: row.mimeType,
+        expectedSha256: row.expectedSha256, status: row.status as MediaUploadStatus,
+        expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
+        ...(row.sessionMode ? { sessionMode: row.sessionMode as 'single' | 'multipart' } : {}),
+        ...(row.partSize ? { partSize: row.partSize.toString() } : {}),
+        ...(row.sessionExpiresAt ? { sessionExpiresAt: row.sessionExpiresAt.toISOString() } : {}),
+        ...(row.actualSha256 ? { actualSha256: row.actualSha256 } : {}),
+        ...(row.actualByteSize ? { actualByteSize: row.actualByteSize.toString() } : {}),
+        ...(row.verifiedAt ? { verifiedAt: row.verifiedAt.toISOString() } : {}),
+        inspectionStatus: row.inspectionStatus as 'pending' | 'usable' | 'quarantined',
+        ...(row.detectedMimeType ? { detectedMimeType: row.detectedMimeType } : {}),
+        ...(row.detectedExtension ? { detectedExtension: row.detectedExtension } : {}),
+        ...(probe ? { probe } : {}),
+        ...(inspectionError ? { inspectionError } : {}),
+        ...(row.inspectedAt ? { inspectedAt: row.inspectedAt.toISOString() } : {}),
+      })
+    } catch {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Stored media upload inspection evidence is invalid', { uploadId: row.id })
+    }
   }
 
   async findUpload(input: { workspaceId: string; clientId: string; uploadId: string }) {
@@ -239,6 +252,38 @@ export class PrismaMediaTransferRepository implements MediaTransferRepository {
         data: { status: 'aborted' },
       })
       if (updated.count !== 1) throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Upload cannot be aborted')
+      await tx.v2MediaUploadAuditEntry.create({ data: auditEntryData(input.auditEntry) })
+      const row = await tx.v2MediaUpload.findFirstOrThrow({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId } })
+      return { upload: this.present(row), replayed: false }
+    })
+  }
+
+  async recordUploadInspection(input: Parameters<MediaTransferRepository['recordUploadInspection']>[0]) {
+    return this.client.$transaction(async (tx) => {
+      const current = await tx.v2MediaUpload.findFirst({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId } })
+      if (!current) throw new DomainError('MEDIA_UPLOAD_NOT_FOUND', 'Upload was not found')
+      const probeJson = input.probe ? stableSerialize(input.probe) : null
+      const inspectionErrorJson = input.error ? stableSerialize(input.error) : null
+      if (current.inspectionStatus !== 'pending') {
+        const existingAudit = await tx.v2MediaUploadAuditEntry.findFirst({ where: { uploadId: input.uploadId, action: 'inspect' } })
+        assertAuditEntryMatches(existingAudit, input.auditEntry)
+        if (
+          current.inspectionStatus !== input.status || current.detectedMimeType !== (input.detectedMimeType ?? null) ||
+          current.detectedExtension !== (input.detectedExtension ?? null) || current.probeJson !== probeJson ||
+          current.inspectionErrorJson !== inspectionErrorJson || current.inspectedAt?.toISOString() !== new Date(input.inspectedAt).toISOString()
+        ) throw new DomainError('PERSISTENCE_CONFLICT', 'Media inspection replay is mismatched')
+        return { upload: this.present(current), replayed: true }
+      }
+      if (current.status !== 'verified') throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Only a verified upload can be inspected')
+      const updated = await tx.v2MediaUpload.updateMany({
+        where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId, status: 'verified', inspectionStatus: 'pending' },
+        data: {
+          inspectionStatus: input.status, detectedMimeType: input.detectedMimeType ?? null,
+          detectedExtension: input.detectedExtension ?? null, probeJson,
+          inspectionErrorJson, inspectedAt: new Date(input.inspectedAt),
+        },
+      })
+      if (updated.count !== 1) throw new DomainError('PERSISTENCE_CONFLICT', 'Media inspection lost its compare-and-set fence')
       await tx.v2MediaUploadAuditEntry.create({ data: auditEntryData(input.auditEntry) })
       const row = await tx.v2MediaUpload.findFirstOrThrow({ where: { id: input.uploadId, workspaceId: input.workspaceId, clientId: input.clientId } })
       return { upload: this.present(row), replayed: false }

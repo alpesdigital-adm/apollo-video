@@ -15095,6 +15095,20 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('media-upload-begun', 3, 'Project media upload intent with inspection state',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'replayed'], properties: {
+        upload: { type: 'object', additionalProperties: false,
+          required: ['id', 'projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum', 'status', 'inspectionStatus', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, projectId: idSchema, fileName: { type: 'string', minLength: 1, maxLength: 255 }, rightsConfirmed: { const: true },
+            kind: { enum: ['video', 'audio', 'image'] }, size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, mimeType: { type: 'string', pattern: '^(video|audio|image)/', maxLength: 160 },
+            checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, status: { const: 'pending-session' }, inspectionStatus: { const: 'pending' }, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        }, replayed: { type: 'boolean' },
+      },
+    }),
+  ),
   defineSchema('media-upload-session', 1, 'Signed media upload session',
     successSchema({
       type: 'object', additionalProperties: false, required: ['uploadId', 'session'],
@@ -15208,6 +15222,26 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           type: 'array', maxItems: 10000,
           items: { type: 'object', additionalProperties: false, required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'], properties: { uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 }, byteSize: { type: 'string' }, etag: { type: 'string' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema } },
         },
+        missingPartNumbers: { type: 'array', maxItems: 10000, items: { type: 'integer', minimum: 1, maximum: 10000 }, uniqueItems: true },
+      },
+    }),
+  ),
+  defineSchema('media-upload-detail', 3, 'Resumable project media upload with quarantine inspection',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['upload', 'parts', 'missingPartNumbers'], properties: {
+        upload: { type: 'object', additionalProperties: false,
+          required: ['id', 'projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum', 'status', 'inspectionStatus', 'expiresAt', 'createdAt'],
+          properties: {
+            id: { type: 'string', format: 'uuid' }, projectId: idSchema, fileName: { type: 'string', minLength: 1, maxLength: 255 }, rightsConfirmed: { const: true },
+            kind: { enum: ['video', 'audio', 'image'] }, size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' }, mimeType: { type: 'string', pattern: '^(video|audio|image)/', maxLength: 160 }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            status: { enum: ['pending-session', 'uploading', 'uploaded', 'verified', 'expired', 'aborted'] }, inspectionStatus: { enum: ['pending', 'usable', 'quarantined'] },
+            detectedMimeType: { type: 'string', pattern: '^(video|audio|image)/', maxLength: 160 }, detectedExtension: { type: 'string', pattern: '^[a-z0-9]{2,8}$' },
+            probe: { type: 'object', additionalProperties: false, required: ['codec'], properties: { codec: { type: 'string', minLength: 1, maxLength: 128 }, duration: { type: 'number', exclusiveMinimum: 0 }, width: { type: 'number', exclusiveMinimum: 0 }, height: { type: 'number', exclusiveMinimum: 0 } } },
+            inspectionError: { type: 'object', additionalProperties: false, required: ['code', 'message', 'action'], properties: { code: { type: 'string', minLength: 3, maxLength: 80 }, message: { type: 'string', minLength: 3, maxLength: 500 }, action: { type: 'string', minLength: 3, maxLength: 500 } } },
+            inspectedAt: dateTimeSchema, expiresAt: dateTimeSchema, createdAt: dateTimeSchema,
+          },
+        },
+        parts: { type: 'array', maxItems: 10000, items: { type: 'object', additionalProperties: false, required: ['uploadId', 'partNumber', 'byteSize', 'etag', 'checksum', 'recordedAt'], properties: { uploadId: { type: 'string', format: 'uuid' }, partNumber: { type: 'integer', minimum: 1, maximum: 10000 }, byteSize: { type: 'string' }, etag: { type: 'string' }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' }, recordedAt: dateTimeSchema } } },
         missingPartNumbers: { type: 'array', maxItems: 10000, items: { type: 'integer', minimum: 1, maximum: 10000 }, uniqueItems: true },
       },
     }),
@@ -15460,6 +15494,15 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       resourceIds: {
         type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: idSchema,
       },
+    },
+  }),
+  defineSchema('begin-media-upload-request', 3, 'Begin project video, audio or image upload request', {
+    type: 'object', additionalProperties: false,
+    required: ['projectId', 'fileName', 'rightsConfirmed', 'kind', 'size', 'mimeType', 'checksum'],
+    properties: {
+      projectId: idSchema, fileName: { type: 'string', minLength: 1, maxLength: 255 }, rightsConfirmed: { const: true },
+      kind: { enum: ['video', 'audio', 'image'] }, size: { type: 'string', pattern: '^[1-9][0-9]{0,15}$' },
+      mimeType: { type: 'string', pattern: '^(video|audio|image)/[a-z0-9.+-]+$', maxLength: 160 }, checksum: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     },
   }),
   defineSchema('create-webhook-subscription-request', 2, 'Create webhook subscription request with project name changes', {

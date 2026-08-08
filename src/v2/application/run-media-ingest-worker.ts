@@ -11,6 +11,8 @@ import { assetRightsRevision } from '../domain/asset-rights.ts'
 import { createMediaColorProbe } from '../domain/color-and-export.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createMediaArtifactManifest, createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
+import { createMediaUploadAuditEntry } from '../domain/media-upload-audit-entry.ts'
+import type { MediaIngestDecision } from '../domain/media-input.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
 import { createPublicEvent } from '../domain/public-event.ts'
@@ -26,9 +28,12 @@ const NON_RETRYABLE_CODES = new Set([
 ])
 
 function safeFailure(error: unknown) {
+  const actionable = error instanceof DomainError && error.code === 'INVALID_MEDIA_ARTIFACT'
+  const action = actionable && typeof error.details.action === 'string' ? error.details.action : undefined
+  const inspectionCode = actionable && typeof error.details.code === 'string' ? error.details.code : undefined
   return {
-    code: error instanceof DomainError ? error.code.toLowerCase() : 'media_ingest_failed',
-    message: 'Media ingest could not be completed',
+    code: inspectionCode?.toLowerCase() ?? (error instanceof DomainError ? error.code.toLowerCase() : 'media_ingest_failed'),
+    message: actionable ? `${error.message}${action ? ` ${action}` : ''}`.slice(0, 500) : 'Media ingest could not be completed',
     retryable: !(error instanceof DomainError && NON_RETRYABLE_CODES.has(error.code)),
   }
 }
@@ -52,6 +57,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   storage: VerifiedMediaStorage
   processor: MediaIngestProcessor
   prober: MediaSourceProber
+  inspector: { inspect(sourcePath: string, upload: Readonly<import('../domain/media-transfer.ts').MediaUpload>, options?: { signal?: AbortSignal }): Promise<Readonly<MediaIngestDecision>> }
   providers: Pick<ProviderRuntimeRouter, 'resolveTranscription'>
   rights: AssetRightsRepository
   clock?: () => Date
@@ -83,6 +89,7 @@ export function runNextMediaIngestOperationService(dependencies: {
     const abortController = new AbortController()
     let leaseLost = false
     let stopped = false
+    let failProjectOnTerminal = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let renewing: Promise<boolean> | undefined
     const command = (now: Date) => ({ operationId: operation.id, leaseOwner, attempt, now: now.toISOString() })
@@ -115,19 +122,62 @@ export function runNextMediaIngestOperationService(dependencies: {
     try {
       scheduleHeartbeat()
       const upload = await dependencies.uploads.findUpload({ workspaceId: operation.workspaceId, clientId: operation.clientId, uploadId: context.uploadId })
-      if (!upload || upload.status !== 'verified' || upload.kind !== 'video' || upload.projectId !== context.projectId || upload.fileName !== context.originalFileName) {
-        throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified project video upload is no longer available')
+      if (!upload || upload.status !== 'verified' || upload.projectId !== context.projectId || upload.fileName !== context.originalFileName) {
+        throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Verified project media upload is no longer available')
       }
+      failProjectOnTerminal = upload.kind === 'video'
       const parts = await dependencies.uploads.listUploadParts({ workspaceId: operation.workspaceId, clientId: operation.clientId, uploadId: context.uploadId })
-      const master = await dependencies.storage.promoteMaster(upload, parts)
+      const quarantined = await dependencies.storage.quarantineSource(upload, parts)
       const workspaceNamespace = createHash('sha256').update(operation.workspaceId).digest('hex').slice(0, 12)
 
       await enter('probing')
-      const sourceProbe = await dependencies.prober.probe(master.path, { signal: abortController.signal })
+      let inspection: Readonly<MediaIngestDecision>
+      if (upload.inspectionStatus === 'usable' || upload.inspectionStatus === 'quarantined') {
+        inspection = Object.freeze({
+          status: upload.inspectionStatus,
+          media: Object.freeze({
+            kind: upload.kind,
+            mimeType: upload.detectedMimeType ?? upload.mimeType,
+            extension: upload.detectedExtension ?? upload.fileName.split('.').pop()?.toLowerCase() ?? 'unknown',
+          }),
+          ...(upload.probe ? { probe: upload.probe } : {}),
+          ...(upload.inspectionError ? { error: upload.inspectionError } : {}),
+        })
+      } else {
+        inspection = await dependencies.inspector.inspect(quarantined.path, upload, { signal: abortController.signal })
+        const inspectedAt = clock().toISOString()
+        const requestFingerprint = calculateVersionHash({
+          schemaVersion: 'media-upload-inspection/v1', uploadId: upload.id,
+          status: inspection.status, media: inspection.media,
+          probe: inspection.probe ?? null, error: inspection.error ?? null,
+          actorContextHash: claimed.authenticationAudit.contextHash,
+        })
+        await dependencies.uploads.recordUploadInspection({
+          workspaceId: operation.workspaceId, clientId: operation.clientId, uploadId: upload.id,
+          status: inspection.status,
+          detectedMimeType: inspection.media.mimeType, detectedExtension: inspection.media.extension,
+          ...(inspection.probe ? { probe: inspection.probe } : {}),
+          ...(inspection.error ? { error: inspection.error } : {}), inspectedAt,
+          auditEntry: createMediaUploadAuditEntry({
+            id: deterministicUuid(`upload-inspection:${upload.id}`), workspaceId: operation.workspaceId,
+            uploadId: upload.id, action: 'inspect', audit: claimed.authenticationAudit,
+            requestFingerprint, occurredAt: inspectedAt,
+          }),
+        })
+      }
+      if (inspection.status === 'quarantined') {
+        throw new DomainError('INVALID_MEDIA_ARTIFACT', inspection.error?.message ?? 'Uploaded media was quarantined', {
+          code: inspection.error?.code ?? 'MEDIA_QUARANTINED', action: inspection.error?.action ?? 'Reexporte o arquivo e tente novamente.',
+        })
+      }
+      const master = await dependencies.storage.promoteMaster(upload, parts)
+      const sourceProbe = upload.kind === 'video'
+        ? await dependencies.prober.probe(master.path, { signal: abortController.signal })
+        : undefined
       const now = clock().toISOString()
       const sourceManifest = createMediaArtifactManifest({
         artifactKey: master.key, artifactSha256: master.sha256, byteSize: master.byteSize,
-        mediaType: 'video', container: containerFromKey(master.key),
+        mediaType: upload.kind, container: inspection.media.extension || containerFromKey(master.key),
         recipe: { id: 'direct-upload', version: '1.0.0', parameters: { mimeType: upload.mimeType } },
       })
       const sourcePersisted = await dependencies.artifacts.persistOrReplay({
@@ -154,6 +204,22 @@ export function runNextMediaIngestOperationService(dependencies: {
         })
       }
       await writeRights(context.sourceArtifactId)
+
+      if (upload.kind === 'audio' || upload.kind === 'image') {
+        await enter('verifying')
+        await enter('persisting')
+        await dependencies.projectMedia.persistCatalogedInput({
+          workspaceId: operation.workspaceId, projectId: context.projectId, uploadId: upload.id,
+          originalFileName: context.originalFileName, artifactId: context.sourceArtifactId,
+          manifestId: context.sourceManifestId, mediaType: upload.kind, createdAt: clock().toISOString(),
+        })
+        stopHeartbeat()
+        const succeeded = await dependencies.operations.succeed(command(clock()))
+        if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
+        await dependencies.processor.cleanup(operation.id).catch(() => undefined)
+        return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
+      }
+      if (!sourceProbe) throw new DomainError('PERSISTENCE_CONFLICT', 'Video probe evidence is missing after inspection')
 
       await enter('normalizing')
       const normalize = () => dependencies.processor.normalize({ sourcePath: master.path, operationId: operation.id, signal: abortController.signal })
@@ -337,7 +403,9 @@ export function runNextMediaIngestOperationService(dependencies: {
         : undefined
       const failed = await dependencies.operations.failOrRetry({ ...command(failedAt), error: failure, ...(nextAttemptAt ? { nextAttemptAt } : {}) })
       if (!failed) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
-      if (failed.operation.status === 'failed') await dependencies.projectMedia.markIngestFailed({ workspaceId: operation.workspaceId, projectId: context.projectId })
+      if (failed.operation.status === 'failed' && failProjectOnTerminal) {
+        await dependencies.projectMedia.markIngestFailed({ workspaceId: operation.workspaceId, projectId: context.projectId })
+      }
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()

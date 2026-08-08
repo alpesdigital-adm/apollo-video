@@ -2008,15 +2008,15 @@
       "responseMediaType": "application/json"
     },
     "apollo.media.uploads.begin": {
-      "version": "2.0.0",
+      "version": "3.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "media:write"
       ],
-      "inputSchemaRef": "apollo://schemas/begin-media-upload-request/v2",
-      "outputSchemaRef": "apollo://schemas/media-upload-begun/v2",
+      "inputSchemaRef": "apollo://schemas/begin-media-upload-request/v3",
+      "outputSchemaRef": "apollo://schemas/media-upload-begun/v3",
       "endpoint": {
         "method": "POST",
         "path": "/v1/media/uploads"
@@ -2034,7 +2034,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.media.uploads.complete": {
-      "version": "2.0.0",
+      "version": "2.1.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -2128,14 +2128,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.media.uploads.read": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "media:write"
       ],
-      "outputSchemaRef": "apollo://schemas/media-upload-detail/v2",
+      "outputSchemaRef": "apollo://schemas/media-upload-detail/v3",
       "endpoint": {
         "method": "GET",
         "path": "/v1/media/uploads/{uploadId}"
@@ -20660,6 +20660,54 @@
         "mimeType": {
           "type": "string",
           "pattern": "^video/[a-z0-9.+-]+$",
+          "maxLength": 160
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/begin-media-upload-request/v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "fileName",
+        "rightsConfirmed",
+        "kind",
+        "size",
+        "mimeType",
+        "checksum"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "rightsConfirmed": {
+          "const": true
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "audio",
+            "image"
+          ]
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,15}$"
+        },
+        "mimeType": {
+          "type": "string",
+          "pattern": "^(video|audio|image)/[a-z0-9.+-]+$",
           "maxLength": 160
         },
         "checksum": {
@@ -53805,6 +53853,112 @@
         }
       }
     },
+    "apollo://schemas/media-upload-begun/v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upload",
+            "replayed"
+          ],
+          "properties": {
+            "upload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "fileName",
+                "rightsConfirmed",
+                "kind",
+                "size",
+                "mimeType",
+                "checksum",
+                "status",
+                "inspectionStatus",
+                "expiresAt",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "fileName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "rightsConfirmed": {
+                  "const": true
+                },
+                "kind": {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "image"
+                  ]
+                },
+                "size": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,15}$"
+                },
+                "mimeType": {
+                  "type": "string",
+                  "pattern": "^(video|audio|image)/",
+                  "maxLength": 160
+                },
+                "checksum": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "const": "pending-session"
+                },
+                "inspectionStatus": {
+                  "const": "pending"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/media-upload-completed/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -54404,6 +54558,237 @@
                     "expired",
                     "aborted"
                   ]
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "parts": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "uploadId",
+                  "partNumber",
+                  "byteSize",
+                  "etag",
+                  "checksum",
+                  "recordedAt"
+                ],
+                "properties": {
+                  "uploadId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "partNumber": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "byteSize": {
+                    "type": "string"
+                  },
+                  "etag": {
+                    "type": "string"
+                  },
+                  "checksum": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "recordedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "missingPartNumbers": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-upload-detail/v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upload",
+            "parts",
+            "missingPartNumbers"
+          ],
+          "properties": {
+            "upload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "fileName",
+                "rightsConfirmed",
+                "kind",
+                "size",
+                "mimeType",
+                "checksum",
+                "status",
+                "inspectionStatus",
+                "expiresAt",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "fileName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "rightsConfirmed": {
+                  "const": true
+                },
+                "kind": {
+                  "enum": [
+                    "video",
+                    "audio",
+                    "image"
+                  ]
+                },
+                "size": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,15}$"
+                },
+                "mimeType": {
+                  "type": "string",
+                  "pattern": "^(video|audio|image)/",
+                  "maxLength": 160
+                },
+                "checksum": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "pending-session",
+                    "uploading",
+                    "uploaded",
+                    "verified",
+                    "expired",
+                    "aborted"
+                  ]
+                },
+                "inspectionStatus": {
+                  "enum": [
+                    "pending",
+                    "usable",
+                    "quarantined"
+                  ]
+                },
+                "detectedMimeType": {
+                  "type": "string",
+                  "pattern": "^(video|audio|image)/",
+                  "maxLength": 160
+                },
+                "detectedExtension": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{2,8}$"
+                },
+                "probe": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "codec"
+                  ],
+                  "properties": {
+                    "codec": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "duration": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  }
+                },
+                "inspectionError": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "action"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 80
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 500
+                    },
+                    "action": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 500
+                    }
+                  }
+                },
+                "inspectedAt": {
+                  "type": "string",
+                  "format": "date-time"
                 },
                 "expiresAt": {
                   "type": "string",

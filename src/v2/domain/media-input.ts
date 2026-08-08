@@ -5,7 +5,14 @@ export interface SniffedMediaInput { kind: MediaUploadKind; mimeType: string; ex
 export interface MediaProbe { codec: string; duration?: number; width?: number; height?: number }
 export interface MediaIngestDecision { status: 'usable' | 'quarantined'; media: SniffedMediaInput; probe?: MediaProbe; error?: { code: string; message: string; action: string } }
 
-const extensionKind: Record<string, MediaUploadKind> = { mp4: 'video', mov: 'video', webm: 'video', wav: 'audio', mp3: 'audio', m4a: 'audio', ogg: 'audio', png: 'image', jpg: 'image', jpeg: 'image', webp: 'image', gif: 'image' }
+const extensionsByMime: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  'video/mp4': new Set(['mp4']), 'video/quicktime': new Set(['mov']), 'video/webm': new Set(['webm']),
+  'audio/wav': new Set(['wav']), 'audio/mpeg': new Set(['mp3']), 'audio/mp4': new Set(['m4a']),
+  'image/png': new Set(['png']), 'image/jpeg': new Set(['jpg', 'jpeg']), 'image/webp': new Set(['webp']), 'image/gif': new Set(['gif']),
+})
+const declaredMimeAliases: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+  'audio/wav': new Set(['audio/wav', 'audio/x-wav']),
+})
 const allowedCodecs: Record<MediaUploadKind, Set<string>> = { video: new Set(['h264', 'hevc', 'vp8', 'vp9', 'av1']), audio: new Set(['aac', 'mp3', 'opus', 'vorbis', 'pcm_s16le', 'pcm_s24le']), image: new Set(['png', 'mjpeg', 'webp', 'gif']) }
 
 export function sniffMediaInput(input: { filename: string; declaredMime?: string; bytes: Uint8Array; byteSize: number }): SniffedMediaInput {
@@ -25,9 +32,10 @@ export function sniffMediaInput(input: { filename: string; declaredMime?: string
   else if (b.length >= 6 && /^GIF8[79]a$/.test(String.fromCharCode(...b.slice(0, 6)))) detected = { kind: 'image', mimeType: 'image/gif', extension: 'gif' }
   assertDomain(detected, 'INVALID_ARGUMENT', 'media signature is unsupported or file is corrupted')
   const extension = input.filename.split('.').pop()?.toLowerCase() ?? ''
-  assertDomain(extensionKind[extension] === detected.kind, 'INVALID_ARGUMENT', 'file extension does not match detected media type')
+  assertDomain(extensionsByMime[detected.mimeType]?.has(extension), 'INVALID_ARGUMENT', 'file extension does not match detected media signature')
   const declared = input.declaredMime?.toLowerCase().trim()
-  assertDomain(!declared || declared === 'application/octet-stream' || declared.split('/')[0] === detected.kind, 'INVALID_ARGUMENT', 'declared MIME does not match detected media type')
+  const acceptedMimes = declaredMimeAliases[detected.mimeType] ?? new Set([detected.mimeType])
+  assertDomain(!declared || declared === 'application/octet-stream' || acceptedMimes.has(declared), 'INVALID_ARGUMENT', 'declared MIME does not match detected media signature')
   return detected
 }
 

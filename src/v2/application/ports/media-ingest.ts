@@ -51,6 +51,7 @@ export interface MediaTranscriber {
 }
 
 export interface VerifiedMediaStorage {
+  quarantineSource(upload: Readonly<MediaUpload>, parts?: readonly Readonly<MediaUploadPart>[]): Promise<Readonly<{ path: string; byteSize: number; sha256: string }>>
   promoteMaster(upload: Readonly<MediaUpload>, parts?: readonly Readonly<MediaUploadPart>[]): Promise<Readonly<{ key: string; path: string; byteSize: number; sha256: string }>>
   promoteDerived(input: { workspaceId: string; sourcePath: string; sha256: string; extension: string; prefix: string }): Promise<Readonly<{ key: string; path: string; byteSize: number; sha256: string }>>
 }
@@ -91,6 +92,16 @@ export interface ProjectMediaRepository {
       version: Readonly<ProjectVersion>
       event: Readonly<PublicEvent>
     }>
+    createdAt: string
+  }): Promise<void>
+  persistCatalogedInput(input: {
+    workspaceId: string
+    projectId: string
+    uploadId: string
+    originalFileName: string
+    artifactId: string
+    manifestId: string
+    mediaType: 'audio' | 'image'
     createdAt: string
   }): Promise<void>
   markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void>

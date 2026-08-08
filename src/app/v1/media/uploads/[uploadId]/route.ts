@@ -14,7 +14,18 @@ export async function GET(request: NextRequest, context: { params: Promise<{ upl
     const { uploadId } = await context.params
     const result = await inspectMediaUploadService({ repository: createMediaTransferRepository() })({ workspaceId: actor.workspaceId, actor, uploadId })
     return NextResponse.json(presentSuccess({
-      upload: { id: result.upload!.id, projectId: result.upload!.projectId, fileName: result.upload!.fileName, rightsConfirmed: result.upload!.rightsConfirmed, kind: result.upload!.kind, size: result.upload!.byteSize, mimeType: result.upload!.mimeType, checksum: result.upload!.expectedSha256, status: result.upload!.status, expiresAt: result.upload!.expiresAt, createdAt: result.upload!.createdAt },
+      upload: {
+        id: result.upload!.id, projectId: result.upload!.projectId, fileName: result.upload!.fileName,
+        rightsConfirmed: result.upload!.rightsConfirmed, kind: result.upload!.kind, size: result.upload!.byteSize,
+        mimeType: result.upload!.mimeType, checksum: result.upload!.expectedSha256, status: result.upload!.status,
+        inspectionStatus: result.upload!.inspectionStatus ?? 'pending',
+        ...(result.upload!.detectedMimeType ? { detectedMimeType: result.upload!.detectedMimeType } : {}),
+        ...(result.upload!.detectedExtension ? { detectedExtension: result.upload!.detectedExtension } : {}),
+        ...(result.upload!.probe ? { probe: result.upload!.probe } : {}),
+        ...(result.upload!.inspectionError ? { inspectionError: result.upload!.inspectionError } : {}),
+        ...(result.upload!.inspectedAt ? { inspectedAt: result.upload!.inspectedAt } : {}),
+        expiresAt: result.upload!.expiresAt, createdAt: result.upload!.createdAt,
+      },
       parts: result.parts,
       missingPartNumbers: result.missingPartNumbers,
     }), { headers: publicApiHeaders(requestId) })

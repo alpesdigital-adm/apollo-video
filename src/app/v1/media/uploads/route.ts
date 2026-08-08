@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { beginMediaUploadService } from '@/v2/application/begin-media-upload'
 import { DomainError } from '@/v2/domain/errors'
+import { MEDIA_UPLOAD_KINDS, type MediaUploadKind } from '@/v2/domain/media-transfer'
 import { createMediaTransferRepository } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -16,13 +17,13 @@ export async function POST(request: NextRequest) {
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     let body: Record<string, unknown>
     try { body = await request.json() as Record<string, unknown> } catch { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') }
-    if (typeof body.projectId !== 'string' || typeof body.fileName !== 'string' || body.rightsConfirmed !== true || body.kind !== 'video') {
-      throw new DomainError('INVALID_ARGUMENT', 'projectId, fileName, rightsConfirmed=true and kind=video are required')
+    if (typeof body.projectId !== 'string' || typeof body.fileName !== 'string' || body.rightsConfirmed !== true || typeof body.kind !== 'string' || !MEDIA_UPLOAD_KINDS.includes(body.kind as MediaUploadKind)) {
+      throw new DomainError('INVALID_ARGUMENT', 'projectId, fileName, rightsConfirmed=true and a supported media kind are required')
     }
     const result = await beginMediaUploadService({ repository: createMediaTransferRepository() })({
       workspaceId: actor.workspaceId, actor, idempotencyKey,
       projectId: body.projectId, fileName: body.fileName, rightsConfirmed: true,
-      kind: 'video', size: body.size as string,
+      kind: body.kind as MediaUploadKind, size: body.size as string,
       mimeType: body.mimeType as string, checksum: body.checksum as string,
     })
     return NextResponse.json(presentSuccess({
@@ -31,7 +32,8 @@ export async function POST(request: NextRequest) {
         projectId: result.upload.projectId, fileName: result.upload.fileName,
         rightsConfirmed: result.upload.rightsConfirmed,
         mimeType: result.upload.mimeType, checksum: result.upload.expectedSha256,
-        status: result.upload.status, expiresAt: result.upload.expiresAt, createdAt: result.upload.createdAt,
+        status: result.upload.status, inspectionStatus: result.upload.inspectionStatus ?? 'pending',
+        expiresAt: result.upload.expiresAt, createdAt: result.upload.createdAt,
       },
       replayed: result.replayed,
     }), { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) })

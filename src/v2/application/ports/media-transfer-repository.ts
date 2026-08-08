@@ -30,6 +30,18 @@ export interface MediaTransferRepository {
   markUploadAbortedOrReplay(input: {
     workspaceId: string; clientId: string; uploadId: string; auditEntry: Readonly<MediaUploadAuditEntry>
   }): Promise<Readonly<{ upload: Readonly<MediaUpload>; replayed: boolean }>>
+  recordUploadInspection(input: {
+    workspaceId: string
+    clientId: string
+    uploadId: string
+    status: 'usable' | 'quarantined'
+    detectedMimeType?: string
+    detectedExtension?: string
+    probe?: Readonly<{ codec: string; duration?: number; width?: number; height?: number }>
+    error?: Readonly<{ code: string; message: string; action: string }>
+    inspectedAt: string
+    auditEntry: Readonly<MediaUploadAuditEntry>
+  }): Promise<Readonly<{ upload: Readonly<MediaUpload>; replayed: boolean }>>
   findCurrentUploadSessionAudit(input: {
     workspaceId: string; clientId: string; uploadId: string; sessionExpiresAt: string
   }): Promise<Readonly<ApiAccessAuditContext> | undefined>

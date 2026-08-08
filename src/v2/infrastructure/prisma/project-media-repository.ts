@@ -299,6 +299,30 @@ export class PrismaProjectMediaRepository implements ProjectMediaRepository {
     })
   }
 
+  async persistCatalogedInput(input: Parameters<ProjectMediaRepository['persistCatalogedInput']>[0]): Promise<void> {
+    await this.client.$transaction(async (transaction) => {
+      const [project, upload, artifact, manifest] = await Promise.all([
+        transaction.v2Project.findFirst({ where: { id: input.projectId, workspaceId: input.workspaceId }, select: { id: true } }),
+        transaction.v2MediaUpload.findFirst({ where: {
+          id: input.uploadId, workspaceId: input.workspaceId, projectId: input.projectId,
+          status: 'verified', inspectionStatus: 'usable', kind: input.mediaType, rightsConfirmed: true,
+        }, select: { id: true } }),
+        transaction.v2MediaArtifact.findFirst({ where: { id: input.artifactId, workspaceId: input.workspaceId, mediaType: input.mediaType, status: 'available' }, select: { id: true } }),
+        transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.manifestId, workspaceId: input.workspaceId, artifactId: input.artifactId }, select: { id: true } }),
+      ])
+      if (!project || !upload || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Cataloged media input references are incomplete')
+      await transaction.v2ProjectMediaAsset.upsert({
+        where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.artifactId, role: `source-${input.mediaType}` } },
+        create: {
+          id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId,
+          artifactId: input.artifactId, uploadId: input.uploadId, role: `source-${input.mediaType}`,
+          originalFileName: input.originalFileName, createdAt: new Date(input.createdAt),
+        },
+        update: {},
+      })
+    })
+  }
+
   async markIngestFailed(input: { workspaceId: string; projectId: string }): Promise<void> {
     const project = await this.client.v2Project.updateMany({
       where: {

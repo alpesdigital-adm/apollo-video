@@ -90,11 +90,15 @@ export class S3VerifiedMediaStorage implements VerifiedMediaStorage {
     this.client = options.client
   }
 
+  async quarantineSource(upload: Readonly<MediaUpload>, parts: readonly Readonly<MediaUploadPart>[] = []) {
+    return this.staging.quarantineSource(upload, parts)
+  }
+
   async promoteMaster(upload: Readonly<MediaUpload>, parts: readonly Readonly<MediaUploadPart>[] = []) {
     if (upload.status !== 'verified' || upload.actualSha256 !== upload.expectedSha256) {
       throw new DomainError('MEDIA_UPLOAD_TRANSITION_REJECTED', 'Only verified media can become a master artifact')
     }
-    const sourcePath = await this.staging.verifiedSourcePath(upload, parts)
+    const sourcePath = (await this.quarantineSource(upload, parts)).path
     return this.promote({
       workspaceId: upload.workspaceId,
       sourcePath,

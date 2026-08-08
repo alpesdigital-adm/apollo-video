@@ -285,7 +285,7 @@ import {
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
-import { probeVideo } from './media/video-probe.ts'
+import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
@@ -1282,6 +1282,7 @@ export function createMediaIngestWorker(
     storage: createVerifiedMediaStorage(environment),
     processor: createFfmpegIngestProcessorFromEnvironment(environment),
     prober: { probe: probeVideo },
+    inspector: { inspect: inspectUploadedMedia },
     providers: createProviderRuntimeRouter(environment),
     rights: createAssetRightsRepository(),
     clock,

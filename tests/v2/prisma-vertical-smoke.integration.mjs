@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,9 +13,14 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import {
   createExternalAuditContext,
 } from '../../src/v2/application/authenticate-api-client.ts'
+import { beginMediaUploadService } from '../../src/v2/application/begin-media-upload.ts'
 import { createColorPipelineCompilationService } from '../../src/v2/application/color-pipeline-compilations.ts'
 import { createApiClientService } from '../../src/v2/application/create-api-client.ts'
+import { enqueueMediaIngestService } from '../../src/v2/application/enqueue-media-ingest.ts'
 import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
+import { issueMediaUploadSessionService } from '../../src/v2/application/issue-media-upload-session.ts'
+import { completeMediaUploadService } from '../../src/v2/application/manage-media-upload.ts'
+import { receiveMediaUploadContentService } from '../../src/v2/application/receive-media-upload-content.ts'
 import { runNextMediaIngestOperationService } from '../../src/v2/application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
@@ -33,7 +38,7 @@ import {
   S3VerifiedMediaStorage,
 } from '../../src/v2/infrastructure/media/s3-artifact-storage.ts'
 import { LocalProjectLutRenderMaterializer } from '../../src/v2/infrastructure/media/local-project-lut-render-materializer.ts'
-import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
+import { inspectUploadedMedia, probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 import { PrismaApiClientRepository } from '../../src/v2/infrastructure/prisma/api-client-repository.ts'
 import { PrismaAssetRightsRepository } from '../../src/v2/infrastructure/prisma/asset-rights-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastructure/prisma/color-pipeline-compilation-repository.ts'
@@ -50,6 +55,7 @@ import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/pri
 import { PrismaRenderElementMapRepository } from '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
 import { PrismaWorkspaceRepository } from '../../src/v2/infrastructure/prisma/workspace-repository.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
+import { createMediaUploadSessionSignerFromEnvironment } from '../../src/v2/infrastructure/security/media-upload-session-signer.ts'
 import { seedV2ProjectSource } from '../../scripts/seed-v2-project-source.mjs'
 
 const require = createRequire(import.meta.url)
@@ -109,6 +115,20 @@ async function createFixture(path) {
   ], { windowsHide: true, timeout: 120_000 })
 }
 
+async function createLibraryFixtures(root) {
+  const audio = join(root, 'library-audio.wav')
+  const image = join(root, 'library-image.jpg')
+  await execFileAsync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    'sine=frequency=660:sample_rate=48000:duration=1', '-c:a', 'pcm_s16le', audio,
+  ], { windowsHide: true, timeout: 120_000 })
+  await execFileAsync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    'color=c=green:s=640x480', '-frames:v', '1', image,
+  ], { windowsHide: true, timeout: 120_000 })
+  return { audio, image }
+}
+
 test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing, directs media-only and renders a proxy', {
   timeout: 240_000,
 }, async (t) => {
@@ -135,6 +155,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
 
   try {
     await createFixture(fixturePath)
+    const libraryFixtures = await createLibraryFixtures(root)
     await new PrismaWorkspaceRepository(prisma).create(createWorkspace({
       id: workspaceId,
       slug: `vertical-${randomUUID()}`,
@@ -172,6 +193,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       storage,
       processor: new FfmpegIngestProcessor({ workRoot: join(root, '.ingest-work'), ffmpegPath }),
       prober: { probe: probeVideo },
+      inspector: { inspect: inspectUploadedMedia },
       providers: {
         resolveTranscription() {
           return { create() { return { async transcribe() {
@@ -249,6 +271,48 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     }
     assert.equal(ingestOutcome.status, 'succeeded')
     assert.equal(seed.ingestOperation.status, 'succeeded')
+
+    const transfers = new PrismaMediaTransferRepository(prisma)
+    const mediaActor = Object.freeze({ ...proxyActor, scopes: new Set(['media:write']) })
+    const uploadSigner = createMediaUploadSessionSignerFromEnvironment({
+      APOLLO_MEDIA_UPLOAD_SIGNING_SECRET: 'vertical-smoke-signing-secret-32-bytes-minimum',
+    })
+    const uploadLibraryInput = async ({ path, kind, mimeType, role }) => {
+      const bytes = await readFile(path)
+      const checksum = createHash('sha256').update(bytes).digest('hex')
+      const begun = await beginMediaUploadService({ repository: transfers, clock })({
+        workspaceId, actor: mediaActor, projectId: seed.project.id,
+        fileName: path.split(/[\\/]/).at(-1), rightsConfirmed: true,
+        idempotencyKey: `vertical-library-${kind}-${checksum}`, kind,
+        size: String(bytes.length), mimeType, checksum,
+      })
+      const issued = await issueMediaUploadSessionService({
+        repository: transfers, signer: uploadSigner, clock,
+      })({ workspaceId, actor: mediaActor, uploadId: begun.upload.id })
+      assert.equal(issued.session.mode, 'single')
+      await receiveMediaUploadContentService({ repository: transfers, storage: localStorage, clock })({
+        workspaceId, clientId, uploadId: begun.upload.id, mode: 'single', maxParts: 1,
+        sessionExpiresAt: issued.session.expiresAt, mimeType,
+        expectedSha256: checksum, body: new Blob([bytes]).stream(), contentLength: bytes.length,
+      })
+      const completed = await completeMediaUploadService({
+        repository: transfers, verifier: localStorage, clock,
+      })({ workspaceId, actor: mediaActor, uploadId: begun.upload.id })
+      await enqueueMediaIngestService({ operations, clock })({ upload: completed.upload, actor: mediaActor })
+      const outcome = await ingest(`vertical-library-${kind}-${randomUUID()}`)
+      assert.equal(outcome.status, 'succeeded')
+      const storedUpload = await prisma.v2MediaUpload.findUniqueOrThrow({ where: { id: begun.upload.id } })
+      assert.equal(storedUpload.inspectionStatus, 'usable')
+      assert.equal(storedUpload.detectedMimeType, mimeType)
+      assert.ok(storedUpload.probeJson)
+      const asset = await prisma.v2ProjectMediaAsset.findFirstOrThrow({
+        where: { uploadId: begun.upload.id }, include: { artifact: { select: { mediaType: true } } },
+      })
+      assert.equal(asset.role, role)
+      assert.equal(asset.artifact.mediaType, kind)
+    }
+    await uploadLibraryInput({ path: libraryFixtures.audio, kind: 'audio', mimeType: 'audio/wav', role: 'source-audio' })
+    await uploadLibraryInput({ path: libraryFixtures.image, kind: 'image', mimeType: 'image/jpeg', role: 'source-image' })
 
     const projectAfterIngest = await prisma.v2Project.findUniqueOrThrow({
       where: { id: seed.project.id },

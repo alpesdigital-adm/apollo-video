@@ -36,7 +36,7 @@ const DIRECTOR_DESTINATION_TYPE: Readonly<Partial<Record<
 
 interface ApiEnvelope<T> { data?: T; error?: { message?: string } }
 interface MediaRecord {
-  id: string; role: 'source-master' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
+  id: string; role: 'source-master' | 'source-audio' | 'source-image' | 'editing-proxy' | 'editorial-proxy' | 'final-output'; originalFileName: string; artifactId: string;
   manifestId: string; mediaType: string; container: string; byteSize: string; sha256: string; status: string;
   rightsStatus?: string; probe?: { width: number; height: number; duration: number; fps: number }; createdAt: string
 }
@@ -776,7 +776,8 @@ interface UploadSession {
   mode: 'single' | 'multipart'; expiresAt: string; maxParts: number;
   requiredHeaders: Record<string, string>; uploadUrl?: string; partSize?: string; partUrlTemplate?: string
 }
-interface PendingUpload { uploadId: string; file: File; checksum: string }
+type ProjectUploadKind = 'video' | 'audio' | 'image'
+interface PendingUpload { uploadId: string; file: File; checksum: string; kind: ProjectUploadKind }
 type UploadPhase = 'idle' | 'hashing' | 'uploading' | 'paused' | 'verifying' | 'processing' | 'done' | 'failed'
 
 const PHASE_LABELS: Record<string, string> = {
@@ -784,6 +785,27 @@ const PHASE_LABELS: Record<string, string> = {
   transcribing: 'Transcrevendo', verifying: 'Validando derivados', persisting: 'Vinculando ao projeto',
   rendering: 'Materializando plano editorial',
   completed: 'Ingestão concluída', retrying: 'Nova tentativa', failed: 'Falha na ingestão', canceled: 'Cancelada',
+}
+
+function projectUploadKind(file: File): ProjectUploadKind | null {
+  const mimeKind = file.type.split('/')[0]
+  if (mimeKind === 'video' || mimeKind === 'audio' || mimeKind === 'image') return mimeKind
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  if (['mp4', 'mov', 'webm'].includes(extension ?? '')) return 'video'
+  if (['wav', 'mp3', 'm4a'].includes(extension ?? '')) return 'audio'
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(extension ?? '')) return 'image'
+  return null
+}
+
+function uploadMime(file: File, kind: ProjectUploadKind): string {
+  if (file.type) return file.type
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  const byExtension: Record<string, string> = {
+    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', wav: 'audio/wav',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', png: 'image/png', jpg: 'image/jpeg',
+    jpeg: 'image/jpeg', webp: 'image/webp',
+  }
+  return byExtension[extension ?? ''] ?? `${kind}/unknown`
 }
 
 const REVIEW_SCOPE_LABELS: Readonly<Record<ReviewApplicationScopeKind, string>> = Object.freeze({
@@ -1177,7 +1199,8 @@ export default function ProjectWorkspacePage() {
         if (pending) window.localStorage.removeItem(`apollo:v2:upload:${projectId}:${pending.checksum}`)
         pendingUpload.current = null
         setUploadPhase('failed')
-        setUploadLabel('A ingestão falhou. O master pode ser enviado novamente após o ajuste.')
+        setUploadLabel(latest.error?.message ?? 'A ingestão falhou. A mídia pode ser enviada novamente após o ajuste.')
+        setNotice(latest.error?.message ?? 'A ingestão falhou. Revise o arquivo e tente novamente.')
       }
       else if (latest?.type === 'media-ingest' && ['queued', 'running', 'waiting', 'retrying'].includes(latest.status) && !['uploading', 'hashing', 'paused', 'verifying'].includes(uploadPhase)) {
         setUploadPhase('processing')
@@ -2683,7 +2706,7 @@ export default function ProjectWorkspacePage() {
     }
   }
 
-  async function beginOrResume(file: File, checksum: string): Promise<string> {
+  async function beginOrResume(file: File, checksum: string, kind: ProjectUploadKind): Promise<string> {
     const storageKey = `apollo:v2:upload:${projectId}:${checksum}`
     const savedId = window.localStorage.getItem(storageKey)
     if (savedId) {
@@ -2696,7 +2719,7 @@ export default function ProjectWorkspacePage() {
     const result = await requestJson<{ upload: { id: string } }>('/v1/media/uploads', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ projectId, fileName: file.name, rightsConfirmed: true, kind: 'video', size: String(file.size), mimeType: file.type || 'video/mp4', checksum }),
+      body: JSON.stringify({ projectId, fileName: file.name, rightsConfirmed: true, kind, size: String(file.size), mimeType: uploadMime(file, kind), checksum }),
     })
     window.localStorage.setItem(storageKey, result.upload.id)
     return result.upload.id
@@ -2709,7 +2732,7 @@ export default function ProjectWorkspacePage() {
     setUploadLabel('Preparando canal seguro…')
     const sessionData = await requestJson<{ uploadId: string; session: UploadSession }>(`/v1/media/uploads/${pending.uploadId}/session`, { method: 'POST', signal: controller.signal })
     const session = sessionData.session
-    const headers = { 'content-type': pending.file.type || 'video/mp4', 'x-apollo-content-sha256': pending.checksum }
+    const headers = { 'content-type': uploadMime(pending.file, pending.kind), 'x-apollo-content-sha256': pending.checksum }
     if (session.mode === 'single') {
       setUploadLabel(`Enviando ${pending.file.name}`)
       const response = await fetch(localSignedUrl(session.uploadUrl!), { method: 'PUT', headers, body: pending.file, signal: controller.signal })
@@ -2742,7 +2765,8 @@ export default function ProjectWorkspacePage() {
 
   async function selectFile(file: File) {
     if (!rightsConfirmed) { setNotice('Confirme os direitos de uso antes de enviar o material.'); return }
-    if (!file.type.startsWith('video/')) { setNotice('Selecione um arquivo de vídeo válido.'); return }
+    const kind = projectUploadKind(file)
+    if (!kind) { setNotice('Selecione um arquivo MP4, MOV, WebM, WAV, MP3, M4A, PNG, JPEG ou WebP.'); return }
     setNotice(null)
     setUploadPhase('hashing')
     setUploadLabel(`Verificando integridade de ${file.name}`)
@@ -2751,14 +2775,14 @@ export default function ProjectWorkspacePage() {
     activeRequest.current = controller
     try {
       const checksum = await hashFile(file, controller.signal, (progress) => setUploadProgress(Math.round(progress * 20)))
-      const uploadId = await beginOrResume(file, checksum)
-      const pending = { uploadId, file, checksum }
+      const uploadId = await beginOrResume(file, checksum, kind)
+      const pending = { uploadId, file, checksum, kind }
       pendingUpload.current = pending
       await transfer(pending)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') { setUploadPhase('paused'); setUploadLabel('Envio pausado com segurança.'); return }
       setUploadPhase('failed')
-      setNotice(error instanceof Error ? error.message : 'Não foi possível enviar o vídeo.')
+      setNotice(error instanceof Error ? error.message : 'Não foi possível enviar a mídia.')
     } finally {
       activeRequest.current = null
     }
@@ -3366,11 +3390,11 @@ export default function ProjectWorkspacePage() {
               </div>
             ) : (
               <div className="w-full max-w-2xl px-3 py-8 text-center">
-                <input accept="video/mp4,video/quicktime,video/webm" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void selectFile(file); event.target.value = '' }} ref={fileInput} type="file" />
+                <input accept="video/mp4,video/quicktime,video/webm,audio/wav,audio/mpeg,audio/mp4,image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void selectFile(file); event.target.value = '' }} ref={fileInput} type="file" />
                 <button className={`group w-full rounded-2xl border border-dashed px-6 py-12 transition ${dragging ? 'border-[#d9ab42]/70 bg-[#d9ab42]/[0.06]' : 'border-white/[0.13] bg-[#0a0a0a] hover:border-[#d9ab42]/40'}`} disabled={!rightsConfirmed || !['idle', 'failed'].includes(uploadPhase)} onClick={() => fileInput.current?.click()} onDragEnter={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); setDragging(false); const file = event.dataTransfer.files[0]; if (file) void selectFile(file) }} type="button">
                   <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-[#d9aa3d]/20 bg-[#d9aa3d]/[0.06] text-2xl font-light text-[#dcb34e] transition group-hover:-translate-y-0.5">↑</span>
-                  <span className="mt-5 block text-lg font-semibold text-[#e9e4db]">Envie o vídeo bruto</span>
-                  <span className="mx-auto mt-2 block max-w-md text-xs leading-5 text-[#77736b]">MP4, MOV ou WebM. Arquivos grandes são divididos, verificáveis e retomáveis sem reiniciar as partes concluídas.</span>
+                  <span className="mt-5 block text-lg font-semibold text-[#e9e4db]">Envie vídeo, áudio ou imagem</span>
+                  <span className="mx-auto mt-2 block max-w-md text-xs leading-5 text-[#77736b]">MP4, MOV, WebM, WAV, MP3, M4A, PNG, JPEG ou WebP. Arquivos grandes são divididos, verificáveis e retomáveis sem reiniciar as partes concluídas.</span>
                 </button>
                 <label className="mx-auto mt-5 flex max-w-xl cursor-pointer items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 text-left">
                   <input checked={rightsConfirmed} className="mt-0.5 h-4 w-4 accent-[#d9aa3d]" onChange={(event) => setRightsConfirmed(event.target.checked)} type="checkbox" />
