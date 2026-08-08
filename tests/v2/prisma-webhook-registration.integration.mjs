@@ -142,7 +142,9 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const client = new PrismaClient()
   const workspaceId = 'webhook-integration-workspace'
   const clientId = 'webhook-integration-client'
-  const now = new Date('2026-07-14T21:50:00.000Z')
+  // Keep application-issued expirations ahead of the database clock while all
+  // behavioral assertions remain relative to one stable instant for this run.
+  const now = new Date(Date.now() + 1_000)
   const idSets = [
     {
       'webhook-endpoint': '00000000-0000-4000-8000-000000000201',
@@ -443,7 +445,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       },
     })
 
-    let shardClock = new Date('2026-07-14T21:50:01.000Z')
+    let shardClock = new Date(now.getTime() + 1_000)
     let shardLeaseId = 620
     const shardCoordinator = coordinateWebhookWorkerShardService({
       repository: new PrismaWebhookWorkerShardRepository(client),
@@ -477,13 +479,13 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       (error) =>
         error instanceof DomainError && error.code === 'WEBHOOK_SHARD_COORDINATION_REJECTED',
     )
-    shardClock = new Date('2026-07-14T21:50:11.000Z')
+    shardClock = new Date(now.getTime() + 11_000)
     assert.equal(await shardCoordinator.heartbeat(firstShard), true)
     assert.equal(await shardCoordinator.heartbeat({
       ...firstShard,
       leaseToken: secondShard.leaseToken,
     }), false)
-    shardClock = new Date('2026-07-14T21:50:32.000Z')
+    shardClock = new Date(now.getTime() + 32_000)
     const reclaimedShard = await shardCoordinator.claim({
       poolId: 'webhook-integration-pool',
       shardCount: 2,
