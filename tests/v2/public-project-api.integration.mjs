@@ -1166,7 +1166,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].post.requestBody.content['application/json']
         .schema.$ref,
-      '#/components/schemas/CreateWebhookSubscriptionRequestV1',
+      '#/components/schemas/CreateWebhookSubscriptionRequestV2',
     )
     assert.equal(
       openApi.paths['/v1/webhooks/subscriptions'].post.parameters.some(
