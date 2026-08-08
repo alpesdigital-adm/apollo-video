@@ -98,7 +98,11 @@ const include = {
 } as const
 
 export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
-  constructor(private readonly client: PrismaClient) {}
+  private readonly client: PrismaClient
+
+  constructor(client: PrismaClient) {
+    this.client = client
+  }
 
   async list(rawQuery: MediaLibraryQuery, now: Date) {
     const query = normalizeMediaLibraryQuery(rawQuery)
