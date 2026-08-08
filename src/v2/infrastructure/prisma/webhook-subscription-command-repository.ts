@@ -94,11 +94,27 @@ export class PrismaWebhookSubscriptionCommandRepository
               baseRevision: administration.baseRevision,
             },
           })
-          assertWebhookAdministrationReplay(auditCommand, administration)
+          if (auditCommand) {
+            assertWebhookAdministrationReplay(auditCommand, administration)
+            return Object.freeze({
+              subscription: current,
+              revision: currentRevision,
+              replayed: true,
+            })
+          }
+          if (currentRevision !== administration.baseRevision) {
+            throw new DomainError(
+              'WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH',
+              'Webhook subscription revision does not match',
+            )
+          }
+          await transaction.v2WebhookAdministrationCommand.create({
+            data: webhookAdministrationCommandData(administration),
+          })
           return Object.freeze({
             subscription: current,
             revision: currentRevision,
-            replayed: true,
+            replayed: false,
           })
         }
         if (currentRevision !== administration.baseRevision) {

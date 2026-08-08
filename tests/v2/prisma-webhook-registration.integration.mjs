@@ -1339,6 +1339,21 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
       (error) => error instanceof DomainError && error.code === 'WEBHOOK_ENDPOINT_REVISION_MISMATCH',
     )
     const cascadePaused = await administration.findSubscriptionById(workspaceId, subscription.id)
+    const convergentPauseAdministration = statusAdministration({
+      targetType: 'webhook-subscription', targetId: subscription.id,
+      targetStatus: 'paused', baseRevision: webhookSubscriptionRevision(cascadePaused),
+      occurredAt: new Date(endpointChangedAt.getTime() + 2_000).toISOString(),
+    })
+    const convergentPause = await subscriptionCommands.setStatus({
+      administration: convergentPauseAdministration,
+      targetStatus: 'paused',
+    })
+    assert.equal(convergentPause.subscription.status, 'paused')
+    assert.equal(convergentPause.replayed, false)
+    assert.equal((await subscriptionCommands.setStatus({
+      administration: convergentPauseAdministration,
+      targetStatus: 'paused',
+    })).replayed, true)
     await assert.rejects(
       () => subscriptionCommands.setStatus({
         administration: statusAdministration({
