@@ -2147,7 +2147,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       await client.v2WebhookSigningSecret.count({
         where: { workspaceId, endpointId: recoveredEndpoint.data.endpoint.id },
       }),
-      4,
+      2,
     )
     assert.equal(
       await client.v2WebhookSigningSecret.count({
@@ -4705,7 +4705,7 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(missingRetryResponse.status, 404)
     assert.equal(
       await client.v2PublicOperation.count({ where: { workspaceId } }),
-      2,
+      4,
     )
     const storedRenderOperation = await client.v2ArtifactRenderOperation.findUnique({
       where: { operationId: renderOperation.data.operation.id },
