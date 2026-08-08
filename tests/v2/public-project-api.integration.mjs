@@ -2565,12 +2565,13 @@ test('authenticated public API manages projects, clients and artifact inspection
       createWebhookSubscriptionRequest('public-subscription-create-1', createSubscriptionBody),
       createWebhookSubscriptionRequest('public-subscription-create-1', createSubscriptionBody),
     ])
+    const createSubscriptionConcurrentBodies = await Promise.all(
+      createSubscriptionConcurrentResponses.map((response) => response.json()),
+    )
     assert.deepEqual(
       createSubscriptionConcurrentResponses.map((response) => response.status).sort(),
       [200, 201],
-    )
-    const createSubscriptionConcurrentBodies = await Promise.all(
-      createSubscriptionConcurrentResponses.map((response) => response.json()),
+      JSON.stringify(createSubscriptionConcurrentBodies),
     )
     const createdSubscription = createSubscriptionConcurrentBodies.find(
       (body) => body.data.replayed === false,
