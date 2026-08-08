@@ -20,5 +20,20 @@ ALTER TABLE "media_upload_audit_entries"
   ADD CONSTRAINT "media_upload_audit_entries_action_check"
     CHECK ("action" IN ('begin', 'session-issue', 'part-record', 'complete', 'abort', 'inspect'));
 
+ALTER TABLE "project_media_assets"
+  DROP CONSTRAINT "project_media_assets_role_check",
+  ADD CONSTRAINT "project_media_assets_role_check"
+    CHECK (
+      "role" IN (
+        'source-master',
+        'source-audio',
+        'source-image',
+        'editing-proxy',
+        'editorial-proxy',
+        'final-output',
+        'selected-insert'
+      )
+    );
+
 CREATE INDEX "media_uploads_workspaceId_inspectionStatus_createdAt_idx"
   ON "media_uploads"("workspaceId", "inspectionStatus", "createdAt" DESC);
