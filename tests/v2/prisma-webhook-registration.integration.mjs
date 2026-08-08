@@ -144,7 +144,7 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
   const clientId = 'webhook-integration-client'
   // Keep application-issued expirations ahead of the database clock while all
   // behavioral assertions remain relative to one stable instant for this run.
-  const now = new Date(Date.now() + 1_000)
+  const now = new Date(Date.now() + 60_000)
   const idSets = [
     {
       'webhook-endpoint': '00000000-0000-4000-8000-000000000201',
@@ -810,6 +810,10 @@ test('webhook registration is atomic, workspace-scoped and stores only a secret 
     const activeRotationEndpointRow = await client.v2WebhookEndpoint.findUniqueOrThrow({
       where: { id: endpoint.id },
     })
+    assert.ok(
+      activeRotationEndpointRow.updatedAt.getTime() >= activeRotationEndpointRow.createdAt.getTime(),
+      `endpoint clock order: ${activeRotationEndpointRow.createdAt.toISOString()} -> ${activeRotationEndpointRow.updatedAt.toISOString()}`,
+    )
     const activeRotationEndpoint = createWebhookEndpoint({
       id: activeRotationEndpointRow.id,
       workspaceId: activeRotationEndpointRow.workspaceId,

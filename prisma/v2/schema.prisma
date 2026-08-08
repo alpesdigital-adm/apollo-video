@@ -331,7 +331,6 @@ model V2WebhookAdministrationCommand {
   workspace   V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "webhook_admin_commands_workspace_fkey")
   actorClient V2ApiClient @relation("WebhookAdministrationCommandActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "webhook_admin_commands_actor_fkey")
 
-  @@unique([targetType, targetId, action, baseRevision], map: "webhook_admin_commands_target_revision_key")
   @@unique([targetType, targetId, action, requestFingerprint], map: "webhook_admin_commands_target_fingerprint_key")
   @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)], map: "webhook_admin_commands_actor_context_idx")
   @@index([workspaceId, targetType, targetId, occurredAt(sort: Desc)], map: "webhook_admin_commands_target_history_idx")
