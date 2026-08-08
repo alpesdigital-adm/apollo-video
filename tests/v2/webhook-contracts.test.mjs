@@ -2196,7 +2196,7 @@ test('webhook delivery replay reopens only terminal state within the absolute at
 })
 
 test('webhook replay service binds client and delivery into required idempotency', async () => {
-  let command
+  const commands = []
   const diagnostic = {
     delivery: createWebhookDelivery({
       id: '00000000-0000-4000-8000-000000000841',
@@ -2215,7 +2215,7 @@ test('webhook replay service binds client and delivery into required idempotency
   const replay = replayWebhookDeliveryService({
     deliveries: {
       async replay(value) {
-        command = value
+        commands.push(value)
         return { diagnostic, replayed: false }
       },
     },
@@ -2228,12 +2228,20 @@ test('webhook replay service binds client and delivery into required idempotency
     deliveryId: diagnostic.delivery.id,
     idempotencyKey: 'replay-request-1',
   })
+  const command = commands[0]
   assert.equal(result.diagnostic.delivery.id, diagnostic.delivery.id)
   assert.equal(command.nextAttemptAt, '2026-07-15T01:30:00.001Z')
   assert.equal(command.expiresAt, '2026-07-16T01:30:00.000Z')
   assert.match(command.requestFingerprint, /^[a-f0-9]{64}$/)
   assert.equal(command.administration.action, 'webhook-delivery.replay')
   assert.equal(command.administration.audit.credentialId, 'credential-1')
+  await replay({
+    workspaceId: 'workspace-1',
+    actor: WEBHOOK_ADMINISTRATOR,
+    deliveryId: diagnostic.delivery.id,
+    idempotencyKey: 'replay-request-2',
+  })
+  assert.notEqual(commands[1].requestFingerprint, command.requestFingerprint)
   await assert.rejects(
     () => replay({
       workspaceId: 'workspace-1',
@@ -2256,7 +2264,6 @@ test('webhook delivery replay retries serialization conflicts before failing exp
       throw error
     },
   })
-
   await assert.rejects(
     () => repository.replay({
       administration: replayAdministration({

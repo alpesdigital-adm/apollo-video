@@ -83,6 +83,7 @@ export function replayWebhookEventService(dependencies: {
         clientId,
         eventId,
         maxDeliveries,
+        idempotencyKey,
       }))
       .digest('hex')
     const result = await dependencies.replays.replayEvent({

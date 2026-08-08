@@ -77,6 +77,7 @@ export function replayWebhookDeliveryService(dependencies: {
         workspaceId,
         clientId,
         deliveryId,
+        idempotencyKey,
       }))
       .digest('hex')
     const result = await dependencies.deliveries.replay({
