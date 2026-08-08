@@ -86,6 +86,7 @@ import type { MediaTransferRepository } from '../application/ports/media-transfe
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { MediaLibraryRepository } from '../application/ports/media-library-repository.ts'
+import type { MediaSegmentRepository } from '../application/ports/media-segment-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
@@ -211,6 +212,7 @@ import { PrismaMediaTransferRepository } from './prisma/media-transfer-repositor
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
+import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -287,6 +289,7 @@ import {
 import { createLocalArtifactContentStorageFromEnvironment } from './media/local-artifact-content-storage.ts'
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
+import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
 import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
@@ -726,6 +729,10 @@ export function createMediaLibraryRepository(): MediaLibraryRepository {
   return new PrismaMediaLibraryRepository(resolveV2Client())
 }
 
+export function createMediaSegmentRepository(): MediaSegmentRepository {
+  return new PrismaMediaSegmentRepository(resolveV2Client())
+}
+
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {
   return new PrismaMediaArtifactLifecycleRepository(resolveV2Client())
 }
@@ -770,6 +777,17 @@ function createArtifactSourceMaterializer(environment: NodeJS.ProcessEnv) {
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Render work root is required for S3 artifact materialization')
   return new S3ArtifactSourceMaterializer(workRoot, createArtifactS3ClientFromEnvironment(environment))
+}
+
+export function createMediaSegmentMaterializationDependencies(environment: NodeJS.ProcessEnv = process.env) {
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Render work root is required for media segment extraction')
+  return {
+    repository: createMediaSegmentRepository(), artifacts: createMediaArtifactPersistenceRepository(environment),
+    sources: createArtifactSourceMaterializer(environment), storage: createVerifiedMediaStorage(environment),
+    extractor: new FfmpegMediaSegmentExtractor(join(resolve(workRoot), 'media-segments')),
+    integrity: { sha256: calculateFileSha256 },
+  }
 }
 
 export function createProjectProxyRenderRepository(): ProjectProxyRenderRepository {

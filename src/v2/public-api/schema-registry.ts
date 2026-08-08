@@ -12572,7 +12572,21 @@ const mediaLibraryItemDataSchema = {
       },
 } as const
 
+const mediaSegmentDataSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'parentAssetId', 'label', 'description', 'semanticRange', 'sourceTimeMapping', 'physicalObjectKey', 'sourceDurationMs', 'segmentHash', 'createdAt'],
+  properties: { id: idSchema, workspaceId: idSchema, parentAssetId: idSchema, parentSegmentId: idSchema, label: { type: 'string', minLength: 1, maxLength: 240 }, description: { type: 'string', maxLength: 1000 }, semanticRange: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, sourceTimeMapping: { type: 'object', additionalProperties: false, required: ['sourceStartMs', 'sourceEndMs', 'rate'], properties: { sourceStartMs: { type: 'integer', minimum: 0 }, sourceEndMs: { type: 'integer', minimum: 1 }, rate: { const: 1 } } }, physicalObjectKey: { type: 'null' }, sourceDurationMs: { type: 'integer', minimum: 1 }, segmentHash: sha256Schema, createdAt: dateTimeSchema },
+} as const
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('media-segment-create-request', 1, 'Virtual media segment creation request', {
+    type: 'object', additionalProperties: false, required: ['label', 'startMs', 'endMs'],
+    properties: { parentSegmentId: idSchema, label: { type: 'string', minLength: 1, maxLength: 240 }, description: { type: 'string', maxLength: 1000 }, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } },
+  }),
+  defineSchema('media-segment', 1, 'Immutable virtual media segment response', successSchema(mediaSegmentDataSchema)),
+  defineSchema('media-segment-page', 1, 'Ordered virtual media segments for one artifact', successSchema({
+    type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', maxItems: 10000, items: mediaSegmentDataSchema } },
+  })),
   defineSchema('media-library-item', 1, 'Media library item response',
     successSchema(mediaLibraryItemDataSchema),
   ),

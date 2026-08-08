@@ -2100,6 +2100,55 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.media.segments.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/media-segment-create-request/v1",
+      "outputSchemaRef": "apollo://schemas/media-segment/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/media/library/{artifactId}/segments"
+      },
+      "toolName": "apollo.media.segments.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.media.segments.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/media-segment-page/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/media/library/{artifactId}/segments"
+      },
+      "toolName": "apollo.media.segments.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.media.uploads.abort": {
       "version": "1.0.0",
       "exposure": "public",
@@ -54313,6 +54362,302 @@
               ],
               "minLength": 8,
               "maxLength": 512
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-segment-create-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "startMs",
+        "endMs"
+      ],
+      "properties": {
+        "parentSegmentId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "startMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "apollo://schemas/media-segment-page/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "items"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "workspaceId",
+                  "parentAssetId",
+                  "label",
+                  "description",
+                  "semanticRange",
+                  "sourceTimeMapping",
+                  "physicalObjectKey",
+                  "sourceDurationMs",
+                  "segmentHash",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "parentAssetId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "parentSegmentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "semanticRange": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "startMs",
+                      "endMs"
+                    ],
+                    "properties": {
+                      "startMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "sourceTimeMapping": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sourceStartMs",
+                      "sourceEndMs",
+                      "rate"
+                    ],
+                    "properties": {
+                      "sourceStartMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "sourceEndMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "rate": {
+                        "const": 1
+                      }
+                    }
+                  },
+                  "physicalObjectKey": {
+                    "type": "null"
+                  },
+                  "sourceDurationMs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "segmentHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/media-segment/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "workspaceId",
+            "parentAssetId",
+            "label",
+            "description",
+            "semanticRange",
+            "sourceTimeMapping",
+            "physicalObjectKey",
+            "sourceDurationMs",
+            "segmentHash",
+            "createdAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "parentAssetId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "parentSegmentId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "semanticRange": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "startMs",
+                "endMs"
+              ],
+              "properties": {
+                "startMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "endMs": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "sourceTimeMapping": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceStartMs",
+                "sourceEndMs",
+                "rate"
+              ],
+              "properties": {
+                "sourceStartMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sourceEndMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rate": {
+                  "const": 1
+                }
+              }
+            },
+            "physicalObjectKey": {
+              "type": "null"
+            },
+            "sourceDurationMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "segmentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
             }
           }
         },

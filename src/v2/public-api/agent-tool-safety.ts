@@ -426,6 +426,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Adds one rights-cleared immutable artifact reference to one project without copying or deleting media bytes.',
     },
+    'apollo.media.segments.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable metadata-only range over an existing artifact without copying or changing media bytes.',
+    },
     'apollo.clients.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Creates a new machine identity with workspace-scoped API permissions.',

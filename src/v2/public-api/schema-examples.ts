@@ -5034,6 +5034,9 @@ const projectLutSelectionDeferredExampleV3 = {
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/media-segment-create-request/v1': [{ label: 'Promessa central', description: 'Trecho reutilizável', startMs: 1200, endMs: 4800 }],
+    'apollo://schemas/media-segment/v1': [{ data: { id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/media-segment-page/v1': [{ data: { items: [{ id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }] }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/media-library-item/v1': [
       {
         data: {

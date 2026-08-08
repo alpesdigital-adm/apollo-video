@@ -1139,6 +1139,20 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.media.segments.list', version: '1.0.0', title: 'List virtual media segments',
+    description: 'Lists immutable semantic ranges for one workspace media artifact without creating derivative bytes.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/media-segment-page/v1', endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}/segments' },
+    toolName: 'apollo.media.segments.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.media.segments.create', version: '1.0.0', title: 'Create virtual media segment',
+    description: 'Creates an immutable semantic range over an existing media artifact; no master bytes are copied or cut.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['artifacts:write'],
+    inputSchemaRef: 'apollo://schemas/media-segment-create-request/v1', outputSchemaRef: 'apollo://schemas/media-segment/v1', endpoint: { method: 'POST', path: '/v1/media/library/{artifactId}/segments' },
+    toolName: 'apollo.media.segments.create', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201, 200], idempotency: 'natural', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.media.library.list',
     version: '1.0.0',
     title: 'List workspace media library',

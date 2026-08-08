@@ -4,10 +4,12 @@ import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 import { attachMediaLibraryItemService } from '../../src/v2/application/media-library.ts'
+import { createMediaSegmentService } from '../../src/v2/application/media-segments.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { mediaLibrarySearchField } from '../../src/v2/domain/media-library.ts'
 import { PrismaMediaLibraryRepository } from '../../src/v2/infrastructure/prisma/media-library-repository.ts'
+import { PrismaMediaSegmentRepository } from '../../src/v2/infrastructure/prisma/media-segment-repository.ts'
 
 function rightsRow(snapshot) {
   return {
@@ -27,11 +29,15 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
   const otherWorkspaceId = `library-other-${suffix}`
   const projectId = `library-project-${suffix}`
   const repository = new PrismaMediaLibraryRepository(prisma)
+  const segmentRepository = new PrismaMediaSegmentRepository(prisma)
   const artifactIds = ['video', 'audio', 'restricted', 'other'].map((kind) => `library-${kind}-${suffix}`)
   const cleanup = async () => {
+    await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaArtifact.updateMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } }, data: { currentRightsSnapshotId: null } })
     await prisma.v2MediaLibraryEntry.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2AssetRightsSnapshot.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2Project.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
@@ -56,6 +62,7 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
       ...artifact, artifactKey: `${artifact.workspaceId}/${artifact.id}`, sha256: String(index + 1).repeat(64),
       createdAt: new Date(`2026-08-08T12:0${index}:00.000Z`),
     } })
+    await prisma.v2MediaArtifactManifest.create({ data: { id: `manifest-${artifactIds[0]}`, workspaceId, artifactId: artifactIds[0], schemaVersion: 'media-artifact-manifest/v1', manifestHash: 'e'.repeat(64), recipeId: 'upload', recipeVersion: '1.0.0', parametersHash: 'f'.repeat(64), manifestJson: stableSerialize({ schemaVersion: 'media-artifact-manifest/v1', artifact: { artifactKey: `${workspaceId}/${artifactIds[0]}`, sha256: '1'.repeat(64), byteSize: 1111, mediaType: 'video', container: 'mp4' }, recipe: { id: 'upload', version: '1.0.0', parametersHash: 'f'.repeat(64) }, sources: [], probe: { width: 540, height: 960, duration: 10, fps: 30 }, manifestHash: 'e'.repeat(64) }) } })
     const people = mediaLibrarySearchField(['Ana Martins'], 'people')
     const topics = mediaLibrarySearchField(['Produto Premium'], 'topics')
     for (const [index, artifact] of artifacts.entries()) await prisma.v2MediaLibraryEntry.create({ data: {
@@ -96,6 +103,22 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
     await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[2] }), /rights/i)
     await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[3] }), /not found/i)
+
+    const createSegment = createMediaSegmentService({ repository: segmentRepository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
+    const firstSegment = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Promessa', startMs: 0, endMs: 5000 })
+    const overlap = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Prova', startMs: 4000, endMs: 8000 })
+    const nested = await createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Frase', startMs: 1000, endMs: 5000 })
+    const edge = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Tudo', startMs: 0, endMs: 10000 })
+    const replayed = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Tudo', startMs: 0, endMs: 10000 })
+    assert.equal(firstSegment.segment.physicalObjectKey, null)
+    assert.equal(overlap.segment.semanticRange.startMs, 4000)
+    assert.equal(nested.segment.parentSegmentId, firstSegment.segment.id)
+    assert.equal(edge.replayed, false)
+    assert.equal(replayed.replayed, true)
+    assert.equal((await segmentRepository.list(workspaceId, artifactIds[0])).length, 4)
+    assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
+    await assert.rejects(() => createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Fora', startMs: 0, endMs: 6000 }), /inside|parent/i)
+    await assert.rejects(() => createSegment({ workspaceId: otherWorkspaceId, artifactId: artifactIds[0], label: 'Cross workspace', startMs: 0, endMs: 1000 }), /not found/i)
   } finally {
     await cleanup()
     await prisma.$disconnect()
