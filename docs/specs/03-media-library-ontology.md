@@ -642,6 +642,14 @@ Somente blob sem referências ativas, sem legal hold e fora do grace period. Nun
 | derivative ausente | rebuild se recipe/source válidos |
 | source revoked | remover de auto-search e marcar downstream |
 
+Evidência F1.011: inputs diretos de vídeo, áudio e imagem compartilham o mesmo
+upload resumível e ledger, mas só se tornam assets após assinatura binária,
+MIME/extensão compatíveis e probe real. Falha mantém o arquivo em quarantine e
+expõe código, mensagem e ação; áudio/imagem suplementares não alteram o estado
+editorial do projeto. O run remoto `f1011-20260808-r1` comprovou essa cadeia em
+PostgreSQL 17 + pgvector e FFmpeg para MP4/WAV/JPEG. Browser offline real,
+implantação e aceite continuam pendentes.
+
 ## 31. Cenários Given/When/Then
 
 ### ML-01 — Dedupe exato

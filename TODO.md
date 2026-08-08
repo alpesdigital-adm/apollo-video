@@ -861,6 +861,20 @@ de F0.002.
 - [ ] Exibir erro acionável para codec, corrupção, tamanho e duração inválidos. Evidência F1-011: respostas incluem code, mensagem e ação para conversão, reexportação, multipart ou ajuste de duração/dimensões.
 - [ ] Criar E2E para cada tipo e falha de rede. Evidência F1-011: regressões cobrem assinaturas e probe real de MP4/WAV/JPEG, corrupção/mismatch e pausa-retomada-cancelamento após rede offline.
 
+Evidência remota parcial F1.011 (run `f1011-20260808-r1`, commits `c7b4a57`,
+`f0b8277`, `d0b1f7f` e `9b4e50e`): PostgreSQL 17 + pgvector aplicou 150
+migrations do zero; o vertical real persistiu 3/3 uploads utilizáveis, 3 audits
+`inspect`, roles `source-master`, `source-audio` e `source-image`, 4/4 operações
+concluídas e proxy MP4 540×960/6 s com SHA-256
+`62a0730f3fa319af8d16b1b792725b70b9e2f867a7db8b18f81bb6120fb66b3f`.
+O golden Linux aprovou 4/4 para MP4/WAV/JPEG, mismatch acionável e zero
+promoção do arquivo rejeitado; build Next limpo também passou. O E2E revelou e
+corrigiu os constraints de audit/roles e a transição indevida do projeto por
+mídia suplementar. Postflight: zero processos, sessões e containers; VPS
+`590809693` destruída com confirmação HTTP 404. As cinco caixas permanecem
+abertas: não houve deploy/aceite e a falha de rede está coberta pela state
+machine, ainda não por browser offline real.
+
 ### F1.012 — Media Library v1 [FR-040]
 
 - [ ] Criar listagem paginada de assets e segments do workspace. Evidência F1-012: consulta por cursor no domínio e paginação externa por offset/limit na biblioteca legada.

@@ -234,6 +234,14 @@ completos do Brand Kit, deploy e aceite.
 | FR-050 | PerceptionTimeline | S1,S3 | D1,D2 | timeline agrega sinais mínimos | golden |
 | FR-051 | EditorialBeat | S1 | D2 | beats independem de subtitle chunk | unit |
 | FR-052 | Confidence | S1 | D2 | decisões carregam confidence/evidence | contract |
+
+Evidência remota FR-030/F1.011: o run `f1011-20260808-r1` em `9b4e50e`
+aplicou 150 migrations do zero e comprovou vídeo, áudio e imagem pelo worker e
+PostgreSQL reais, com quarantine/FFprobe, audit `inspect`, rights, artifacts e
+roles de projeto. O golden complementar aprovou mismatch/corrupção acionável e
+ausência de promoção. Build Linux e postflight passaram; a VPS `590809693` foi
+destruída. O requisito segue aberto por falta de deploy/aceite e de browser
+offline real para a jornada de falha de rede.
 | FR-060 | TreatmentPlan | S1 | D2 | objetivo produz gramática/energy policy | golden |
 | FR-061 | StoryPlan | S1 | D2 | atos/blocos/dependências persistidos | golden |
 | FR-062 | Alternativas de montagem | S1 | D2 | ao menos candidatos elegíveis são comparados | integration |

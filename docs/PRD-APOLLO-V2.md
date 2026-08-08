@@ -556,6 +556,13 @@ O sistema deve aceitar:
 - assets de marca;
 - mídia gerada externamente.
 
+Evidência de implementação F1.011 (run remoto `f1011-20260808-r1`): o fluxo V2
+API-first recebe vídeo, áudio e imagem, mantém bytes em quarentena até
+assinatura/FFprobe, persiste a decisão auditável no PostgreSQL e só então promove
+o artifact. O vertical em `9b4e50e` comprovou MP4/WAV/JPEG reais e preservação do
+estado do projeto para mídia suplementar. Implantação, aceite e browser offline
+real permanecem pendentes; portanto FR-030 não está concluído integralmente.
+
 ### FR-031 — Masters imutáveis
 
 Toda fonte original deve ser armazenada sem sobrescrita.
