@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
+import sharp from 'sharp'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
@@ -34,6 +35,7 @@ import { FfmpegIngestProcessor } from '../../src/v2/infrastructure/media/ffmpeg-
 import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { SharpImageAnalysisProcessor } from '../../src/v2/infrastructure/media/sharp-image-analysis-processor.ts'
 import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
+import { TesseractImageVisionProvider } from '../../src/v2/infrastructure/image/tesseract-image-vision-provider.ts'
 import {
   createArtifactS3ClientFromEnvironment,
   S3ArtifactSourceMaterializer,
@@ -125,10 +127,8 @@ async function createLibraryFixtures(root) {
     '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
     'sine=frequency=660:sample_rate=48000:duration=1', '-c:a', 'pcm_s16le', audio,
   ], { windowsHide: true, timeout: 120_000 })
-  await execFileAsync(ffmpegPath, [
-    '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
-    'color=c=green:s=640x480', '-frames:v', '1', image,
-  ], { windowsHide: true, timeout: 120_000 })
+  const svg = '<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="480" fill="#d8f0d8"/><text x="35" y="170" font-family="DejaVu Sans" font-size="52" font-weight="bold" fill="#102030">OFERTA VÁLIDA</text><text x="35" y="300" font-family="DejaVu Sans" font-size="48" font-weight="bold" fill="#204080">WELCOME APOLLO</text></svg>'
+  await sharp(Buffer.from(svg)).jpeg({ quality: 94 }).toFile(image)
   return { audio, image }
 }
 
@@ -242,7 +242,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
         },
       },
       rights: new PrismaAssetRightsRepository(prisma),
-      imageAnalysis: { processor: new SharpImageAnalysisProcessor(join(root, '.image-analysis-work')), repository: new PrismaImageAnalysisRepository(prisma), integrity: { sha256: calculateFileSha256 } },
+      imageAnalysis: { processor: new SharpImageAnalysisProcessor(join(root, '.image-analysis-work'), process.env.APOLLO_TESSERACT_PATH ? new TesseractImageVisionProvider({ binary: process.env.APOLLO_TESSERACT_PATH }) : undefined), repository: new PrismaImageAnalysisRepository(prisma), integrity: { sha256: calculateFileSha256 } },
       clock,
       leaseDurationMs: 60_000,
       heartbeatIntervalMs: 10_000,
@@ -341,7 +341,13 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     const imageAnalysis = await prisma.v2ImageAnalysis.findFirstOrThrow({ where: { workspaceId, artifactId: imageAsset.artifactId } })
     const imageAnalysisJson = JSON.parse(imageAnalysis.analysisJson)
     assert.deepEqual(imageAnalysisJson.dimensions, { width: 640, height: 480 })
-    assert.equal(imageAnalysisJson.ocr.state, 'unavailable')
+    if (process.env.APOLLO_TESSERACT_PATH) {
+      assert.equal(imageAnalysisJson.ocr.state, 'available')
+      const observedText = imageAnalysisJson.ocr.values.map((region) => region.text).join(' ').toLocaleLowerCase()
+      assert.match(observedText, /oferta/)
+      assert.match(observedText, /welcome/)
+      assert.equal(imageAnalysisJson.ocr.producer.provider, 'tesseract')
+    } else assert.equal(imageAnalysisJson.ocr.state, 'unavailable')
     assert.equal(imageAnalysisJson.faces.state, 'unavailable')
     assert.equal(imageAnalysisJson.objects.state, 'unavailable')
     assert.equal(imageAnalysisJson.derivatives.immutableOriginal, true)
