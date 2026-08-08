@@ -1296,14 +1296,15 @@ test('authenticated public API manages projects, clients and artifact inspection
     assert.equal(eventCatalogResponse.status, 200)
     assert.equal(
       eventCatalog.data.envelopeSchemaRef,
-      'apollo://schemas/public-event/v1',
+      'apollo://schemas/public-event/v2',
     )
-    assert.equal(eventCatalog.data.events.length, 14)
+    assert.equal(eventCatalog.data.events.length, 15)
     assert.deepEqual(
       eventCatalog.data.events.map((event) => event.type),
       [
         'project.created',
         'project.version.created',
+        'project.name.changed',
         'project.status.changed',
         'operation.status.changed',
         'operation.succeeded',
