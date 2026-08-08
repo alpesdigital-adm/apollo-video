@@ -5333,7 +5333,7 @@ test('authenticated public API manages projects, clients and artifact inspection
         actorEnvironment: apiEnvironment,
         actorAuthenticationKind: 'bearer',
         actorContextHash: webhookAuditContext.contextHash,
-        type: 'artifact-render', status: 'queued', phase: 'queued',
+        type: 'project-proxy-render', status: 'queued', phase: 'queued',
         progressCompleted: 0, progressTotal: 4, progressUnit: 'render',
         targetType: 'media-artifact', targetId: derivedArtifactId,
         cancelable: true, retryable: false, attempt: 0, maxAttempts: 3,
