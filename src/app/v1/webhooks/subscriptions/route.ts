@@ -76,9 +76,9 @@ export async function POST(request: NextRequest) {
     const createSubscription = createWebhookSubscriptionService({
       repository: createWebhookSubscriptionCreationRepository(),
       clock: () => new Date(),
-      createId: (kind) => kind === 'webhook-subscription'
-        ? randomUUID()
-        : `${kind}-${randomUUID()}`,
+      createId: (kind) => kind === 'idempotency-record'
+        ? `${kind}-${randomUUID()}`
+        : randomUUID(),
     })
     const result = await createSubscription({
       workspaceId: actor.workspaceId,
