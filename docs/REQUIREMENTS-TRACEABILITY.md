@@ -233,6 +233,14 @@ completos do Brand Kit, deploy e aceite.
 | FR-049 | Catalogação automática | S3 | D1,D4 | asset aprovado entra no índice | integration |
 | FR-050 | PerceptionTimeline | S1,S3 | D1,D2 | timeline agrega sinais mínimos | golden |
 | FR-051 | EditorialBeat | S1 | D2 | beats independem de subtitle chunk | unit |
+
+Evidência remota parcial FR-047/F1.014: commits `1342201..a0efc4b` integraram
+`V2ImageAnalysis` ao ingest worker, PostgreSQL e API pública. PostgreSQL 16 +
+pgvector aplicou 154 migrations do zero; integração Prisma e jornada HTTP ampla
+passaram 1/1, com postflight limpo. Sharp + Tesseract real observou OCR pt-BR/en,
+gerou thumbnail/preview visualmente inspecionados e preservou o SHA-256 do
+source. Faces/objects sem provider, busca/reuso E2E, deploy e aceite permanecem
+abertos; FR-047 não está entregue.
 | FR-052 | Confidence | S1 | D2 | decisões carregam confidence/evidence | contract |
 
 Evidência remota FR-030/F1.011: o run `f1011-20260808-r1` em `9b4e50e`

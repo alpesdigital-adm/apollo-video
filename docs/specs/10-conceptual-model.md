@@ -137,7 +137,7 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.3 | EvidenceSegment | Media | table | V2EvidenceSegment | project+source+range |
 | 10.3 | ValidatedSegment | Media | table | V2ValidatedSegment | immutable validation envelope |
 | 10.3 | LongFormMoment | Media | table | V2LongFormMoment | index run+moment id |
-| 10.3 | ImageAnalysis | Media | planned | gap: versioned image analysis contract | artifact+producer version |
+| 10.3 | ImageAnalysis | Media | table | V2ImageAnalysis | workspace+artifact+manifest; analysis hash |
 | 10.3 | MediaEmbedding | Media | table | V2SemanticSearchDocument | workspace+document id |
 | 10.3 | AssetRights | Media | table | V2AssetRightsSnapshot | artifact+rights revision |
 | 10.4 | CaptureSession | Capture | value-object | src/v2/domain/capture-synchronization.ts#CaptureSession | workspace session id |

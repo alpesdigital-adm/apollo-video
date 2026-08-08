@@ -689,6 +689,14 @@ Imagens devem registrar:
 - embedding;
 - lineage de crops, outpainting e transformações.
 
+Estado parcial auditado em F1.014: `V2ImageAnalysis` persiste análise
+content-addressed, dimensões/orientação, cores, OCR espacial com provenance,
+descrição observada e derivatives imutáveis; ingest worker, PostgreSQL e a API
+`GET /v1/media/library/{artifactId}/image-analysis` foram integrados. Golden
+Linux real comprovou Sharp + Tesseract `por-eng`, source imutável, thumbnail e
+preview inspecionados. Faces/objects ainda são explicitamente `unavailable` sem
+provider; busca/reuso E2E, implantação e aceite continuam pendentes.
+
 ### FR-048 — Busca híbrida
 
 Filtros duros → busca textual/OCR → busca vetorial → reranking editorial → crítica visual.

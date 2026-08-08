@@ -922,6 +922,22 @@ Media Library global ainda não pagina segmentos junto com assets.
 - [ ] Implementar busca e reutilização em B-roll, insert e card. Evidência F1-014: busca ranqueada preserva a finalidade pedida e endpoint externo cataloga a imagem.
 - [ ] Criar eval com imagens sem texto, texto pequeno e múltiplos idiomas. Evidência F1-014/T-FR-047: três fixtures exercitam ausência, baixa área/confidence e OCR pt-BR/en.
 
+Evidência remota parcial F1.014 (commits `1342201..a0efc4b`): o run isolado
+aplicou 154 migrations V2 do zero em PostgreSQL 16 + pgvector; a integração
+Prisma de webhooks passou 1/1 e a jornada HTTP pública ampla passou 1/1 no SHA
+`a0efc4b`, ambas com postflight de zero conexões, containers e processos. O
+worker real já havia produzido MP4 vertical 540×960 de 6 s e a cadeia
+Sharp + Tesseract `por-eng` foi reexecutada no Linux sobre imagem 1200×800:
+source SHA-256 `d5547b43...` permaneceu idêntico, OCR observou OFERTA/VÁLIDA/
+HOJE/WELCOME/APOLLO, thumbnail 320×213 e preview 1200×800 foram inspecionados
+visualmente. Builds Windows/Linux, 1215/1215 testes locais, typecheck, lint,
+212 capabilities/403 schemas/451 examples/169 paths e schema V2 (155 tabelas,
+804 índices, 597 FKs) passaram. Faces e objects continuam fail-closed como
+`unavailable` porque nenhum provider está configurado; busca/reuso não foi
+demonstrada ponta a ponta nesta rodada e não houve deploy/aceite. Por isso as
+cinco caixas permanecem abertas. A VPS descartável foi destruída após preservar
+as evidências e o snapshot-base.
+
 ### F1.015 — Catalogação automática [FR-049]
 
 - [ ] Definir quais outputs aprovados viram assets ou segments pesquisáveis. Evidência F1-015: final/proxy viram asset e deepfake bruto reaproveitável vira segment.
