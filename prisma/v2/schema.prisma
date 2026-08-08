@@ -33,6 +33,7 @@ model V2Workspace {
   mediaLibraryEntries                    V2MediaLibraryEntry[]
   mediaSegments                          V2MediaSegment[]
   mediaSegmentMaterializations           V2MediaSegmentMaterialization[]
+  imageAnalyses                          V2ImageAnalysis[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -1219,6 +1220,9 @@ model V2MediaArtifact {
   libraryWaveformFor           V2MediaLibraryEntry[]                     @relation("MediaLibraryWaveformArtifact")
   mediaSegments                V2MediaSegment[]
   mediaSegmentDerivatives      V2MediaSegmentMaterialization[]           @relation("MediaSegmentDerivativeArtifact")
+  imageAnalyses                V2ImageAnalysis[]                          @relation("ImageAnalysisSourceArtifact")
+  imageAnalysisThumbnails      V2ImageAnalysis[]                          @relation("ImageAnalysisThumbnailArtifact")
+  imageAnalysisPreviews        V2ImageAnalysis[]                          @relation("ImageAnalysisPreviewArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -1307,6 +1311,32 @@ model V2MediaSegmentMaterialization {
   @@unique([outputManifestId, workspaceId])
   @@index([workspaceId, segmentId, createdAt(sort: Desc)])
   @@map("media_segment_materializations")
+}
+
+model V2ImageAnalysis {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  artifactId          String   @db.VarChar(128)
+  manifestId          String   @db.VarChar(128)
+  sourceSha256        String   @db.Char(64)
+  analysisJson        String   @db.Text
+  analysisHash        String   @db.Char(64)
+  thumbnailArtifactId String   @db.VarChar(128)
+  previewArtifactId   String   @db.VarChar(128)
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace         V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact          V2MediaArtifact         @relation("ImageAnalysisSourceArtifact", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest          V2MediaArtifactManifest @relation(fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  thumbnailArtifact V2MediaArtifact         @relation("ImageAnalysisThumbnailArtifact", fields: [thumbnailArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previewArtifact   V2MediaArtifact         @relation("ImageAnalysisPreviewArtifact", fields: [previewArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, artifactId, manifestId])
+  @@unique([thumbnailArtifactId, workspaceId])
+  @@unique([previewArtifactId, workspaceId])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("image_analyses")
 }
 
 model V2MediaArtifactLifecycleTransition {
@@ -1419,6 +1449,7 @@ model V2MediaArtifactManifest {
   finalExportSources         V2ProjectFinalExportOperation[]           @relation("FinalExportSourceManifest")
   finalExportAttemptOutputs  V2ProjectFinalExportAttempt[]
   segmentMaterializations    V2MediaSegmentMaterialization[]
+  imageAnalyses              V2ImageAnalysis[]
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])

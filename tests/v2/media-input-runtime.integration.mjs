@@ -13,6 +13,8 @@ import { createApiAccessAuditContext } from '../../src/v2/domain/api-access-cont
 import { createMediaUpload } from '../../src/v2/domain/media-transfer.ts'
 import { LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
 import { inspectUploadedMedia } from '../../src/v2/infrastructure/media/video-probe.ts'
+import { SharpImageAnalysisProcessor } from '../../src/v2/infrastructure/media/sharp-image-analysis-processor.ts'
+import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -47,13 +49,14 @@ async function stage(storage, fixture, identity) {
   })
 }
 
-function createWorkerHarness({ upload: initialUpload, storage, inspection = inspectUploadedMedia }) {
+function createWorkerHarness({ upload: initialUpload, storage, inspection = inspectUploadedMedia, imageProcessor }) {
   let upload = initialUpload
   let claimed = false
   const persisted = []
   const cataloged = []
   const failures = []
   const phases = []
+  const imageAnalyses = []
   let cleanupCalls = 0
   let projectFailureCalls = 0
   const authenticationAudit = createApiAccessAuditContext({
@@ -123,10 +126,11 @@ function createWorkerHarness({ upload: initialUpload, storage, inspection = insp
       async findCurrent() { return { snapshot: { status: 'approved' } } },
       async setCurrent() { throw new Error('approved rights must not be rewritten') },
     },
+    ...(imageProcessor ? { imageAnalysis: { processor: imageProcessor, integrity: { sha256: calculateFileSha256 }, repository: { async find() { return null }, async persist(analysis) { imageAnalyses.push(analysis); return { analysis, replayed: false } } } } } : {}),
     clock: () => new Date('2026-08-07T23:15:00.000Z'),
   })
   return {
-    runNext, persisted, cataloged, failures, phases,
+    runNext, persisted, cataloged, failures, phases, imageAnalyses,
     get cleanupCalls() { return cleanupCalls },
     get projectFailureCalls() { return projectFailureCalls },
     get upload() { return upload },
@@ -184,14 +188,21 @@ test('F1.011 durable worker catalogs real WAV and JPEG without invoking the vide
   ]
   for (const item of cases) {
     const upload = await stage(storage, item.fixture, item)
-    const harness = createWorkerHarness({ upload, storage })
+    const harness = createWorkerHarness({ upload, storage, ...(item.kind === 'image' ? { imageProcessor: new SharpImageAnalysisProcessor(join(root, 'image-work')) } : {}) })
     const result = await harness.runNext(`worker-${item.kind}`)
     assert.deepEqual(result, { operationId: `operation-${upload.id}`, status: 'succeeded' }, JSON.stringify(harness.failures))
     assert.equal(harness.upload.inspectionStatus, 'usable')
-    assert.equal(harness.persisted.length, 1)
+    assert.equal(harness.persisted.length, item.kind === 'image' ? 3 : 1)
     assert.equal(harness.persisted[0].manifest.artifact.mediaType, item.kind)
     assert.equal(harness.cataloged.length, 1)
     assert.equal(harness.cataloged[0].mediaType, item.kind)
+    assert.equal(harness.imageAnalyses.length, item.kind === 'image' ? 1 : 0)
+    if (item.kind === 'image') {
+      assert.equal(harness.imageAnalyses[0].dimensions.width, 640)
+      assert.equal(harness.imageAnalyses[0].dimensions.height, 480)
+      assert.equal(harness.imageAnalyses[0].ocr.state, 'unavailable')
+      assert.equal(harness.imageAnalyses[0].derivatives.immutableOriginal, true)
+    }
     assert.deepEqual(harness.phases, ['probing', 'verifying', 'persisting'])
     assert.equal(harness.failures.length, 0)
     assert.equal(harness.cleanupCalls, 1)

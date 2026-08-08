@@ -32,6 +32,7 @@
     "test:integration:asset-rights-audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-asset-rights-audit.integration.mjs",
     "test:integration:media-library": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-media-library.integration.mjs",
     "test:integration:media-segment": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/media-segment-materialization.integration.mjs",
+    "test:integration:image-analysis": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/image-analysis-tesseract.integration.mjs tests/v2/media-input-runtime.integration.mjs",
     "test:integration:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/remotion-renderer.integration.mjs",
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
     "test:integration:review": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-review-annotation.integration.mjs",

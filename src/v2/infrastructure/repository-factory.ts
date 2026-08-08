@@ -87,6 +87,7 @@ import type { MediaDownloadGrantRepository } from '../application/ports/media-do
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { MediaLibraryRepository } from '../application/ports/media-library-repository.ts'
 import type { MediaSegmentRepository } from '../application/ports/media-segment-repository.ts'
+import type { ImageAnalysisRepository } from '../application/ports/image-analysis-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
@@ -213,6 +214,7 @@ import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-gran
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
+import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -290,6 +292,8 @@ import { createLocalArtifactContentStorageFromEnvironment } from './media/local-
 import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-ingest-processor.ts'
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
 import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
+import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
+import { TesseractImageVisionProvider } from './image/tesseract-image-vision-provider.ts'
 import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
@@ -731,6 +735,10 @@ export function createMediaLibraryRepository(): MediaLibraryRepository {
 
 export function createMediaSegmentRepository(): MediaSegmentRepository {
   return new PrismaMediaSegmentRepository(resolveV2Client())
+}
+
+export function createImageAnalysisRepository(): ImageAnalysisRepository {
+  return new PrismaImageAnalysisRepository(resolveV2Client())
 }
 
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {
@@ -1309,6 +1317,13 @@ export function createMediaIngestWorker(
     inspector: { inspect: inspectUploadedMedia },
     providers: createProviderRuntimeRouter(environment),
     rights: createAssetRightsRepository(),
+    imageAnalysis: {
+      processor: new SharpImageAnalysisProcessor(
+        join(resolve(environment.APOLLO_V2_RENDER_WORK_ROOT ?? '.apollo/work'), 'image-analysis'),
+        environment.APOLLO_TESSERACT_PATH?.trim() ? new TesseractImageVisionProvider({ binary: environment.APOLLO_TESSERACT_PATH.trim() }) : undefined,
+      ),
+      repository: createImageAnalysisRepository(), integrity: { sha256: calculateFileSha256 },
+    },
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),

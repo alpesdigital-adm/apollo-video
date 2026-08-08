@@ -32,6 +32,8 @@ import { createWorkspace } from '../../src/v2/domain/workspace.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import { FfmpegIngestProcessor } from '../../src/v2/infrastructure/media/ffmpeg-ingest-processor.ts'
 import { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } from '../../src/v2/infrastructure/media/local-media-upload-storage.ts'
+import { SharpImageAnalysisProcessor } from '../../src/v2/infrastructure/media/sharp-image-analysis-processor.ts'
+import { calculateFileSha256 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
 import {
   createArtifactS3ClientFromEnvironment,
   S3ArtifactSourceMaterializer,
@@ -45,6 +47,7 @@ import { PrismaColorPipelineCompilationRepository } from '../../src/v2/infrastru
 import { PrismaDirectorRunRepository } from '../../src/v2/infrastructure/prisma/director-run-repository.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prisma/media-artifact-repository.ts'
+import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
 import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
 import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from '../../src/v2/infrastructure/prisma/project-policy-overrides-repository.ts'
@@ -239,6 +242,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
         },
       },
       rights: new PrismaAssetRightsRepository(prisma),
+      imageAnalysis: { processor: new SharpImageAnalysisProcessor(join(root, '.image-analysis-work')), repository: new PrismaImageAnalysisRepository(prisma), integrity: { sha256: calculateFileSha256 } },
       clock,
       leaseDurationMs: 60_000,
       heartbeatIntervalMs: 10_000,
@@ -330,9 +334,20 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
         where: { id: seed.project.id }, select: { status: true },
       })
       assert.equal(project.status, projectStatusBeforeLibrary)
+      return asset
     }
     await uploadLibraryInput({ path: libraryFixtures.audio, kind: 'audio', mimeType: 'audio/wav', role: 'source-audio' })
-    await uploadLibraryInput({ path: libraryFixtures.image, kind: 'image', mimeType: 'image/jpeg', role: 'source-image' })
+    const imageAsset = await uploadLibraryInput({ path: libraryFixtures.image, kind: 'image', mimeType: 'image/jpeg', role: 'source-image' })
+    const imageAnalysis = await prisma.v2ImageAnalysis.findFirstOrThrow({ where: { workspaceId, artifactId: imageAsset.artifactId } })
+    const imageAnalysisJson = JSON.parse(imageAnalysis.analysisJson)
+    assert.deepEqual(imageAnalysisJson.dimensions, { width: 640, height: 480 })
+    assert.equal(imageAnalysisJson.ocr.state, 'unavailable')
+    assert.equal(imageAnalysisJson.faces.state, 'unavailable')
+    assert.equal(imageAnalysisJson.objects.state, 'unavailable')
+    assert.equal(imageAnalysisJson.derivatives.immutableOriginal, true)
+    const imageLibrary = await prisma.v2MediaLibraryEntry.findUniqueOrThrow({ where: { artifactId: imageAsset.artifactId } })
+    assert.equal(imageLibrary.thumbnailArtifactId, imageAnalysis.thumbnailArtifactId)
+    assert.equal(await prisma.v2MediaArtifactLineage.count({ where: { workspaceId, sourceArtifactId: imageAsset.artifactId } }), 2)
 
     const projectAfterIngest = await prisma.v2Project.findUniqueOrThrow({
       where: { id: seed.project.id },

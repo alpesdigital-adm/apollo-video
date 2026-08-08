@@ -6,6 +6,8 @@ import type { MediaIngestProcessor, MediaSourceProber, ProjectMediaRepository, V
 import type { MediaTransferRepository } from './ports/media-transfer-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
+import type { ImageAnalysisProcessor } from './ports/image-analysis.ts'
+import type { ImageAnalysisRepository } from './ports/image-analysis-repository.ts'
 import type { ProviderRuntimeRouter } from './ports/provider-runtime-router.ts'
 import { assetRightsRevision } from '../domain/asset-rights.ts'
 import { createMediaColorProbe } from '../domain/color-and-export.ts'
@@ -20,6 +22,7 @@ import { setAssetRightsService } from './set-asset-rights.ts'
 import { calculatePublicOperationRetryDelayMs } from './run-public-operation-worker.ts'
 import { compileInitialSourceEditPlan } from './apply-editorial-cut-command.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
+import { analyzeImageArtifactService } from './analyze-image-artifact.ts'
 import { calculateVersionHash, stableSerialize } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set([
@@ -60,6 +63,7 @@ export function runNextMediaIngestOperationService(dependencies: {
   inspector: { inspect(sourcePath: string, upload: Readonly<import('../domain/media-transfer.ts').MediaUpload>, options?: { signal?: AbortSignal }): Promise<Readonly<MediaIngestDecision>> }
   providers: Pick<ProviderRuntimeRouter, 'resolveTranscription'>
   rights: AssetRightsRepository
+  imageAnalysis?: { processor: ImageAnalysisProcessor; repository: ImageAnalysisRepository; integrity: import('./ports/media-ingest.ts').ArtifactFileIntegrity }
   clock?: () => Date
   leaseDurationMs?: number
   heartbeatIntervalMs?: number
@@ -213,6 +217,10 @@ export function runNextMediaIngestOperationService(dependencies: {
           originalFileName: context.originalFileName, artifactId: context.sourceArtifactId,
           manifestId: context.sourceManifestId, mediaType: upload.kind, createdAt: clock().toISOString(),
         })
+        if (upload.kind === 'image') {
+          if (!dependencies.imageAnalysis) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Image analysis runtime is not configured')
+          await analyzeImageArtifactService({ processor: dependencies.imageAnalysis.processor, repository: dependencies.imageAnalysis.repository, artifacts: dependencies.artifacts, storage: dependencies.storage, integrity: dependencies.imageAnalysis.integrity, clock })({ operationId: operation.id, workspaceId: operation.workspaceId, artifactId: context.sourceArtifactId, manifestId: context.sourceManifestId, artifactKey: master.key, sourcePath: master.path, sourceSha256: master.sha256, signal: abortController.signal })
+        }
         stopHeartbeat()
         const succeeded = await dependencies.operations.succeed(command(clock()))
         if (!succeeded) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
