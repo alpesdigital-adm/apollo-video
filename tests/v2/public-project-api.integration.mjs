@@ -5368,10 +5368,12 @@ test('authenticated public API manages projects, clients and artifact inspection
       dashboardProject.dashboard.latestOperation.id,
       'public-api-dashboard-operation-v2',
     )
-    assert.equal(
-      'progress' in dashboardProject.dashboard.latestOperation,
-      false,
-    )
+    assert.deepEqual(dashboardProject.dashboard.latestOperation.progress, {
+      completed: 0,
+      total: 4,
+      unit: 'render',
+    })
+    assert.equal('percent' in dashboardProject.dashboard.latestOperation.progress, false)
     assert.equal(dashboardProject.dashboard.openReviewIssueCount, 0)
     assert.deepEqual(dashboardProject.dashboard.outputs, [])
     assert.equal(dashboardProject.dashboard.outputCount, 0)
