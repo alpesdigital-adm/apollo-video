@@ -1006,7 +1006,7 @@ test('authenticated public API manages projects, clients and artifact inspection
       openApi.paths['/v1/operations/dead-letter'].get.parameters.map(
         (parameter) => parameter.name,
       ),
-      ['limit', 'after', 'type', 'targetId'],
+      ['limit', 'after', 'type', 'projectId', 'targetId'],
     )
     assert.equal(
       openApi.paths['/v1/operations/{operationId}'].get['x-apollo-capability-id'],
