@@ -12572,6 +12572,34 @@ const mediaLibraryItemDataSchema = {
       },
 } as const
 
+const mediaLibrarySourceSchemaV2 = {
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false,
+      required: ['type', 'artifactId', 'virtual', 'bytesDuplicated'],
+      properties: { type: { const: 'artifact' }, artifactId: idSchema, virtual: { const: false }, bytesDuplicated: { const: false } },
+    },
+    {
+      type: 'object', additionalProperties: false,
+      required: ['type', 'artifactId', 'description', 'semanticRange', 'sourceTimeMapping', 'physicalObjectKey', 'sourceDurationMs', 'segmentHash', 'virtual', 'bytesDuplicated'],
+      properties: {
+        type: { const: 'segment' }, artifactId: idSchema, parentSegmentId: idSchema,
+        description: { type: 'string', maxLength: 1000 },
+        semanticRange: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } },
+        sourceTimeMapping: { type: 'object', additionalProperties: false, required: ['sourceStartMs', 'sourceEndMs', 'rate'], properties: { sourceStartMs: { type: 'integer', minimum: 0 }, sourceEndMs: { type: 'integer', minimum: 1 }, rate: { const: 1 } } },
+        physicalObjectKey: { type: 'null' }, sourceDurationMs: { type: 'integer', minimum: 1 }, segmentHash: sha256Schema,
+        virtual: { const: true }, bytesDuplicated: { const: false },
+      },
+    },
+  ],
+} as const
+
+const mediaLibraryItemDataSchemaV2 = {
+  ...mediaLibraryItemDataSchema,
+  required: [...mediaLibraryItemDataSchema.required, 'source'],
+  properties: { ...mediaLibraryItemDataSchema.properties, source: mediaLibrarySourceSchemaV2 },
+} as const
+
 const mediaSegmentDataSchema = {
   type: 'object', additionalProperties: false,
   required: ['id', 'workspaceId', 'parentAssetId', 'label', 'description', 'semanticRange', 'sourceTimeMapping', 'physicalObjectKey', 'sourceDurationMs', 'segmentHash', 'createdAt'],
@@ -12604,6 +12632,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object', additionalProperties: false, required: ['items', 'nextCursor'],
       properties: {
         items: { type: 'array', maxItems: 100, items: mediaLibraryItemDataSchema },
+        nextCursor: { type: ['string', 'null'], minLength: 8, maxLength: 512 },
+      },
+    }),
+  ),
+  defineSchema('media-library-item', 2, 'Unified artifact or virtual segment media library item response',
+    successSchema(mediaLibraryItemDataSchemaV2),
+  ),
+  defineSchema('media-library-page', 2, 'Unified artifact and virtual segment media library page response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['items', 'nextCursor'],
+      properties: {
+        items: { type: 'array', maxItems: 100, items: mediaLibraryItemDataSchemaV2 },
         nextCursor: { type: ['string', 'null'], minLength: 8, maxLength: 512 },
       },
     }),

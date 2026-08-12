@@ -5067,6 +5067,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/media-library-item/v2': [
+      {
+        data: {
+          id: artifactId, workspaceId, kind: 'video', label: 'Entrevista principal.mp4',
+          people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+          rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+          origin: { type: 'upload' },
+          preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+          technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' },
+          source: { type: 'artifact', artifactId, virtual: false, bytesDuplicated: false }, createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-library-page/v2': [
+      {
+        data: {
+          items: [{
+            id: 'segment-example-1', workspaceId, kind: 'segment', label: 'Promessa central',
+            people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+            rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+            origin: { type: 'derived', parentArtifactId: artifactId },
+            preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+            technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' },
+            source: { type: 'segment', artifactId, description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), virtual: true, bytesDuplicated: false }, createdAt,
+          }],
+          nextCursor: null,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/media-library-attachment-request/v1': [{ artifactId }],
     'apollo://schemas/media-library-attachment/v1': [
       {

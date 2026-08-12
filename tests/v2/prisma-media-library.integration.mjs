@@ -31,6 +31,7 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
   const repository = new PrismaMediaLibraryRepository(prisma)
   const segmentRepository = new PrismaMediaSegmentRepository(prisma)
   const artifactIds = ['video', 'audio', 'restricted', 'other'].map((kind) => `library-${kind}-${suffix}`)
+  const thumbnailId = `library-thumbnail-${suffix}`
   const cleanup = async () => {
     await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
@@ -62,6 +63,10 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
       ...artifact, artifactKey: `${artifact.workspaceId}/${artifact.id}`, sha256: String(index + 1).repeat(64),
       createdAt: new Date(`2026-08-08T12:0${index}:00.000Z`),
     } })
+    await prisma.v2MediaArtifact.create({ data: {
+      id: thumbnailId, workspaceId, mediaType: 'image', container: 'jpeg', status: 'available', byteSize: 555n,
+      artifactKey: `${workspaceId}/${thumbnailId}`, sha256: '5'.repeat(64), createdAt: new Date('2026-08-08T11:59:00.000Z'),
+    } })
     await prisma.v2MediaArtifactManifest.create({ data: { id: `manifest-${artifactIds[0]}`, workspaceId, artifactId: artifactIds[0], schemaVersion: 'media-artifact-manifest/v1', manifestHash: 'e'.repeat(64), recipeId: 'upload', recipeVersion: '1.0.0', parametersHash: 'f'.repeat(64), manifestJson: stableSerialize({ schemaVersion: 'media-artifact-manifest/v1', artifact: { artifactKey: `${workspaceId}/${artifactIds[0]}`, sha256: '1'.repeat(64), byteSize: 1111, mediaType: 'video', container: 'mp4' }, recipe: { id: 'upload', version: '1.0.0', parametersHash: 'f'.repeat(64) }, sources: [], probe: { width: 540, height: 960, duration: 10, fps: 30 }, manifestHash: 'e'.repeat(64) }) } })
     const people = mediaLibrarySearchField(['Ana Martins'], 'people')
     const topics = mediaLibrarySearchField(['Produto Premium'], 'topics')
@@ -69,7 +74,7 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
       artifactId: artifact.id, workspaceId: artifact.workspaceId, label: `Asset ${index}`,
       peopleJson: stableSerialize(index < 2 ? people.values : []), peopleSearch: index < 2 ? people.search : '\n',
       topicsJson: stableSerialize(index < 2 ? topics.values : []), topicsSearch: index < 2 ? topics.search : '\n',
-      originType: 'upload', createdAt: new Date(`2026-08-08T12:0${index}:00.000Z`),
+      originType: 'upload', ...(index === 0 ? { thumbnailArtifactId: thumbnailId } : {}), createdAt: new Date(`2026-08-08T12:0${index}:00.000Z`),
     } })
     for (const [index, artifactId] of artifactIds.slice(0, 3).entries()) {
       const snapshot = createAssetRightsSnapshot({
@@ -117,6 +122,27 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal(replayed.replayed, true)
     assert.equal((await segmentRepository.list(workspaceId, artifactIds[0])).length, 4)
     assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
+    const segmentPage = await repository.list({ workspaceId, kind: 'segment', person: 'ana martins', topic: 'premium', rightsStatus: 'eligible' }, new Date('2026-08-08T13:01:00.000Z'))
+    assert.equal(segmentPage.items.length, 4)
+    assert.equal(segmentPage.items.every((item) => item.kind === 'segment' && item.source.virtual && item.source.bytesDuplicated === false && item.source.physicalObjectKey === null), true)
+    assert.equal(segmentPage.items.every((item) => item.source.artifactId === artifactIds[0] && item.technical.byteSize === '1111'), true)
+    assert.equal(segmentPage.items.every((item) => item.people[0] === 'Ana Martins' && item.topics[0] === 'Produto Premium'), true)
+    assert.equal(segmentPage.items.every((item) => item.preview.thumbnail.artifactId === thumbnailId), true)
+    assert.deepEqual((await repository.findById(workspaceId, nested.segment.id, new Date('2026-08-08T13:01:00.000Z'))).source.semanticRange, { startMs: 1000, endMs: 5000 })
+    assert.equal(await repository.findById(otherWorkspaceId, nested.segment.id, new Date('2026-08-08T13:01:00.000Z')), null)
+
+    const unifiedIds = []
+    let after
+    do {
+      const page = await repository.list({ workspaceId, person: 'ana martins', limit: 2, ...(after ? { after } : {}) }, new Date('2026-08-08T13:01:00.000Z'))
+      unifiedIds.push(...page.items.map((item) => item.id))
+      after = page.nextCursor ?? undefined
+    } while (after)
+    assert.deepEqual(new Set(unifiedIds).size, unifiedIds.length)
+    assert.equal(unifiedIds.filter((id) => id.startsWith('segment-')).length, 4)
+    assert.deepEqual(unifiedIds.slice(-2), [artifactIds[1], artifactIds[0]])
+    const scopedCursor = (await repository.list({ workspaceId, kind: 'segment', limit: 1 }, new Date('2026-08-08T13:01:00.000Z'))).nextCursor
+    await assert.rejects(() => repository.list({ workspaceId, kind: 'video', limit: 1, after: scopedCursor }, new Date('2026-08-08T13:01:00.000Z')), /cursor/i)
     await assert.rejects(() => createSegment({ workspaceId, artifactId: artifactIds[0], parentSegmentId: firstSegment.segment.id, label: 'Fora', startMs: 0, endMs: 6000 }), /inside|parent/i)
     await assert.rejects(() => createSegment({ workspaceId: otherWorkspaceId, artifactId: artifactIds[0], label: 'Cross workspace', startMs: 0, endMs: 1000 }), /not found/i)
   } finally {

@@ -1161,11 +1161,11 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.media.library.list',
-    version: '1.0.0',
+    version: '2.0.0',
     title: 'List workspace media library',
-    description: 'Lists immutable V2 media artifacts with cursor pagination, technical state, previews, origin and rights eligibility.',
+    description: 'Lists immutable V2 media artifacts and virtual MediaSegments in one cursor order, inheriting parent previews and rights without copying bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
-    outputSchemaRef: 'apollo://schemas/media-library-page/v1',
+    outputSchemaRef: 'apollo://schemas/media-library-page/v2',
     endpoint: { method: 'GET', path: '/v1/media/library' }, toolName: 'apollo.media.library.list',
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
     queryParameters: [
@@ -1178,10 +1178,10 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     ],
   },
   {
-    id: 'apollo.media.library.read', version: '1.0.0', title: 'Read media library item',
-    description: 'Reads canonical metadata, previews, origin, technical state and current rights eligibility for one V2 library item.',
+    id: 'apollo.media.library.read', version: '2.0.0', title: 'Read media library item',
+    description: 'Reads one canonical artifact or virtual MediaSegment with parent previews, technical state and current rights eligibility without copying bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
-    outputSchemaRef: 'apollo://schemas/media-library-item/v1', endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}' },
+    outputSchemaRef: 'apollo://schemas/media-library-item/v2', endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}' },
     toolName: 'apollo.media.library.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
