@@ -293,7 +293,7 @@ import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-inges
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
 import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
 import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
-import { TesseractImageVisionProvider } from './image/tesseract-image-vision-provider.ts'
+import { createConfiguredImageVisionProvider } from './image/composite-image-vision-provider.ts'
 import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
@@ -1305,6 +1305,7 @@ export function createMediaIngestWorker(
   const configuredHeartbeat = Number(environment.APOLLO_V2_INGEST_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
+  const imageVision = createConfiguredImageVisionProvider(environment)
   return runNextMediaIngestOperationService({
     operations: createPublicOperationRepository(telemetry),
     telemetry,
@@ -1320,7 +1321,7 @@ export function createMediaIngestWorker(
     imageAnalysis: {
       processor: new SharpImageAnalysisProcessor(
         join(resolve(environment.APOLLO_V2_RENDER_WORK_ROOT ?? '.apollo/work'), 'image-analysis'),
-        environment.APOLLO_TESSERACT_PATH?.trim() ? new TesseractImageVisionProvider({ binary: environment.APOLLO_TESSERACT_PATH.trim() }) : undefined,
+        imageVision,
       ),
       repository: createImageAnalysisRepository(), integrity: { sha256: calculateFileSha256 },
     },
