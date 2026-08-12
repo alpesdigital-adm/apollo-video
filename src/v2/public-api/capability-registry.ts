@@ -1146,6 +1146,26 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.media.images.analysis.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.media.images.search', version: '1.0.0', title: 'Search reusable images by editorial purpose',
+    description: 'Ranks rights-cleared immutable image artifacts for b-roll, insert or card use while preserving analysis and rights evidence.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/image-reuse-search-result/v1', endpoint: { method: 'GET', path: '/v1/media/images/search' },
+    toolName: 'apollo.media.images.search', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'query', required: true, description: 'Observed or inferred image terms.', schema: { type: 'string', minLength: 2, maxLength: 240 } },
+      { name: 'usage', required: true, description: 'Editorial purpose preserved by ranking.', schema: { type: 'string', enum: ['b-roll', 'insert', 'card'] } },
+      { name: 'limit', required: false, description: 'Maximum ranked candidates.', schema: { type: 'integer', minimum: 1, maximum: 50 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.images.reuse', version: '1.0.0', title: 'Reuse an immutable image in a project',
+    description: 'Revalidates rights and consent transactionally, attaches the source artifact by reference and persists purpose-specific lineage without copying bytes.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/image-reuse-request/v1', outputSchemaRef: 'apollo://schemas/image-reuse-reference/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/image-reuses' }, toolName: 'apollo.projects.images.reuse',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201, 200], idempotency: 'natural', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.media.segments.list', version: '1.0.0', title: 'List virtual media segments',
     description: 'Lists immutable semantic ranges for one workspace media artifact without creating derivative bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
