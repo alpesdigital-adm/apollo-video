@@ -9,6 +9,8 @@ import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { mediaLibrarySearchField } from '../../src/v2/domain/media-library.ts'
 import { PrismaMediaLibraryRepository } from '../../src/v2/infrastructure/prisma/media-library-repository.ts'
+import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
+import { createImageAnalysis } from '../../src/v2/domain/image-analysis.ts'
 import { PrismaMediaSegmentRepository } from '../../src/v2/infrastructure/prisma/media-segment-repository.ts'
 
 function rightsRow(snapshot) {
@@ -29,10 +31,13 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
   const otherWorkspaceId = `library-other-${suffix}`
   const projectId = `library-project-${suffix}`
   const repository = new PrismaMediaLibraryRepository(prisma)
+  const imageRepository = new PrismaImageAnalysisRepository(prisma)
   const segmentRepository = new PrismaMediaSegmentRepository(prisma)
   const artifactIds = ['video', 'audio', 'restricted', 'other'].map((kind) => `library-${kind}-${suffix}`)
   const thumbnailId = `library-thumbnail-${suffix}`
   const cleanup = async () => {
+    await prisma.v2ImageReuseReference.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
+    await prisma.v2ImageAnalysis.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegmentMaterialization.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2MediaSegment.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
     await prisma.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } })
@@ -108,6 +113,30 @@ test('T-FR-040 Prisma library keeps cursor/filter isolation and attaches one rig
     assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: artifactIds[0] } })).byteSize, 1111n)
     await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[2] }), /rights/i)
     await assert.rejects(() => attach({ workspaceId, projectId, artifactId: artifactIds[3] }), /not found/i)
+
+    const imageId = artifactIds[2]
+    const thumbnailId = `library-image-thumb-${suffix}`
+    const previewId = `library-image-preview-${suffix}`
+    for (const [id, sha] of [[thumbnailId, '7'.repeat(64)], [previewId, '8'.repeat(64)]]) await prisma.v2MediaArtifact.create({ data: { id, workspaceId, artifactKey: `${workspaceId}/${id}`, sha256: sha, byteSize: 321n, mediaType: 'image', container: 'webp', status: 'available' } })
+    const manifestId = `manifest-${imageId}`
+    await prisma.v2MediaArtifactManifest.create({ data: { id: manifestId, workspaceId, artifactId: imageId, schemaVersion: 'media-artifact-manifest/v1', manifestHash: '9'.repeat(64), recipeId: 'upload', recipeVersion: '1.0.0', parametersHash: 'a'.repeat(64), manifestJson: stableSerialize({ schemaVersion: 'media-artifact-manifest/v1', artifact: { artifactKey: `${workspaceId}/${imageId}`, sha256: '3'.repeat(64), byteSize: 3333, mediaType: 'image', container: 'png' }, recipe: { id: 'upload', version: '1.0.0', parametersHash: 'a'.repeat(64) }, sources: [], manifestHash: '9'.repeat(64) }) } })
+    const analysis = createImageAnalysis({ id: `analysis-${imageId}`, workspaceId, artifactId: imageId, manifestId, sourceSha256: '3'.repeat(64), dimensions: { width: 1080, height: 1350 }, dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta premium', language: 'pt-BR', box: [0.1, 0.2, 0.8, 0.4], confidence: 0.97, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'available', values: [], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, objects: { state: 'available', values: [{ label: 'produto', box: [0.1, 0.1, 0.5, 0.5], confidence: 0.94 }], producer: { provider: 'vision', model: 'detector', version: 'v1' }, reasonCodes: [] }, observedDescription: 'Imagem de produto com oferta premium.', inferredTags: [{ value: 'produto', confidence: 0.94, provenance: 'vision@v1:object' }], derivatives: { thumbnailArtifactId: thumbnailId, previewArtifactId: previewId, immutableOriginal: true }, createdAt: '2026-08-08T12:30:00.000Z' })
+    await imageRepository.persist(analysis)
+    await assert.rejects(() => imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' }), /rights/i)
+    const approved = createAssetRightsSnapshot({ id: `library-image-rights-approved-${suffix}`, workspaceId, artifactId: imageId, sequence: 2, draft: { status: 'approved', allowedUses: ['editorial-reuse'], prohibitedUses: [], consent: { status: 'approved', allowedUses: ['editorial-reuse'] } }, createdBy: { type: 'user', id: 'integration-test' }, createdAt: '2026-08-08T12:45:00.000Z' })
+    await prisma.v2AssetRightsSnapshot.create({ data: rightsRow(approved) })
+    await prisma.v2MediaArtifact.update({ where: { id: imageId }, data: { currentRightsSnapshotId: approved.id, rightsRevision: 2 } })
+    const ranked = await imageRepository.searchReusable({ workspaceId, text: 'oferta premium', usage: 'card', limit: 5 }, new Date('2026-08-08T13:00:00.000Z'))
+    assert.equal(ranked[0].artifactId, imageId)
+    assert.equal(ranked[0].usage, 'card')
+    const reused = await imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:00:00.000Z' })
+    const replayedReuse = await imageRepository.reuse({ workspaceId, projectId, artifactId: imageId, usage: 'card', text: 'oferta premium', createdAt: '2026-08-08T13:01:00.000Z' })
+    assert.equal(reused.bytesDuplicated, false)
+    assert.equal(reused.replayed, false)
+    assert.equal(replayedReuse.replayed, true)
+    assert.equal(replayedReuse.id, reused.id)
+    assert.equal(await prisma.v2ImageReuseReference.count({ where: { workspaceId, projectId, artifactId: imageId, usage: 'card' } }), 1)
+    assert.equal((await prisma.v2MediaArtifact.findUnique({ where: { id: imageId } })).byteSize, 3333n)
 
     const createSegment = createMediaSegmentService({ repository: segmentRepository, clock: () => new Date('2026-08-08T13:00:00.000Z') })
     const firstSegment = await createSegment({ workspaceId, artifactId: artifactIds[0], label: 'Promessa', startMs: 0, endMs: 5000 })

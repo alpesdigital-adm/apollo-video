@@ -34,6 +34,7 @@ model V2Workspace {
   mediaSegments                          V2MediaSegment[]
   mediaSegmentMaterializations           V2MediaSegmentMaterialization[]
   imageAnalyses                          V2ImageAnalysis[]
+  imageReuseReferences                   V2ImageReuseReference[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -526,6 +527,7 @@ model V2Project {
   versionsForkedFrom                     V2ProjectVersion[]                        @relation("ForkedFromProject")
   mediaUploads                           V2MediaUpload[]
   mediaAssets                            V2ProjectMediaAsset[]
+  imageReuseReferences                   V2ImageReuseReference[]
   mediaTranscripts                       V2MediaTranscript[]
   mediaIngestOperations                  V2MediaIngestOperation[]
   publicOperations                       V2PublicOperation[]
@@ -1222,6 +1224,7 @@ model V2MediaArtifact {
   imageAnalyses                V2ImageAnalysis[]                          @relation("ImageAnalysisSourceArtifact")
   imageAnalysisThumbnails      V2ImageAnalysis[]                          @relation("ImageAnalysisThumbnailArtifact")
   imageAnalysisPreviews        V2ImageAnalysis[]                          @relation("ImageAnalysisPreviewArtifact")
+  imageReuseSources            V2ImageReuseReference[]                    @relation("ImageReuseSourceArtifact")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -1330,6 +1333,7 @@ model V2ImageAnalysis {
   manifest          V2MediaArtifactManifest @relation(fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   thumbnailArtifact V2MediaArtifact         @relation("ImageAnalysisThumbnailArtifact", fields: [thumbnailArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   previewArtifact   V2MediaArtifact         @relation("ImageAnalysisPreviewArtifact", fields: [previewArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reuseReferences   V2ImageReuseReference[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactId, manifestId])
@@ -1337,6 +1341,40 @@ model V2ImageAnalysis {
   @@unique([previewArtifactId, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@map("image_analyses")
+}
+
+model V2ImageReuseReference {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  artifactId            String   @db.VarChar(128)
+  manifestId            String   @db.VarChar(128)
+  mediaAssetReferenceId String   @db.Uuid
+  analysisId            String   @db.VarChar(128)
+  analysisHash          String   @db.Char(64)
+  rightsSnapshotId      String   @db.VarChar(128)
+  rightsSnapshotHash    String   @db.Char(64)
+  usage                 String   @db.VarChar(16)
+  query                  String   @db.VarChar(240)
+  score                  Float
+  lineageHash            String   @db.Char(64)
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace           V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project               @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact            V2MediaArtifact         @relation("ImageReuseSourceArtifact", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest            V2MediaArtifactManifest @relation("ImageReuseSourceManifest", fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
+  mediaAssetReference V2ProjectMediaAsset     @relation(fields: [mediaAssetReferenceId], references: [id], onDelete: Restrict)
+  analysis            V2ImageAnalysis         @relation(fields: [analysisId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot      V2AssetRightsSnapshot   @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, lineageHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, artifactId, usage])
+  @@index([workspaceId, analysisId])
+  @@index([workspaceId, rightsSnapshotId])
+  @@map("image_reuse_references")
 }
 
 model V2MediaArtifactLifecycleTransition {
@@ -1450,6 +1488,7 @@ model V2MediaArtifactManifest {
   finalExportAttemptOutputs  V2ProjectFinalExportAttempt[]
   segmentMaterializations    V2MediaSegmentMaterialization[]
   imageAnalyses              V2ImageAnalysis[]
+  imageReuseSources          V2ImageReuseReference[]                    @relation("ImageReuseSourceManifest")
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])
@@ -2011,6 +2050,7 @@ model V2AssetRightsSnapshot {
   sourceCleanupSourceReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewSourceRights")
   sourceCleanupOutputReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewOutputRights")
   changes                    V2AssetRightsChange[]
+  imageReuseReferences       V2ImageReuseReference[]
 
   @@unique([id, workspaceId])
   @@unique([artifactId, sequence])
@@ -2780,6 +2820,7 @@ model V2ProjectMediaAsset {
   project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   artifact  V2MediaArtifact @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   upload    V2MediaUpload?  @relation(fields: [uploadId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  imageReuseReferences V2ImageReuseReference[]
 
   @@unique([projectId, artifactId, role])
   @@unique([uploadId, role])

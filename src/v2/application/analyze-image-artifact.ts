@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { createImageAnalysis } from '../domain/image-analysis.ts'
+import { normalizeImageReuseSearchQuery, type ImageUsage } from '../domain/image-library.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import type { ImageAnalysisProcessor } from './ports/image-analysis.ts'
@@ -37,5 +38,23 @@ export function readImageAnalysisService(dependencies: { repository: ImageAnalys
     const analysis = await dependencies.repository.find(workspaceId.trim(), artifactId.trim())
     if (!analysis) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Image analysis was not found')
     return analysis
+  }
+}
+
+export function searchReusableImagesService(dependencies: { repository: ImageAnalysisRepository; clock?: () => Date }) {
+  return async (input: { workspaceId: string; text: string; usage: ImageUsage; limit?: number }) => {
+    const query = normalizeImageReuseSearchQuery(input)
+    const items = await dependencies.repository.searchReusable(query, dependencies.clock?.() ?? new Date())
+    return Object.freeze({ query: query.text, usage: query.usage, items: Object.freeze([...items]) })
+  }
+}
+
+export function reuseImageArtifactService(dependencies: { repository: ImageAnalysisRepository; clock?: () => Date }) {
+  return async (input: { workspaceId: string; projectId: string; artifactId: string; usage: ImageUsage; text: string }) => {
+    const query = normalizeImageReuseSearchQuery({ workspaceId: input.workspaceId, text: input.text, usage: input.usage, limit: 1 })
+    const projectId = input.projectId.trim()
+    const artifactId = input.artifactId.trim()
+    if (![projectId, artifactId].every((id) => /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(id))) throw new DomainError('INVALID_ARGUMENT', 'Image reuse projectId or artifactId is invalid')
+    return dependencies.repository.reuse({ workspaceId: query.workspaceId, projectId, artifactId, usage: query.usage, text: query.text, createdAt: (dependencies.clock?.() ?? new Date()).toISOString() })
   }
 }

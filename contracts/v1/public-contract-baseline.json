@@ -2007,6 +2007,64 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.media.images.search": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "artifacts:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/image-reuse-search-result/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/media/images/search"
+      },
+      "toolName": "apollo.media.images.search",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "query",
+          "required": true,
+          "description": "Observed or inferred image terms.",
+          "schema": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 240
+          }
+        },
+        {
+          "name": "usage",
+          "required": true,
+          "description": "Editorial purpose preserved by ranking.",
+          "schema": {
+            "type": "string",
+            "enum": [
+              "b-roll",
+              "insert",
+              "card"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "description": "Maximum ranked candidates.",
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.media.library.list": {
       "version": "2.0.0",
       "exposure": "public",
@@ -3483,6 +3541,32 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.images.reuse": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/image-reuse-request/v1",
+      "outputSchemaRef": "apollo://schemas/image-reuse-reference/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/image-reuses"
+      },
+      "toolName": "apollo.projects.images.reuse",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.projects.list": {
@@ -45242,6 +45326,306 @@
             "analysisHash": {
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/image-reuse-reference/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "id",
+            "workspaceId",
+            "projectId",
+            "artifactId",
+            "manifestId",
+            "mediaAssetReferenceId",
+            "analysisId",
+            "analysisHash",
+            "rightsSnapshotId",
+            "rightsSnapshotHash",
+            "usage",
+            "query",
+            "score",
+            "bytesDuplicated",
+            "lineageHash",
+            "replayed",
+            "createdAt"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "image-reuse-reference/v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "manifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "mediaAssetReferenceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "analysisId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "analysisHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsSnapshotId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "rightsSnapshotHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "usage": {
+              "enum": [
+                "b-roll",
+                "insert",
+                "card"
+              ]
+            },
+            "query": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 240
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "bytesDuplicated": {
+              "const": false
+            },
+            "lineageHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "replayed": {
+              "type": "boolean"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/image-reuse-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifactId",
+        "query",
+        "usage"
+      ],
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "query": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 240
+        },
+        "usage": {
+          "enum": [
+            "b-roll",
+            "insert",
+            "card"
+          ]
+        }
+      }
+    },
+    "apollo://schemas/image-reuse-search-result/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query",
+            "usage",
+            "items"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 240
+            },
+            "usage": {
+              "enum": [
+                "b-roll",
+                "insert",
+                "card"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "artifactId",
+                  "manifestId",
+                  "analysisId",
+                  "analysisHash",
+                  "label",
+                  "usage",
+                  "score",
+                  "matchedTerms",
+                  "orientation",
+                  "previewArtifactId",
+                  "rightsSnapshotId",
+                  "rightsSnapshotHash",
+                  "rightsValidUntil"
+                ],
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "manifestId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "analysisId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "analysisHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "usage": {
+                    "enum": [
+                      "b-roll",
+                      "insert",
+                      "card"
+                    ]
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "matchedTerms": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 240
+                    }
+                  },
+                  "orientation": {
+                    "enum": [
+                      "portrait",
+                      "landscape",
+                      "square"
+                    ]
+                  },
+                  "previewArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "rightsSnapshotId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "rightsSnapshotHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "rightsValidUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
             }
           }
         },
