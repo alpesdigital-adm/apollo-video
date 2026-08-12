@@ -25,7 +25,13 @@ export class SharpImageAnalysisProcessor implements ImageAnalysisProcessor {
     const [thumbnailInfo, previewInfo] = await Promise.all([sharp(input.sourcePath).rotate().resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toFile(thumbnailPath), sharp(input.sourcePath).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).webp({ quality: 88 }).toFile(previewPath)])
     const observations = this.vision ? await this.vision.analyze({ sourcePath: input.sourcePath, width, height, signal: input.signal }) : { ocr: unavailable<never>('OCR_PROVIDER_NOT_CONFIGURED'), faces: unavailable<never>('FACE_PROVIDER_NOT_CONFIGURED'), objects: unavailable<never>('OBJECT_PROVIDER_NOT_CONFIGURED'), inferredTags: Object.freeze([]) }
     const orientation = width === height ? 'square' : width > height ? 'landscape' : 'portrait'; const dominantColors = Object.freeze([hex(statistics.dominant.r, statistics.dominant.g, statistics.dominant.b)])
-    const visible = [...observations.objects.values.map((value) => value.label), ...observations.ocr.values.map((value) => `texto “${value.text}”`)]
+    const visible = [
+      ...(observations.faces.values.length > 0
+        ? [`${observations.faces.values.length} ${observations.faces.values.length === 1 ? 'rosto observado' : 'rostos observados'}`]
+        : []),
+      ...observations.objects.values.map((value) => value.label),
+      ...observations.ocr.values.map((value) => `texto “${value.text}”`),
+    ]
     const observedDescription = visible.length ? `Imagem ${orientation} ${width}×${height} com ${visible.join(', ')}.` : `Imagem ${orientation} ${width}×${height}; objetos e texto não observados ou indisponíveis.`
     const derivative = async (path: string, info: { width: number; height: number; size: number }) => { const [bytes, sha256] = await Promise.all([stat(path), calculateFileSha256(path)]); if (!info.width || !info.height || info.size !== bytes.size || bytes.size < 1) throw new DomainError('RENDER_OUTPUT_INVALID', 'Image derivative is invalid'); return Object.freeze({ path, sha256, byteSize: bytes.size, width: info.width, height: info.height }) }
     const [thumbnail, preview] = await Promise.all([derivative(thumbnailPath, thumbnailInfo), derivative(previewPath, previewInfo)])
