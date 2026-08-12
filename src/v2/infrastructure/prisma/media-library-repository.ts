@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Prisma, PrismaClient, V2MediaLibraryEntry } from '../../../../generated/prisma-v2/index.js'
+import type { Prisma, PrismaClient, V2MediaLibraryEntry, V2MediaSegment } from '../../../../generated/prisma-v2/index.js'
 
 import type { MediaLibraryRepository } from '../../application/ports/media-library-repository.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../domain/canonical-hash.ts'
@@ -16,7 +16,12 @@ import {
 import type { MediaArtifactLifecycleStatus, MediaArtifactType } from '../../domain/media-artifact.ts'
 import { hydrateAssetRights } from './asset-rights-repository.ts'
 
-type EntryWithArtifact = V2MediaLibraryEntry & {
+type LibraryMetadata = V2MediaLibraryEntry & {
+  thumbnailArtifact: { id: string; status: string } | null
+  waveformArtifact: { id: string; status: string } | null
+}
+
+type EntryWithArtifact = LibraryMetadata & {
   artifact: {
     mediaType: string
     container: string
@@ -24,8 +29,19 @@ type EntryWithArtifact = V2MediaLibraryEntry & {
     status: string
     currentRightsSnapshot: Parameters<typeof hydrateAssetRights>[0] | null
   }
-  thumbnailArtifact: { id: string; status: string } | null
-  waveformArtifact: { id: string; status: string } | null
+}
+
+type SegmentWithArtifact = V2MediaSegment & {
+  parentSegment: { artifactId: string; startMs: number; endMs: number } | null
+  artifact: {
+    id: string
+    mediaType: string
+    container: string
+    byteSize: bigint
+    status: string
+    currentRightsSnapshot: Parameters<typeof hydrateAssetRights>[0] | null
+    libraryEntry: LibraryMetadata | null
+  }
 }
 
 function parseDisplayArray(value: string, field: string): readonly string[] {
@@ -49,20 +65,34 @@ function queryFingerprint(query: MediaLibraryQuery): string {
   })
 }
 
-function encodeCursor(entry: Pick<V2MediaLibraryEntry, 'artifactId' | 'createdAt'>, fingerprint: string): string {
-  return Buffer.from(stableSerialize({ createdAt: entry.createdAt.toISOString(), fingerprint, id: entry.artifactId }), 'utf8').toString('base64url')
+type CursorEntity = 'asset' | 'segment'
+
+function cursorKey(entity: CursorEntity, id: string): string {
+  return `${entity === 'segment' ? 's' : 'a'}:${id}`
 }
 
-function decodeCursor(value: string, fingerprint: string): Readonly<{ createdAt: Date; id: string }> {
+function encodeCursor(entry: { entity: CursorEntity; id: string; createdAt: Date }, fingerprint: string): string {
+  return Buffer.from(stableSerialize({ createdAt: entry.createdAt.toISOString(), fingerprint, key: cursorKey(entry.entity, entry.id) }), 'utf8').toString('base64url')
+}
+
+function decodeCursor(value: string, fingerprint: string): Readonly<{ createdAt: Date; entity: CursorEntity; id: string; key: string }> {
   try {
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>
-    if (Object.keys(parsed).sort().join(',') !== 'createdAt,fingerprint,id' || parsed.fingerprint !== fingerprint || typeof parsed.id !== 'string' || typeof parsed.createdAt !== 'string') throw new Error('invalid')
+    if (Object.keys(parsed).sort().join(',') !== 'createdAt,fingerprint,key' || parsed.fingerprint !== fingerprint || typeof parsed.key !== 'string' || typeof parsed.createdAt !== 'string') throw new Error('invalid')
     const createdAt = new Date(parsed.createdAt)
-    if (Number.isNaN(createdAt.getTime()) || parsed.id.length < 3 || parsed.id.length > 128) throw new Error('invalid')
-    return Object.freeze({ createdAt, id: parsed.id })
+    const match = /^(a|s):([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/.exec(parsed.key)
+    if (Number.isNaN(createdAt.getTime()) || !match) throw new Error('invalid')
+    return Object.freeze({ createdAt, entity: match[1] === 's' ? 'segment' : 'asset', id: match[2], key: parsed.key })
   } catch {
     throw new DomainError('INVALID_CURSOR', 'Media library cursor is invalid for this query')
   }
+}
+
+function previewFromLibrary(row: LibraryMetadata) {
+  const preview = (artifact: { id: string; status: string } | null) => artifact?.status === 'available'
+    ? Object.freeze({ status: 'available' as const, artifactId: artifact.id })
+    : Object.freeze({ status: 'unavailable' as const })
+  return Object.freeze({ thumbnail: preview(row.thumbnailArtifact), waveform: preview(row.waveformArtifact) })
 }
 
 function mapItem(row: EntryWithArtifact, now: Date, locale: string): Readonly<MediaLibraryItem> {
@@ -72,9 +102,6 @@ function mapItem(row: EntryWithArtifact, now: Date, locale: string): Readonly<Me
   if (!['available', 'quarantined', 'deleted'].includes(status)) throw new DomainError('PERSISTENCE_CONFLICT', 'Library artifact status is invalid')
   const originType = row.originType as MediaLibraryItem['origin']['type']
   if (!['upload', 'generated', 'derived'].includes(originType)) throw new DomainError('PERSISTENCE_CONFLICT', 'Library origin is invalid')
-  const preview = (artifact: { id: string; status: string } | null) => artifact?.status === 'available'
-    ? Object.freeze({ status: 'available' as const, artifactId: artifact.id })
-    : Object.freeze({ status: 'unavailable' as const })
   return Object.freeze({
     id: row.artifactId,
     workspaceId: row.workspaceId,
@@ -85,8 +112,56 @@ function mapItem(row: EntryWithArtifact, now: Date, locale: string): Readonly<Me
     status: mediaLibraryTechnicalStatus(status),
     rights: mediaLibraryRights(row.artifact.currentRightsSnapshot ? hydrateAssetRights(row.artifact.currentRightsSnapshot) : null, { workspaceId: row.workspaceId, locale, now }),
     origin: Object.freeze({ type: originType, ...(row.parentArtifactId ? { parentArtifactId: row.parentArtifactId } : {}) }),
-    preview: Object.freeze({ thumbnail: preview(row.thumbnailArtifact), waveform: preview(row.waveformArtifact) }),
+    preview: previewFromLibrary(row),
     technical: Object.freeze({ mediaType, container: row.artifact.container, byteSize: row.artifact.byteSize.toString() }),
+    source: Object.freeze({ type: 'artifact' as const, artifactId: row.artifactId, virtual: false as const, bytesDuplicated: false as const }),
+    createdAt: row.createdAt.toISOString(),
+  })
+}
+
+function mapSegmentItem(row: SegmentWithArtifact, now: Date, locale: string): Readonly<MediaLibraryItem> {
+  const library = row.artifact.libraryEntry
+  if (!library) throw new DomainError('PERSISTENCE_CONFLICT', 'Media segment parent is not cataloged in the library')
+  const mediaType = row.artifact.mediaType as MediaArtifactType
+  if (!['video', 'audio'].includes(mediaType)) throw new DomainError('PERSISTENCE_CONFLICT', 'Media segment parent type is invalid')
+  const status = row.artifact.status as MediaArtifactLifecycleStatus
+  if (!['available', 'quarantined', 'deleted'].includes(status)) throw new DomainError('PERSISTENCE_CONFLICT', 'Media segment parent status is invalid')
+  const semanticRange = Object.freeze({ startMs: row.startMs, endMs: row.endMs })
+  const sourceTimeMapping = Object.freeze({ sourceStartMs: row.startMs, sourceEndMs: row.endMs, rate: 1 as const })
+  const segmentContent = {
+    schemaVersion: 'media-segment/v1', workspaceId: row.workspaceId, parentAssetId: row.artifactId,
+    ...(row.parentSegmentId ? { parentSegmentId: row.parentSegmentId } : {}), label: row.label, description: row.description,
+    semanticRange, sourceTimeMapping, sourceDurationMs: row.sourceDurationMs,
+  }
+  const parentIsValid = !row.parentSegmentId || (row.parentSegment?.artifactId === row.artifactId && row.startMs >= row.parentSegment.startMs && row.endMs <= row.parentSegment.endMs)
+  if (row.physicalObjectKey !== null || row.startMs < 0 || row.endMs <= row.startMs || row.endMs > row.sourceDurationMs || !parentIsValid || calculateCanonicalHash(segmentContent) !== row.segmentHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored media segment failed read-model validation')
+  }
+  return Object.freeze({
+    id: row.id,
+    workspaceId: row.workspaceId,
+    kind: 'segment' as const,
+    label: row.label,
+    people: parseDisplayArray(library.peopleJson, 'people'),
+    topics: parseDisplayArray(library.topicsJson, 'topics'),
+    status: mediaLibraryTechnicalStatus(status),
+    rights: mediaLibraryRights(row.artifact.currentRightsSnapshot ? hydrateAssetRights(row.artifact.currentRightsSnapshot) : null, { workspaceId: row.workspaceId, locale, now }),
+    origin: Object.freeze({ type: 'derived' as const, parentArtifactId: row.artifact.id }),
+    preview: previewFromLibrary(library),
+    technical: Object.freeze({ mediaType, container: row.artifact.container, byteSize: row.artifact.byteSize.toString() }),
+    source: Object.freeze({
+      type: 'segment' as const,
+      artifactId: row.artifact.id,
+      ...(row.parentSegmentId ? { parentSegmentId: row.parentSegmentId } : {}),
+      description: row.description,
+      semanticRange,
+      sourceTimeMapping,
+      physicalObjectKey: null,
+      sourceDurationMs: row.sourceDurationMs,
+      segmentHash: row.segmentHash,
+      virtual: true as const,
+      bytesDuplicated: false as const,
+    }),
     createdAt: row.createdAt.toISOString(),
   })
 }
@@ -96,6 +171,29 @@ const include = {
   thumbnailArtifact: { select: { id: true, status: true } },
   waveformArtifact: { select: { id: true, status: true } },
 } as const
+
+const segmentInclude = {
+  parentSegment: { select: { artifactId: true, startMs: true, endMs: true } },
+  artifact: {
+    select: {
+      id: true, mediaType: true, container: true, byteSize: true, status: true, currentRightsSnapshot: true,
+      libraryEntry: { include: { thumbnailArtifact: { select: { id: true, status: true } }, waveformArtifact: { select: { id: true, status: true } } } },
+    },
+  },
+} as const
+
+function afterFor(entity: CursorEntity, scan: ReturnType<typeof decodeCursor> | null) {
+  if (!scan) return {}
+  const sameTimestampIsAfter = entity === 'asset'
+    ? scan.entity === 'segment' ? {} : { artifactId: { lt: scan.id } }
+    : scan.entity === 'asset' ? null : { id: { lt: scan.id } }
+  return {
+    OR: [
+      { createdAt: { lt: scan.createdAt } },
+      ...(sameTimestampIsAfter === null ? [] : [{ createdAt: scan.createdAt, ...sameTimestampIsAfter }]),
+    ],
+  }
+}
 
 export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
   private readonly client: PrismaClient
@@ -108,40 +206,58 @@ export class PrismaMediaLibraryRepository implements MediaLibraryRepository {
     const query = normalizeMediaLibraryQuery(rawQuery)
     const fingerprint = queryFingerprint(query)
     let scan = query.after ? decodeCursor(query.after, fingerprint) : null
-    const matched: Array<{ row: EntryWithArtifact; item: Readonly<MediaLibraryItem> }> = []
+    const matched: Array<{ cursor: { entity: CursorEntity; id: string; createdAt: Date }; item: Readonly<MediaLibraryItem> }> = []
     while (matched.length <= query.limit) {
-      const rows = await this.client.v2MediaLibraryEntry.findMany({
-        where: {
-          workspaceId: query.workspaceId,
-          artifact: { mediaType: query.kind && query.kind !== 'segment' ? query.kind : query.kind === 'segment' ? '__segment__' : { in: ['video', 'audio', 'image'] } },
-          ...(query.person ? { peopleSearch: { contains: `\n${query.person}\n` } } : {}),
-          ...(query.topic ? { topicsSearch: { contains: query.topic } } : {}),
-          ...(scan ? { OR: [{ createdAt: { lt: scan.createdAt } }, { createdAt: scan.createdAt, artifactId: { lt: scan.id } }] } : {}),
-        },
-        orderBy: [{ createdAt: 'desc' }, { artifactId: 'desc' }],
-        take: 100,
-        include,
-      }) as EntryWithArtifact[]
-      if (rows.length === 0) break
-      for (const row of rows) {
-        const item = mapItem(row, now, 'pt-BR')
-        if (!query.rightsStatus || item.rights.status === query.rightsStatus) matched.push({ row, item })
+      const libraryFilter = {
+        ...(query.person ? { peopleSearch: { contains: `\n${query.person}\n` } } : {}),
+        ...(query.topic ? { topicsSearch: { contains: query.topic } } : {}),
+      }
+      const [assetRows, segmentRows] = await Promise.all([
+        query.kind === 'segment' ? Promise.resolve([] as EntryWithArtifact[]) : this.client.v2MediaLibraryEntry.findMany({
+          where: {
+            workspaceId: query.workspaceId,
+            artifact: { mediaType: query.kind ?? { in: ['video', 'audio', 'image'] } },
+            ...libraryFilter,
+            ...afterFor('asset', scan),
+          },
+          orderBy: [{ createdAt: 'desc' }, { artifactId: 'desc' }], take: 100, include,
+        }) as Promise<EntryWithArtifact[]>,
+        query.kind && query.kind !== 'segment' ? Promise.resolve([] as SegmentWithArtifact[]) : this.client.v2MediaSegment.findMany({
+          where: {
+            workspaceId: query.workspaceId,
+            artifact: { libraryEntry: { is: libraryFilter } },
+            ...afterFor('segment', scan),
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100, include: segmentInclude,
+        }) as Promise<SegmentWithArtifact[]>,
+      ])
+      const candidates = [
+        ...assetRows.map((row) => ({ entity: 'asset' as const, id: row.artifactId, createdAt: row.createdAt, item: mapItem(row, now, 'pt-BR') })),
+        ...segmentRows.map((row) => ({ entity: 'segment' as const, id: row.id, createdAt: row.createdAt, item: mapSegmentItem(row, now, 'pt-BR') })),
+      ].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || cursorKey(right.entity, right.id).localeCompare(cursorKey(left.entity, left.id))).slice(0, 100)
+      if (candidates.length === 0) break
+      for (const candidate of candidates) {
+        if (!query.rightsStatus || candidate.item.rights.status === query.rightsStatus) matched.push({ cursor: candidate, item: candidate.item })
         if (matched.length > query.limit) break
       }
-      const last = rows.at(-1)!
-      scan = { createdAt: last.createdAt, id: last.artifactId }
-      if (rows.length < 100 || matched.length > query.limit) break
+      const last = candidates.at(-1)!
+      scan = Object.freeze({ createdAt: last.createdAt, entity: last.entity, id: last.id, key: cursorKey(last.entity, last.id) })
+      if (candidates.length < 100 || matched.length > query.limit) break
     }
     const page = matched.slice(0, query.limit)
     return Object.freeze({
       items: Object.freeze(page.map(({ item }) => item)),
-      nextCursor: matched.length > query.limit && page.length ? encodeCursor(page.at(-1)!.row, fingerprint) : null,
+      nextCursor: matched.length > query.limit && page.length ? encodeCursor(page.at(-1)!.cursor, fingerprint) : null,
     })
   }
 
-  async findById(workspaceId: string, artifactId: string, now: Date, locale = 'pt-BR') {
-    const row = await this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId }, include }) as EntryWithArtifact | null
-    return row ? mapItem(row, now, locale) : null
+  async findById(workspaceId: string, itemId: string, now: Date, locale = 'pt-BR') {
+    const [row, segment] = await Promise.all([
+      this.client.v2MediaLibraryEntry.findFirst({ where: { workspaceId, artifactId: itemId }, include }) as Promise<EntryWithArtifact | null>,
+      this.client.v2MediaSegment.findFirst({ where: { workspaceId, id: itemId, artifact: { libraryEntry: { isNot: null } } }, include: segmentInclude }) as Promise<SegmentWithArtifact | null>,
+    ])
+    if (row && segment) throw new DomainError('PERSISTENCE_CONFLICT', 'Media library identity is ambiguous')
+    return row ? mapItem(row, now, locale) : segment ? mapSegmentItem(segment, now, locale) : null
   }
 
   async attach(input: { workspaceId: string; projectId: string; artifactId: string; createdAt: string }) {

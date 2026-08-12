@@ -1283,6 +1283,7 @@ model V2MediaSegment {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactId, segmentHash])
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)], map: "media_segments_workspace_created_id_idx")
   @@index([workspaceId, artifactId, startMs, endMs])
   @@index([workspaceId, parentSegmentId])
   @@map("media_segments")

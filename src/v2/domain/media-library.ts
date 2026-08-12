@@ -9,6 +9,25 @@ export const MEDIA_LIBRARY_RIGHTS_STATUSES = ['eligible', 'review', 'restricted'
 export type LibraryRightsStatus = (typeof MEDIA_LIBRARY_RIGHTS_STATUSES)[number]
 export type RightsStatus = LibraryRightsStatus
 
+export type MediaLibrarySource = Readonly<{
+  type: 'artifact'
+  artifactId: string
+  virtual: false
+  bytesDuplicated: false
+}> | Readonly<{
+  type: 'segment'
+  artifactId: string
+  parentSegmentId?: string
+  description: string
+  semanticRange: Readonly<{ startMs: number; endMs: number }>
+  sourceTimeMapping: Readonly<{ sourceStartMs: number; sourceEndMs: number; rate: 1 }>
+  physicalObjectKey: null
+  sourceDurationMs: number
+  segmentHash: string
+  virtual: true
+  bytesDuplicated: false
+}>
+
 export interface MediaLibraryItem {
   id: string
   workspaceId: string
@@ -28,6 +47,7 @@ export interface MediaLibraryItem {
     waveform: Readonly<{ status: 'available' | 'unavailable'; artifactId?: string }>
   }>
   technical: Readonly<{ mediaType: MediaArtifactType; container: string; byteSize: string }>
+  source: MediaLibrarySource
   createdAt: string
 }
 
