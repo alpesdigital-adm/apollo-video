@@ -2,6 +2,11 @@ import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
 import type { ProjectWorkspaceQueryRepository, ProjectWorkspaceMediaRecord } from '../../application/ports/project-workspace-query-repository.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  classifyConfidence,
+  createDecisionConfidence,
+  type ConfidenceDecisionType,
+} from '../../domain/decision-confidence.ts'
 import { PROJECT_STATUSES, type ProjectStatus } from '../../domain/project.ts'
 import { parseProductionBrief } from '../../domain/production-brief.ts'
 import { parseBriefCompilation } from '../../application/compile-brief.ts'
@@ -30,6 +35,41 @@ function parseJsonArray(value: string, field: string): unknown[] {
     return parsed
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+export function projectConfidenceUncertainties(values: readonly unknown[]) {
+  try {
+    return Object.freeze(values.flatMap((value) => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return []
+      const record = value as Record<string, unknown>
+      const detail = record.confidenceDetail
+      if (typeof detail !== 'object' || detail === null || Array.isArray(detail)) return []
+      const confidence = createDecisionConfidence(detail as Parameters<typeof createDecisionConfidence>[0])
+      if (confidence.confidenceHash !== (detail as Record<string, unknown>).confidenceHash) {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision confidence hash is invalid')
+      }
+      const type = record.decisionType as ConfidenceDecisionType
+      const band = classifyConfidence(type, confidence)
+      if (band === 'auto-apply') return []
+      if (record.confidenceBand !== band || typeof record.id !== 'string' || typeof record.choice !== 'string') {
+        throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision confidence projection is invalid')
+      }
+      return [Object.freeze({
+        id: record.id,
+        label: record.choice,
+        type,
+        band,
+        value: confidence.value,
+        reasonCodes: confidence.reasonCodes,
+        calibrationVersion: confidence.calibrationVersion,
+        evidenceCount: confidence.evidence.length,
+      })]
+    }).toSorted((left, right) =>
+      left.value - right.value || left.id.localeCompare(right.id)))
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT') throw error
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director decision confidence is invalid')
   }
 }
 
@@ -166,6 +206,7 @@ export class PrismaProjectWorkspaceQueryRepository implements ProjectWorkspaceQu
         qualityScore: typeof quality.score === 'number' ? quality.score : 0,
         decisionCount: decisions.length,
         assumptionCount: assumptions.length,
+        uncertainties: projectConfidenceUncertainties(decisions),
         subtitleCueCount,
         transitionCount: Array.isArray(directedPlan.transitions) ? directedPlan.transitions.length : 0,
         automaticZoom: typeof directedPlan.movementPolicy === 'object' && directedPlan.movementPolicy !== null && !Array.isArray(directedPlan.movementPolicy)

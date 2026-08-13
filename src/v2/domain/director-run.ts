@@ -9,6 +9,13 @@ import type { StrategicObjectiveId } from './strategic-objective.ts'
 import type { DesiredActionReference } from './desired-action.ts'
 import type { QualityReport as StrategicQualityReport } from './strategic-rubric.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
+import {
+  classifyConfidence,
+  createDecisionConfidence,
+  type ConfidenceBand,
+  type ConfidenceDecisionType,
+  type DecisionConfidence,
+} from './decision-confidence.ts'
 
 interface RetimedTranscriptWord {
   text: string
@@ -85,8 +92,16 @@ export interface DirectorDecision {
   reason: string
   evidenceRefs: readonly string[]
   confidence: number
+  decisionType: ConfidenceDecisionType
+  confidenceDetail: Readonly<DecisionConfidence>
+  confidenceBand: ConfidenceBand
   alternatives: readonly string[]
 }
+
+export type DirectorDecisionInput = Omit<
+  DirectorDecision,
+  'decisionType' | 'confidenceDetail' | 'confidenceBand'
+>
 
 export interface DirectorPerceptionSnapshot {
   schemaVersion: 1
@@ -251,7 +266,18 @@ function validId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(value)
 }
 
-export function validateDirectorDecisions(input: readonly DirectorDecision[]): readonly Readonly<DirectorDecision>[] {
+const decisionTypeByCategory: Readonly<Record<DirectorDecisionCategory, ConfidenceDecisionType>> = Object.freeze({
+  narrative: 'narrative-reorder',
+  movement: 'generation',
+  layout: 'generation',
+  subtitle: 'transcription',
+  transition: 'cut',
+  insert: 'asset-selection',
+})
+
+export function validateDirectorDecisions(
+  input: readonly (DirectorDecisionInput | DirectorDecision)[],
+): readonly Readonly<DirectorDecision>[] {
   assertDomain(input.length >= 4 && input.length <= 64, 'INVALID_COMMAND', 'Director decisions must be bounded and complete')
   const ids = new Set<string>()
   for (const decision of input) {
@@ -261,11 +287,47 @@ export function validateDirectorDecisions(input: readonly DirectorDecision[]): r
     assertDomain(decision.evidenceRefs.length > 0, 'INVALID_COMMAND', 'Director decision needs evidence')
     assertDomain(decision.confidence >= 0 && decision.confidence <= 1, 'INVALID_COMMAND', 'Director decision confidence is invalid')
   }
-  return Object.freeze(input.map((decision) => Object.freeze({
-    ...decision,
-    evidenceRefs: Object.freeze([...decision.evidenceRefs]),
-    alternatives: Object.freeze([...decision.alternatives]),
-  })))
+  return Object.freeze(input.map((decision) => {
+    const evidenceRefs = Object.freeze([...decision.evidenceRefs])
+    const weight = 1 / evidenceRefs.length
+    const confidenceDetail = createDecisionConfidence({
+      value: decision.confidence,
+      evidence: evidenceRefs.map((ref, index) => Object.freeze({
+        ref,
+        weight: index === evidenceRefs.length - 1
+          ? 1 - weight * (evidenceRefs.length - 1)
+          : weight,
+      })),
+      reasonCodes: [`DIRECTOR_${decision.category.toUpperCase()}`],
+      calibrationVersion: 'director-confidence-2026-08-v1',
+    })
+    const decisionType = decisionTypeByCategory[decision.category]
+    const persisted = decision as Partial<DirectorDecision>
+    const hasPersistedConfidence = persisted.decisionType !== undefined ||
+      persisted.confidenceDetail !== undefined || persisted.confidenceBand !== undefined
+    if (hasPersistedConfidence) {
+      const storedConfidence = persisted.confidenceDetail
+        ? createDecisionConfidence(persisted.confidenceDetail)
+        : undefined
+      assertDomain(
+        persisted.decisionType === decisionType &&
+          persisted.confidenceBand === classifyConfidence(decisionType, confidenceDetail) &&
+          storedConfidence !== undefined &&
+          storedConfidence.confidenceHash === persisted.confidenceDetail?.confidenceHash &&
+          storedConfidence.confidenceHash === confidenceDetail.confidenceHash,
+        'PERSISTENCE_CONFLICT',
+        'Stored Director decision confidence is inconsistent',
+      )
+    }
+    return Object.freeze({
+      ...decision,
+      decisionType,
+      confidenceDetail,
+      confidenceBand: classifyConfidence(decisionType, confidenceDetail),
+      evidenceRefs,
+      alternatives: Object.freeze([...decision.alternatives]),
+    })
+  }))
 }
 
 export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<DirectedEditPlan> {

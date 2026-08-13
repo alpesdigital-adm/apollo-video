@@ -26,6 +26,14 @@ test('T-FR-012 project editor shows persisted owner trust, summary and assumptio
   assert.match(projectEditorSource, /Nenhuma geração cara foi iniciada por esta leitura/)
 })
 
+test('T-FR-052 Director panel shows only compact review/block confidence chips', () => {
+  assert.match(projectEditorSource, /data-testid="director-confidence-uncertainties"/)
+  assert.match(projectEditorSource, /latestDirectorRun\?\.uncertainties\.length/)
+  assert.match(projectEditorSource, /data-confidence-band=\{uncertainty\.band\}/)
+  assert.match(projectEditorSource, /uncertainty\.band === 'block' \? 'Bloqueado' : 'Revisar'/)
+  assert.doesNotMatch(projectEditorSource, /data-confidence-band="auto-apply"/)
+})
+
 test('project editor prioritizes the version-bound review artifact with the approved final as fallback', () => {
   assert.match(
     projectEditorSource,

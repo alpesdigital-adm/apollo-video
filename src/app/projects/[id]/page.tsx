@@ -557,6 +557,10 @@ interface DirectorRunSummary {
   id: string; status: 'planned' | 'rendering' | 'succeeded' | 'failed'; plannerVersion: string; criticVersion: string;
   baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string; storySnapshotId: string; qualitySnapshotId: string;
   qualityStatus: 'approved' | 'approved-with-warnings' | 'blocked'; qualityScore: number; decisionCount: number; assumptionCount: number;
+  uncertainties: readonly {
+    id: string; label: string; type: string; band: 'review' | 'block'; value: number;
+    reasonCodes: readonly string[]; calibrationVersion: string; evidenceCount: number
+  }[];
   subtitleCueCount: number; transitionCount: number; automaticZoom: boolean; createdAt: string
   objective: StrategicObjectiveId; objectiveVersion: number; rubricRef: string; supersedesRunId?: string
 }
@@ -3254,6 +3258,20 @@ export default function ProjectWorkspacePage() {
           <div className="mt-5 rounded-xl border border-[#6962de]/15 bg-[#6962de]/[0.045] p-4">
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#8c85e8]">Gate atual</p>
             <p className="mt-2 text-xs leading-5 text-[#8f8aa4]">{latestDirectorRun ? `DirectorRun ${latestDirectorRun.qualityStatus === 'approved' ? 'aprovado' : 'aprovado com ressalvas'} pelo critic, com ${latestDirectorRun.decisionCount} decisões editoriais persistidas.` : workspace.editPlan?.state === 'compiled' ? `Corte editorial V2 aplicado em ${workspace.editPlan.clipCount} trechos, com ${workspace.editPlan.cutCount} decisões persistidas.` : 'Ingestão verificável: master, proxy de edição, transcript e lineage.'}</p>
+            {latestDirectorRun?.uncertainties.length ? (
+              <div className="mt-3 flex flex-wrap gap-1.5" data-testid="director-confidence-uncertainties">
+                {latestDirectorRun.uncertainties.map((uncertainty) => (
+                  <span
+                    className={`rounded-full border px-2 py-1 text-[9px] font-semibold ${uncertainty.band === 'block' ? 'border-[#c66f68]/35 bg-[#c66f68]/10 text-[#df8a82]' : 'border-[#d5aa4e]/35 bg-[#d5aa4e]/10 text-[#e2bd69]'}`}
+                    data-confidence-band={uncertainty.band}
+                    key={uncertainty.id}
+                    title={`${uncertainty.reasonCodes.join(', ')} · ${uncertainty.calibrationVersion} · ${uncertainty.evidenceCount} evidências`}
+                  >
+                    {uncertainty.band === 'block' ? 'Bloqueado' : 'Revisar'} · {uncertainty.label} · {Math.round(uncertainty.value * 100)}%
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {workspace.editPlan?.state === 'compiled' ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Zoom automático {workspace.editPlan.automaticZoom ? 'ativo' : 'desativado'}</span><span className="rounded-md border border-white/[0.07] px-2 py-1 text-[9px] text-[#aaa4bd]">Proteção facial {workspace.editPlan.subtitleFaceProtection ? 'ativa' : 'pendente'}</span></div> : null}
             {latestDirectorRun ? <div className="mt-3 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.subtitleCueCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">blocos de legenda</span></div><div className="rounded-lg border border-white/[0.07] bg-black/10 px-2 py-2"><span className="block text-sm font-semibold text-[#d9b45b]">{latestDirectorRun.transitionCount}</span><span className="text-[8px] uppercase tracking-[0.12em] text-[#6f6a78]">transições</span></div></div> : null}
             {workspace.editPlan?.state === 'compiled' && transcript ? <button className="mt-4 w-full rounded-lg bg-[#dbae3f] px-3 py-2.5 text-xs font-semibold text-[#171207] transition hover:bg-[#e5bb50] disabled:cursor-not-allowed disabled:opacity-45" disabled={directorRunning || exportRunning || operationActive} onClick={() => void runDirector()} type="button">{directorRunning ? 'Diretor planejando…' : latestDirectorRun ? 'Executar nova direção V2' : 'Executar Diretor V2'}</button> : null}
