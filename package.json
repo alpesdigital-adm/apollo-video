@@ -34,6 +34,7 @@
     "test:integration:media-segment": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/media-segment-materialization.integration.mjs",
     "test:integration:image-analysis": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/image-analysis-tesseract.integration.mjs tests/v2/media-input-runtime.integration.mjs",
     "test:integration:render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/remotion-renderer.integration.mjs",
+    "test:integration:visual-montage": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/visual-montage-render.integration.mjs",
     "test:integration:prisma": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-project-repository.integration.mjs",
     "test:integration:review": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-review-annotation.integration.mjs",
     "test:integration:operations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-public-operation.integration.mjs tests/v2/prisma-operation-telemetry.integration.mjs",
