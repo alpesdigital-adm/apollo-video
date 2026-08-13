@@ -10,6 +10,7 @@ import {
   discoverDirectorToolsService,
   executeDirectorToolsService,
 } from '../../src/v2/application/execute-director-tools.ts'
+import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
 import {
   DIRECTOR_TOOL_DESCRIPTORS,
@@ -23,6 +24,19 @@ const workspaceId = 'workspace-director-tools'
 const projectId = 'project-director-tools'
 const baseVersionId = 'project-version-director-tools-7'
 const rightsHash = 'a'.repeat(64)
+const runId = 'director-run-tools-1'
+const usage = (spendMinorUnits = 0) => ({ spendMinorUnits, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 })
+
+function actor() {
+  const auditContext = createExternalAuditContext({
+    clientId: 'client-director-tools', credentialId: 'credential-director-tools', workspaceId, environment: 'sandbox',
+  })
+  return Object.freeze({
+    clientId: 'client-director-tools', credentialId: 'credential-director-tools', workspaceId, environment: 'sandbox',
+    scopes: new Set(['projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false,
+    workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext,
+  })
+}
 
 const context = (overrides = {}) => ({
   workspaceId,
@@ -126,6 +140,7 @@ test('T-FR-064 rejects arguments, scope, rights, budget and base version before 
 test('T-FR-064 application execution resolves authoritative server context before dispatch', async () => {
   const fake = services()
   const resolutions = []
+  const budgetCalls = []
   const execute = executeDirectorToolsService({
     contexts: {
       async resolve(input) {
@@ -133,11 +148,29 @@ test('T-FR-064 application execution resolves authoritative server context befor
         return context()
       },
     },
+    budgets: {
+      async reserve(input) {
+        budgetCalls.push({ action: 'reserve', input })
+        return { state: { revision: 2 }, reservation: { id: 'reservation-director-tools-1' }, outcome: 'reserved', replayed: false }
+      },
+      async settle(input) {
+        budgetCalls.push({ action: 'settle', input })
+        return { state: { revision: 3, status: 'active' }, reservation: { id: input.reservationId }, replayed: false }
+      },
+    },
     services: fake,
+    clock: () => new Date('2026-08-13T12:00:00.000Z'),
   })
-  const result = await execute({ workspaceId, projectId, calls: validCalls() })
+  const result = await execute({
+    workspaceId, projectId, runId, expectedBudgetRevision: 1, actor: actor(),
+    idempotencyKey: 'director-tools-batch-1', calls: validCalls(),
+  })
   assert.equal(result.results.length, 5)
-  assert.deepEqual(resolutions, [{ workspaceId, projectId, requestedAssetIds: ['asset-eligible'] }])
+  assert.deepEqual(resolutions, [{ workspaceId, projectId, runId, requestedAssetIds: ['asset-eligible'] }])
+  assert.deepEqual(budgetCalls.map((entry) => entry.action), ['reserve', 'settle'])
+  assert.equal(budgetCalls[0].input.estimate.spendMinorUnits, 350)
+  assert.equal(budgetCalls[1].input.expectedRevision, 2)
+  assert.equal(result.budget.revision, 3)
 })
 
 test('T-FR-064 canonical Wave 5 StoryPlan and montage hashes are mandatory at the tool boundary', async () => {
@@ -181,11 +214,16 @@ test('T-FR-064 context resolver derives version, rights and budget from server-s
         return new Map([['asset-eligible', snapshot], ['asset-revoked', null]])
       },
     },
+    budgets: {
+      async get(input) {
+        assert.deepEqual(input, { workspaceId, projectId, runId })
+        return { limits: usage(500), actual: usage(50), reserved: usage(50) }
+      },
+    },
     clock: () => new Date('2026-08-13T12:01:00.000Z'),
-    budgetLimit: 4,
   })
   const resolved = await resolver.resolve({
-    workspaceId, projectId,
+    workspaceId, projectId, runId,
     requestedAssetIds: ['asset-revoked', 'asset-eligible', 'asset-eligible'],
   })
   assert.equal(resolved.baseVersionId, baseVersionId)
@@ -217,5 +255,8 @@ test('T-FR-064 model and application layers cannot import infrastructure, Prisma
   const route = await readFile(new URL('../../src/app/v1/director-tools/route.ts', import.meta.url), 'utf8')
   assert.match(route, /authenticateExternalRequest/)
   assert.match(route, /requireScope\(actor, 'projects:write'\)/)
+  assert.match(route, /assertExternalMutationOrigin/)
+  assert.match(route, /directorBudgetService/)
+  assert.match(route, /idempotencyKey/)
   assert.match(route, /executeDirectorToolsService/)
 })

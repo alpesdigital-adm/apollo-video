@@ -7526,6 +7526,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         }],
       },
     ],
+    'apollo://schemas/director-tool-execution-request/v3': [
+      {
+        projectId, runId: 'director-run-example-1', baseRevision: 1,
+        calls: [{ id: 'director-tool-call-example-3', name: 'search-media', arguments: { query: 'product proof', limit: 10 }, scope: { workspaceId, projectId }, baseVersionId: 'project-version-example-1', estimatedCost: 0.5, rights: [] }],
+      },
+    ],
     'apollo://schemas/director-tool-execution/v1': [
       {
         data: {
@@ -7537,6 +7543,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           budgetRemaining: 4.5,
         },
         meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-tool-execution/v2': [
+      {
+        data: {
+          schemaVersion: 'director-tool-execution/v1',
+          results: [{ callId: 'director-tool-call-example-3', tool: 'search-media', status: 'accepted', chargedCost: 0.5, result: { kind: 'search-results', value: { results: [] } } }],
+          budgetRemaining: 4.5,
+          budget: { revision: 3, status: 'active', estimated: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, realized: { spendMinorUnits: 50, elapsedMs: 120, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 } },
+        }, meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/agent-tool-list/v1': [
@@ -11020,6 +11036,45 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/speaker-diarization-read/v1': [
       {
         data: speakerDiarizationRunExample,
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-director-budget-request/v1': [
+      {
+        runId: 'director-run-example-1',
+        limits: { spendMinorUnits: 5000, elapsedMs: 120000, tokens: 50000, generations: 10, candidates: 20, criticRounds: 4 },
+      },
+    ],
+    'apollo://schemas/director-budget-action-request/v1': [
+      {
+        action: 'reserve', baseRevision: 1, operationKind: 'search-media',
+        estimate: { spendMinorUnits: 25, elapsedMs: 2000, tokens: 1000, generations: 1, candidates: 10, criticRounds: 0 },
+      },
+      {
+        action: 'settle', baseRevision: 2, reservationId: 'director-reservation-example-1', outcome: 'completed',
+        actual: { spendMinorUnits: 28, elapsedMs: 1800, tokens: 900, generations: 1, candidates: 8, criticRounds: 0 },
+        candidateResult: { id: 'candidate-example-1', valid: true, score: 0.91, payloadHash: '9'.repeat(64) },
+      },
+    ],
+    'apollo://schemas/director-budget-read/v1': [
+      {
+        data: { budget: { schemaVersion: 1, id: 'director-budget-example-1', projectId, runId: 'director-run-example-1', revision: 3, status: 'active', estimated: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, realized: { spendMinorUnits: 28, elapsedMs: 1800, tokens: 900, generations: 1, candidates: 8, criticRounds: 0 }, limits: { spendMinorUnits: 5000, elapsedMs: 120000, tokens: 50000, generations: 10, candidates: 20, criticRounds: 4 }, bestResult: { id: 'candidate-example-1', valid: true, score: 0.91, payloadHash: '9'.repeat(64) }, exhaustedDimension: null, createdAt, updatedAt: createdAt } },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-budget-list/v1': [
+      {
+        data: { budgets: [{ schemaVersion: 1, id: 'director-budget-example-1', projectId, runId: 'director-run-example-1', revision: 1, status: 'active', estimated: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, realized: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, limits: { spendMinorUnits: 5000, elapsedMs: 120000, tokens: 50000, generations: 10, candidates: 20, criticRounds: 4 }, bestResult: null, exhaustedDimension: null, createdAt, updatedAt: createdAt }] },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-budget-mutated/v1': [
+      {
+        data: {
+          budget: { schemaVersion: 1, id: 'director-budget-example-1', projectId, runId: 'director-run-example-1', revision: 2, status: 'active', estimated: { spendMinorUnits: 25, elapsedMs: 2000, tokens: 1000, generations: 1, candidates: 10, criticRounds: 0 }, realized: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, limits: { spendMinorUnits: 5000, elapsedMs: 120000, tokens: 50000, generations: 10, candidates: 20, criticRounds: 4 }, bestResult: null, exhaustedDimension: null, createdAt, updatedAt: createdAt },
+          reservation: { schemaVersion: 1, id: 'director-reservation-example-1', operationKind: 'search-media', status: 'reserved', estimated: { spendMinorUnits: 25, elapsedMs: 2000, tokens: 1000, generations: 1, candidates: 10, criticRounds: 0 }, realized: null, overrun: null, candidateResult: null, createdAt, settledAt: null },
+          outcome: 'reserved', replayed: false,
+        },
         meta: { apiVersion: 'v1' },
       },
     ],

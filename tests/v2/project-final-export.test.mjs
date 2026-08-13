@@ -373,6 +373,7 @@ function workerDependencies(
             [sourceArtifactId],
           )
           const parameters = JSON.parse(input.recipeParameters.canonicalJson)
+          assert.match(parameters.audioTimelineHash, /^[a-f0-9]{64}$/)
           assert.equal(parameters.directorRunId, 'director-run-final-export-test')
           assert.equal(parameters.qualitySnapshotId, 'quality-snapshot-final-export-test')
           assert.deepEqual(parameters.outputSpec, {
@@ -395,6 +396,7 @@ function workerDependencies(
           calls.rendered += 1
           assert.equal(input.renderKind, 'final')
           assert.equal(input.fps, 30)
+          assert.match(input.audioTimelineHash, /^[a-f0-9]{64}$/)
           assert.deepEqual(input.lutPaths, {})
           assert.deepEqual(input.sources, [{
             artifactId: sourceArtifactId,

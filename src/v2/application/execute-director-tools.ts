@@ -13,9 +13,12 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import { validateStoryPlan } from '../domain/story-plan.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
+import type { DirectorBudgetRepository } from './ports/director-budget-repository.ts'
+import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
+import { directorBudgetService } from './director-budgets.ts'
 import { selectMontageCandidate } from './select-montage-candidate.ts'
 
-export const DIRECTOR_TOOL_SERVER_BUDGET = 5
+const COST_MINOR_UNITS_PER_TOOL_UNIT = 100
 
 export function discoverDirectorToolsService() {
   return createDirectorToolCatalog()
@@ -67,18 +70,17 @@ export interface DirectorToolContextResolver {
   resolve(input: Readonly<{
     workspaceId: string
     projectId: string
+    runId: string
     requestedAssetIds: readonly string[]
   }>): Promise<Readonly<DirectorToolContext>>
 }
 
 export function createDirectorToolContextResolver(dependencies: {
   directorRuns: Pick<DirectorRunRepository, 'readContext'>
+  budgets: Pick<DirectorBudgetRepository, 'get'>
   rights: Pick<AssetRightsRepository, 'findCurrentForArtifacts'>
   clock: () => Date
-  budgetLimit?: number
 }): DirectorToolContextResolver {
-  const budgetLimit = dependencies.budgetLimit ?? DIRECTOR_TOOL_SERVER_BUDGET
-  assertDomain(Number.isFinite(budgetLimit) && budgetLimit >= 0, 'INVALID_ARGUMENT', 'Director tool server budget must be finite and non-negative')
   const resolver: DirectorToolContextResolver = {
     async resolve(input) {
       const context = await dependencies.directorRuns.readContext({ workspaceId: input.workspaceId, projectId: input.projectId })
@@ -96,11 +98,21 @@ export function createDirectorToolContextResolver(dependencies: {
         }, dependencies.clock())
         if (decision.outcome === 'allow' && decision.rightsSnapshotHash) eligible.set(assetId, decision.rightsSnapshotHash)
       }
+      const budget = await dependencies.budgets.get({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        runId: input.runId,
+      })
+      if (!budget) throw new DomainError('PROJECT_NOT_FOUND', 'Director tool budget was not found')
+      const remainingMinorUnits = Math.max(
+        0,
+        budget.limits.spendMinorUnits - budget.actual.spendMinorUnits - budget.reserved.spendMinorUnits,
+      )
       return Object.freeze({
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         baseVersionId: context.currentVersion.id,
-        budgetRemaining: budgetLimit,
+        budgetRemaining: remainingMinorUnits / COST_MINOR_UNITS_PER_TOOL_UNIT,
         eligibleAssetRights: eligible,
       })
     },
@@ -110,11 +122,17 @@ export function createDirectorToolContextResolver(dependencies: {
 
 export function executeDirectorToolsService(dependencies: {
   contexts: DirectorToolContextResolver
+  budgets: ReturnType<typeof directorBudgetService>
   services: DirectorApplicationServices
+  clock?: () => Date
 }) {
   return async function execute(input: Readonly<{
     workspaceId: string
     projectId: string
+    runId: string
+    expectedBudgetRevision: number
+    actor: Readonly<AuthenticatedExternalActor>
+    idempotencyKey: string
     calls: unknown
   }>) {
     const parsed = parseDirectorToolCalls(input.calls)
@@ -124,9 +142,51 @@ export function executeDirectorToolsService(dependencies: {
     const context = await dependencies.contexts.resolve({
       workspaceId: input.workspaceId,
       projectId: input.projectId,
+      runId: input.runId,
       requestedAssetIds,
     })
-    return runDirectorToolCalls(parsed, context, dependencies.services)
+    const preflight = preflightDirectorToolCalls(parsed, context)
+    const estimatedCost = preflight.calls.reduce((sum, call) => sum + call.estimatedCost, 0)
+    const estimate = {
+      spendMinorUnits: Math.round(estimatedCost * COST_MINOR_UNITS_PER_TOOL_UNIT),
+      elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0,
+    }
+    const reserved = await dependencies.budgets.reserve({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      runId: input.runId,
+      expectedRevision: input.expectedBudgetRevision,
+      operationKind: 'director-tool-batch',
+      estimate,
+      actor: input.actor,
+      idempotencyKey: `${input.idempotencyKey}:reserve`,
+    })
+    if (!reserved.reservation) {
+      throw new DomainError('GOVERNANCE_LIMIT_EXCEEDED', 'Director tool budget is exhausted')
+    }
+    const startedAt = (dependencies.clock ?? (() => new Date()))().getTime()
+    let result: Awaited<ReturnType<typeof runDirectorToolCalls>>
+    try {
+      result = await runDirectorToolCalls(parsed, context, dependencies.services)
+    } catch (error) {
+      await dependencies.budgets.settle({
+        workspaceId: input.workspaceId, projectId: input.projectId, runId: input.runId,
+        expectedRevision: reserved.state.revision,
+        reservationId: reserved.reservation.id,
+        actual: { ...estimate, spendMinorUnits: 0 }, outcome: 'cancelled', actor: input.actor,
+        idempotencyKey: `${input.idempotencyKey}:cancel`,
+      })
+      throw error
+    }
+    const elapsedMs = Math.max(0, (dependencies.clock ?? (() => new Date()))().getTime() - startedAt)
+    const settled = await dependencies.budgets.settle({
+      workspaceId: input.workspaceId, projectId: input.projectId, runId: input.runId,
+      expectedRevision: reserved.state.revision,
+      reservationId: reserved.reservation.id,
+      actual: { ...estimate, elapsedMs }, outcome: 'completed', actor: input.actor,
+      idempotencyKey: `${input.idempotencyKey}:settle`,
+    })
+    return Object.freeze({ ...result, budget: settled.state })
   }
 }
 
