@@ -2721,6 +2721,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.narrative-safety.preflight', version: '1.0.0', title: 'Preflight narrative safety',
+    description: 'Checks a proposed trim and ordering against the exact StoryPlan statements, speaker attribution, critical tokens, source ranges and proof/context dependencies before any Command is created.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    inputSchemaRef: 'apollo://schemas/narrative-safety-preflight-request/v1', outputSchemaRef: 'apollo://schemas/narrative-safety-preflight/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/narrative-safety/preflight' }, toolName: 'apollo.projects.narrative-safety.preflight',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.semantic-search.documents.catalog',
     version: '1.0.0',
     title: 'Catalog source for hybrid search',

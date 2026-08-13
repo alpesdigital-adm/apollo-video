@@ -4229,6 +4229,31 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.narrative-safety.preflight": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "inputSchemaRef": "apollo://schemas/narrative-safety-preflight-request/v1",
+      "outputSchemaRef": "apollo://schemas/narrative-safety-preflight/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/narrative-safety/preflight"
+      },
+      "toolName": "apollo.projects.narrative-safety.preflight",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.perception.put": {
       "version": "1.0.0",
       "exposure": "public",
@@ -59470,6 +59495,299 @@
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
                   }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/narrative-safety-preflight-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "expectedBaseHash",
+        "storyPlanId",
+        "edit"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedBaseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "storyPlanId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "edit": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statementId",
+              "speakerId",
+              "sourceArtifactId",
+              "sourceRangeMs",
+              "preservedText"
+            ],
+            "properties": {
+              "statementId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "speakerId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "sourceArtifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "sourceRangeMs": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "preservedText": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 4000
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/narrative-safety-preflight/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision"
+          ],
+          "properties": {
+            "decision": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "projectVersionId",
+                "projectVersionBaseHash",
+                "storyPlanId",
+                "storySnapshotHash",
+                "contextHash",
+                "safe",
+                "issues",
+                "preflightHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "narrative-safety-decision/v1"
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionBaseHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "storyPlanId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "storySnapshotHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "contextHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "safe": {
+                  "type": "boolean"
+                },
+                "issues": {
+                  "type": "array",
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "code",
+                      "severity",
+                      "category",
+                      "statementId",
+                      "rangeMs",
+                      "evidence",
+                      "restoreAction"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "narrative-quality-issue/v1"
+                      },
+                      "code": {
+                        "enum": [
+                          "UNKNOWN_STATEMENT",
+                          "STATEMENT_DUPLICATED",
+                          "SOURCE_RANGE_CHANGED",
+                          "SOURCE_TEXT_CHANGED",
+                          "ATTRIBUTION_CHANGED",
+                          "CLAIM_CHANGED",
+                          "QUALIFIER_REMOVED",
+                          "NEGATION_REMOVED",
+                          "CAUSALITY_CHANGED",
+                          "DEADLINE_REMOVED",
+                          "DEPENDENCY_REMOVED",
+                          "DEPENDENCY_REORDERED"
+                        ]
+                      },
+                      "severity": {
+                        "const": "hard"
+                      },
+                      "category": {
+                        "const": "integrity"
+                      },
+                      "statementId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "rangeMs": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "evidence": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "kind",
+                            "ref"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "enum": [
+                                "source-text",
+                                "speaker",
+                                "source-range",
+                                "dependency",
+                                "critical-token"
+                              ]
+                            },
+                            "ref": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000
+                            },
+                            "rangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "items": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "restoreAction": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "statementId",
+                          "sourceRangeMs",
+                          "refs"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "restore-statement",
+                              "restore-token",
+                              "restore-attribution",
+                              "restore-dependency",
+                              "restore-order"
+                            ]
+                          },
+                          "statementId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceRangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "refs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "preflightHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
                 }
               }
             }

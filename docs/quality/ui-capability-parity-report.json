@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 220,
-    "operableCapabilities": 220,
-    "publicContractCapabilities": 220,
+    "registeredCapabilities": 221,
+    "operableCapabilities": 221,
+    "publicContractCapabilities": 221,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3027,6 +3027,17 @@
       "endpoint": "POST /v1/projects/{projectId}/validated-segments/{validatedSegmentId}/reuse-preflight",
       "inputSchemaRef": "apollo://schemas/preflight-validated-segment-reuse-request/v1",
       "outputSchemaRef": "apollo://schemas/validated-segment-reuse-preflight/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.narrative-safety.preflight",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/narrative-safety/preflight",
+      "inputSchemaRef": "apollo://schemas/narrative-safety-preflight-request/v1",
+      "outputSchemaRef": "apollo://schemas/narrative-safety-preflight/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
