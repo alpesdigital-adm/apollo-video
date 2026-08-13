@@ -146,6 +146,24 @@ const colorPipelineCompilationExample = {
   createdAt,
   compilationHash: '6'.repeat(64),
 }
+const storyPlanCoreExample = {
+  objective: 'sale',
+  desiredActionRef: { schemaVersion: 'desired-action-ref/v1', id: 'desired-action-2886afbb013a88dabe3c38df', actionHash: '2886afbb013a88dabe3c38dfd17bb52b3a375065a91ef3e15dbefc8312aca34d', action: { schemaVersion: 1, kind: 'buy', destination: { type: 'url', value: 'https://example.com' }, verbalCta: 'Buy now', visualCta: 'Buy now', disclosures: [] } },
+  treatmentPlanRef: { id: 'treatment-plan-example-1', schemaVersion: 1, contentHash: 'b'.repeat(64) },
+  targetDurationMs: { min: 6000, max: 10000 },
+  acts: [{ id: 'opening', role: 'opening', blockIds: ['block-hook'] }, { id: 'development', role: 'development', blockIds: ['block-proof'] }, { id: 'resolution', role: 'resolution', blockIds: ['block-cta'] }],
+  blocks: [
+    { id: 'block-hook', actId: 'opening', role: 'hook', intent: 'Open with the result', dependencies: [], sourceCandidateIds: ['candidate-hook'], durationTargetMs: { min: 1500, ideal: 2000, max: 2500 }, content: { claimIds: [], qualifierIds: [], proofIds: [] }, presentation: 'source-video', sourceRangeId: 'range-hook' },
+    { id: 'block-proof', actId: 'development', role: 'proof', intent: 'Ground the claim', dependencies: ['block-hook'], sourceCandidateIds: ['candidate-proof'], durationTargetMs: { min: 2000, ideal: 3000, max: 4000 }, content: { claimIds: ['claim-1'], qualifierIds: ['qualifier-1'], proofIds: ['proof-1'] }, presentation: 'source-video', sourceRangeId: 'range-proof' },
+    { id: 'block-cta', actId: 'resolution', role: 'cta', intent: 'Present the configured action', dependencies: ['block-proof'], sourceCandidateIds: ['candidate-cta'], durationTargetMs: { min: 1500, ideal: 2000, max: 2500 }, content: { claimIds: [], qualifierIds: [], proofIds: [], ctaId: 'desired-action-2886afbb013a88dabe3c38df' }, presentation: 'voiceover' },
+  ],
+  sourceRanges: [{ id: 'range-hook', artifactId, startMs: 0, endMs: 2000, rightsRef: 'rights-example-1' }, { id: 'range-proof', artifactId, startMs: 2000, endMs: 5000, rightsRef: 'rights-example-1' }, { id: 'range-cta', artifactId, startMs: 5000, endMs: 7000, rightsRef: 'rights-example-1' }],
+  sourceCandidates: [{ id: 'candidate-hook', sourceRangeId: 'range-hook', purpose: 'hook', rank: 1 }, { id: 'candidate-proof', sourceRangeId: 'range-proof', purpose: 'proof', rank: 1 }, { id: 'candidate-cta', sourceRangeId: 'range-cta', purpose: 'cta', rank: 1 }],
+  qualifiers: [{ id: 'qualifier-1', text: 'For qualified participants' }],
+  claims: [{ id: 'claim-1', text: 'The method improves clarity', qualifierIds: ['qualifier-1'], proofContextIds: ['proof-1'] }],
+  proofContexts: [{ id: 'proof-1', claimIds: ['claim-1'], sourceCandidateIds: ['candidate-proof'], attribution: 'Participant result' }],
+}
+const storyPlanExample = { schemaVersion: 3, id: 'story-plan-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', ...storyPlanCoreExample, storyHash: 'c'.repeat(64), createdBy: { type: 'api-client', id: clientId }, createdAt, requestFingerprint: 'd'.repeat(64) }
 const rightsSnapshotId = 'rights-example-1'
 const assetRightsRequestExample = {
   owner: 'Alpes Digital',
@@ -5674,6 +5692,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/create-story-plan-request/v1': [{ projectVersionId: 'project-version-example-1', plan: storyPlanCoreExample }],
+    'apollo://schemas/story-plan-mutated/v1': [{ data: { storyPlan: storyPlanExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/story-plan-read/v1': [{ data: { storyPlan: storyPlanExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/public-operation-detail/v2': [
       { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
     ],

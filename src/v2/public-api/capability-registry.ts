@@ -2356,6 +2356,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.story-plans.create', version: '1.0.0', title: 'Create a validated StoryPlan',
+    description: 'Validates and persists one immutable StoryPlan bound to an exact ProjectVersion and versioned TreatmentPlan reference before EditPlan compilation.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/create-story-plan-request/v1', outputSchemaRef: 'apollo://schemas/story-plan-mutated/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/story-plans' }, toolName: 'apollo.projects.story-plans.create',
+    supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.story-plans.read', version: '1.0.0', title: 'Read an immutable StoryPlan',
+    description: 'Reads a content-addressed StoryPlan with acts, blocks, evidence context, source references and readiness validation.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/story-plan-read/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/story-plans/{storyPlanId}' },
+    toolName: 'apollo.projects.story-plans.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.contiguous-extractions.read',
     version: '1.0.0',
     title: 'Read a contiguous long-form extraction',

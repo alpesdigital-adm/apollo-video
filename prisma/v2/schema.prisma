@@ -6146,3 +6146,32 @@ model V2SourceCleanupResult {
   @@index([workspaceId, passed, completedAt(sort: Desc)], map: "source_cleanup_results_workspace_passed_idx")
   @@map("source_cleanup_results")
 }
+
+model V2StoryPlan {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  schemaVersion        Int
+  treatmentPlanId      String   @db.VarChar(128)
+  treatmentSchemaVersion Int
+  treatmentContentHash String   @db.Char(64)
+  storyJson            String   @db.Text
+  storyHash            String   @db.Char(64)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  createdByClientId    String   @db.VarChar(128)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "story_plans_actor_idempotency_key")
+  @@unique([id, workspaceId, projectId], map: "story_plans_id_workspace_project_key")
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)], map: "story_plans_project_version_created_idx")
+  @@map("story_plans")
+}
