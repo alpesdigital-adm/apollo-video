@@ -56,6 +56,11 @@ function data(input: Parameters<MontageAlternativeRepository['create']>[0]) {
 export class PrismaMontageAlternativeRepository implements MontageAlternativeRepository {
   constructor(private readonly client: PrismaClient = getV2PostgresClient()) {}
 
+  async readStoryPlanReference(input: { workspaceId: string; projectId: string; storyPlanId: string }) {
+    const row = await this.client.v2StoryPlan.findFirst({ where: { id: input.storyPlanId, workspaceId: input.workspaceId, projectId: input.projectId }, select: { id: true, storyHash: true } })
+    return row ? Object.freeze({ id: row.id, hash: row.storyHash }) : null
+  }
+
   async findReplay(input: { workspaceId: string; projectId: string; actorClientId: string; idempotencyKey: string; actorContextHash: string }) {
     const row = await this.client.v2MontageAlternativeRun.findFirst({ where: { workspaceId: input.workspaceId, projectId: input.projectId, createdByClientId: input.actorClientId, idempotencyKey: input.idempotencyKey } })
     if (!row) return null

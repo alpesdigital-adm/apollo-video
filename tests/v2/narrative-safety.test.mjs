@@ -6,12 +6,30 @@ import { preflightNarrativeSafetyService } from '../../src/v2/application/prefli
 import { parseNarrativeSafetyPreflightBody } from '../../src/v2/public-api/narrative-safety-contract.ts'
 import { PrismaNarrativeSafetyRepository } from '../../src/v2/infrastructure/prisma/narrative-safety-repository.ts'
 import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { createStoryPlan } from '../../src/v2/domain/story-plan.ts'
+import { createDesiredActionReference } from '../../src/v2/domain/desired-action.ts'
 
 const fixtures = Object.values(NARRATIVE_POLICY_FIXTURES)
 const block = (statement) => ({ id: statement.storyBlockId, actId: 'development', role: statement.kind === 'fact' ? 'context' : statement.kind === 'testimony' ? 'proof' : 'argument', intent: statement.kind, dependencies: [], sourceCandidateIds: [statement.sourceArtifactId], durationTargetMs: { min: 1_000, ideal: 2_000, max: 3_000 }, content: { claimIds: statement.claims.map((claim) => claim.id), qualifierIds: [], proofIds: statement.kind === 'testimony' || statement.dependencies.some((dependency) => dependency.kind === 'proof') ? ['proof-context'] : [] }, presentation: 'source-video', sourceRangeId: statement.id })
 const storyPlan = { schemaVersion: 1, objective: 'sale', targetDurationMs: { min: 6_000, max: 12_000 }, acts: [{ id: 'development', role: 'development', blockIds: fixtures.map((statement) => statement.storyBlockId) }], blocks: fixtures.map(block) }
 const context = createNarrativeSafetyContext({ storyPlanId: 'story-plan-safety', storyPlan, statements: fixtures })
 const preserved = (id, overrides = {}) => { const statement = context.statements.find((value) => value.id === id); return { statementId: id, speakerId: statement.speakerId, sourceArtifactId: statement.sourceArtifactId, sourceRangeMs: statement.rangeMs, preservedText: statement.text, ...overrides } }
+
+const persistedStoryPlan = (() => {
+  const sourceRanges = fixtures.map((statement) => ({ id: `range-${statement.id}`, artifactId: statement.sourceArtifactId, startMs: statement.rangeMs[0], endMs: statement.rangeMs[1], rightsRef: 'rights-master' }))
+  const sourceCandidates = fixtures.map((statement, index) => ({ id: `candidate-${statement.id}`, sourceRangeId: `range-${statement.id}`, purpose: statement.kind === 'fact' ? 'context' : statement.kind === 'testimony' ? 'proof' : 'argument', rank: index + 1 }))
+  const blocks = fixtures.map((statement) => ({ ...block(statement), sourceCandidateIds: [`candidate-${statement.id}`], sourceRangeId: `range-${statement.id}` }))
+  const desiredActionRef = createDesiredActionReference({ schemaVersion: 1, kind: 'learn', destination: { type: 'url', value: 'https://example.com/safety' }, verbalCta: 'Learn more', visualCta: 'Learn more', disclosures: [] })
+  const claims = fixtures.flatMap((statement) => statement.claims.map((claim) => ({ id: claim.id, text: claim.text, qualifierIds: [], proofContextIds: [] })))
+  const plan = createStoryPlan({
+    id: 'story-plan-safety', workspaceId: 'workspace-safety', projectId: 'project-safety', projectVersionId: 'project-version-safety', objective: 'sale', desiredActionRef,
+    treatmentPlanRef: { id: 'treatment-plan-safety', schemaVersion: 3, contentHash: '9'.repeat(64) }, targetDurationMs: { min: 6_000, max: 12_000 },
+    acts: [{ id: 'development', role: 'development', blockIds: fixtures.map((statement) => statement.storyBlockId) }], blocks, sourceRanges, sourceCandidates,
+    qualifiers: [], claims, proofContexts: [{ id: 'proof-context', claimIds: [], sourceCandidateIds: [`candidate-${fixtures[0].id}`], attribution: 'Source evidence' }],
+    createdBy: { type: 'api-client', id: 'client-safety' }, createdAt: '2026-08-13T12:00:00.000Z',
+  })
+  return plan
+})()
 
 test('T-FR-063 structures claims, qualifiers, negation, causality, deadlines and proof dependencies', () => {
   assert.match(context.contextHash, /^[a-f0-9]{64}$/)
@@ -88,15 +106,19 @@ test('T-FR-063 public request is exact and accepts only localized source-preserv
 })
 
 test('T-FR-063 Prisma adapter reads only the exact immutable StoryPlan snapshot and verifies canonical bytes', async () => {
-  const stored = { ...storyPlan, id: 'story-plan-safety', narrativeSafety: context }
+  const stored = { schemaVersion: 'narrative-safety-story-snapshot/v1', storyPlan: persistedStoryPlan, narrativeSafety: context }
   const contentJson = stableSerialize(stored)
+  const { id: _id, workspaceId: _workspaceId, projectId: _projectId, projectVersionId: _projectVersionId, storyHash: _storyHash, createdBy: _createdBy, createdAt: _createdAt, ...storyCore } = persistedStoryPlan
+  const storyRow = { id: persistedStoryPlan.id, workspaceId: persistedStoryPlan.workspaceId, projectId: persistedStoryPlan.projectId, projectVersionId: persistedStoryPlan.projectVersionId, schemaVersion: 3, treatmentPlanId: persistedStoryPlan.treatmentPlanRef.id, treatmentSchemaVersion: persistedStoryPlan.treatmentPlanRef.schemaVersion, treatmentContentHash: persistedStoryPlan.treatmentPlanRef.contentHash, storyJson: stableSerialize(storyCore), storyHash: persistedStoryPlan.storyHash, createdByClientId: persistedStoryPlan.createdBy.id, createdAt: new Date(persistedStoryPlan.createdAt) }
   let receivedWhere
-  const client = { v2ProjectVersion: { async findFirst(query) { receivedWhere = query.where; return { id: 'project-version-safety', baseHash: 'a'.repeat(64), storySnapshot: { kind: 'story', schemaVersion: 1, contentJson, contentHash: calculateCanonicalHash(stored) } } } } }
+  const client = { v2ProjectVersion: { async findFirst(query) { receivedWhere = query.where; return { id: 'project-version-safety', baseHash: 'a'.repeat(64), storySnapshot: { kind: 'story', schemaVersion: 1, contentJson, contentHash: calculateCanonicalHash(stored) } } } }, v2StoryPlan: { async findFirst() { return storyRow } } }
   const repository = new PrismaNarrativeSafetyRepository(client)
   const loaded = await repository.load({ workspaceId: 'workspace-safety', projectId: 'project-safety', projectVersionId: 'project-version-safety', storyPlanId: 'story-plan-safety' })
   assert.deepEqual(receivedWhere, { id: 'project-version-safety', projectId: 'project-safety', workspaceId: 'workspace-safety', storySnapshotId: { not: null } })
   assert.equal(loaded.context.contextHash, context.contextHash)
   assert.equal(loaded.storySnapshotHash, calculateCanonicalHash(stored))
-  const corrupt = new PrismaNarrativeSafetyRepository({ v2ProjectVersion: { async findFirst() { return { id: 'project-version-safety', baseHash: 'a'.repeat(64), storySnapshot: { kind: 'story', schemaVersion: 1, contentJson: contentJson.replace('pode', 'deve'), contentHash: calculateCanonicalHash(stored) } } } } })
+  const corrupt = new PrismaNarrativeSafetyRepository({ v2ProjectVersion: { async findFirst() { return { id: 'project-version-safety', baseHash: 'a'.repeat(64), storySnapshot: { kind: 'story', schemaVersion: 1, contentJson: contentJson.replace('pode', 'deve'), contentHash: calculateCanonicalHash(stored) } } } }, v2StoryPlan: { async findFirst() { return storyRow } } })
   await assert.rejects(() => corrupt.load({ workspaceId: 'workspace-safety', projectId: 'project-safety', projectVersionId: 'project-version-safety', storyPlanId: 'story-plan-safety' }), /integrity validation/)
+  const staleStory = new PrismaNarrativeSafetyRepository({ v2ProjectVersion: client.v2ProjectVersion, v2StoryPlan: { async findFirst() { return { ...storyRow, storyHash: '0'.repeat(64) } } } })
+  await assert.rejects(() => staleStory.load({ workspaceId: 'workspace-safety', projectId: 'project-safety', projectVersionId: 'project-version-safety', storyPlanId: 'story-plan-safety' }), /StoryPlan failed integrity/)
 })

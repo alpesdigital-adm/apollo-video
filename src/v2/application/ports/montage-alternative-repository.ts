@@ -20,6 +20,7 @@ export interface PersistedMontageAlternativeRun extends MontageAlternativeRun {
 }
 
 export interface MontageAlternativeRepository {
+  readStoryPlanReference(input: { workspaceId: string; projectId: string; storyPlanId: string }): Promise<Readonly<{ id: string; hash: string }> | null>
   findReplay(input: { workspaceId: string; projectId: string; actorClientId: string; idempotencyKey: string; actorContextHash: string }): Promise<Readonly<PersistedMontageAlternativeRun> | null>
   create(input: { run: Readonly<MontageAlternativeRun>; requestFingerprint: string; idempotencyKey: string; authenticationAudit: Readonly<ApiAccessAuditContext> }): Promise<Readonly<{ run: Readonly<PersistedMontageAlternativeRun>; replayed: boolean }>>
   read(input: { workspaceId: string; projectId: string; runId: string }): Promise<Readonly<PersistedMontageAlternativeRun> | null>

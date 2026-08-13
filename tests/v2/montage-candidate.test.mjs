@@ -74,6 +74,7 @@ const actor = authenticatedActor({ clientId: 'client-montage', credentialId: 'cr
 test('T-FR-062 application persists complete selection and replays before any scoring work', async () => {
   const records = new Map(); let createCount = 0
   const repository = {
+    async readStoryPlanReference(input) { return input.storyPlanId === storyPlanRef.id ? { id: storyPlanRef.id, hash: storyPlanRef.hash } : null },
     async findReplay(input) { return [...records.values()].find((record) => record.idempotencyKey === input.idempotencyKey && record.createdByClientId === input.actorClientId) ?? null },
     async create(input) { createCount += 1; const run = Object.freeze({ ...input.run, requestFingerprint: input.requestFingerprint, idempotencyKey: input.idempotencyKey }); records.set(run.id, run); return Object.freeze({ run, replayed: false }) },
     async read(input) { return [...records.values()].find((run) => run.id === input.runId && run.workspaceId === input.workspaceId && run.projectId === input.projectId) ?? null },
@@ -85,4 +86,5 @@ test('T-FR-062 application persists complete selection and replays before any sc
   assert.equal(created.run.selection.winnerId, 'candidate-b'); assert.equal(created.run.selection.candidates.length, 2)
   assert.equal((await readMontageAlternativeRunService({ repository })({ workspaceId: actor.workspaceId, projectId: 'project-montage', runId: created.run.id })).runHash, created.run.runHash)
   await assert.rejects(() => service({ ...request, seeds: [seed('different')] }), /different montage alternative request/)
+  await assert.rejects(() => service({ ...request, storyPlanRef: { ...storyPlanRef, hash: 'b'.repeat(64) }, seeds: [seed('stale', { storyPlanRef: { ...storyPlanRef, hash: 'b'.repeat(64) } })], idempotencyKey: 'montage-key-stale' }), /stale StoryPlan hash/)
 })

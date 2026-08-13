@@ -71,6 +71,9 @@ export function createMontageAlternativeRunService(dependencies: {
     assertDomain(IDEMPOTENCY_KEY.test(idempotencyKey), 'INVALID_ARGUMENT', 'Idempotency-Key must contain 8 to 128 visible ASCII characters')
     const seeds = Object.freeze(request.seeds.map((value) => createMontageCandidateSeed(value)))
     assertDomain(seeds.every(({ storyPlanRef }) => storyPlanRef.id === request.storyPlanRef.id && storyPlanRef.hash === request.storyPlanRef.hash), 'VERSION_CONFLICT', 'candidate seeds do not match the requested StoryPlan contract')
+    const persistedStoryPlan = await dependencies.repository.readStoryPlanReference({ workspaceId, projectId, storyPlanId: request.storyPlanRef.id })
+    if (!persistedStoryPlan) throw new DomainError('PROJECT_NOT_FOUND', 'Exact StoryPlan for montage alternatives was not found')
+    if (persistedStoryPlan.id !== request.storyPlanRef.id || persistedStoryPlan.hash !== request.storyPlanRef.hash) throw new DomainError('VERSION_CONFLICT', 'Montage alternatives reference a stale StoryPlan hash')
     const requestFingerprint = calculateCanonicalHash({ schemaVersion: 'create-montage-alternative-run-request/v1', workspaceId, projectId, policyVersion: request.policyVersion, storyPlanRef: request.storyPlanRef, seeds, actorClientId: authenticationAudit.clientId, actorContextHash: authenticationAudit.contextHash })
     const replay = await dependencies.repository.findReplay({ workspaceId, projectId, actorClientId: authenticationAudit.clientId, idempotencyKey, actorContextHash: authenticationAudit.contextHash })
     if (replay) {
