@@ -197,6 +197,7 @@ function dependencies(operations, overrides = {}) {
     renderer: {
       async render(input) {
         assert.deepEqual(input.lutPaths, {})
+        assert.match(input.audioTimelineHash, /^[a-f0-9]{64}$/)
         return {
           outputPath: join(tmpdir(), 'project-proxy-worker-output.mp4'),
           sha256: 'd'.repeat(64),

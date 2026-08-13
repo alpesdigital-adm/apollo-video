@@ -8,6 +8,7 @@ import type { EditorialProxyRenderer } from '../../application/ports/editorial-p
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
@@ -365,6 +366,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         (source.mediaType === 'video') !== Boolean(source.colorPipelineCompilation))
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
     for (const clip of input.clips) assertClipTimeline(clip)
+    const calculatedAudioTimelineHash = createEditorialAudioTimelineHash({ fps: input.fps, clips: input.clips })
+    if (input.audioTimelineHash !== undefined && input.audioTimelineHash !== calculatedAudioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial audio timeline hash does not match the rendered clips')
     const fullExpectedFrames = input.clips.reduce(
       (total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame,
       0,

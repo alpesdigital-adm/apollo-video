@@ -7,6 +7,7 @@ import type { ManualCropRegion } from './manual-editing.ts'
 import type { DirectorRunImpactV1 } from './director-run-impact.ts'
 import type { StrategicObjectiveId } from './strategic-objective.ts'
 import type { DesiredActionReference } from './desired-action.ts'
+import { createEditorialAudioTimelineHash } from './production-modes.ts'
 import type { QualityReport as StrategicQualityReport } from './strategic-rubric.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import {
@@ -178,6 +179,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
   storyPlanId: string
   treatmentPlanId: string
   directorRunId: string
+  audioTimelineHash: string
   desiredActionRef: Readonly<DesiredActionReference>
   overlayTracks: readonly Readonly<DirectedCtaOverlay>[]
   subtitleTracks: readonly Readonly<{
@@ -346,6 +348,7 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
   assertDomain(plan.effectTracks.length === 0, 'INVALID_RENDER_INPUT', 'Unjustified camera effects are forbidden')
   const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
   assertDomain(clips.length > 0, 'INVALID_RENDER_INPUT', 'Director EditPlan needs source clips')
+  assertDomain(plan.audioTimelineHash === createEditorialAudioTimelineHash({ fps: plan.fps, clips }), 'INVALID_RENDER_INPUT', 'Director audio timeline hash is inconsistent')
   let cursor = 0
   for (const clip of clips) {
     assertDomain(clip.timelineInFrame === cursor && clip.timelineOutFrame > clip.timelineInFrame, 'INVALID_RENDER_INPUT', 'Director timeline is not continuous')

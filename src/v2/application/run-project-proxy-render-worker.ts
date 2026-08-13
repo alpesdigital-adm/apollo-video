@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
+import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -149,6 +150,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       )
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
+      const audioTimelineHash = createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
+      if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before proxy render')
       await enter('rendering')
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
         dependencies.sources.materialize({
@@ -175,7 +178,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         lutPaths: materializedLut.lutPaths,
-        clips, fps: source.editPlan.fps, format: source.format, subtitleCues,
+        clips, audioTimelineHash, fps: source.editPlan.fps, format: source.format, subtitleCues,
         ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions, ...(composition ? { composition } : {}),
         ...(source.rangeReuse ? {
@@ -206,7 +209,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,

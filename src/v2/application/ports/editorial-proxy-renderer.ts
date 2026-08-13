@@ -3,9 +3,9 @@ import type { DirectedCtaOverlay, DirectedSubtitleCue, DirectedTransition } from
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.5.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.5.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.2.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.6.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.6.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.3.0'
 
 export interface EditorialProxyRenderResult {
   outputPath: string
@@ -27,6 +27,9 @@ export interface EditorialProxyRenderer {
     }>[]
     lutPaths: Readonly<Record<string, string>>
     clips: readonly Readonly<EditorialCutClip>[]
+    /** Canonical frame-first audio identity. Workers must provide it; direct
+     * adapter diagnostics may omit it and let the adapter derive the same hash. */
+    audioTimelineHash?: string
     fps: number
     format: string
     outputSpec?: { width: number; height: number; fps: number }
