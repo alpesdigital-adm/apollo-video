@@ -4,6 +4,10 @@ import test from 'node:test'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.director-tools.execute': {
+    mode: 'read-only-deterministic',
+    evidence: 'F1.024 performs no project, version, artifact, database or storage mutation; it returns bounded search/evaluation/proposal results only after an atomic fail-closed preflight',
+  },
   'apollo.api-access.workspace.change': {
     mode: 'durable-covered',
     evidence: 'F0.036 serializable workspace revision CAS, actor-bound idempotency, immutable access-command audit and atomic cancellation of eligible public operations',
@@ -361,6 +365,6 @@ test('the concurrency audit has no unclassified durable gap', () => {
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
-    2,
+    3,
   )
 })

@@ -21,6 +21,61 @@ export interface PublicSchemaDefinition {
 const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const directorToolNameSchema = {
+  enum: ['search-media', 'create-story-plan', 'propose-asset', 'evaluate-candidate', 'propose-patch'],
+} as const
+const directorToolRightsSchema = {
+  type: 'array', maxItems: 100, uniqueItems: true,
+  items: {
+    type: 'object', additionalProperties: false, required: ['assetId', 'snapshotHash'],
+    properties: { assetId: idSchema, snapshotHash: sha256Schema },
+  },
+} as const
+const directorToolArgumentSchemas = {
+  'search-media': {
+    type: 'object', additionalProperties: false, required: ['query'],
+    properties: { query: { type: 'string', minLength: 1, maxLength: 500 }, limit: { type: 'integer', minimum: 1, maximum: 50 } },
+  },
+  'create-story-plan': {
+    type: 'object', additionalProperties: false, required: ['plan', 'assetIds'],
+    properties: { plan: { type: 'object' }, assetIds: { type: 'array', maxItems: 100, uniqueItems: true, items: idSchema } },
+  },
+  'propose-asset': {
+    type: 'object', additionalProperties: false, required: ['assetId', 'planNodeId', 'purpose'],
+    properties: { assetId: idSchema, planNodeId: idSchema, purpose: { type: 'string', minLength: 1, maxLength: 500 } },
+  },
+  'evaluate-candidate': {
+    type: 'object', additionalProperties: false, required: ['candidates', 'rubric', 'minimumConfidence'],
+    properties: {
+      candidates: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object' } },
+      rubric: { type: 'object' }, minimumConfidence: { type: 'number', minimum: 0, maximum: 1 },
+    },
+  },
+  'propose-patch': {
+    type: 'object', additionalProperties: false, required: ['operations', 'assetIds', 'rationale'],
+    properties: {
+      operations: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' } },
+      assetIds: { type: 'array', maxItems: 100, uniqueItems: true, items: idSchema },
+      rationale: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+  },
+} as const
+const directorToolCallSchema = {
+  oneOf: Object.entries(directorToolArgumentSchemas).map(([name, argumentsSchema]) => ({
+    type: 'object', additionalProperties: false,
+    required: ['id', 'name', 'arguments', 'scope', 'baseVersionId', 'estimatedCost', 'rights'],
+    properties: {
+      id: idSchema, name: { const: name }, arguments: argumentsSchema,
+      scope: {
+        type: 'object', additionalProperties: false, required: ['workspaceId', 'projectId'],
+        properties: { workspaceId: idSchema, projectId: idSchema },
+      },
+      baseVersionId: idSchema,
+      estimatedCost: { type: 'number', minimum: 0, maximum: 5 },
+      rights: directorToolRightsSchema,
+    },
+  })),
+}
 const strategicObjectiveSchema = {
   enum: [
     'discovery', 'awareness', 'warming', 'lead-generation',
@@ -15509,6 +15564,62 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         id: idSchema, clientId: idSchema, action: { type: 'string', maxLength: 80 }, status: { type: 'string', maxLength: 32 }, target: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { type: 'string' }, id: idSchema } },
         usage: { type: 'object', additionalProperties: false, required: ['unit', 'quantity'], properties: { unit: { const: 'operation' }, quantity: { const: 1 } } }, createdAt: dateTimeSchema, updatedAt: dateTimeSchema,
       } } }, nextCursor: { type: 'string', minLength: 8, maxLength: 1024 },
+    },
+  })),
+  defineSchema('director-tool-catalog', 1, 'Fixed Director tool catalog', successSchema({
+    type: 'object', additionalProperties: false, required: ['schemaVersion', 'tools', 'execution'],
+    properties: {
+      schemaVersion: { const: 'director-tool-catalog/v1' },
+      tools: {
+        type: 'array', minItems: 5, maxItems: 5,
+        items: {
+          type: 'object', additionalProperties: false,
+          required: ['name', 'costUnits', 'description', 'inputSchema'],
+          properties: {
+            name: directorToolNameSchema,
+            costUnits: { enum: [0.25, 0.5, 0.75, 1] },
+            description: { type: 'string', minLength: 1, maxLength: 1000 },
+            inputSchema: { type: 'object' },
+          },
+        },
+      },
+      execution: {
+        type: 'object', additionalProperties: false,
+        required: ['method', 'path', 'maxCalls', 'validation', 'semantics'],
+        properties: {
+          method: { const: 'POST' }, path: { const: '/v1/director-tools' }, maxCalls: { const: 20 },
+          validation: {
+            type: 'array', minItems: 5, maxItems: 5, uniqueItems: true,
+            items: { enum: ['arguments', 'scope', 'rights', 'budget', 'base-version'] },
+          },
+          semantics: { const: 'preflight-entire-batch-before-first-handler' },
+        },
+      },
+    },
+  })),
+  defineSchema('director-tool-execution-request', 1, 'Director tool execution request', {
+    type: 'object', additionalProperties: false, required: ['projectId', 'calls'],
+    properties: {
+      projectId: idSchema,
+      calls: { type: 'array', minItems: 1, maxItems: 20, items: directorToolCallSchema },
+    },
+  }),
+  defineSchema('director-tool-execution', 1, 'Accepted Director tool execution', successSchema({
+    type: 'object', additionalProperties: false, required: ['schemaVersion', 'results', 'budgetRemaining'],
+    properties: {
+      schemaVersion: { const: 'director-tool-execution/v1' },
+      results: {
+        type: 'array', minItems: 1, maxItems: 20,
+        items: {
+          type: 'object', additionalProperties: false,
+          required: ['callId', 'tool', 'status', 'chargedCost', 'result'],
+          properties: {
+            callId: idSchema, tool: directorToolNameSchema, status: { const: 'accepted' },
+            chargedCost: { type: 'number', minimum: 0, maximum: 5 }, result: {},
+          },
+        },
+      },
+      budgetRemaining: { type: 'number', minimum: 0, maximum: 5 },
     },
   })),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',

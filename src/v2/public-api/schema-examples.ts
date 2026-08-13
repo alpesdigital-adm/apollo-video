@@ -6,6 +6,7 @@ import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
   MVP_CORE_CRITERION_CHECKS,
 } from '../domain/mvp-core-gate.ts'
+import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -7418,6 +7419,36 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           asOf: createdAt, expiredRotations: 1, destroyedRotationEnvelopes: 1,
           destroyedSigningSecretPayloads: 2, hasMore: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-tool-catalog/v1': [
+      { data: createDirectorToolCatalog(), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/director-tool-execution-request/v1': [
+      {
+        projectId,
+        calls: [{
+          id: 'director-tool-call-example-1',
+          name: 'search-media',
+          arguments: { query: 'product proof', limit: 10 },
+          scope: { workspaceId, projectId },
+          baseVersionId: 'project-version-example-1',
+          estimatedCost: 0.5,
+          rights: [],
+        }],
+      },
+    ],
+    'apollo://schemas/director-tool-execution/v1': [
+      {
+        data: {
+          schemaVersion: 'director-tool-execution/v1',
+          results: [{
+            callId: 'director-tool-call-example-1', tool: 'search-media', status: 'accepted', chargedCost: 0.5,
+            result: { kind: 'search-results', value: { results: [] } },
+          }],
+          budgetRemaining: 4.5,
         },
         meta: { apiVersion: 'v1' },
       },
