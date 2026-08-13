@@ -6,6 +6,10 @@ import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
   MVP_CORE_CRITERION_CHECKS,
 } from '../domain/mvp-core-gate.ts'
+import {
+  EDITORIAL_TIMELINE_GOLDENS,
+  evaluateEditorialGrammar,
+} from '../domain/editorial-grammar.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
