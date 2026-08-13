@@ -8,6 +8,7 @@ import type { EditorialProxyRenderer } from '../../application/ports/editorial-p
 import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy-render-repository.ts'
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -18,13 +19,12 @@ const require = createRequire(import.meta.url)
 const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
-const FORMAT_DIMENSIONS: Readonly<Record<string, readonly [number, number]>> = Object.freeze({
-  '9:16': [540, 960] as const,
-  '16:9': [960, 540] as const,
-  '4:5': [640, 800] as const,
-  '1:1': [720, 720] as const,
-  '21:9': [1050, 450] as const,
-})
+const FORMAT_DIMENSIONS: Readonly<Record<string, readonly [number, number]>> = Object.freeze(
+  Object.fromEntries(Object.entries(OUTPUT_FORMAT_REGISTRY.presets).map(([ratio, preset]) => [
+    ratio,
+    Object.freeze([preset.exportDefaults.proxy.width, preset.exportDefaults.proxy.height]) as readonly [number, number],
+  ])),
+)
 
 function assertContained(root: string, candidate: string): void {
   const rel = relative(root, candidate)
@@ -366,8 +366,6 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         (source.mediaType === 'video') !== Boolean(source.colorPipelineCompilation))
     ) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial proxy render input is invalid')
     for (const clip of input.clips) assertClipTimeline(clip)
-    const calculatedAudioTimelineHash = createEditorialAudioTimelineHash({ fps: input.fps, clips: input.clips })
-    if (input.audioTimelineHash !== undefined && input.audioTimelineHash !== calculatedAudioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Editorial audio timeline hash does not match the rendered clips')
     const fullExpectedFrames = input.clips.reduce(
       (total, clip) => total + clip.timelineOutFrame - clip.timelineInFrame,
       0,

@@ -77,6 +77,9 @@ async function startPrivateAssetServer(inputProps) {
 
   const markedProps = structuredClone(inputProps)
   markedProps.videoSrc = await markLocation(markedProps.videoSrc)
+  if ('narrationAudioSrc' in markedProps) {
+    markedProps.narrationAudioSrc = await markLocation(markedProps.narrationAudioSrc)
+  }
   if ('fontSrc' in markedProps) markedProps.fontSrc = await markLocation(markedProps.fontSrc)
   for (const scene of markedProps.scenes ?? []) {
     if (!scene?.props || typeof scene.props !== 'object') continue
@@ -140,6 +143,9 @@ async function startPrivateAssetServer(inputProps) {
     return value
   }
   markedProps.videoSrc = unmarkLocation(markedProps.videoSrc)
+  if ('narrationAudioSrc' in markedProps) {
+    markedProps.narrationAudioSrc = unmarkLocation(markedProps.narrationAudioSrc)
+  }
   if ('fontSrc' in markedProps) markedProps.fontSrc = unmarkLocation(markedProps.fontSrc)
   for (const scene of markedProps.scenes ?? []) {
     if (!scene?.props || typeof scene.props !== 'object') continue

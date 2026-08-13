@@ -57,6 +57,7 @@ export interface ApolloVideoRenderPropsV1 extends Record<string, unknown> {
   scenes: readonly CompiledScene[]
   subtitles: readonly CompiledSubtitle[]
   videoSrc: string
+  narrationAudioSrc?: string
   format: '9:16' | '16:9'
   palette: Readonly<{
     primary: string
@@ -394,6 +395,7 @@ export function compileApolloVideoRenderProps(
     props,
     [
       'primaryVideoAssetId',
+      'primaryAudioAssetId',
       'scenes',
       'subtitles',
       'palette',
@@ -423,11 +425,16 @@ export function compileApolloVideoRenderProps(
     'props.subtitles cannot exceed 10000 items',
   )
   const assets = new Map(input.assets.map((asset) => [asset.id, asset]))
-  const videoSrc = resolveAsset(
-    assets,
-    props.primaryVideoAssetId,
-    ['video'],
-    'props.primaryVideoAssetId',
+  assertDomain(
+    (props.primaryVideoAssetId === undefined) !== (props.primaryAudioAssetId === undefined),
+    'INVALID_RENDER_INPUT',
+    'props must declare exactly one primary video or voiceover audio asset',
+  )
+  const videoSrc = props.primaryVideoAssetId === undefined ? '' : resolveAsset(
+    assets, props.primaryVideoAssetId, ['video'], 'props.primaryVideoAssetId',
+  ).uri
+  const narrationAudioSrc = props.primaryAudioAssetId === undefined ? undefined : resolveAsset(
+    assets, props.primaryAudioAssetId, ['audio'], 'props.primaryAudioAssetId',
   ).uri
   const scenes = Object.freeze(
     props.scenes.map((scene, index) => compileScene(scene, index, input, assets)),
@@ -439,6 +446,7 @@ export function compileApolloVideoRenderProps(
     scenes,
     subtitles,
     videoSrc,
+    ...(narrationAudioSrc ? { narrationAudioSrc } : {}),
     format: input.output.aspectRatio === '9:16' ||
       input.output.aspectRatio === '4:5'
       ? '9:16'

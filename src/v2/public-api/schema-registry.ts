@@ -202,6 +202,43 @@ const outputSpecSchema = {
     deliveryProfileId: idSchema,
   },
 } as const
+const outputFormatExportSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['codec', 'audioCodec', 'container', 'pixelFormat', 'videoBitrateKbps', 'audioBitrateKbps'],
+  properties: {
+    width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 },
+    codec: { const: 'h264' }, audioCodec: { const: 'aac' }, container: { const: 'mp4' }, pixelFormat: { const: 'yuv420p' },
+    videoBitrateKbps: { type: 'integer', minimum: 1 }, audioBitrateKbps: { type: 'integer', minimum: 1 },
+  },
+} as const
+const outputFormatPresetSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'version', 'spec', 'subtitleBounds', 'exportDefaults', 'compatiblePlatforms', 'presetHash'],
+  properties: {
+    schemaVersion: { const: 'output-format-preset/v1' }, version: { const: 1 }, spec: outputSpecSchema,
+    subtitleBounds: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: {
+      x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+      width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+    } },
+    exportDefaults: { type: 'object', additionalProperties: false, required: ['proxy', 'final'], properties: {
+      proxy: { ...outputFormatExportSchema, required: [...outputFormatExportSchema.required, 'width', 'height'] }, final: outputFormatExportSchema,
+    } },
+    compatiblePlatforms: { type: 'array', minItems: 1, maxItems: 7, uniqueItems: true, items: { enum: ['generic', 'instagram-reels', 'instagram-feed', 'youtube', 'youtube-shorts', 'tiktok', 'linkedin'] } },
+    presetHash: sha256Schema,
+  },
+} as const
+const outputFormatRegistrySchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'registryVersion', 'presets', 'registryHash'],
+  properties: {
+    schemaVersion: { const: 'output-format-registry/v1' }, registryVersion: { const: 1 },
+    presets: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: {
+      '9:16': outputFormatPresetSchema, '16:9': outputFormatPresetSchema, '4:5': outputFormatPresetSchema,
+      '1:1': outputFormatPresetSchema, '21:9': outputFormatPresetSchema,
+    } },
+    registryHash: sha256Schema,
+  },
+} as const
 const projectBriefSchemaV9 = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'objective', 'desiredAction', 'outputSpec', 'productionBrief', 'createdAt'],
@@ -12811,6 +12848,8 @@ const directorDecisionEntrySchema = {
 } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),
+  defineSchema('output-format-registry', 1, 'Content-addressed required output format registry', outputFormatRegistrySchema),
   defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
     policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
     seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: { id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } }, blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } }, assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } }, patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } }, maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } } } } },

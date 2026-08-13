@@ -6,9 +6,9 @@ import {
 } from '../domain/desired-action.ts'
 import {
   createOutputSpec,
-  OUTPUT_PRESETS,
   type OutputAspectRatio,
 } from '../domain/output-spec.ts'
+import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import { createProject, normalizeProjectName } from '../domain/project.ts'
 import { createProjectSnapshot } from '../domain/project-snapshot.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
@@ -73,7 +73,7 @@ export function createProjectService(dependencies: CreateProjectDependencies) {
     const name = normalizeProjectName(request.name)
     const objective = resolveStrategicObjective(request.objective)
     const locale = request.locale?.trim() || 'pt-BR'
-    const outputPreset = OUTPUT_PRESETS[request.format]
+    const outputPreset = readOutputFormatPreset(request.format).spec
     assertDomain(Boolean(outputPreset), 'INVALID_OUTPUT_SPEC', 'Unsupported output format')
     const outputSpec = createOutputSpec({
       ...outputPreset,

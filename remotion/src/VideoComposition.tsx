@@ -104,6 +104,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   scenes,
   subtitles,
   videoSrc,
+  narrationAudioSrc,
   format,
   palette,
   stylePreset,
@@ -477,6 +478,7 @@ export const VideoComposition: React.FC<CompositionProps> = ({
           />
         )
       )}
+      {narrationAudioSrc && <Audio src={narrationAudioSrc} />}
 
       {/* COLD OPEN teaser — subtle: constant 1.04 punch-in, normal grade, NO B&W.
           Covers [0, len); the normal background below is a Sequence from={coLen}. */}

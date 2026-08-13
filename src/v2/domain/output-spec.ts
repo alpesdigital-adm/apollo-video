@@ -17,6 +17,12 @@ export interface NormalizedInsets {
   bottom: number
   left: number
 }
+export interface NormalizedBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 export interface OutputSpec {
   schemaVersion: 1
   id: string
@@ -39,13 +45,6 @@ const RATIO_VALUES: Readonly<Record<OutputAspectRatio, number>> = Object.freeze(
   '21:9': 21 / 9,
 })
 
-const DEFAULT_SAFE_AREA: Readonly<NormalizedInsets> = Object.freeze({
-  top: 0.05,
-  right: 0.05,
-  bottom: 0.05,
-  left: 0.05,
-})
-
 export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputSpecInput>>> =
   Object.freeze({
     '9:16': Object.freeze({
@@ -55,7 +54,7 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
       width: 1080,
       height: 1920,
       fps: 30,
-      safeArea: DEFAULT_SAFE_AREA,
+      safeArea: Object.freeze({ top: 0.08, right: 0.06, bottom: 0.06, left: 0.06 }),
     }),
     '16:9': Object.freeze({
       id: 'preset-16x9',
@@ -64,7 +63,7 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
       width: 1920,
       height: 1080,
       fps: 30,
-      safeArea: DEFAULT_SAFE_AREA,
+      safeArea: Object.freeze({ top: 0.055, right: 0.05, bottom: 0.06, left: 0.05 }),
     }),
     '4:5': Object.freeze({
       id: 'preset-4x5',
@@ -73,7 +72,7 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
       width: 1080,
       height: 1350,
       fps: 30,
-      safeArea: DEFAULT_SAFE_AREA,
+      safeArea: Object.freeze({ top: 0.07, right: 0.06, bottom: 0.06, left: 0.06 }),
     }),
     '1:1': Object.freeze({
       id: 'preset-1x1',
@@ -82,7 +81,7 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
       width: 1080,
       height: 1080,
       fps: 30,
-      safeArea: DEFAULT_SAFE_AREA,
+      safeArea: Object.freeze({ top: 0.07, right: 0.07, bottom: 0.06, left: 0.07 }),
     }),
     '21:9': Object.freeze({
       id: 'preset-21x9',
@@ -91,7 +90,7 @@ export const OUTPUT_PRESETS: Readonly<Record<OutputAspectRatio, Readonly<OutputS
       width: 2520,
       height: 1080,
       fps: 30,
-      safeArea: DEFAULT_SAFE_AREA,
+      safeArea: Object.freeze({ top: 0.06, right: 0.08, bottom: 0.06, left: 0.08 }),
     }),
   })
 

@@ -137,18 +137,6 @@ export function createEditorialAudioTimelineHash(input: { fps: number; clips: re
   return calculateCanonicalHash({ schemaVersion: 'editorial-audio-timeline/v1', fps: Number(input.fps.toFixed(6)), segments })
 }
 
-export function planVisualMontage(input: { durationMs: number; sourceAudioId: string; beatBoundariesMs: readonly number[]; availableVisualIds: readonly string[] }): Readonly<ProductionEditPlan> {
-  const sourceDurationMs = duration(input.durationMs, 'durationMs')
-  const sourceAudioId = identifier(input.sourceAudioId, 'sourceAudioId')
-  if (!input.availableVisualIds.length) throw new DomainError('INVALID_ARGUMENT', 'Visual montage requires visual candidates')
-  const boundaries = [0, ...input.beatBoundariesMs.filter((value) => Number.isSafeInteger(value) && value > 0 && value < sourceDurationMs), sourceDurationMs].toSorted((left, right) => left - right)
-  if (new Set(boundaries).size !== boundaries.length) throw new DomainError('INVALID_ARGUMENT', 'Visual montage beat boundaries must be unique')
-  const canonicalBeats = boundaries.slice(0, -1).map((startMs, index) => Object.freeze({ id: `beat-${index + 1}`, startMs, endMs: boundaries[index + 1]!, role: index === 0 ? 'hook' as const : index === boundaries.length - 2 ? 'cta' as const : 'development' as const }))
-  const visuals = canonicalBeats.map((beat, index) => Object.freeze({ startMs: beat.startMs, endMs: beat.endMs, beatId: beat.id, kind: (index % 3 === 0 ? 'image' : index % 3 === 1 ? 'b-roll' : 'card') as 'image' | 'b-roll' | 'card', assetBriefId: `brief-${index}-${identifier(input.availableVisualIds[index % input.availableVisualIds.length]!, 'availableVisualId')}` }))
-  const audioTimelineHash = calculateCanonicalHash({ schemaVersion: 'visual-montage-audio-timeline/v1', sourceAudioId, durationMs: sourceDurationMs })
-  return finalize({ mode: 'visual-montage', sourceDurationMs, durationMs: sourceDurationMs, sourceAudioId, cuts: Object.freeze([]), beats: Object.freeze(canonicalBeats), visuals: Object.freeze(visuals), subtitles: Object.freeze(canonicalBeats.map((beat) => Object.freeze({ startMs: beat.startMs, endMs: beat.endMs, beatId: beat.id }))), reframe: false, cameraMotions: Object.freeze(canonicalBeats.filter((_, index) => index % 2 === 0).map((beat) => Object.freeze({ ...beat, beatId: beat.id, kind: 'face-safe-reframe' as const }))), patternBreaks: Object.freeze(canonicalBeats.slice(1).map((beat) => beat.startMs)), render: Object.freeze({ proxy: Object.freeze({ audioTimelineHash }), final: Object.freeze({ audioTimelineHash }), synchronized: true as const }) })
-}
-
 export function validateProductionCoverage(plan: ProductionEditPlan) {
   const empty = plan.visuals.some((visual) => visual.endMs <= visual.startMs) || plan.visuals[0]?.startMs !== 0 || plan.visuals.at(-1)?.endMs !== plan.durationMs || plan.visuals.some((visual, index) => index > 0 && visual.startMs !== plan.visuals[index - 1]!.endMs)
   const repeated = plan.visuals.some((visual, index) => index >= 2 && visual.assetBriefId && visual.assetBriefId === plan.visuals[index - 1]!.assetBriefId)
