@@ -10,6 +10,7 @@ import {
   EDITORIAL_TIMELINE_GOLDENS,
   evaluateEditorialGrammar,
 } from '../domain/editorial-grammar.ts'
+import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -6039,6 +6040,15 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/director-decision-list/v1': [{ data: { decisionLog: {
+      schemaVersion: 'director-decision-list/v1', runId: 'director-run-example-1', commandId: 'edit-command-example-1', resultVersionId: 'project-version-example-2', logHash: '8'.repeat(64),
+      decisions: [{ id: 'decision-narrative-linear', planNodeIds: ['story-block-1'], decision: 'preserve-linear-narrative', summary: 'Preserve the evidenced source order.', confidence: 0.94, score: 0.94, cost: { estimated: 0, actual: 0, currency: 'credits', source: 'deterministic-local' }, actor: { type: 'api-client', id: 'client-example-1' }, createdAt, decisionHash: '9'.repeat(64) }],
+    } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/director-decision-detail/v1': [{ data: { decision: {
+      schemaVersion: 'director-decision-detail/v1', logHash: '8'.repeat(64), decision: {
+        schemaVersion: 'director-decision/v1', id: 'decision-narrative-linear', runId: 'director-run-example-1', planNodeIds: ['story-block-1'], commandId: 'edit-command-example-1', resultTarget: { projectVersionId: 'project-version-example-2', artifactRole: 'final-output' }, actor: { type: 'api-client', id: 'client-example-1' }, decision: 'preserve-linear-narrative', reason: 'The retained source already develops one continuous argument.', candidates: [{ id: 'preserve-linear-narrative', outcome: 'selected', reason: 'Best evidenced ordering.' }, { id: 'cold-open-reference', outcome: 'rejected', reason: 'Not selected by the versioned Director policy.' }], evidence: [{ ref: 'transcript-example-1', rangeMs: [0, 4000] }], confidence: 0.94, score: 0.94, cost: { estimated: 0, actual: 0, currency: 'credits', source: 'deterministic-local' }, summary: 'Preserve the evidenced source order.', createdAt, decisionHash: '9'.repeat(64),
+      }, lineage: { status: 'ready', trace: { schemaVersion: 'director-decision-lineage/v1', decisionId: 'decision-narrative-linear', runId: 'director-run-example-1', commandId: 'edit-command-example-1', artifactId, projectVersionId: 'project-version-example-2', fps: 30, frameRanges: [{ fromFrame: 0, toFrame: 120, rangeMs: [0, 4000] }] } },
+    } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/director-quality-report-read/v1': [
       {
         data: {
@@ -7481,6 +7491,50 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: {
           asOf: createdAt, expiredRotations: 1, destroyedRotationEnvelopes: 1,
           destroyedSigningSecretPayloads: 2, hasMore: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-tool-catalog/v1': [
+      { data: createDirectorToolCatalog(), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/director-tool-execution-request/v1': [
+      {
+        projectId,
+        calls: [{
+          id: 'director-tool-call-example-1',
+          name: 'search-media',
+          arguments: { query: 'product proof', limit: 10 },
+          scope: { workspaceId, projectId },
+          baseVersionId: 'project-version-example-1',
+          estimatedCost: 0.5,
+          rights: [],
+        }],
+      },
+    ],
+    'apollo://schemas/director-tool-execution-request/v2': [
+      {
+        projectId,
+        calls: [{
+          id: 'director-tool-call-example-2',
+          name: 'search-media',
+          arguments: { query: 'product proof', limit: 10 },
+          scope: { workspaceId, projectId },
+          baseVersionId: 'project-version-example-1',
+          estimatedCost: 0.5,
+          rights: [],
+        }],
+      },
+    ],
+    'apollo://schemas/director-tool-execution/v1': [
+      {
+        data: {
+          schemaVersion: 'director-tool-execution/v1',
+          results: [{
+            callId: 'director-tool-call-example-1', tool: 'search-media', status: 'accepted', chargedCost: 0.5,
+            result: { kind: 'search-results', value: { results: [] } },
+          }],
+          budgetRemaining: 4.5,
         },
         meta: { apiVersion: 'v1' },
       },

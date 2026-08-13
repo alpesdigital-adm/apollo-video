@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 228,
-    "operableCapabilities": 228,
-    "publicContractCapabilities": 228,
+    "registeredCapabilities": 232,
+    "operableCapabilities": 232,
+    "publicContractCapabilities": 232,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1999,6 +1999,28 @@
       ]
     },
     {
+      "capabilityId": "apollo.director-tools.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/director-tools",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-tool-catalog/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.director-tools.execute",
+      "exposure": "public",
+      "endpoint": "POST /v1/director-tools",
+      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v2",
+      "outputSchemaRef": "apollo://schemas/director-tool-execution/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.events.catalog.read",
       "exposure": "public",
       "endpoint": "GET /v1/events/catalog",
@@ -3797,6 +3819,28 @@
       "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/quality-report",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/director-quality-report-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-runs.decisions.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/decisions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-decision-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-runs.decisions.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/decisions/{decisionId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-decision-detail/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
