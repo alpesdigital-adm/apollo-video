@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 223,
-    "operableCapabilities": 223,
-    "publicContractCapabilities": 223,
+    "registeredCapabilities": 228,
+    "operableCapabilities": 228,
+    "publicContractCapabilities": 228,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2945,6 +2945,28 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.story-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/story-plans",
+      "inputSchemaRef": "apollo://schemas/create-story-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/story-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.story-plans.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/story-plans/{storyPlanId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/story-plan-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.contiguous-extractions.read",
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/contiguous-extractions/{extractionId}",
@@ -3049,6 +3071,17 @@
       "endpoint": "POST /v1/projects/{projectId}/validated-segments/{validatedSegmentId}/reuse-preflight",
       "inputSchemaRef": "apollo://schemas/preflight-validated-segment-reuse-request/v1",
       "outputSchemaRef": "apollo://schemas/validated-segment-reuse-preflight/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.narrative-safety.preflight",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/narrative-safety/preflight",
+      "inputSchemaRef": "apollo://schemas/narrative-safety-preflight-request/v1",
+      "outputSchemaRef": "apollo://schemas/narrative-safety-preflight/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3775,6 +3808,28 @@
       "endpoint": "POST /v1/editorial-grammar/evaluations",
       "inputSchemaRef": "apollo://schemas/editorial-grammar-evaluation-request/v1",
       "outputSchemaRef": "apollo://schemas/editorial-grammar-evaluation/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.montage-alternatives.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/montage-alternatives",
+      "inputSchemaRef": "apollo://schemas/create-montage-alternatives-request/v1",
+      "outputSchemaRef": "apollo://schemas/montage-alternatives-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.montage-alternatives.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/montage-alternatives/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/montage-alternatives-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

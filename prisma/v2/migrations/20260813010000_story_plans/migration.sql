@@ -30,4 +30,5 @@ CREATE TABLE "story_plans" (
 );
 CREATE UNIQUE INDEX "story_plans_actor_idempotency_key" ON "story_plans"("workspaceId", "projectId", "createdByClientId", "idempotencyKey");
 CREATE UNIQUE INDEX "story_plans_id_workspace_project_key" ON "story_plans"("id", "workspaceId", "projectId");
+CREATE UNIQUE INDEX "story_plans_id_workspace_project_hash_key" ON "story_plans"("id", "workspaceId", "projectId", "storyHash");
 CREATE INDEX "story_plans_project_version_created_idx" ON "story_plans"("workspaceId", "projectId", "projectVersionId", "createdAt" DESC);

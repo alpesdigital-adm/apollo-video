@@ -4113,6 +4113,7 @@ model V2MontageAlternativeRun {
   workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   createdBy V2ApiClient @relation("MontageAlternativeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  storyPlan V2StoryPlan @relation(fields: [storyPlanId, workspaceId, projectId, storyPlanHash], references: [id, workspaceId, projectId, storyHash], onDelete: Restrict, map: "montage_alternative_runs_storyPlan_ref_fkey")
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -6481,8 +6482,11 @@ model V2StoryPlan {
   workspaceRole           String?  @db.VarChar(32)
   createdAt             DateTime @db.Timestamptz(3)
 
+  montageAlternativeRuns V2MontageAlternativeRun[]
+
   @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "story_plans_actor_idempotency_key")
   @@unique([id, workspaceId, projectId], map: "story_plans_id_workspace_project_key")
+  @@unique([id, workspaceId, projectId, storyHash], map: "story_plans_id_workspace_project_hash_key")
   @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)], map: "story_plans_project_version_created_idx")
   @@map("story_plans")
 }
