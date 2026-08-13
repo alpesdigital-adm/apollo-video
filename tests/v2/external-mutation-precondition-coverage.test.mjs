@@ -239,6 +239,12 @@ const coverage = Object.freeze({
   'apollo.projects.director-runs.enqueue': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before allocating a durable fenced Director operation',
   },
+  'apollo.projects.editorial-beats.derive': {
+    mode: 'idempotent-create', evidence: 'request fingerprint and idempotency bind expectedTranscriptHash, immutable project version and the complete word-signal derivation input',
+  },
+  'apollo.projects.editorial-beats.adjust': {
+    mode: 'idempotent-create', evidence: 'request binds an immutable beat set and exact source beat/word IDs to a completed matching DirectorRun; persistence rechecks source and alignment hashes',
+  },
   'apollo.projects.manual-edits.apply': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId, baseHash and expectedRevision before the serializable manual-edit transaction',
   },
@@ -542,7 +548,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 10,
-    'idempotent-create': 48,
+    'idempotent-create': 50,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,

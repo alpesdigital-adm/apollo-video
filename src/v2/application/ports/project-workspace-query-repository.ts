@@ -33,6 +33,10 @@ export interface ProjectWorkspaceRecord {
     baseVersionId: string; resultVersionId: string; treatmentSnapshotId: string;
     storySnapshotId: string; qualitySnapshotId: string; qualityStatus: string;
     qualityScore: number; decisionCount: number; assumptionCount: number;
+    uncertainties: readonly {
+      id: string; label: string; type: string; band: 'review' | 'block'; value: number;
+      reasonCodes: readonly string[]; calibrationVersion: string; evidenceCount: number
+    }[];
     subtitleCueCount: number; transitionCount: number; automaticZoom: boolean;
     createdAt: string
   }[]

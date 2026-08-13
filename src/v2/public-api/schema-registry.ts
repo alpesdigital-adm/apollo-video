@@ -12641,6 +12641,16 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'createdAt', 'result'],
     properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
   })),
+  defineSchema('editorial-beat-derive-request', 1, 'Semantic editorial beat derivation request', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'transcriptId', 'expectedTranscriptHash', 'signals'],
+    properties: { projectVersionId: idSchema, transcriptId: idSchema, expectedTranscriptHash: sha256Schema, pauseBoundaryMs: { type: 'integer', minimum: 100, maximum: 5000 }, maxDurationMs: { type: 'integer', minimum: 1000, maximum: 30000 }, signals: { type: 'array', minItems: 1, maxItems: 500000, items: { type: 'object', additionalProperties: false, required: ['wordId', 'intent', 'argumentId', 'visualContext'], properties: { wordId: idSchema, intent: idSchema, argumentId: idSchema, visualContext: idSchema } } } },
+  }),
+  defineSchema('editorial-beat-set', 1, 'Immutable semantic editorial beat set', successSchema({
+    type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId', 'transcriptId', 'transcriptHash', 'derivationVersion', 'pauseBoundaryMs', 'maxDurationMs', 'words', 'wordsHash', 'signals', 'signalsHash', 'beats', 'beatsHash', 'idempotencyKey', 'requestFingerprint', 'actor', 'createdAt', 'recordHash'],
+    properties: { schemaVersion: { const: 'editorial-beat-set/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, transcriptId: idSchema, transcriptHash: sha256Schema, derivationVersion: { const: 'editorial-beat-derivation/v1' }, pauseBoundaryMs: { type: 'integer', minimum: 100 }, maxDurationMs: { type: 'integer', minimum: 1000 }, words: { type: 'array', minItems: 1, maxItems: 500000, items: { type: 'object', additionalProperties: false, required: ['id', 'index', 'text', 'startMs', 'endMs'], properties: { id: idSchema, index: { type: 'integer', minimum: 0 }, text: { type: 'string', minLength: 1, maxLength: 240 }, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 0 } } } }, wordsHash: sha256Schema, signals: { type: 'array', minItems: 1, maxItems: 500000, items: { type: 'object', additionalProperties: false, required: ['wordId', 'intent', 'argumentId', 'visualContext'], properties: { wordId: idSchema, intent: idSchema, argumentId: idSchema, visualContext: idSchema } } }, signalsHash: sha256Schema, beats: { type: 'array', minItems: 1, maxItems: 500000, items: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'ordinal', 'startMs', 'endMs', 'wordIds', 'intent', 'argumentId', 'visualContext', 'boundaryReasons', 'beatHash'], properties: { schemaVersion: { const: 'editorial-beat/v1' }, id: idSchema, ordinal: { type: 'integer', minimum: 0 }, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 0 }, wordIds: { type: 'array', minItems: 1, items: idSchema }, intent: idSchema, argumentId: idSchema, visualContext: idSchema, boundaryReasons: { type: 'array', uniqueItems: true, items: { enum: ['sentence-end', 'intent-change', 'pause', 'argument-change', 'visual-change', 'max-duration'] } }, beatHash: sha256Schema } } }, beatsHash: sha256Schema, idempotencyKey: idSchema, requestFingerprint: sha256Schema, actor: { type: 'object', additionalProperties: false, required: ['clientId'], properties: { clientId: idSchema } }, replayed: { type: 'boolean' }, createdAt: dateTimeSchema, recordHash: sha256Schema },
+  })),
+  defineSchema('editorial-beat-adjustment-request', 1, 'Director editorial beat adjustment request', { type: 'object', additionalProperties: false, required: ['beatId', 'directorRunId', 'startWordId', 'endWordId', 'reason'], properties: { beatId: idSchema, directorRunId: idSchema, startWordId: idSchema, endWordId: idSchema, reason: { type: 'string', minLength: 3, maxLength: 500 } } }),
+  defineSchema('editorial-beat-adjustment', 1, 'Audited Director editorial beat adjustment', successSchema({ type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'beatSetId', 'sourceBeatId', 'directorRunId', 'reason', 'startWordId', 'endWordId', 'sourceBeatHash', 'adjustedBeat', 'wordAlignmentHash', 'wordAlignmentUnchanged', 'adjustmentHash', 'idempotencyKey', 'requestFingerprint', 'actor', 'createdAt', 'recordHash'], properties: { schemaVersion: { const: 'editorial-beat-adjustment-record/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema, beatSetId: idSchema, sourceBeatId: idSchema, directorRunId: idSchema, reason: { type: 'string', minLength: 3, maxLength: 500 }, startWordId: idSchema, endWordId: idSchema, sourceBeatHash: sha256Schema, adjustedBeat: { type: 'object' }, wordAlignmentHash: sha256Schema, wordAlignmentUnchanged: { const: true }, adjustmentHash: sha256Schema, idempotencyKey: idSchema, requestFingerprint: sha256Schema, actor: { type: 'object', additionalProperties: false, required: ['clientId'], properties: { clientId: idSchema } }, replayed: { type: 'boolean' }, createdAt: dateTimeSchema, recordHash: sha256Schema } })),
   defineSchema('image-analysis', 1, 'Immutable observed and inferred image analysis', successSchema({
     type: 'object', additionalProperties: false,
     required: ['schemaVersion', 'id', 'workspaceId', 'artifactId', 'manifestId', 'sourceSha256', 'dimensions', 'orientation', 'dominantColors', 'ocr', 'faces', 'objects', 'observedDescription', 'inferredTags', 'derivatives', 'createdAt', 'analysisHash'],
@@ -18389,14 +18399,16 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
-  ...([8, 9, 10] as const).map((version) => defineSchema(
+  ...([8, 9, 10, 11] as const).map((version) => defineSchema(
     'project-workspace',
     version,
     version === 8
       ? 'Project workspace with objective-bound DirectorRun history'
       : version === 9
         ? 'Project workspace with canonical optional production brief'
-        : 'Project workspace with evidence-bound compiled production brief',
+        : version === 10
+          ? 'Project workspace with evidence-bound compiled production brief'
+          : 'Project workspace with review and block Director confidence uncertainty',
     successSchema({
       type: 'object', additionalProperties: false,
       required: ['project', 'commands', 'directorRuns', 'media', 'transcripts', 'operationIds', 'operations'],
@@ -18438,7 +18450,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               'objectiveVersion', 'rubricRef', 'baseVersionId', 'resultVersionId',
               'treatmentSnapshotId', 'storySnapshotId', 'qualitySnapshotId', 'qualityStatus',
               'qualityScore', 'decisionCount', 'assumptionCount', 'subtitleCueCount', 'transitionCount',
-              'automaticZoom', 'createdAt',
+              'automaticZoom', ...(version === 11 ? ['uncertainties'] : []), 'createdAt',
             ],
             properties: {
               id: idSchema, status: { enum: ['planned', 'rendering', 'succeeded', 'failed'] },
@@ -18452,6 +18464,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
               qualityStatus: { enum: ['approved', 'approved-with-warnings', 'blocked'] },
               qualityScore: { type: 'number', minimum: 0, maximum: 1 },
               decisionCount: { type: 'integer', minimum: 0, maximum: 64 }, assumptionCount: { type: 'integer', minimum: 0, maximum: 64 },
+              ...(version === 11 ? {
+                uncertainties: {
+                  type: 'array', maxItems: 64,
+                  items: {
+                    type: 'object', additionalProperties: false,
+                    required: ['id', 'label', 'type', 'band', 'value', 'reasonCodes', 'calibrationVersion', 'evidenceCount'],
+                    properties: {
+                      id: idSchema, label: { type: 'string', minLength: 1, maxLength: 256 },
+                      type: { enum: ['transcription', 'cut', 'asset-selection', 'narrative-reorder', 'rights', 'generation'] },
+                      band: { enum: ['review', 'block'] }, value: { type: 'number', minimum: 0, maximum: 1 },
+                      reasonCodes: { type: 'array', minItems: 1, maxItems: 16, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } },
+                      calibrationVersion: { type: 'string', minLength: 3, maxLength: 128 },
+                      evidenceCount: { type: 'integer', minimum: 1, maximum: 32 },
+                    },
+                  },
+                },
+              } : {}),
               subtitleCueCount: { type: 'integer', minimum: 0 }, transitionCount: { type: 'integer', minimum: 0 },
               automaticZoom: { type: 'boolean' }, createdAt: dateTimeSchema,
             },

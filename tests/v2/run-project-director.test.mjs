@@ -13,6 +13,7 @@ import { createDesiredAction } from '../../src/v2/domain/desired-action.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../src/v2/domain/director-run-impact.ts'
+import { validateDirectorDecisions } from '../../src/v2/domain/director-run.ts'
 import {
   advancePublicOperationPhase,
   cancelPublicOperation,
@@ -332,6 +333,19 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.equal(captionText.includes('dois dias'), false)
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_effect'), true)
   assert.equal(result.run.decisions.some((decision) => decision.choice === 'no_insert'), true)
+  const layoutConfidence = result.run.decisions.find((decision) => decision.id === 'decision-layout-inset')
+  assert.equal(layoutConfidence.decisionType, 'generation')
+  assert.equal(layoutConfidence.confidenceBand, 'review')
+  assert.equal(layoutConfidence.confidenceDetail.value, layoutConfidence.confidence)
+  assert.equal(layoutConfidence.confidenceDetail.calibrationVersion, 'director-confidence-2026-08-v1')
+  assert.match(layoutConfidence.confidenceDetail.confidenceHash, /^[a-f0-9]{64}$/)
+  assert.throws(
+    () => validateDirectorDecisions(result.run.decisions.map((decision) =>
+      decision.id === layoutConfidence.id
+        ? { ...decision, confidenceDetail: { ...decision.confidenceDetail, reasonCodes: ['TAMPERED'] } }
+        : decision)),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
   assert.equal(result.run.qualityReport.status, 'approved-with-warnings')
   assert.equal(result.run.qualityReport.schemaVersion, 'director-quality-report/v2')
   assert.equal(result.run.qualityReport.strategic.rubric.id, 'awareness-discovery')

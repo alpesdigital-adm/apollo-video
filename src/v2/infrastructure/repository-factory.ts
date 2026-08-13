@@ -160,6 +160,7 @@ import { PrismaAssetSelectionRepository } from './prisma/asset-selection-reposit
 import { PrismaQualityIterationRepository } from './prisma/quality-iteration-repository.ts'
 import { PrismaMvpCoreGateRepository } from './prisma/mvp-core-gate-repository.ts'
 import { PrismaSpeechSegmentCatalogRepository } from './prisma/speech-segment-catalog-repository.ts'
+import { PrismaEditorialBeatRepository } from './prisma/editorial-beat-repository.ts'
 import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repository.ts'
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
@@ -371,6 +372,10 @@ export function createMvpCoreGateRepository(): MvpCoreGateRepository {
 
 export function createSpeechSegmentCatalogRepository(): SpeechSegmentCatalogRepository {
   return new PrismaSpeechSegmentCatalogRepository(resolveV2Client())
+}
+
+export function createEditorialBeatRepository() {
+  return new PrismaEditorialBeatRepository(resolveV2Client())
 }
 
 export function createEvidenceSegmentRepository(): EvidenceSegmentRepository {
