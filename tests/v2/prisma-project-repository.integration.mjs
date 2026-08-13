@@ -6,7 +6,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 test('Prisma adapter atomically creates and replays a v2 project', async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
-  const { createExternalAuditContext } = await import(
+  const { createExternalAuditContext, materializeActorAuditContext } = await import(
     '../../src/v2/application/authenticate-api-client.ts'
   )
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
@@ -118,7 +118,10 @@ test('Prisma adapter atomically creates and replays a v2 project', async () => {
     assert.equal(firstAuditCommand?.action, 'create')
     assert.equal(firstAuditCommand?.actorClientId, clientId)
     assert.equal(firstAuditCommand?.actorCredentialId, issued.credential.id)
-    assert.equal(firstAuditCommand?.actorContextHash, auditContext.contextHash)
+    assert.equal(
+      firstAuditCommand?.actorContextHash,
+      materializeActorAuditContext(actor).contextHash,
+    )
     assert.equal(firstAuditCommand?.projectId, first.project.id)
     assert.equal(firstAuditCommand?.versionId, first.version.id)
     const outbox = await client.v2PublicEventOutbox.findMany({
