@@ -395,6 +395,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable quality report from exact server evidence without approving final export or mutating the project version.',
     },
+    'apollo.projects.montage-alternatives.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Evaluates bounded candidates against one exact StoryPlan contract and persists an immutable reviewable selection without rendering or mutating the project version.',
+    },
     'apollo.projects.final-exports.enqueue': {
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Publishes one approved high-resolution final artifact bound to an exact immutable project version.',

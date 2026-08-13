@@ -12581,8 +12581,77 @@ const mediaSegmentDataSchema = {
 const imageBoxSchema = { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: 0, maximum: 1 } } as const
 const imageProducerSchema = { type: 'object', additionalProperties: false, required: ['provider', 'model', 'version'], properties: { provider: { type: 'string', minLength: 1, maxLength: 96 }, model: { type: 'string', minLength: 1, maxLength: 96 }, version: { type: 'string', minLength: 1, maxLength: 96 } } } as const
 const imageEntityObservationSchema = { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['label', 'box', 'confidence'], properties: { label: { type: 'string', minLength: 1, maxLength: 120 }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } } as const
+const montageHardGateCodeSchema = { enum: ['HOOK_NOT_SELF_CONTAINED', 'ORDER_NOT_PERMITTED', 'RIGHTS_NOT_APPROVED', 'PATTERN_BUDGET_EXCEEDED', 'STORY_BLOCK_COVERAGE_INVALID'] } as const
+const montageCandidateSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'seed', 'storyPlanRef', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals', 'seedHash', 'status', 'hardGateResults', 'score', 'estimatedCost', 'rejectionReasons', 'candidateHash'],
+  properties: {
+    schemaVersion: { const: 'montage-candidate-seed/v1' }, id: idSchema, seed: idSchema,
+    storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+    mode: { enum: ['chronological', 'cold-open', 'reorganized'] },
+    hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } },
+    blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema },
+    permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } },
+    assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } },
+    patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } },
+    maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+    rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } },
+    seedHash: sha256Schema, status: { enum: ['eligible', 'rejected'] },
+    hardGateResults: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'object', additionalProperties: false, required: ['code', 'passed', 'evidenceRefs'], properties: { code: montageHardGateCodeSchema, passed: { type: 'boolean' }, evidenceRefs: { type: 'array', maxItems: 64, items: idSchema } } } },
+    score: { anyOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] }, estimatedCost: { anyOf: [{ type: 'number', minimum: 0, maximum: 1000000 }, { type: 'null' }] },
+    rejectionReasons: { type: 'array', maxItems: 5, uniqueItems: true, items: montageHardGateCodeSchema }, candidateHash: sha256Schema,
+  },
+} as const
+const montageAlternativeRunSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'policyVersion', 'storyPlanRef', 'selection', 'createdByClientId', 'createdAt', 'runHash'],
+  properties: {
+    schemaVersion: { const: 'montage-alternative-run/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    policyVersion: { const: 'montage-alternatives-2026-08-v1' },
+    storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+    selection: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'policyVersion', 'rubric', 'status', 'winnerId', 'reason', 'diversity', 'candidates', 'selectionHash'],
+      properties: {
+        schemaVersion: { const: 'montage-selection/v1' }, policyVersion: { const: 'montage-alternatives-2026-08-v1' },
+        rubric: {
+          type: 'object', additionalProperties: false, required: ['id', 'weights', 'tieTolerance', 'minimumConfidence'],
+          properties: { id: { const: 'montage-rubric-v1' }, weights: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { const: 0.35 }, objective: { const: 0.25 }, continuity: { const: 0.2 }, evidence: { const: 0.2 } } }, tieTolerance: { const: 0.000001 }, minimumConfidence: { const: 0.7 } },
+        },
+        status: { enum: ['selected', 'review', 'blocked'] }, winnerId: { anyOf: [idSchema, { type: 'null' }] },
+        reason: { enum: ['HIGHEST_RUBRIC_SCORE', 'SCORE_TIE', 'LOW_CONFIDENCE', 'NO_ELIGIBLE_CANDIDATE'] },
+        diversity: {
+          type: 'object', additionalProperties: false,
+          required: ['candidateCount', 'eligibleCount', 'uniqueHooks', 'uniqueOrders', 'uniqueAssetSets', 'uniquePatternSets', 'normalized'],
+          properties: {
+            candidateCount: { type: 'integer', minimum: 1, maximum: 32 }, eligibleCount: { type: 'integer', minimum: 0, maximum: 32 },
+            uniqueHooks: { type: 'integer', minimum: 1, maximum: 32 }, uniqueOrders: { type: 'integer', minimum: 1, maximum: 32 }, uniqueAssetSets: { type: 'integer', minimum: 1, maximum: 32 }, uniquePatternSets: { type: 'integer', minimum: 1, maximum: 32 },
+            normalized: { type: 'object', additionalProperties: false, required: ['hooks', 'orders', 'assets', 'patterns', 'overall'], properties: { hooks: { type: 'number', minimum: 0, maximum: 1 }, orders: { type: 'number', minimum: 0, maximum: 1 }, assets: { type: 'number', minimum: 0, maximum: 1 }, patterns: { type: 'number', minimum: 0, maximum: 1 }, overall: { type: 'number', minimum: 0, maximum: 1 } } },
+          },
+        },
+        candidates: { type: 'array', minItems: 1, maxItems: 32, items: montageCandidateSchema }, selectionHash: sha256Schema,
+      },
+    },
+    createdByClientId: idSchema, createdAt: dateTimeSchema, runHash: sha256Schema,
+  },
+} as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', {
+    type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
+      policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+      seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: {
+        id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } },
+        blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } },
+        assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } },
+        patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } },
+        maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+        rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } },
+      } } },
+    },
+  }),
+  defineSchema('montage-alternatives-created', 1, 'Created or replayed montage alternative run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: montageAlternativeRunSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('montage-alternatives-read', 1, 'Immutable montage alternative run', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: montageAlternativeRunSchema } })),
   defineSchema('image-analysis', 1, 'Immutable observed and inferred image analysis', successSchema({
     type: 'object', additionalProperties: false,
     required: ['schemaVersion', 'id', 'workspaceId', 'artifactId', 'manifestId', 'sourceSha256', 'dimensions', 'orientation', 'dominantColors', 'ocr', 'faces', 'objects', 'observedDescription', 'inferredTags', 'derivatives', 'createdAt', 'analysisHash'],
