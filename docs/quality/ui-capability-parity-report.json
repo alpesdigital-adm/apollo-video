@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 214,
-    "operableCapabilities": 214,
-    "publicContractCapabilities": 214,
+    "registeredCapabilities": 217,
+    "operableCapabilities": 217,
+    "publicContractCapabilities": 217,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1528,7 +1528,7 @@
     {
       "uiAction": "src/components/MediaLibraryWorkspace.tsx:49",
       "capabilityId": "apollo.media.library.list",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/media/library",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -2153,6 +2153,39 @@
       ]
     },
     {
+      "capabilityId": "apollo.media.images.search",
+      "exposure": "public",
+      "endpoint": "GET /v1/media/images/search",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/image-reuse-search-result/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.images.reuse",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/image-reuses",
+      "inputSchemaRef": "apollo://schemas/image-reuse-request/v1",
+      "outputSchemaRef": "apollo://schemas/image-reuse-reference/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.media.catalog-records.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/media/library/{artifactId}/catalog-record",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/automatic-catalog-record/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.perception.read",
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/perception",
@@ -2201,7 +2234,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/media/library",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/media-library-page/v1",
+      "outputSchemaRef": "apollo://schemas/media-library-page/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -2212,7 +2245,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/media/library/{artifactId}",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/media-library-item/v1",
+      "outputSchemaRef": "apollo://schemas/media-library-item/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
