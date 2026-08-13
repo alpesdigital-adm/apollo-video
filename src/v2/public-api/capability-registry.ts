@@ -1166,6 +1166,13 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201, 200], idempotency: 'natural', requestBodyRequired: true,
   },
   {
+    id: 'apollo.media.catalog-records.read', version: '1.0.0', title: 'Read automatic catalog evidence',
+    description: 'Reads the immutable eligibility, inherited rights and generated-from lineage evidence for one automatically cataloged output.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],
+    outputSchemaRef: 'apollo://schemas/automatic-catalog-record/v1', endpoint: { method: 'GET', path: '/v1/media/library/{artifactId}/catalog-record' },
+    toolName: 'apollo.media.catalog-records.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.media.segments.list', version: '1.0.0', title: 'List virtual media segments',
     description: 'Lists immutable semantic ranges for one workspace media artifact without creating derivative bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],

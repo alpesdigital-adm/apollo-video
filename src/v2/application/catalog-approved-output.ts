@@ -1,25 +1,54 @@
-import { createHash } from 'crypto'
-import type { RightsStatus } from '../domain/media-library.ts'
+import { createAssetRightsChangeIntent } from '../domain/asset-rights-change.ts'
+import { assertAutomaticCatalogCandidate, createInheritedCatalogRights } from '../domain/automatic-catalog.ts'
+import { DomainError } from '../domain/errors.ts'
+import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
+import type { AutomaticCatalogRepository } from './ports/automatic-catalog-repository.ts'
 
-export interface PromotedOutput {
-  workspaceId: string; artifactId: string; manifestId: string; kind: 'final' | 'proxy' | 'deepfake-raw' | 'temporary'
-  promotionStatus: 'approved' | 'rejected' | 'failed'; parentArtifactIds: readonly string[]; generation?: { provider: string; model: string }
-  rights: { status: RightsStatus; consentStatus: string; snapshotId: string }
+export function catalogApprovedOutputService(dependencies: {
+  repository: AutomaticCatalogRepository
+  rights: AssetRightsRepository
+  clock?: () => Date
+}) {
+  const clock = dependencies.clock ?? (() => new Date())
+  return async (target: { workspaceId: string; artifactId: string; manifestId: string }) => {
+    const candidate = await dependencies.repository.inspect(target)
+    if (!candidate) return Object.freeze({ status: 'ignored' as const, record: null })
+    assertAutomaticCatalogCandidate(candidate)
+    const sourceIds = [...new Set(candidate.lineage.map((edge) => edge.sourceArtifactId))]
+    const sourceRights = await dependencies.rights.findCurrentForArtifacts(candidate.workspaceId, sourceIds)
+    const snapshots = sourceIds.map((id) => sourceRights.get(id) ?? null)
+    if (snapshots.some((snapshot) => snapshot === null)) throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Catalog output source rights evidence is incomplete')
+    const current = await dependencies.rights.findCurrent(candidate.workspaceId, candidate.artifactId)
+    if (!current) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Catalog output artifact was not found')
+    const createdAt = clock().toISOString()
+    const inherited = createInheritedCatalogRights({
+      candidate,
+      sourceSnapshots: snapshots as NonNullable<(typeof snapshots)[number]>[],
+      sequence: (current.snapshot?.sequence ?? 0) + 1,
+      createdAt,
+    })
+    let rightsSnapshot = current.snapshot
+    if (rightsSnapshot?.snapshotHash !== inherited.snapshotHash) {
+      const change = createAssetRightsChangeIntent({
+        workspaceId: candidate.workspaceId,
+        artifactId: candidate.artifactId,
+        snapshotHash: inherited.snapshotHash,
+        baseRevision: current.revision,
+        actor: { kind: 'internal', actorType: 'system', actorId: 'automatic-catalog' },
+        changedAt: createdAt,
+      })
+      rightsSnapshot = (await dependencies.rights.setCurrent(inherited, current.revision, change)).snapshot
+    }
+    if (!rightsSnapshot || rightsSnapshot.snapshotHash !== inherited.snapshotHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog output rights did not converge')
+    const result = await dependencies.repository.persist({ candidate, rightsSnapshotId: rightsSnapshot.id, rightsSnapshotHash: rightsSnapshot.snapshotHash, createdAt })
+    return Object.freeze({ status: result.replayed ? 'already-cataloged' as const : 'cataloged' as const, record: result.record })
+  }
 }
-export interface CatalogedOutput {
-  id: string; workspaceId: string; artifactId: string; manifestId: string; searchableKind: 'asset' | 'segment'
-  rights: PromotedOutput['rights']; lineage: { relation: 'generated-from'; parents: readonly string[]; generation?: PromotedOutput['generation'] }
-}
-export interface OutputCatalogRepository { findByKey(key: string): Promise<CatalogedOutput | null>; save(key: string, item: CatalogedOutput): Promise<CatalogedOutput> }
 
-function catalogKey(output: PromotedOutput): string { return `${output.workspaceId}:${output.artifactId}:${output.manifestId}` }
-export function isCatalogEligible(output: PromotedOutput): boolean { return output.promotionStatus === 'approved' && output.kind !== 'temporary' }
-
-export async function catalogApprovedOutput(output: PromotedOutput, repository: OutputCatalogRepository): Promise<Readonly<{ status: 'cataloged' | 'already-cataloged' | 'ignored'; item: CatalogedOutput | null }>> {
-  if (!isCatalogEligible(output)) return Object.freeze({ status: 'ignored', item: null })
-  const key = catalogKey(output)
-  const existing = await repository.findByKey(key)
-  if (existing) return Object.freeze({ status: 'already-cataloged', item: existing })
-  const item: CatalogedOutput = Object.freeze({ id: `catalog_${createHash('sha256').update(key).digest('hex').slice(0, 20)}`, workspaceId: output.workspaceId, artifactId: output.artifactId, manifestId: output.manifestId, searchableKind: output.kind === 'deepfake-raw' ? 'segment' : 'asset', rights: Object.freeze({ ...output.rights }), lineage: Object.freeze({ relation: 'generated-from' as const, parents: Object.freeze([...output.parentArtifactIds]), ...(output.generation ? { generation: Object.freeze({ ...output.generation }) } : {}) }) })
-  return Object.freeze({ status: 'cataloged', item: await repository.save(key, item) })
+export function readAutomaticCatalogRecordService(dependencies: { repository: AutomaticCatalogRepository }) {
+  return async (workspaceId: string, artifactId: string) => {
+    const record = await dependencies.repository.find(workspaceId, artifactId)
+    if (!record) throw new DomainError('MEDIA_ARTIFACT_NOT_FOUND', 'Automatic catalog record was not found')
+    return record
+  }
 }

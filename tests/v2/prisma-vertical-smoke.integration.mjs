@@ -485,6 +485,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       },
     }
     const render = runNextProjectProxyRenderOperationService({
+      async catalogOutput() {},
       operations,
       telemetry,
       projects: proxyProjects,
