@@ -33,6 +33,7 @@ model V2Workspace {
   mediaLibraryEntries                    V2MediaLibraryEntry[]
   mediaSegments                          V2MediaSegment[]
   mediaSegmentMaterializations           V2MediaSegmentMaterialization[]
+  automaticCatalogRecords                V2AutomaticCatalogRecord[]
   imageAnalyses                          V2ImageAnalysis[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
@@ -1222,6 +1223,7 @@ model V2MediaArtifact {
   imageAnalyses                V2ImageAnalysis[]                          @relation("ImageAnalysisSourceArtifact")
   imageAnalysisThumbnails      V2ImageAnalysis[]                          @relation("ImageAnalysisThumbnailArtifact")
   imageAnalysisPreviews        V2ImageAnalysis[]                          @relation("ImageAnalysisPreviewArtifact")
+  automaticCatalogRecords      V2AutomaticCatalogRecord[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -1280,6 +1282,7 @@ model V2MediaSegment {
   parentSegment    V2MediaSegment?                @relation("NestedMediaSegments", fields: [parentSegmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   children         V2MediaSegment[]               @relation("NestedMediaSegments")
   materializations V2MediaSegmentMaterialization[]
+  automaticCatalogRecords V2AutomaticCatalogRecord[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactId, segmentHash])
@@ -1310,6 +1313,36 @@ model V2MediaSegmentMaterialization {
   @@unique([outputManifestId, workspaceId])
   @@index([workspaceId, segmentId, createdAt(sort: Desc)])
   @@map("media_segment_materializations")
+}
+
+model V2AutomaticCatalogRecord {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  artifactId              String   @db.VarChar(128)
+  manifestId              String   @db.VarChar(128)
+  outputKind              String   @db.VarChar(32)
+  searchableKind          String   @db.VarChar(16)
+  segmentId               String?  @db.VarChar(128)
+  rightsSnapshotId        String   @db.VarChar(128)
+  rightsSnapshotHash      String   @db.Char(64)
+  eligibilityEvidenceHash String   @db.Char(64)
+  lineageJson             String   @db.Text
+  recordHash              String   @db.Char(64)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact       V2MediaArtifact         @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  manifest       V2MediaArtifactManifest @relation(fields: [manifestId, artifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict, map: "automatic_catalog_manifest_fkey")
+  segment        V2MediaSegment?         @relation(fields: [segmentId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  rightsSnapshot V2AssetRightsSnapshot   @relation(fields: [rightsSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, artifactId, manifestId])
+  @@unique([workspaceId, recordHash])
+  @@index([workspaceId, outputKind, createdAt(sort: Desc)])
+  @@index([workspaceId, segmentId])
+  @@index([workspaceId, rightsSnapshotId])
+  @@map("automatic_catalog_records")
 }
 
 model V2ImageAnalysis {
@@ -1449,6 +1482,7 @@ model V2MediaArtifactManifest {
   finalExportAttemptOutputs  V2ProjectFinalExportAttempt[]
   segmentMaterializations    V2MediaSegmentMaterialization[]
   imageAnalyses              V2ImageAnalysis[]
+  automaticCatalogRecords    V2AutomaticCatalogRecord[]
 
   @@unique([id, workspaceId])
   @@unique([id, artifactId, workspaceId])
@@ -2000,6 +2034,7 @@ model V2AssetRightsSnapshot {
   artifact                   V2MediaArtifact               @relation("AssetRightsSnapshots", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   currentForArtifacts        V2MediaArtifact[]             @relation("CurrentAssetRights")
   consentDocument            V2MediaArtifact?              @relation("ConsentDocument", fields: [consentDocumentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  automaticCatalogRecords    V2AutomaticCatalogRecord[]
   decisions                  V2AssetUseDecision[]
   evidenceSegments           V2EvidenceSegment[]
   longFormIndexRuns          V2LongFormIndexRun[]

@@ -12583,6 +12583,17 @@ const imageProducerSchema = { type: 'object', additionalProperties: false, requi
 const imageEntityObservationSchema = { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['label', 'box', 'confidence'], properties: { label: { type: 'string', minLength: 1, maxLength: 120 }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('automatic-catalog-record', 1, 'Immutable automatic catalog eligibility and lineage evidence', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['id', 'workspaceId', 'artifactId', 'manifestId', 'outputKind', 'searchableKind', 'rightsSnapshotId', 'rightsSnapshotHash', 'eligibilityEvidenceHash', 'lineage', 'recordHash', 'createdAt'],
+    properties: {
+      id: idSchema, workspaceId: idSchema, artifactId: idSchema, manifestId: idSchema,
+      outputKind: { enum: ['final', 'proxy', 'deepfake-raw'] }, searchableKind: { enum: ['asset', 'segment'] }, segmentId: idSchema,
+      rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema, eligibilityEvidenceHash: sha256Schema,
+      lineage: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['sourceArtifactId', 'role', 'ordinal'], properties: { sourceArtifactId: idSchema, role: { type: 'string', minLength: 1, maxLength: 64 }, ordinal: { type: 'integer', minimum: 0 }, provider: { type: 'string', minLength: 1, maxLength: 64 }, model: { type: 'string', minLength: 1, maxLength: 128 }, modelVersion: { type: 'string', minLength: 1, maxLength: 64 } } } },
+      recordHash: sha256Schema, createdAt: dateTimeSchema,
+    },
+  })),
   defineSchema('image-analysis', 1, 'Immutable observed and inferred image analysis', successSchema({
     type: 'object', additionalProperties: false,
     required: ['schemaVersion', 'id', 'workspaceId', 'artifactId', 'manifestId', 'sourceSha256', 'dimensions', 'orientation', 'dominantColors', 'ocr', 'faces', 'objects', 'observedDescription', 'inferredTags', 'derivatives', 'createdAt', 'analysisHash'],

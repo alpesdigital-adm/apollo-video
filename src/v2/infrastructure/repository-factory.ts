@@ -22,6 +22,7 @@ import { runNextPublicOperationService } from '../application/run-public-operati
 import { runNextMediaIngestOperationService } from '../application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
+import { catalogApprovedOutputService } from '../application/catalog-approved-output.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
@@ -213,6 +214,7 @@ import { PrismaMediaTransferRepository } from './prisma/media-transfer-repositor
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
+import { PrismaAutomaticCatalogRepository } from './prisma/automatic-catalog-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
@@ -339,6 +341,18 @@ export function createApiAccessControlRepository(): ApiAccessControlRepository {
 
 export function createAssetRightsRepository(): AssetRightsRepository {
   return new PrismaAssetRightsRepository(resolveV2Client())
+}
+
+export function createAutomaticCatalogService(clock: () => Date = () => new Date()) {
+  return catalogApprovedOutputService({
+    repository: new PrismaAutomaticCatalogRepository(resolveV2Client()),
+    rights: createAssetRightsRepository(),
+    clock,
+  })
+}
+
+export function createAutomaticCatalogRepository() {
+  return new PrismaAutomaticCatalogRepository(resolveV2Client())
 }
 
 export function createAssetSelectionRepository(): AssetSelectionRepository {
@@ -1399,6 +1413,7 @@ export function createProjectProxyRenderWorker(
     sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
     proxyReviews: createProxyReviewRepository(),
+    catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
@@ -1456,6 +1471,7 @@ export function createProjectFinalExportWorker(
     telemetry,
     projects: createProjectFinalExportRepository(),
     rights: createAssetRightsRepository(),
+    catalogOutput: createAutomaticCatalogService(clock),
     artifacts: createMediaArtifactPersistenceRepository(environment),
     storage: createVerifiedMediaStorage(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),

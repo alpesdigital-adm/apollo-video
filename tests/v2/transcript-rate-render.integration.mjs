@@ -581,6 +581,7 @@ async function renderThroughRealWorker(input) {
   const realStorage = new LocalMediaUploadStorage(artifactRoot)
   const captured = { lutCleaned: 0, rendererCleaned: 0 }
   const deps = {
+    async catalogOutput() {},
     operations,
     colorPipelines,
     luts: {
