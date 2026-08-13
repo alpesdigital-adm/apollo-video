@@ -4743,6 +4743,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.montage-alternatives.create', version: '1.0.0', title: 'Create montage alternatives',
+    description: 'Evaluates and persists content-addressed montage candidates after hard gates, using one rubric and deterministic review or block outcomes.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/create-montage-alternatives-request/v1', outputSchemaRef: 'apollo://schemas/montage-alternatives-created/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/montage-alternatives' }, toolName: 'apollo.projects.montage-alternatives.create',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.montage-alternatives.read', version: '1.0.0', title: 'Read montage alternatives',
+    description: 'Reads one immutable montage selection with every eligible and rejected alternative, diversity metrics and deterministic winner state.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/montage-alternatives-read/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/montage-alternatives/{runId}' },
+    toolName: 'apollo.projects.montage-alternatives.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.rename',
     version: '1.0.0',
     title: 'Rename project',

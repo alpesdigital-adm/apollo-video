@@ -194,6 +194,10 @@ const storyPlanCoreExample = {
   proofContexts: [{ id: 'proof-1', claimIds: ['claim-1'], sourceCandidateIds: ['candidate-proof'], attribution: 'Participant result' }],
 }
 const storyPlanExample = { schemaVersion: 3, id: 'story-plan-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', ...storyPlanCoreExample, storyHash: 'c'.repeat(64), createdBy: { type: 'api-client', id: clientId }, createdAt, requestFingerprint: 'd'.repeat(64) }
+const montageStoryPlanRefExample = { id: storyPlanExample.id, hash: storyPlanExample.storyHash }
+const montageCandidateInputExample = { id: 'candidate-example-1', seed: 'seed-example-1', mode: 'chronological', hook: { id: 'hook-example-1', selfContained: true }, blockOrder: ['block-hook', 'block-body'], permittedBlockOrders: [['block-hook', 'block-body']], assets: [{ id: 'asset-example-1', rightsApproved: true }], patternBreaks: [{ id: 'break-example-1', atMs: 1000, group: 'group-hook' }], maximumPatternBreaks: 3, confidence: 0.9, rubricSignals: { narrative: 0.9, objective: 0.8, continuity: 0.85, evidence: 0.8 } }
+const montageCandidateExample = { schemaVersion: 'montage-candidate-seed/v1', ...montageCandidateInputExample, storyPlanRef: montageStoryPlanRefExample, seedHash: 'd'.repeat(64), status: 'eligible', hardGateResults: [{ code: 'HOOK_NOT_SELF_CONTAINED', passed: true, evidenceRefs: ['hook-example-1'] }, { code: 'ORDER_NOT_PERMITTED', passed: true, evidenceRefs: [storyPlanExample.id] }, { code: 'RIGHTS_NOT_APPROVED', passed: true, evidenceRefs: ['asset-example-1'] }, { code: 'PATTERN_BUDGET_EXCEEDED', passed: true, evidenceRefs: ['break-example-1'] }, { code: 'STORY_BLOCK_COVERAGE_INVALID', passed: true, evidenceRefs: [storyPlanExample.id] }], score: 0.8475, estimatedCost: 0.3, rejectionReasons: [], candidateHash: 'e'.repeat(64) }
+const montageRunExample = { schemaVersion: 'montage-alternative-run/v1', id: 'montage-run-example-1', workspaceId, projectId, policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, selection: { schemaVersion: 'montage-selection/v1', policyVersion: 'montage-alternatives-2026-08-v1', rubric: { id: 'montage-rubric-v1', weights: { narrative: 0.35, objective: 0.25, continuity: 0.2, evidence: 0.2 }, tieTolerance: 0.000001, minimumConfidence: 0.7 }, status: 'selected', winnerId: montageCandidateExample.id, reason: 'HIGHEST_RUBRIC_SCORE', diversity: { candidateCount: 1, eligibleCount: 1, uniqueHooks: 1, uniqueOrders: 1, uniqueAssetSets: 1, uniquePatternSets: 1, normalized: { hooks: 1, orders: 1, assets: 1, patterns: 1, overall: 1 } }, candidates: [montageCandidateExample], selectionHash: 'b'.repeat(64) }, createdByClientId: clientId, createdAt, runHash: 'f'.repeat(64) }
 const rightsSnapshotId = 'rights-example-1'
 const assetRightsRequestExample = {
   owner: 'Alpes Digital',
@@ -5088,6 +5092,9 @@ const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: 
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
+    'apollo://schemas/montage-alternatives-created/v1': [{ data: { run: montageRunExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/montage-alternatives-read/v1': [{ data: { run: montageRunExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/editorial-grammar-evaluation-request/v1': [EDITORIAL_TIMELINE_GOLDENS.adequate],
     'apollo://schemas/editorial-grammar-evaluation/v1': [{ data: evaluateEditorialGrammar(EDITORIAL_TIMELINE_GOLDENS.adequate), meta: { apiVersion: 'v1' } }],
     'apollo://schemas/automatic-catalog-record/v1': [{ data: {

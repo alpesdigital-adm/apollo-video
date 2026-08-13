@@ -82,6 +82,7 @@ import type { ContaminationReportRepository } from '../application/ports/contami
 import type { SourceCleanupRepository } from '../application/ports/source-cleanup-repository.ts'
 import type { ValidationEnvelopeRepository } from '../application/ports/validation-envelope-repository.ts'
 import type { ProofNeedRepository } from '../application/ports/proof-need-repository.ts'
+import type { MontageAlternativeRepository } from '../application/ports/montage-alternative-repository.ts'
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -213,6 +214,7 @@ import { PrismaContaminationReportRepository } from './prisma/contamination-repo
 import { PrismaSourceCleanupRepository } from './prisma/source-cleanup-repository.ts'
 import { PrismaValidationEnvelopeRepository } from './prisma/validation-envelope-repository.ts'
 import { PrismaProofNeedRepository } from './prisma/proof-need-repository.ts'
+import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative-repository.ts'
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
@@ -567,6 +569,10 @@ ValidationEnvelopeRepository {
 
 export function createProofNeedRepository(): ProofNeedRepository {
   return new PrismaProofNeedRepository(resolveV2Client())
+}
+
+export function createMontageAlternativeRepository(): MontageAlternativeRepository {
+  return new PrismaMontageAlternativeRepository(resolveV2Client())
 }
 
 export function createProofIntegrityRepository():

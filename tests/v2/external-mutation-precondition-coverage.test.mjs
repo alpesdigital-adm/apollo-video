@@ -286,6 +286,9 @@ const coverage = Object.freeze({
   'apollo.projects.quality-iterations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds project version, proxy revision/hash, asset selections, rubric evidence, reference dataset and fixed budget; serializable commit rechecks all server evidence',
   },
+  'apollo.projects.montage-alternatives.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the exact StoryPlan contract, all canonical candidate seeds, policy and authenticated actor before immutable selection persistence',
+  },
   'apollo.workspace-luts.import': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds workspace, logical LUT ID, canonical .cube hash, license, compatibility, intensity and actor before preview generation',
   },
@@ -559,7 +562,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 3,
     'explicit-precondition': 10,
-    'idempotent-create': 52,
+    'idempotent-create': 53,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
