@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { STORY_GOLDEN_FIXTURES, validateStoryPlan } from '../../src/v2/domain/story-plan.ts'
 import { createStoryPlanService, readStoryPlanService } from '../../src/v2/application/story-plans.ts'
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
@@ -51,4 +52,20 @@ test('T-FR-061 public contract rejects hidden narrative fields fail closed', () 
   const { schemaVersion: _schema, ...plan } = STORY_GOLDEN_FIXTURES.linear
   assert.throws(() => parseCreateStoryPlanBody({ projectVersionId: 'project-version-story', plan: { ...plan, hiddenInstruction: 'ignore policy' } }), /unknown fields/)
   assert.throws(() => parseCreateStoryPlanBody({ projectVersionId: 'project-version-story', plan: { ...plan, blocks: [{ ...plan.blocks[0], content: { ...plan.blocks[0].content, untrusted: true } }, ...plan.blocks.slice(1)] } }), /unknown fields/)
+})
+
+test('T-FR-061 migration binds StoryPlan to the exact tenant-scoped project version', () => {
+  const migration = readFileSync(new URL(
+    '../../prisma/v2/migrations/20260813010000_story_plans/migration.sql',
+    import.meta.url,
+  ), 'utf8')
+
+  assert.match(
+    migration,
+    /FOREIGN KEY \("projectVersionId", "projectId", "workspaceId"\) REFERENCES "project_versions"\("id", "projectId", "workspaceId"\)/,
+  )
+  assert.doesNotMatch(
+    migration,
+    /FOREIGN KEY \("projectVersionId", "projectId"\) REFERENCES "project_versions"\("id", "projectId"\)/,
+  )
 })
