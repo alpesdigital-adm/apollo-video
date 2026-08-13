@@ -1,16 +1,8 @@
 import { validateStoryPlan, type StoryPlan } from './story-plan.ts'
+import { createDesiredActionReference, parseDesiredAction } from './desired-action.ts'
 import { DomainError, assertDomain } from './errors.ts'
-
-export interface DirectorMontageCandidate {
-  id: string
-  hookId: string
-  blockOrder: readonly string[]
-  assetIds: readonly string[]
-  patternBreakIds: readonly string[]
-  confidence: number
-  hardGateIssues: readonly string[]
-  rubricSignals: Readonly<Record<string, number>>
-}
+import { resolveStrategicObjective } from './strategic-objective.ts'
+import { createMontageCandidateSeed, MONTAGE_RUBRIC, type MontageCandidateSeed } from './montage-candidate.ts'
 
 export const DIRECTOR_TOOL_NAMES = [
   'search-media',
@@ -39,7 +31,7 @@ export interface DirectorProposeAssetArguments {
 }
 
 export interface DirectorEvaluateCandidateArguments {
-  candidates: readonly DirectorMontageCandidate[]
+  candidates: readonly MontageCandidateSeed[]
   rubric: Readonly<{ id: string; weights: Readonly<Record<string, number>> }>
   minimumConfidence: number
 }
@@ -200,16 +192,46 @@ function finiteUnit(value: unknown, field: string): number {
   return value
 }
 
+function safeInteger(value: unknown, field: string, minimum = 0): number {
+  assertDomain(Number.isSafeInteger(value) && Number(value) >= minimum, 'INVALID_ARGUMENT', `${field} must be an integer greater than or equal to ${minimum}`)
+  return Number(value)
+}
+
 function stringArray(value: unknown, field: string, maximum = 100): readonly string[] {
   assertDomain(Array.isArray(value) && value.length <= maximum, 'INVALID_ARGUMENT', `${field} must be an array with at most ${maximum} values`)
   return Object.freeze(value.map((item, index) => boundedText(item, `${field}[${index}]`, 256)))
 }
 
 function parseStoryPlan(value: unknown): StoryPlan {
-  const input = record(value, ['schemaVersion', 'objective', 'desiredActionRef', 'targetDurationMs', 'acts', 'blocks'], 'arguments.plan')
-  assertDomain(input.schemaVersion === 1 || input.schemaVersion === 2, 'INVALID_ARGUMENT', 'arguments.plan.schemaVersion is invalid')
+  const input = record(value, ['schemaVersion', 'objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'], 'arguments.plan')
+  assertDomain(input.schemaVersion === 3, 'INVALID_ARGUMENT', 'arguments.plan.schemaVersion must be the current StoryPlan v3 contract')
+  const objective = boundedText(input.objective, 'arguments.plan.objective', 160)
+  const strategicObjective = resolveStrategicObjective(objective)
+  const desiredActionRef = record(input.desiredActionRef, ['schemaVersion', 'id', 'actionHash', 'action'], 'arguments.plan.desiredActionRef')
+  let expectedActionRef
+  try {
+    expectedActionRef = createDesiredActionReference(parseDesiredAction(desiredActionRef.action, strategicObjective.id))
+  } catch (error) {
+    if (error instanceof DomainError) throw new DomainError('INVALID_ARGUMENT', 'arguments.plan.desiredActionRef is invalid')
+    throw error
+  }
+  assertDomain(
+    desiredActionRef.schemaVersion === expectedActionRef.schemaVersion &&
+      desiredActionRef.id === expectedActionRef.id && desiredActionRef.actionHash === expectedActionRef.actionHash,
+    'INVALID_ARGUMENT',
+    'arguments.plan.desiredActionRef failed canonical validation',
+  )
+  const treatmentPlanRef = record(input.treatmentPlanRef, ['id', 'schemaVersion', 'contentHash'], 'arguments.plan.treatmentPlanRef')
+  const parsedTreatmentPlanRef = Object.freeze({
+    id: identity(treatmentPlanRef.id, 'arguments.plan.treatmentPlanRef.id'),
+    schemaVersion: safeInteger(treatmentPlanRef.schemaVersion, 'arguments.plan.treatmentPlanRef.schemaVersion', 1),
+    contentHash: typeof treatmentPlanRef.contentHash === 'string' && HASH.test(treatmentPlanRef.contentHash)
+      ? treatmentPlanRef.contentHash
+      : (() => { throw new DomainError('INVALID_ARGUMENT', 'arguments.plan.treatmentPlanRef.contentHash is invalid') })(),
+  })
   const target = record(input.targetDurationMs, ['min', 'max'], 'arguments.plan.targetDurationMs')
-  assertDomain(typeof target.min === 'number' && Number.isFinite(target.min) && target.min >= 0 && typeof target.max === 'number' && Number.isFinite(target.max) && target.max >= target.min, 'INVALID_ARGUMENT', 'arguments.plan.targetDurationMs is invalid')
+  const targetMin = safeInteger(target.min, 'arguments.plan.targetDurationMs.min', 1)
+  const targetMax = safeInteger(target.max, 'arguments.plan.targetDurationMs.max', targetMin)
   assertDomain(Array.isArray(input.acts) && input.acts.length >= 1 && input.acts.length <= 20, 'INVALID_ARGUMENT', 'arguments.plan.acts must contain 1 to 20 acts')
   const acts = input.acts.map((value, index) => {
     const act = record(value, ['id', 'role', 'blockIds'], `arguments.plan.acts[${index}]`)
@@ -227,7 +249,9 @@ function parseStoryPlan(value: unknown): StoryPlan {
     assertDomain(['hook', 'context', 'argument', 'proof', 'cta'].includes(String(block.role)), 'INVALID_ARGUMENT', `${field}.role is invalid`)
     assertDomain(['source-video', 'voiceover', 'cold-open-reference'].includes(String(block.presentation)), 'INVALID_ARGUMENT', `${field}.presentation is invalid`)
     const duration = record(block.durationTargetMs, ['min', 'ideal', 'max'], `${field}.durationTargetMs`)
-    assertDomain([duration.min, duration.ideal, duration.max].every((item) => typeof item === 'number' && Number.isFinite(item)), 'INVALID_ARGUMENT', `${field}.durationTargetMs is invalid`)
+    const durationMin = safeInteger(duration.min, `${field}.durationTargetMs.min`, 1)
+    const durationIdeal = safeInteger(duration.ideal, `${field}.durationTargetMs.ideal`, durationMin)
+    const durationMax = safeInteger(duration.max, `${field}.durationTargetMs.max`, durationIdeal)
     const content = record(block.content, ['claimIds', 'qualifierIds', 'proofIds', 'ctaId'], `${field}.content`)
     return Object.freeze({
       id: identity(block.id, `${field}.id`),
@@ -236,7 +260,7 @@ function parseStoryPlan(value: unknown): StoryPlan {
       intent: boundedText(block.intent, `${field}.intent`, 500),
       dependencies: identities(block.dependencies, `${field}.dependencies`),
       sourceCandidateIds: identities(block.sourceCandidateIds, `${field}.sourceCandidateIds`),
-      durationTargetMs: Object.freeze({ min: duration.min as number, ideal: duration.ideal as number, max: duration.max as number }),
+      durationTargetMs: Object.freeze({ min: durationMin, ideal: durationIdeal, max: durationMax }),
       content: Object.freeze({
         claimIds: identities(content.claimIds, `${field}.content.claimIds`),
         qualifierIds: identities(content.qualifierIds, `${field}.content.qualifierIds`),
@@ -247,36 +271,94 @@ function parseStoryPlan(value: unknown): StoryPlan {
       ...(block.sourceRangeId === undefined ? {} : { sourceRangeId: identity(block.sourceRangeId, `${field}.sourceRangeId`) }),
     })
   })
+  const sourceRanges = parseBoundedObjects(input.sourceRanges, 'arguments.plan.sourceRanges', (item, field) => {
+    const range = record(item, ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef', 'consentRef'], field)
+    const startMs = safeInteger(range.startMs, `${field}.startMs`)
+    const endMs = safeInteger(range.endMs, `${field}.endMs`, startMs + 1)
+    return Object.freeze({ id: identity(range.id, `${field}.id`), artifactId: identity(range.artifactId, `${field}.artifactId`), startMs, endMs, rightsRef: identity(range.rightsRef, `${field}.rightsRef`), ...(range.consentRef === undefined ? {} : { consentRef: identity(range.consentRef, `${field}.consentRef`) }) })
+  })
+  const sourceCandidates = parseBoundedObjects(input.sourceCandidates, 'arguments.plan.sourceCandidates', (item, field) => {
+    const source = record(item, ['id', 'sourceRangeId', 'purpose', 'rank'], field)
+    assertDomain(['hook', 'context', 'argument', 'proof', 'cta'].includes(String(source.purpose)), 'INVALID_ARGUMENT', `${field}.purpose is invalid`)
+    return Object.freeze({ id: identity(source.id, `${field}.id`), sourceRangeId: identity(source.sourceRangeId, `${field}.sourceRangeId`), purpose: source.purpose as 'hook' | 'context' | 'argument' | 'proof' | 'cta', rank: safeInteger(source.rank, `${field}.rank`, 1) })
+  })
+  const qualifiers = parseBoundedObjects(input.qualifiers, 'arguments.plan.qualifiers', (item, field) => {
+    const qualifier = record(item, ['id', 'text'], field)
+    return Object.freeze({ id: identity(qualifier.id, `${field}.id`), text: boundedText(qualifier.text, `${field}.text`, 1024) })
+  }, true)
+  const claims = parseBoundedObjects(input.claims, 'arguments.plan.claims', (item, field) => {
+    const claim = record(item, ['id', 'text', 'qualifierIds', 'proofContextIds'], field)
+    return Object.freeze({ id: identity(claim.id, `${field}.id`), text: boundedText(claim.text, `${field}.text`, 2048), qualifierIds: identities(claim.qualifierIds, `${field}.qualifierIds`), proofContextIds: identities(claim.proofContextIds, `${field}.proofContextIds`) })
+  }, true)
+  const proofContexts = parseBoundedObjects(input.proofContexts, 'arguments.plan.proofContexts', (item, field) => {
+    const proof = record(item, ['id', 'claimIds', 'sourceCandidateIds', 'attribution'], field)
+    return Object.freeze({ id: identity(proof.id, `${field}.id`), claimIds: identities(proof.claimIds, `${field}.claimIds`), sourceCandidateIds: identities(proof.sourceCandidateIds, `${field}.sourceCandidateIds`), attribution: boundedText(proof.attribution, `${field}.attribution`, 1024) })
+  }, true)
   const plan = Object.freeze({
-    schemaVersion: input.schemaVersion,
-    objective: boundedText(input.objective, 'arguments.plan.objective', 160),
-    ...(input.desiredActionRef === undefined ? {} : { desiredActionRef: structuredClone(input.desiredActionRef) as StoryPlan['desiredActionRef'] }),
-    targetDurationMs: Object.freeze({ min: target.min as number, max: target.max as number }),
+    schemaVersion: 3 as const,
+    objective,
+    desiredActionRef: expectedActionRef,
+    treatmentPlanRef: parsedTreatmentPlanRef,
+    targetDurationMs: Object.freeze({ min: targetMin, max: targetMax }),
     acts: Object.freeze(acts),
     blocks: Object.freeze(blocks),
+    sourceRanges,
+    sourceCandidates,
+    qualifiers,
+    claims,
+    proofContexts,
   }) as StoryPlan
   validateStoryPlan(plan)
   return plan
 }
 
-function parseCandidate(value: unknown, index: number): DirectorMontageCandidate {
+function parseBoundedObjects<T>(value: unknown, field: string, parse: (item: unknown, field: string) => T, allowEmpty = false): readonly T[] {
+  assertDomain(Array.isArray(value) && value.length <= 100 && (allowEmpty || value.length >= 1), 'INVALID_ARGUMENT', `${field} must contain ${allowEmpty ? 'at most' : '1 to'} 100 items`)
+  return Object.freeze(value.map((item, index) => parse(item, `${field}[${index}]`)))
+}
+
+function parseCandidate(value: unknown, index: number): MontageCandidateSeed {
   const field = `arguments.candidates[${index}]`
-  const input = record(value, ['id', 'hookId', 'blockOrder', 'assetIds', 'patternBreakIds', 'confidence', 'hardGateIssues', 'rubricSignals'], field)
+  const input = record(value, ['schemaVersion', 'id', 'seed', 'storyPlanRef', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals', 'seedHash'], field)
+  const storyPlanRef = record(input.storyPlanRef, ['id', 'hash'], `${field}.storyPlanRef`)
+  const hook = record(input.hook, ['id', 'selfContained'], `${field}.hook`)
+  assertDomain(typeof hook.selfContained === 'boolean', 'INVALID_ARGUMENT', `${field}.hook.selfContained is invalid`)
   const rubricSignals = openRecord(input.rubricSignals, `${field}.rubricSignals`)
   const normalizedSignals = Object.fromEntries(Object.entries(rubricSignals).map(([key, signal]) => {
     assertDomain(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(key) && typeof signal === 'number' && Number.isFinite(signal), 'INVALID_ARGUMENT', `${field}.rubricSignals is invalid`)
     return [key, signal]
   }))
-  return Object.freeze({
+  assertDomain(Array.isArray(input.permittedBlockOrders), 'INVALID_ARGUMENT', `${field}.permittedBlockOrders is invalid`)
+  assertDomain(Array.isArray(input.assets), 'INVALID_ARGUMENT', `${field}.assets is invalid`)
+  assertDomain(Array.isArray(input.patternBreaks), 'INVALID_ARGUMENT', `${field}.patternBreaks is invalid`)
+  const canonical = createMontageCandidateSeed({
     id: identity(input.id, `${field}.id`),
-    hookId: identity(input.hookId, `${field}.hookId`),
-    blockOrder: stringArray(input.blockOrder, `${field}.blockOrder`),
-    assetIds: identities(input.assetIds, `${field}.assetIds`),
-    patternBreakIds: identities(input.patternBreakIds, `${field}.patternBreakIds`),
+    seed: identity(input.seed, `${field}.seed`),
+    storyPlanRef: { id: identity(storyPlanRef.id, `${field}.storyPlanRef.id`), hash: boundedHash(storyPlanRef.hash, `${field}.storyPlanRef.hash`) },
+    mode: input.mode as MontageCandidateSeed['mode'],
+    hook: { id: identity(hook.id, `${field}.hook.id`), selfContained: hook.selfContained },
+    blockOrder: identities(input.blockOrder, `${field}.blockOrder`),
+    permittedBlockOrders: Object.freeze(input.permittedBlockOrders.map((order, orderIndex) => identities(order, `${field}.permittedBlockOrders[${orderIndex}]`))),
+    assets: Object.freeze(input.assets.map((value, assetIndex) => {
+      const asset = record(value, ['id', 'rightsApproved'], `${field}.assets[${assetIndex}]`)
+      assertDomain(typeof asset.rightsApproved === 'boolean', 'INVALID_ARGUMENT', `${field}.assets[${assetIndex}].rightsApproved is invalid`)
+      return Object.freeze({ id: identity(asset.id, `${field}.assets[${assetIndex}].id`), rightsApproved: asset.rightsApproved })
+    })),
+    patternBreaks: Object.freeze(input.patternBreaks.map((value, breakIndex) => {
+      const item = record(value, ['id', 'atMs', 'group'], `${field}.patternBreaks[${breakIndex}]`)
+      return Object.freeze({ id: identity(item.id, `${field}.patternBreaks[${breakIndex}].id`), atMs: safeInteger(item.atMs, `${field}.patternBreaks[${breakIndex}].atMs`), group: identity(item.group, `${field}.patternBreaks[${breakIndex}].group`) })
+    })),
+    maximumPatternBreaks: safeInteger(input.maximumPatternBreaks, `${field}.maximumPatternBreaks`),
     confidence: finiteUnit(input.confidence, `${field}.confidence`),
-    hardGateIssues: stringArray(input.hardGateIssues, `${field}.hardGateIssues`),
-    rubricSignals: Object.freeze(normalizedSignals),
+    rubricSignals: Object.freeze(normalizedSignals) as MontageCandidateSeed['rubricSignals'],
   })
+  assertDomain(input.schemaVersion === canonical.schemaVersion && input.seedHash === canonical.seedHash, 'INVALID_ARGUMENT', `${field} failed canonical hash validation`)
+  return canonical
+}
+
+function boundedHash(value: unknown, field: string): string {
+  assertDomain(typeof value === 'string' && HASH.test(value), 'INVALID_ARGUMENT', `${field} must be a lowercase SHA-256`)
+  return value
 }
 
 function parseArguments(name: DirectorToolName, value: unknown): DirectorToolArguments[DirectorToolName] {
@@ -304,12 +386,13 @@ function parseArguments(name: DirectorToolName, value: unknown): DirectorToolArg
       return [key, weight]
     }))
     assertDomain(Object.keys(normalizedWeights).length >= 1, 'INVALID_ARGUMENT', 'arguments.rubric.weights cannot be empty')
+    assertDomain(rubric.id === MONTAGE_RUBRIC.id && JSON.stringify(normalizedWeights) === JSON.stringify(MONTAGE_RUBRIC.weights), 'INVALID_ARGUMENT', 'arguments.rubric must match the canonical montage rubric')
     const candidates = input.candidates.map(parseCandidate)
     assertDomain(new Set(candidates.map((candidate) => candidate.id)).size === candidates.length, 'INVALID_ARGUMENT', 'arguments.candidates contains duplicate ids')
     return Object.freeze({
       candidates: Object.freeze(candidates),
       rubric: Object.freeze({ id: identity(rubric.id, 'arguments.rubric.id'), weights: Object.freeze(normalizedWeights) }),
-      minimumConfidence: finiteUnit(input.minimumConfidence, 'arguments.minimumConfidence'),
+      minimumConfidence: (() => { const value = finiteUnit(input.minimumConfidence, 'arguments.minimumConfidence'); assertDomain(value === MONTAGE_RUBRIC.minimumConfidence, 'INVALID_ARGUMENT', 'arguments.minimumConfidence must match the canonical montage rubric'); return value })(),
     })
   }
   const input = record(value, ['operations', 'assetIds', 'rationale'], 'arguments')
@@ -335,7 +418,7 @@ function parseArguments(name: DirectorToolName, value: unknown): DirectorToolArg
 function referencedAssetIds(call: DirectorToolCall): readonly string[] {
   if (call.name === 'create-story-plan' || call.name === 'propose-patch') return call.arguments.assetIds
   if (call.name === 'propose-asset') return Object.freeze([call.arguments.assetId])
-  if (call.name === 'evaluate-candidate') return Object.freeze([...new Set(call.arguments.candidates.flatMap((candidate) => candidate.assetIds))].sort())
+  if (call.name === 'evaluate-candidate') return Object.freeze([...new Set(call.arguments.candidates.flatMap((candidate) => candidate.assets.map(({ id }) => id)))].sort())
   return Object.freeze([])
 }
 

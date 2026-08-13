@@ -564,7 +564,7 @@ test('the current public surface has no unguarded state replacement', () => {
     return result
   }, {})
   assert.deepEqual(counts, {
-    'read-only-preflight': 3,
+    'read-only-preflight': 4,
     'explicit-precondition': 10,
     'idempotent-create': 53,
     'natural-idempotent-create': 3,

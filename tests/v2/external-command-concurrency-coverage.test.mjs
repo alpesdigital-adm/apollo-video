@@ -379,6 +379,6 @@ test('the concurrency audit has no unclassified durable gap', () => {
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
-    3,
+    4,
   )
 })

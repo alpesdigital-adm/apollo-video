@@ -16,6 +16,7 @@ import {
   DIRECTOR_TOOL_NAMES,
 } from '../../src/v2/domain/director-tools.ts'
 import { STORY_GOLDEN_FIXTURES } from '../../src/v2/domain/story-plan.ts'
+import { createMontageCandidateSeed, MONTAGE_RUBRIC } from '../../src/v2/domain/montage-candidate.ts'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const workspaceId = 'workspace-director-tools'
@@ -44,22 +45,26 @@ const call = (id, name, argumentsValue, estimatedCost, assetIds = [], overrides 
   ...overrides,
 })
 
-const candidate = {
+const candidate = createMontageCandidateSeed({
   id: 'candidate-director-1',
-  hookId: 'hook-director-1',
+  seed: 'seed-director-1',
+  storyPlanRef: { id: 'story-plan-director-1', hash: 'b'.repeat(64) },
+  mode: 'chronological',
+  hook: { id: 'hook-director-1', selfContained: true },
   blockOrder: ['hook', 'argument', 'proof', 'cta'],
-  assetIds: ['asset-eligible'],
-  patternBreakIds: ['pattern-break-1'],
+  permittedBlockOrders: [['hook', 'argument', 'proof', 'cta']],
+  assets: [{ id: 'asset-eligible', rightsApproved: true }],
+  patternBreaks: [{ id: 'pattern-break-1', atMs: 1000, group: 'group-hook' }],
+  maximumPatternBreaks: 3,
   confidence: 0.91,
-  hardGateIssues: [],
-  rubricSignals: { clarity: 0.9, continuity: 0.8 },
-}
+  rubricSignals: { narrative: 0.9, objective: 0.8, continuity: 0.8, evidence: 0.85 },
+})
 
 const validCalls = () => [
   call('director-call-search', 'search-media', { query: 'proof document', limit: 10 }, 0.5),
   call('director-call-plan', 'create-story-plan', { plan: STORY_GOLDEN_FIXTURES.linear, assetIds: ['asset-eligible'] }, 1, ['asset-eligible']),
   call('director-call-asset', 'propose-asset', { assetId: 'asset-eligible', planNodeId: 'proof-node-1', purpose: 'Support the claim' }, 0.25, ['asset-eligible']),
-  call('director-call-evaluate', 'evaluate-candidate', { candidates: [candidate], rubric: { id: 'rubric-director-1', weights: { clarity: 0.6, continuity: 0.4 } }, minimumConfidence: 0.7 }, 0.75, ['asset-eligible']),
+  call('director-call-evaluate', 'evaluate-candidate', { candidates: [candidate], rubric: { id: MONTAGE_RUBRIC.id, weights: MONTAGE_RUBRIC.weights }, minimumConfidence: MONTAGE_RUBRIC.minimumConfidence }, 0.75, ['asset-eligible']),
   call('director-call-patch', 'propose-patch', { operations: [{ operation: 'replace', path: '/blocks/proof/assetId', value: 'asset-eligible' }], assetIds: ['asset-eligible'], rationale: 'Use the strongest eligible proof.' }, 1, ['asset-eligible']),
 ]
 

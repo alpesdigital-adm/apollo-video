@@ -173,8 +173,6 @@ export function createLocalDirectorProposalServices(dependencies: {
         kind: 'candidate-evaluation',
         evaluation: selectMontageCandidate({
           seeds: input.arguments.candidates,
-          rubric: input.arguments.rubric,
-          minimumConfidence: input.arguments.minimumConfidence,
         }),
       })
     },
