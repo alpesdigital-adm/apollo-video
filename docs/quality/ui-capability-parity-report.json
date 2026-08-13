@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 236,
-    "operableCapabilities": 236,
-    "publicContractCapabilities": 236,
+    "registeredCapabilities": 238,
+    "operableCapabilities": 238,
+    "publicContractCapabilities": 238,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3110,6 +3110,17 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.reframe-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/reframe-plans",
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.semantic-search.documents.catalog",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/semantic-search/documents",
@@ -3885,6 +3896,17 @@
       "endpoint": "POST /v1/projects/{projectId}/director-budgets/{runId}/actions",
       "inputSchemaRef": "apollo://schemas/director-budget-action-request/v1",
       "outputSchemaRef": "apollo://schemas/director-budget-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.responsive-placement.solve",
+      "exposure": "public",
+      "endpoint": "POST /v1/responsive-placement/solve",
+      "inputSchemaRef": "apollo://schemas/responsive-placement-request/v1",
+      "outputSchemaRef": "apollo://schemas/responsive-placement-result/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
