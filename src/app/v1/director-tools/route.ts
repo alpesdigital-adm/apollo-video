@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
+import { directorBudgetService } from '@/v2/application/director-budgets'
 import {
   createDirectorToolContextResolver,
   createLocalDirectorProposalServices,
@@ -12,11 +14,12 @@ import { DomainError } from '@/v2/domain/errors'
 import { createSemanticEmbeddingProvider } from '@/v2/infrastructure/semantic-embedding-provider'
 import {
   createAssetRightsRepository,
+  createDirectorBudgetRepository,
   createDirectorRunRepository,
   createSandboxProviderExecutionRepository,
   createSemanticSearchRepository,
 } from '@/v2/infrastructure/repository-factory'
-import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import { assertExternalMutationOrigin, authenticateExternalRequest } from '@/v2/public-api/authentication'
 import {
   parseDirectorToolExecutionBody,
   presentDirectorToolExecution,
@@ -42,6 +45,7 @@ export async function POST(request: NextRequest) {
   try {
     const actor = await authenticateExternalRequest(request)
     requireScope(actor, 'projects:write')
+    assertExternalMutationOrigin(request, actor)
     let raw: unknown
     try {
       raw = await request.json()
@@ -62,8 +66,13 @@ export async function POST(request: NextRequest) {
     const execute = executeDirectorToolsService({
       contexts: createDirectorToolContextResolver({
         directorRuns: createDirectorRunRepository(),
+        budgets: createDirectorBudgetRepository(),
         rights: createAssetRightsRepository(),
         clock: () => new Date(),
+      }),
+      budgets: directorBudgetService({
+        repository: createDirectorBudgetRepository(),
+        createId: (kind) => `director-${kind}-${randomUUID()}`,
       }),
       services: createLocalDirectorProposalServices({
         searchMedia: (input) => search({
@@ -81,6 +90,10 @@ export async function POST(request: NextRequest) {
     const result = await execute({
       workspaceId: actor.workspaceId,
       projectId: body.projectId,
+      runId: body.runId,
+      expectedBudgetRevision: body.baseRevision,
+      actor,
+      idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
       calls: body.calls,
     })
     return NextResponse.json(

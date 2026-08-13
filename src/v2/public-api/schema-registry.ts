@@ -15819,6 +15819,13 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       calls: { type: 'array', minItems: 1, maxItems: 20, items: directorToolCallSchema },
     },
   }),
+  defineSchema('director-tool-execution-request', 3, 'Strictly typed Director tool execution request bound to one durable budget revision', {
+    type: 'object', additionalProperties: false, required: ['projectId', 'runId', 'baseRevision', 'calls'],
+    properties: {
+      projectId: idSchema, runId: idSchema, baseRevision: { type: 'integer', minimum: 1 },
+      calls: { type: 'array', minItems: 1, maxItems: 20, items: directorToolCallSchema },
+    },
+  }),
   defineSchema('director-tool-execution', 1, 'Accepted Director tool execution', successSchema({
     type: 'object', additionalProperties: false, required: ['schemaVersion', 'results', 'budgetRemaining'],
     properties: {
@@ -15835,6 +15842,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
       },
       budgetRemaining: { type: 'number', minimum: 0, maximum: 5 },
+    },
+  })),
+  defineSchema('director-tool-execution', 2, 'Accepted Director tool execution with durable estimated and realized budget evidence', successSchema({
+    type: 'object', additionalProperties: false, required: ['schemaVersion', 'results', 'budgetRemaining', 'budget'],
+    properties: {
+      schemaVersion: { const: 'director-tool-execution/v1' },
+      results: {
+        type: 'array', minItems: 1, maxItems: 20,
+        items: { type: 'object', additionalProperties: false, required: ['callId', 'tool', 'status', 'chargedCost', 'result'], properties: { callId: idSchema, tool: directorToolNameSchema, status: { const: 'accepted' }, chargedCost: { type: 'number', minimum: 0, maximum: 5 }, result: {} } },
+      },
+      budgetRemaining: { type: 'number', minimum: 0 },
+      budget: { type: 'object', additionalProperties: false, required: ['revision', 'status', 'estimated', 'realized'], properties: { revision: { type: 'integer', minimum: 1 }, status: { enum: ['active', 'budget_exhausted', 'cancelled', 'completed'] }, estimated: directorBudgetUsageSchema, realized: directorBudgetUsageSchema } },
     },
   })),
   defineSchema('agent-tool-list', 1, 'Scope-filtered agent tool list',

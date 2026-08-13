@@ -6,8 +6,8 @@ import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const coverage = Object.freeze({
   'apollo.director-tools.execute': {
-    mode: 'read-only-preflight',
-    evidence: 'F1.024 preflights the complete bounded batch against server-derived scope, exact rights snapshots, fixed tool costs and current immutable base before any application handler; handlers return search results or proposals only',
+    mode: 'revision-bound-action',
+    evidence: 'Wave7 requires baseRevision for the durable Director run budget and atomically reserves before any paid application handler',
   },
   'apollo.api-access.workspace.change': {
     mode: 'explicit-precondition', mechanism: 'body-revision',
@@ -570,13 +570,13 @@ test('the current public surface has no unguarded state replacement', () => {
     return result
   }, {})
   assert.deepEqual(counts, {
-    'read-only-preflight': 4,
+    'read-only-preflight': 3,
     'explicit-precondition': 10,
     'idempotent-create': 54,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
-    'revision-bound-action': 11,
+    'revision-bound-action': 12,
     'base-version-bound-action': 6,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

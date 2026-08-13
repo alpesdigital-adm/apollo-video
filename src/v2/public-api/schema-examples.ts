@@ -7526,6 +7526,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         }],
       },
     ],
+    'apollo://schemas/director-tool-execution-request/v3': [
+      {
+        projectId, runId: 'director-run-example-1', baseRevision: 1,
+        calls: [{ id: 'director-tool-call-example-3', name: 'search-media', arguments: { query: 'product proof', limit: 10 }, scope: { workspaceId, projectId }, baseVersionId: 'project-version-example-1', estimatedCost: 0.5, rights: [] }],
+      },
+    ],
     'apollo://schemas/director-tool-execution/v1': [
       {
         data: {
@@ -7537,6 +7543,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           budgetRemaining: 4.5,
         },
         meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/director-tool-execution/v2': [
+      {
+        data: {
+          schemaVersion: 'director-tool-execution/v1',
+          results: [{ callId: 'director-tool-call-example-3', tool: 'search-media', status: 'accepted', chargedCost: 0.5, result: { kind: 'search-results', value: { results: [] } } }],
+          budgetRemaining: 4.5,
+          budget: { revision: 3, status: 'active', estimated: { spendMinorUnits: 0, elapsedMs: 0, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 }, realized: { spendMinorUnits: 50, elapsedMs: 120, tokens: 0, generations: 0, candidates: 0, criticRounds: 0 } },
+        }, meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/agent-tool-list/v1': [
