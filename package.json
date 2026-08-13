@@ -26,6 +26,7 @@
     "test:integration:media": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/ffmpeg-ingest.integration.mjs tests/v2/ffmpeg-color-pipeline.integration.mjs",
     "test:integration:media-input": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/media-input-runtime.integration.mjs",
     "test:integration:editorial-renderer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/ffmpeg-editorial-proxy-renderer.integration.mjs",
+    "test:integration:reframe": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/reframe-plan-render.integration.mjs",
     "test:integration:output-formats": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/output-formats-render.integration.mjs",
     "test:integration:responsive-placement": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/responsive-placement-visual.integration.mjs",
     "test:integration:transcript-rate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/transcript-rate-render.integration.mjs",

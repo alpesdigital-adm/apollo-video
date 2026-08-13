@@ -17094,6 +17094,41 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('reframe-plan-request', 1, 'Create one crop plan from immutable observation evidence', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'format', 'observationSet'],
+    properties: {
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+      observationSet: {
+        type: 'object', additionalProperties: false,
+        required: ['schemaVersion', 'id', 'sourceArtifactId', 'sourceManifestId', 'sourceSha256', 'sourceWidth', 'sourceHeight', 'fps', 'durationFrames', 'observations', 'contentHash'],
+        properties: {
+          schemaVersion: { const: 'reframe-observations/v1' }, id: idSchema, sourceArtifactId: idSchema, sourceManifestId: idSchema,
+          sourceSha256: sha256Schema, sourceWidth: { type: 'integer', minimum: 2, maximum: 16384 }, sourceHeight: { type: 'integer', minimum: 2, maximum: 16384 },
+          fps: { type: 'integer', minimum: 1, maximum: 120 }, durationFrames: { type: 'integer', minimum: 1, maximum: 2592000 }, contentHash: sha256Schema,
+          observations: { type: 'array', minItems: 1, maxItems: 10000, items: {
+            type: 'object', additionalProperties: false, required: ['id', 'subjectId', 'kind', 'startFrame', 'endFrame', 'bounds', 'confidence', 'priority', 'critical'],
+            properties: { id: idSchema, subjectId: idSchema, kind: { enum: ['face', 'object', 'screen', 'region-of-interest'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, bounds: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } }, confidence: { type: 'number', minimum: 0, maximum: 1 }, priority: { type: 'integer', minimum: 0, maximum: 100 }, critical: { type: 'boolean' } },
+          } },
+        },
+      },
+      overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'format', 'startFrame', 'endFrame', 'crop'], properties: { id: idSchema, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, crop: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } } } },
+      maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
+    },
+  }),
+  defineSchema('reframe-plan', 1, 'Content-addressed per-format reframe plan with localized fallbacks', successSchema({
+    type: 'object', additionalProperties: false, required: ['plan'], properties: { plan: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'format', 'observationSetId', 'observationSetHash', 'outputFormatRegistryHash', 'outputPresetHash', 'maxVelocityPerSecond', 'maxAccelerationPerSecondSquared', 'safetyMargin', 'segments', 'issues', 'planHash'],
+      properties: {
+        schemaVersion: { const: 'reframe-plan/v1' }, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, observationSetId: idSchema,
+        observationSetHash: sha256Schema, outputFormatRegistryHash: sha256Schema, outputPresetHash: sha256Schema, planHash: sha256Schema,
+        maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
+        segments: { type: 'array', minItems: 1, maxItems: 20000, items: { type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame', 'mode', 'crop', 'source', 'observationIds', 'subjectIds', 'velocity'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, mode: { enum: ['crop', 'contain'] }, crop: { oneOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } }] }, source: { enum: ['face', 'object', 'screen', 'region-of-interest', 'multiple-subjects', 'manual', 'fallback'] }, observationIds: { type: 'array', uniqueItems: true, items: idSchema }, subjectIds: { type: 'array', uniqueItems: true, items: idSchema }, velocity: { type: 'object', additionalProperties: false, required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' } } } } } },
+        issues: { type: 'array', maxItems: 20000, items: { type: 'object', additionalProperties: false, required: ['code', 'format', 'startFrame', 'endFrame', 'observationIds'], properties: { code: { enum: ['PERCEPTION_UNCERTAIN', 'SUBJECTS_DO_NOT_FIT', 'NO_SUBJECT_OBSERVATION', 'TRACKING_LIMIT_EXCEEDED'] }, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, observationIds: { type: 'array', uniqueItems: true, items: idSchema } } } },
+      },
+    } },
+  })),
   defineSchema('catalog-semantic-search-document-request', 1, 'Catalog one immutable source identity for full-text and semantic retrieval', {
     type: 'object',
     additionalProperties: false,
