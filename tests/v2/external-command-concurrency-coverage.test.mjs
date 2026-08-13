@@ -258,6 +258,9 @@ const coverage = Object.freeze({
   'apollo.projects.images.reuse': {
     mode: 'durable-covered', evidence: 'F1.014 serializable image/analysis/current-rights recheck, immutable purpose lineage, reference-only attachment and bounded serialization retry',
   },
+  'apollo.projects.perception.put': {
+    mode: 'durable-covered', evidence: 'F1.016 actor-bound idempotency plus serializable baseRevision CAS over the latest immutable PerceptionTimeline',
+  },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },

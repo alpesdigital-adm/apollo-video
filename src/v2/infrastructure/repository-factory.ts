@@ -89,6 +89,7 @@ import type { MediaArtifactQueryRepository } from '../application/ports/media-ar
 import type { MediaLibraryRepository } from '../application/ports/media-library-repository.ts'
 import type { MediaSegmentRepository } from '../application/ports/media-segment-repository.ts'
 import type { ImageAnalysisRepository } from '../application/ports/image-analysis-repository.ts'
+import type { PerceptionTimelineRepository } from '../application/ports/perception-timeline-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
@@ -217,6 +218,7 @@ import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.
 import { PrismaAutomaticCatalogRepository } from './prisma/automatic-catalog-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
+import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -753,6 +755,10 @@ export function createMediaSegmentRepository(): MediaSegmentRepository {
 
 export function createImageAnalysisRepository(): ImageAnalysisRepository {
   return new PrismaImageAnalysisRepository(resolveV2Client())
+}
+
+export function createPerceptionTimelineRepository(): PerceptionTimelineRepository {
+  return new PrismaPerceptionTimelineRepository(resolveV2Client())
 }
 
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {

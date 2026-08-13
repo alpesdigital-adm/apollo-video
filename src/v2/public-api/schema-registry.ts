@@ -12609,6 +12609,13 @@ const mediaSegmentDataSchema = {
 const imageBoxSchema = { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: 0, maximum: 1 } } as const
 const imageProducerSchema = { type: 'object', additionalProperties: false, required: ['provider', 'model', 'version'], properties: { provider: { type: 'string', minLength: 1, maxLength: 96 }, model: { type: 'string', minLength: 1, maxLength: 96 }, version: { type: 'string', minLength: 1, maxLength: 96 } } } as const
 const imageEntityObservationSchema = { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['label', 'box', 'confidence'], properties: { label: { type: 'string', minLength: 1, maxLength: 120 }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } } as const
+const perceptionKindSchema = { enum: ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] } as const
+const perceptionRangeSchema = { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } } as const
+const perceptionProvenanceSchema = { type: 'object', additionalProperties: false, required: ['source', 'model', 'version', 'confidence'], properties: { source: { type: 'string', minLength: 1, maxLength: 256 }, model: { type: 'string', minLength: 1, maxLength: 256 }, version: { type: 'string', minLength: 1, maxLength: 256 }, confidence: { type: 'number', minimum: 0, maximum: 1 } } } as const
+const perceptionObservationSchema = { type: 'object', additionalProperties: false, required: ['id', 'kind', 'startMs', 'endMs', 'value', 'provenance'], properties: { id: idSchema, kind: perceptionKindSchema, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 }, value: {}, provenance: perceptionProvenanceSchema } } as const
+const perceptionCoverageInputSchema = { type: 'object', additionalProperties: false, required: ['kind', 'ranges'], properties: { kind: perceptionKindSchema, ranges: { type: 'array', maxItems: 10000, items: perceptionRangeSchema } } } as const
+const perceptionCoverageSchema = { type: 'object', additionalProperties: false, required: ['kind', 'state', 'ranges', 'observedMs'], properties: { kind: perceptionKindSchema, state: { enum: ['absent', 'partial', 'complete'] }, ranges: { type: 'array', maxItems: 10000, items: perceptionRangeSchema }, observedMs: { type: 'integer', minimum: 0 } } } as const
+const perceptionTimelineSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'durationMs', 'observations', 'coverage', 'inventedValues', 'timelineHash'], properties: { schemaVersion: { const: 1 }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 }, timelineHash: sha256Schema } } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('automatic-catalog-record', 1, 'Immutable automatic catalog eligibility and lineage evidence', successSchema({
@@ -12621,6 +12628,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       lineage: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['sourceArtifactId', 'role', 'ordinal'], properties: { sourceArtifactId: idSchema, role: { type: 'string', minLength: 1, maxLength: 64 }, ordinal: { type: 'integer', minimum: 0 }, provider: { type: 'string', minLength: 1, maxLength: 64 }, model: { type: 'string', minLength: 1, maxLength: 128 }, modelVersion: { type: 'string', minLength: 1, maxLength: 64 } } } },
       recordHash: sha256Schema, createdAt: dateTimeSchema,
     },
+  })),
+  defineSchema('perception-timeline-put-request', 1, 'Immutable project perception timeline input', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'baseRevision', 'durationMs', 'observations', 'coverage'],
+    properties: { projectVersionId: idSchema, baseRevision: { oneOf: [{ type: 'null' }, sha256Schema] }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageInputSchema } },
+  }),
+  defineSchema('perception-timeline-put-response', 1, 'Persisted immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'projectId', 'projectVersionId', 'timeline', 'createdAt', 'replayed'],
+    properties: { id: idSchema, projectId: idSchema, projectVersionId: idSchema, timeline: perceptionTimelineSchema, createdAt: dateTimeSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('perception-range-response', 1, 'Range query over one immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'createdAt', 'result'],
+    properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
   })),
   defineSchema('image-analysis', 1, 'Immutable observed and inferred image analysis', successSchema({
     type: 'object', additionalProperties: false,

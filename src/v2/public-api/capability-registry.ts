@@ -1173,6 +1173,25 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.media.catalog-records.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.perception.read', version: '1.0.0', title: 'Query project perception timeline',
+    description: 'Queries immutable multimodal observations and explicit absent, partial or complete coverage by half-open time range and kind.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/perception-range-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/perception' },
+    toolName: 'apollo.projects.perception.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'startMs', required: false, description: 'Inclusive range start in milliseconds.', schema: { type: 'integer', minimum: 0 } },
+      { name: 'endMs', required: false, description: 'Exclusive range end in milliseconds.', schema: { type: 'integer', minimum: 1 } },
+      { name: 'kinds', required: false, description: 'Comma-separated canonical perception kinds.', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.perception.put', version: '1.0.0', title: 'Persist project perception timeline',
+    description: 'Persists one immutable, credential-audited PerceptionTimeline for a V2 ProjectVersion with explicit coverage for all nine kinds.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/perception-timeline-put-request/v1', outputSchemaRef: 'apollo://schemas/perception-timeline-put-response/v1', endpoint: { method: 'PUT', path: '/v1/projects/{projectId}/perception' },
+    toolName: 'apollo.projects.perception.put', supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.media.segments.list', version: '1.0.0', title: 'List virtual media segments',
     description: 'Lists immutable semantic ranges for one workspace media artifact without creating derivative bytes.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['artifacts:read'],

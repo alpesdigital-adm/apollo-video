@@ -36,6 +36,7 @@ model V2Workspace {
   automaticCatalogRecords                V2AutomaticCatalogRecord[]
   imageAnalyses                          V2ImageAnalysis[]
   imageReuseReferences                   V2ImageReuseReference[]
+  perceptionTimelines                    V2PerceptionTimeline[]
   mediaArtifactLifecycleTransitions      V2MediaArtifactLifecycleTransition[]
   mediaUploads                           V2MediaUpload[]
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
@@ -250,6 +251,7 @@ model V2ApiClient {
   authoredReviewAnnotations             V2ReviewAnnotation[]                 @relation("ReviewAnnotationActor")
   authoredReviewPatchProposals          V2ReviewPatchProposal[]              @relation("ReviewPatchProposalActor")
   authoredReviewPatchBatches            V2ReviewPatchBatch[]                 @relation("ReviewPatchBatchActor")
+  authoredPerceptionTimelines            V2PerceptionTimeline[]               @relation("PerceptionTimelineActor")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -604,6 +606,7 @@ model V2Project {
   lutSelectionHead                       V2ProjectLutSelectionHead?
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
+  perceptionTimelines                    V2PerceptionTimeline[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -737,6 +740,7 @@ model V2ProjectVersion {
   proxyReviews                  V2ProxyReview[]
   assetSelections               V2AssetSelection[]
   qualityIterations             V2QualityIteration[]
+  perceptionTimelines           V2PerceptionTimeline[]
   mvpCoreGatesAsPrimary         V2MvpCoreGate[]                 @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion       V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase           V2ProjectLutSelection[]         @relation("ProjectLutSelectionBase")
@@ -1408,6 +1412,40 @@ model V2ImageReuseReference {
   @@index([workspaceId, analysisId])
   @@index([workspaceId, rightsSnapshotId])
   @@map("image_reuse_references")
+}
+
+model V2PerceptionTimeline {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  baseRevision            String?  @db.Char(64)
+  durationMs              Int
+  timelineJson            String   @db.Text
+  timelineHash            String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  recordHash              String   @db.Char(64)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion V2ProjectVersion @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient       @relation("PerceptionTimelineActor", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id])
+  @@index([workspaceId, projectVersionId])
+  @@map("perception_timelines")
 }
 
 model V2MediaArtifactLifecycleTransition {
