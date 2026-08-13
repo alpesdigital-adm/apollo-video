@@ -106,6 +106,16 @@ const productionBriefSchema = {
     readyForExpensiveGeneration: { const: false },
   },
 } as const
+const normalizedInsetsSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['top', 'right', 'bottom', 'left'],
+  properties: {
+    top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+  },
+} as const
 const outputSpecSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea'],
@@ -115,16 +125,7 @@ const outputSpecSchema = {
     aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
     width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 },
     fps: { type: 'integer', minimum: 1, maximum: 120 },
-    safeArea: {
-      type: 'object', additionalProperties: false,
-      required: ['top', 'right', 'bottom', 'left'],
-      properties: {
-        top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-      },
-    },
+    safeArea: normalizedInsetsSchema,
     deliveryProfileId: idSchema,
   },
 } as const
@@ -163,6 +164,37 @@ const outputFormatRegistrySchema = {
       '1:1': outputFormatPresetSchema, '21:9': outputFormatPresetSchema,
     } },
     registryHash: sha256Schema,
+  },
+} as const
+const responsivePlacementElementSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'kind', 'anchor', 'priority', 'readingOrder', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'],
+  properties: {
+    id: idSchema, kind: { enum: ['subtitle', 'logo', 'cta', 'insert'] },
+    anchor: { enum: ['auto', 'top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'] },
+    priority: { type: 'integer', minimum: 0, maximum: 100 }, readingOrder: { type: 'integer', minimum: 0, maximum: 63 },
+    minWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, maxWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+    minHeight: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, maxHeight: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+  },
+} as const
+const responsiveProtectedRegionSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'kind', 'x', 'y', 'width', 'height'],
+  properties: { id: idSchema, kind: { enum: ['face', 'roi', 'reading-order'] }, x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } },
+} as const
+const responsivePlacementRequestSchema = {
+  type: 'object', additionalProperties: false, required: ['outputSpec', 'elements'],
+  properties: { outputSpec: outputSpecSchema, elements: { type: 'array', minItems: 1, maxItems: 64, items: responsivePlacementElementSchema }, protectedRegions: { type: 'array', maxItems: 128, items: responsiveProtectedRegionSchema } },
+} as const
+const responsivePlacementResultSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'policyVersion', 'registryHash', 'format', 'canvas', 'safeArea', 'elements', 'issues', 'reviewRequired', 'placementHash'],
+  properties: {
+    schemaVersion: { const: 'responsive-placement/v1' }, policyVersion: { const: 'responsive-placement-2026-08-v1' }, registryHash: sha256Schema,
+    format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, canvas: { type: 'object', additionalProperties: false, required: ['width', 'height'], properties: { width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 } } },
+    safeArea: normalizedInsetsSchema,
+    elements: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'anchor', 'readingOrder', 'x', 'y', 'width', 'height'], properties: { id: idSchema, kind: { enum: ['subtitle', 'logo', 'cta', 'insert'] }, anchor: { enum: ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'] }, readingOrder: { type: 'integer', minimum: 0, maximum: 63 }, x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } },
+    issues: { type: 'array', maxItems: 256, items: { type: 'object', additionalProperties: false, required: ['elementId', 'code', 'severity', 'reason', 'attemptedAnchors'], properties: { elementId: idSchema, code: { enum: ['IMPOSSIBLE_CONSTRAINTS', 'ANCHOR_FALLBACK', 'FACE_COLLISION_AVOIDED', 'ROI_COLLISION_AVOIDED', 'READING_ORDER_COLLISION_AVOIDED'] }, severity: { enum: ['warning', 'review'] }, reason: { type: 'string', minLength: 1, maxLength: 512 }, attemptedAnchors: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: { type: 'string' } } } } },
+    reviewRequired: { type: 'boolean' }, placementHash: sha256Schema,
   },
 } as const
 const projectBriefSchemaV9 = {
@@ -12753,6 +12785,8 @@ const perceptionTimelineSchema = { type: 'object', additionalProperties: false, 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),
   defineSchema('output-format-registry', 1, 'Content-addressed required output format registry', outputFormatRegistrySchema),
+  defineSchema('responsive-placement-request', 1, 'Format-specific responsive placement request', responsivePlacementRequestSchema),
+  defineSchema('responsive-placement-result', 1, 'Content-addressed responsive placement result', successSchema(responsivePlacementResultSchema)),
   defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
     policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
     seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: { id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } }, blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } }, assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } }, patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } }, maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } } } } },

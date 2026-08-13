@@ -11,6 +11,7 @@ import {
   evaluateEditorialGrammar,
 } from '../domain/editorial-grammar.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
+import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -5095,6 +5096,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
   Object.freeze({
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
     'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
+    'apollo://schemas/responsive-placement-request/v1': [{
+      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
+      protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
+    }],
+    'apollo://schemas/responsive-placement-result/v1': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
     'apollo://schemas/montage-alternatives-created/v1': [{ data: { run: montageRunExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/montage-alternatives-read/v1': [{ data: { run: montageRunExample }, meta: { apiVersion: 'v1' } }],
