@@ -29,6 +29,9 @@ const coverage = Object.freeze({
   'apollo.render-inputs.preflight': {
     mode: 'read-only-preflight', evidence: 'deterministic RenderInput preflight',
   },
+  'apollo.editorial-grammar.evaluate': {
+    mode: 'read-only-preflight', evidence: 'deterministic content-addressed editorial grammar evaluation with no persistence',
+  },
   'apollo.artifacts.render.enqueue': {
     mode: 'idempotent-create', evidence: 'F0-066',
   },
@@ -534,7 +537,7 @@ test('the current public surface has no unguarded state replacement', () => {
     return result
   }, {})
   assert.deepEqual(counts, {
-    'read-only-preflight': 2,
+    'read-only-preflight': 3,
     'explicit-precondition': 9,
     'idempotent-create': 48,
     'natural-idempotent-create': 2,

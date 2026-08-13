@@ -28,6 +28,9 @@ const coverage = Object.freeze({
   'apollo.render-inputs.preflight': {
     mode: 'read-only-deterministic', evidence: 'domain RenderInput preflight contracts',
   },
+  'apollo.editorial-grammar.evaluate': {
+    mode: 'read-only-deterministic', evidence: 'content-addressed editorial grammar preflight contracts with no persistence',
+  },
   'apollo.artifacts.render.enqueue': {
     mode: 'durable-covered', evidence: 'F0-066',
   },
@@ -349,6 +352,6 @@ test('the concurrency audit has no unclassified durable gap', () => {
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
-    2,
+    3,
   )
 })
