@@ -103,11 +103,13 @@ test('T-FR-091 real worker renders person-free voiceover montage to proxy and fi
     const [audio, image, video] = await Promise.all([identity(audioPath), identity(imagePath), identity(videoPath)])
     const plan = createVisualMontagePlan({
       id: 'visual-montage-e2e', workspaceId: 'workspace-visual-montage', projectId: 'project-visual-montage', projectVersionId: 'version-visual-montage',
+      storyPlanRef: { id: 'story-visual-montage', hash: '1'.repeat(64) },
+      montageSelectionRef: { selectionHash: '2'.repeat(64), candidateId: 'candidate-visual-montage', candidateHash: '3'.repeat(64) },
       sourceAudio: { artifactId: 'artifact-narration', artifactKey: 'voice/narration.m4a', ...audio, durationMs: 2700 },
       beatBoundaries: [
-        { endMs: 900, narration: 'Uma ideia ganha forma.', intention: 'Abrir o conceito', content: ['formas abstratas'], style: ['vermelho'] },
-        { endMs: 1800, narration: 'O movimento cria ritmo.', intention: 'Criar progressao', content: ['cor e movimento'], style: ['azul'] },
-        { endMs: 2700, narration: 'A mensagem fica clara.', intention: 'Fechar a mensagem', content: ['tipografia limpa'], style: ['alto contraste'] },
+        { storyBlockId: 'story-block-one', endMs: 900, narration: 'Uma ideia ganha forma.', intention: 'Abrir o conceito', content: ['formas abstratas'], style: ['vermelho'] },
+        { storyBlockId: 'story-block-two', endMs: 1800, narration: 'O movimento cria ritmo.', intention: 'Criar progressao', content: ['cor e movimento'], style: ['azul'] },
+        { storyBlockId: 'story-block-three', endMs: 2700, narration: 'A mensagem fica clara.', intention: 'Fechar a mensagem', content: ['tipografia limpa'], style: ['alto contraste'] },
       ],
       assets: [
         { id: 'abstract-image', artifactId: 'artifact-image', artifactKey: 'visuals/abstract-red.png', ...image, kind: 'image', containsPeople: false, personEvidence: { schemaVersion: 'person-presence-evidence/v1', method: 'synthetic-generation', containsPeople: false, evidenceHash: image.sha256 }, content: ['cor solida'], style: ['abstrato'] },
@@ -121,7 +123,7 @@ test('T-FR-091 real worker renders person-free voiceover montage to proxy and fi
     const inputs = compileVisualMontageRenderInputs({ plan, renderer: rendererIdentity })
     const filesById = new Map([['voiceover-audio', audioPath], ['abstract-image', imagePath], ['abstract-video', videoPath]])
 
-    for (const [kind, spec] of Object.entries(inputs)) {
+    for (const [kind, spec] of [['proxy', inputs.proxy], ['final', inputs.final]]) {
       const { inputHash: _inputHash, composition: compiledComposition, ...portableSpec } = spec
       const { propsHash: _propsHash, ...composition } = compiledComposition
       const { schemaVersion: _outputSchemaVersion, ...output } = spec.output

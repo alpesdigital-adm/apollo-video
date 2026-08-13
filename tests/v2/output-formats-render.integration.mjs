@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,9 +13,8 @@ import { OUTPUT_FORMAT_REGISTRY } from '../../src/v2/domain/output-format-regist
 import { OUTPUT_ASPECT_RATIOS } from '../../src/v2/domain/output-spec.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegPath = require('ffmpeg-static')
-const ffprobePath = require('ffprobe-static').path
+const ffmpegPath = 'ffmpeg'
+const ffprobePath = 'ffprobe'
 const sourceArtifactId = 'artifact-format-smoke-source'
 
 function colorCompilation() {

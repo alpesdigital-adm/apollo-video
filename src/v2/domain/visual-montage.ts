@@ -25,6 +25,7 @@ export interface VisualMontageSourceAsset {
 }
 
 export interface VisualMontageBeatInput {
+  storyBlockId: string
   endMs: number
   narration: string
   intention: string
@@ -34,6 +35,7 @@ export interface VisualMontageBeatInput {
 
 export interface VisualMontageBeat {
   id: string
+  storyBlockId: string
   startMs: number
   endMs: number
   narration: string
@@ -72,6 +74,12 @@ export interface VisualMontagePlan {
   workspaceId: string
   projectId: string
   projectVersionId: string
+  storyPlanRef: Readonly<{ id: string; hash: string }>
+  montageSelectionRef: Readonly<{
+    selectionHash: string
+    candidateId: string
+    candidateHash: string
+  }>
   sourceAudio: Readonly<{ artifactId: string; artifactKey: string; sha256: string; byteSize: number; durationMs: number }>
   fps: 30
   beats: readonly Readonly<VisualMontageBeat>[]
@@ -156,6 +164,8 @@ export function createVisualMontagePlan(input: {
   workspaceId: string
   projectId: string
   projectVersionId: string
+  storyPlanRef: VisualMontagePlan['storyPlanRef']
+  montageSelectionRef: VisualMontagePlan['montageSelectionRef']
   sourceAudio: VisualMontagePlan['sourceAudio']
   beatBoundaries: readonly VisualMontageBeatInput[]
   assets: readonly VisualMontageSourceAsset[]
@@ -178,13 +188,15 @@ export function createVisualMontagePlan(input: {
   let startMs = 0
   const beats = Object.freeze(input.beatBoundaries.map((boundary, index) => {
     if (!Number.isSafeInteger(boundary.endMs) || boundary.endMs <= startMs || boundary.endMs > sourceAudio.durationMs) throw new DomainError('INVALID_ARGUMENT', `beatBoundaries[${index}] is invalid`)
+    const storyBlockId = id(boundary.storyBlockId, `beatBoundaries[${index}].storyBlockId`)
     const beatId = `visual-beat-${index + 1}`
     const duration = boundary.endMs - startMs
     const assetBrief = createAssetBrief({ intention: boundary.intention, content: boundary.content, style: boundary.style, durationMs: { min: Math.max(100, duration - 250), max: Math.min(120_000, duration + 250) }, entry: index === 0 ? 'audio-start' : `beat-${index}-end`, exit: `beat-${index + 1}-end`, prohibited: ['person', 'people', 'human', 'face', 'speaker'] })
-    const beat = Object.freeze({ id: beatId, startMs, endMs: boundary.endMs, narration: text(boundary.narration, `beatBoundaries[${index}].narration`, 120), assetBrief, assetBriefHash: calculateCanonicalHash(assetBrief) })
+    const beat = Object.freeze({ id: beatId, storyBlockId, startMs, endMs: boundary.endMs, narration: text(boundary.narration, `beatBoundaries[${index}].narration`, 120), assetBrief, assetBriefHash: calculateCanonicalHash(assetBrief) })
     startMs = boundary.endMs
     return beat
   }))
+  if (new Set(beats.map(({ storyBlockId }) => storyBlockId)).size !== beats.length) throw new DomainError('INVALID_ARGUMENT', 'visual montage beats must reference unique StoryPlan blocks')
   if (startMs !== sourceAudio.durationMs) throw new DomainError('INVALID_ARGUMENT', 'beats must end exactly at the source audio duration')
   const slots = Object.freeze(beats.map((beat, index): Readonly<VisualMontageSlot> => {
     const kind: VisualMontageSlotKind = index % 3 === 0 ? 'image' : index % 3 === 1 ? 'video' : 'card'
@@ -194,6 +206,8 @@ export function createVisualMontagePlan(input: {
   }))
   const validation = validateVisualMontage({ sourceAudio, beats, slots, assets })
   if (!validation.passed) throw new DomainError('INVALID_ARGUMENT', 'visual montage failed coverage validation', { validation })
-  const core = Object.freeze({ schemaVersion: 'visual-montage-plan/v1' as const, id: id(input.id, 'id'), workspaceId: id(input.workspaceId, 'workspaceId'), projectId: id(input.projectId, 'projectId'), projectVersionId: id(input.projectVersionId, 'projectVersionId'), sourceAudio, fps: 30 as const, beats, slots, assets, validation, audioTimelineHash: calculateCanonicalHash({ artifactId: sourceAudio.artifactId, sha256: sourceAudio.sha256, durationMs: sourceAudio.durationMs }) })
+  const storyPlanRef = Object.freeze({ id: id(input.storyPlanRef.id, 'storyPlanRef.id'), hash: hash(input.storyPlanRef.hash, 'storyPlanRef.hash') })
+  const montageSelectionRef = Object.freeze({ selectionHash: hash(input.montageSelectionRef.selectionHash, 'montageSelectionRef.selectionHash'), candidateId: id(input.montageSelectionRef.candidateId, 'montageSelectionRef.candidateId'), candidateHash: hash(input.montageSelectionRef.candidateHash, 'montageSelectionRef.candidateHash') })
+  const core = Object.freeze({ schemaVersion: 'visual-montage-plan/v1' as const, id: id(input.id, 'id'), workspaceId: id(input.workspaceId, 'workspaceId'), projectId: id(input.projectId, 'projectId'), projectVersionId: id(input.projectVersionId, 'projectVersionId'), storyPlanRef, montageSelectionRef, sourceAudio, fps: 30 as const, beats, slots, assets, validation, audioTimelineHash: calculateCanonicalHash({ artifactId: sourceAudio.artifactId, sha256: sourceAudio.sha256, durationMs: sourceAudio.durationMs }) })
   return Object.freeze({ ...core, planHash: calculateCanonicalHash(core) })
 }
