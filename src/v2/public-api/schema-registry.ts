@@ -12222,6 +12222,20 @@ const colorPipelineCompilationSchema = {
     compilationHash: sha256Schema,
   },
 } as const
+const storyPlanCoreProperties = {
+  objective: strategicObjectiveSchema,
+  desiredActionRef: { type: 'object' },
+  treatmentPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'schemaVersion', 'contentHash'], properties: { id: idSchema, schemaVersion: { type: 'integer', minimum: 1 }, contentHash: sha256Schema } },
+  targetDurationMs: { type: 'object', additionalProperties: false, required: ['min', 'max'], properties: { min: { type: 'integer', minimum: 1 }, max: { type: 'integer', minimum: 1 } } },
+  acts: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'role', 'blockIds'], properties: { id: idSchema, role: { enum: ['opening', 'development', 'resolution'] }, blockIds: { type: 'array', minItems: 1, items: idSchema } } } },
+  blocks: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'actId', 'role', 'intent', 'dependencies', 'sourceCandidateIds', 'durationTargetMs', 'content', 'presentation'], properties: { id: idSchema, actId: idSchema, role: { enum: ['hook', 'context', 'argument', 'proof', 'cta'] }, intent: { type: 'string', minLength: 1, maxLength: 512 }, dependencies: { type: 'array', items: idSchema }, sourceCandidateIds: { type: 'array', minItems: 1, items: idSchema }, durationTargetMs: { type: 'object', additionalProperties: false, required: ['min', 'ideal', 'max'], properties: { min: { type: 'integer', minimum: 1 }, ideal: { type: 'integer', minimum: 1 }, max: { type: 'integer', minimum: 1 } } }, content: { type: 'object', additionalProperties: false, required: ['claimIds', 'qualifierIds', 'proofIds'], properties: { claimIds: { type: 'array', items: idSchema }, qualifierIds: { type: 'array', items: idSchema }, proofIds: { type: 'array', items: idSchema }, ctaId: idSchema } }, presentation: { enum: ['source-video', 'voiceover', 'cold-open-reference'] }, sourceRangeId: idSchema } } },
+  sourceRanges: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef'], properties: { id: idSchema, artifactId: idSchema, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 }, rightsRef: idSchema, consentRef: idSchema } } },
+  sourceCandidates: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'sourceRangeId', 'purpose', 'rank'], properties: { id: idSchema, sourceRangeId: idSchema, purpose: { enum: ['hook', 'context', 'argument', 'proof', 'cta'] }, rank: { type: 'integer', minimum: 1 } } } },
+  qualifiers: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'text'], properties: { id: idSchema, text: { type: 'string', minLength: 1, maxLength: 1024 } } } },
+  claims: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'text', 'qualifierIds', 'proofContextIds'], properties: { id: idSchema, text: { type: 'string', minLength: 1, maxLength: 2048 }, qualifierIds: { type: 'array', items: idSchema }, proofContextIds: { type: 'array', items: idSchema } } } },
+  proofContexts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'claimIds', 'sourceCandidateIds', 'attribution'], properties: { id: idSchema, claimIds: { type: 'array', items: idSchema }, sourceCandidateIds: { type: 'array', items: idSchema }, attribution: { type: 'string', minLength: 1, maxLength: 1024 } } } },
+} as const
+const storyPlanSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId', 'objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts', 'storyHash', 'createdBy', 'createdAt', 'requestFingerprint'], properties: { schemaVersion: { const: 3 }, id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, ...storyPlanCoreProperties, storyHash: sha256Schema, createdBy: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } }, createdAt: dateTimeSchema, requestFingerprint: sha256Schema } } as const
 
 const treatmentPerceptionSummarySchema = {
   type: 'object', additionalProperties: false,
@@ -14005,6 +14019,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['treatmentPlan'],
     properties: { treatmentPlan: persistedTreatmentPlanSchema },
   })),
+  defineSchema('create-story-plan-request', 1, 'Create a validated StoryPlan before EditPlan compilation', { type: 'object', additionalProperties: false, required: ['projectVersionId', 'plan'], properties: { projectVersionId: idSchema, plan: { type: 'object', additionalProperties: false, required: ['objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'], properties: storyPlanCoreProperties } } }),
+  defineSchema('story-plan-mutated', 1, 'Created or replayed immutable StoryPlan', successSchema({ type: 'object', additionalProperties: false, required: ['storyPlan', 'replayed'], properties: { storyPlan: storyPlanSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('story-plan-read', 1, 'Immutable validated StoryPlan', successSchema({ type: 'object', additionalProperties: false, required: ['storyPlan'], properties: { storyPlan: storyPlanSchema } })),
   defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',
     successSchema({
       type: 'object',

@@ -59,6 +59,7 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
+import type { StoryPlanRepository } from '../application/ports/story-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
@@ -167,6 +168,7 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
+import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
@@ -400,6 +402,10 @@ ColorPipelineCompilationRepository {
 
 export function createTreatmentPlanRepository(): TreatmentPlanRepository {
   return new PrismaTreatmentPlanRepository(resolveV2Client())
+}
+
+export function createStoryPlanRepository(): StoryPlanRepository {
+  return new PrismaStoryPlanRepository(resolveV2Client())
 }
 
 export function createWorkspaceLutRepository(): WorkspaceLutRepository {
