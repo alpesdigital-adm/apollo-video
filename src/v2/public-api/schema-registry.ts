@@ -21,6 +21,50 @@ export interface PublicSchemaDefinition {
 const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const directorBudgetUsageSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['spendMinorUnits', 'elapsedMs', 'tokens', 'generations', 'candidates', 'criticRounds'],
+  properties: {
+    spendMinorUnits: { type: 'integer', minimum: 0 },
+    elapsedMs: { type: 'integer', minimum: 0 },
+    tokens: { type: 'integer', minimum: 0 },
+    generations: { type: 'integer', minimum: 0 },
+    candidates: { type: 'integer', minimum: 0 },
+    criticRounds: { type: 'integer', minimum: 0 },
+  },
+} as const
+const directorBudgetCandidateSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'valid', 'score', 'payloadHash'],
+  properties: { id: idSchema, valid: { type: 'boolean' }, score: { type: 'number', minimum: 0, maximum: 1 }, payloadHash: sha256Schema },
+} as const
+const directorBudgetSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'projectId', 'runId', 'revision', 'status', 'estimated', 'realized', 'limits', 'bestResult', 'exhaustedDimension', 'createdAt', 'updatedAt'],
+  properties: {
+    schemaVersion: { const: 1 }, id: idSchema, projectId: idSchema, runId: idSchema,
+    revision: { type: 'integer', minimum: 1 },
+    status: { enum: ['active', 'budget_exhausted', 'cancelled', 'completed'] },
+    estimated: directorBudgetUsageSchema, realized: directorBudgetUsageSchema, limits: directorBudgetUsageSchema,
+    bestResult: { anyOf: [directorBudgetCandidateSchema, { type: 'null' }] },
+    exhaustedDimension: { anyOf: [{ enum: ['spendMinorUnits', 'elapsedMs', 'tokens', 'generations', 'candidates', 'criticRounds'] }, { type: 'null' }] },
+    createdAt: dateTimeSchema, updatedAt: dateTimeSchema,
+  },
+} as const
+const directorBudgetReservationSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'operationKind', 'status', 'estimated', 'realized', 'overrun', 'candidateResult', 'createdAt', 'settledAt'],
+  properties: {
+    schemaVersion: { const: 1 }, id: idSchema, operationKind: idSchema,
+    status: { enum: ['reserved', 'settled', 'cancelled'] },
+    estimated: directorBudgetUsageSchema,
+    realized: { anyOf: [directorBudgetUsageSchema, { type: 'null' }] },
+    overrun: { anyOf: [directorBudgetUsageSchema, { type: 'null' }] },
+    candidateResult: { anyOf: [directorBudgetCandidateSchema, { type: 'null' }] },
+    createdAt: dateTimeSchema,
+    settledAt: { anyOf: [dateTimeSchema, { type: 'null' }] },
+  },
+} as const
 const strategicObjectiveSchema = {
   enum: [
     'discovery', 'awareness', 'warming', 'lead-generation',
@@ -20334,6 +20378,50 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['qualityReport'],
       properties: { qualityReport: directorQualityReportReadSchema },
+    }),
+  ),
+  defineSchema('create-director-budget-request', 1, 'Create versioned limits for one Director run before paid work', {
+    type: 'object', additionalProperties: false, required: ['runId', 'limits'],
+    properties: { runId: idSchema, limits: directorBudgetUsageSchema },
+  }),
+  defineSchema('director-budget-action-request', 1, 'Reserve, settle, cancel or conclude one exact Director budget revision', {
+    type: 'object',
+    required: ['baseRevision'],
+    properties: { baseRevision: { type: 'integer', minimum: 1 } },
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false,
+        required: ['action', 'baseRevision', 'operationKind', 'estimate'],
+        properties: { action: { const: 'reserve' }, baseRevision: { type: 'integer', minimum: 1 }, operationKind: idSchema, estimate: directorBudgetUsageSchema },
+      },
+      {
+        type: 'object', additionalProperties: false,
+        required: ['action', 'baseRevision', 'reservationId', 'actual', 'outcome'],
+        properties: { action: { const: 'settle' }, baseRevision: { type: 'integer', minimum: 1 }, reservationId: idSchema, actual: directorBudgetUsageSchema, outcome: { enum: ['completed', 'cancelled'] }, candidateResult: directorBudgetCandidateSchema },
+      },
+      {
+        type: 'object', additionalProperties: false,
+        required: ['action', 'baseRevision'],
+        properties: { action: { enum: ['cancel-run', 'conclude'] }, baseRevision: { type: 'integer', minimum: 1 } },
+      },
+    ],
+  }),
+  defineSchema('director-budget-read', 1, 'One Director run budget with estimated versus realized usage',
+    successSchema({ type: 'object', additionalProperties: false, required: ['budget'], properties: { budget: directorBudgetSchema } }),
+  ),
+  defineSchema('director-budget-list', 1, 'Project Director budgets with estimated versus realized usage',
+    successSchema({ type: 'object', additionalProperties: false, required: ['budgets'], properties: { budgets: { type: 'array', maxItems: 100, items: directorBudgetSchema } } }),
+  ),
+  defineSchema('director-budget-mutated', 1, 'Versioned Director budget mutation with reservation and replay evidence',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['budget', 'reservation', 'outcome', 'replayed'],
+      properties: {
+        budget: directorBudgetSchema,
+        reservation: { anyOf: [directorBudgetReservationSchema, { type: 'null' }] },
+        outcome: { enum: ['created', 'reserved', 'completed', 'cancelled', 'budget_exhausted', 'completed-with-best-valid', 'no-valid-result'] },
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('project-manual-timeline', 1, 'Current manual editing timeline and immutable history',

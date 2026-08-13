@@ -3285,6 +3285,114 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.director-budgets.actions.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/director-budget-action-request/v1",
+      "outputSchemaRef": "apollo://schemas/director-budget-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/director-budgets/{runId}/actions"
+      },
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.director-budgets.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-director-budget-request/v1",
+      "outputSchemaRef": "apollo://schemas/director-budget-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/director-budgets"
+      },
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.director-budgets.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/director-budget-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/director-budgets"
+      },
+      "toolName": "apollo.projects.director-budgets.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum budgets to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.director-budgets.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/director-budget-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/director-budgets/{runId}"
+      },
+      "toolName": "apollo.projects.director-budgets.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.director-runs.enqueue": {
       "version": "3.0.0",
       "exposure": "public",
@@ -32903,6 +33011,59 @@
         }
       }
     },
+    "apollo://schemas/create-director-budget-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "limits"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "spendMinorUnits",
+            "elapsedMs",
+            "tokens",
+            "generations",
+            "candidates",
+            "criticRounds"
+          ],
+          "properties": {
+            "spendMinorUnits": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "elapsedMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "generations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "candidates": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "criticRounds": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/create-long-form-index-workflow-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -35503,6 +35664,1216 @@
         },
         "confirmed": {
           "const": true
+        }
+      }
+    },
+    "apollo://schemas/director-budget-action-request/v1": {
+      "type": "object",
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action",
+            "baseRevision",
+            "operationKind",
+            "estimate"
+          ],
+          "properties": {
+            "action": {
+              "const": "reserve"
+            },
+            "baseRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "operationKind": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "estimate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "spendMinorUnits",
+                "elapsedMs",
+                "tokens",
+                "generations",
+                "candidates",
+                "criticRounds"
+              ],
+              "properties": {
+                "spendMinorUnits": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "elapsedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "generations": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "candidates": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "criticRounds": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action",
+            "baseRevision",
+            "reservationId",
+            "actual",
+            "outcome"
+          ],
+          "properties": {
+            "action": {
+              "const": "settle"
+            },
+            "baseRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reservationId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actual": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "spendMinorUnits",
+                "elapsedMs",
+                "tokens",
+                "generations",
+                "candidates",
+                "criticRounds"
+              ],
+              "properties": {
+                "spendMinorUnits": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "elapsedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "generations": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "candidates": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "criticRounds": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "outcome": {
+              "enum": [
+                "completed",
+                "cancelled"
+              ]
+            },
+            "candidateResult": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "valid",
+                "score",
+                "payloadHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "valid": {
+                  "type": "boolean"
+                },
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "payloadHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action",
+            "baseRevision"
+          ],
+          "properties": {
+            "action": {
+              "enum": [
+                "cancel-run",
+                "conclude"
+              ]
+            },
+            "baseRevision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "apollo://schemas/director-budget-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "budgets"
+          ],
+          "properties": {
+            "budgets": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "projectId",
+                  "runId",
+                  "revision",
+                  "status",
+                  "estimated",
+                  "realized",
+                  "limits",
+                  "bestResult",
+                  "exhaustedDimension",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": 1
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "budget_exhausted",
+                      "cancelled",
+                      "completed"
+                    ]
+                  },
+                  "estimated": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "spendMinorUnits",
+                      "elapsedMs",
+                      "tokens",
+                      "generations",
+                      "candidates",
+                      "criticRounds"
+                    ],
+                    "properties": {
+                      "spendMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elapsedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "generations": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "candidates": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "criticRounds": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "realized": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "spendMinorUnits",
+                      "elapsedMs",
+                      "tokens",
+                      "generations",
+                      "candidates",
+                      "criticRounds"
+                    ],
+                    "properties": {
+                      "spendMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elapsedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "generations": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "candidates": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "criticRounds": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "spendMinorUnits",
+                      "elapsedMs",
+                      "tokens",
+                      "generations",
+                      "candidates",
+                      "criticRounds"
+                    ],
+                    "properties": {
+                      "spendMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elapsedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "tokens": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "generations": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "candidates": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "criticRounds": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "bestResult": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "valid",
+                          "score",
+                          "payloadHash"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "valid": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "payloadHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "exhaustedDimension": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "spendMinorUnits",
+                          "elapsedMs",
+                          "tokens",
+                          "generations",
+                          "candidates",
+                          "criticRounds"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/director-budget-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "budget",
+            "reservation",
+            "outcome",
+            "replayed"
+          ],
+          "properties": {
+            "budget": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "projectId",
+                "runId",
+                "revision",
+                "status",
+                "estimated",
+                "realized",
+                "limits",
+                "bestResult",
+                "exhaustedDimension",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "budget_exhausted",
+                    "cancelled",
+                    "completed"
+                  ]
+                },
+                "estimated": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "realized": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "bestResult": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "valid",
+                        "score",
+                        "payloadHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "valid": {
+                          "type": "boolean"
+                        },
+                        "score": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "payloadHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "exhaustedDimension": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "spendMinorUnits",
+                        "elapsedMs",
+                        "tokens",
+                        "generations",
+                        "candidates",
+                        "criticRounds"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "reservation": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "operationKind",
+                    "status",
+                    "estimated",
+                    "realized",
+                    "overrun",
+                    "candidateResult",
+                    "createdAt",
+                    "settledAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "operationKind": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "status": {
+                      "enum": [
+                        "reserved",
+                        "settled",
+                        "cancelled"
+                      ]
+                    },
+                    "estimated": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "spendMinorUnits",
+                        "elapsedMs",
+                        "tokens",
+                        "generations",
+                        "candidates",
+                        "criticRounds"
+                      ],
+                      "properties": {
+                        "spendMinorUnits": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "elapsedMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "tokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "generations": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "candidates": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "criticRounds": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "realized": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "spendMinorUnits",
+                            "elapsedMs",
+                            "tokens",
+                            "generations",
+                            "candidates",
+                            "criticRounds"
+                          ],
+                          "properties": {
+                            "spendMinorUnits": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "elapsedMs": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "tokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "generations": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "candidates": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "criticRounds": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "overrun": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "spendMinorUnits",
+                            "elapsedMs",
+                            "tokens",
+                            "generations",
+                            "candidates",
+                            "criticRounds"
+                          ],
+                          "properties": {
+                            "spendMinorUnits": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "elapsedMs": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "tokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "generations": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "candidates": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "criticRounds": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "candidateResult": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "valid",
+                            "score",
+                            "payloadHash"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "valid": {
+                              "type": "boolean"
+                            },
+                            "score": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "payloadHash": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "settledAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outcome": {
+              "enum": [
+                "created",
+                "reserved",
+                "completed",
+                "cancelled",
+                "budget_exhausted",
+                "completed-with-best-valid",
+                "no-valid-result"
+              ]
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/director-budget-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "budget"
+          ],
+          "properties": {
+            "budget": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "projectId",
+                "runId",
+                "revision",
+                "status",
+                "estimated",
+                "realized",
+                "limits",
+                "bestResult",
+                "exhaustedDimension",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "budget_exhausted",
+                    "cancelled",
+                    "completed"
+                  ]
+                },
+                "estimated": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "realized": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "spendMinorUnits",
+                    "elapsedMs",
+                    "tokens",
+                    "generations",
+                    "candidates",
+                    "criticRounds"
+                  ],
+                  "properties": {
+                    "spendMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "generations": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "candidates": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "criticRounds": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "bestResult": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "valid",
+                        "score",
+                        "payloadHash"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "valid": {
+                          "type": "boolean"
+                        },
+                        "score": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "payloadHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "exhaustedDimension": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "spendMinorUnits",
+                        "elapsedMs",
+                        "tokens",
+                        "generations",
+                        "candidates",
+                        "criticRounds"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

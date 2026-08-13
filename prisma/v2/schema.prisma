@@ -85,6 +85,9 @@ model V2Workspace {
   commandArtifactInvalidations           V2CommandArtifactInvalidation[]
   commandArtifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
   directorRuns                           V2DirectorRun[]
+  directorBudgets                        V2DirectorBudget[]
+  directorBudgetReservations             V2DirectorBudgetReservation[]
+  directorBudgetEvents                   V2DirectorBudgetEvent[]
   reviewAnnotations                      V2ReviewAnnotation[]
   renderElementMaps                      V2RenderElementMap[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
@@ -258,6 +261,7 @@ model V2ApiClient {
   authoredReviewPatchProposals          V2ReviewPatchProposal[]              @relation("ReviewPatchProposalActor")
   authoredReviewPatchBatches            V2ReviewPatchBatch[]                 @relation("ReviewPatchBatchActor")
   authoredPerceptionTimelines            V2PerceptionTimeline[]               @relation("PerceptionTimelineActor")
+  authoredDirectorBudgetEvents           V2DirectorBudgetEvent[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -549,6 +553,9 @@ model V2Project {
   commandArtifactInvalidations           V2CommandArtifactInvalidation[]
   commandArtifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
   directorRuns                           V2DirectorRun[]
+  directorBudgets                        V2DirectorBudget[]
+  directorBudgetReservations             V2DirectorBudgetReservation[]
+  directorBudgetEvents                   V2DirectorBudgetEvent[]
   treatmentPlans                         V2TreatmentPlan[]
   reviewAnnotations                      V2ReviewAnnotation[]
   renderElementMaps                      V2RenderElementMap[]
@@ -1170,6 +1177,96 @@ model V2DirectorRun {
   @@index([workspaceId, projectId, objective, objectiveVersion], map: "director_runs_objective_revision_idx")
   @@index([workspaceId, status, updatedAt(sort: Desc)])
   @@map("director_runs")
+}
+
+model V2DirectorBudget {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  runId              String   @db.VarChar(128)
+  revision           Int
+  status             String   @db.VarChar(32)
+  limitsJson         String   @db.Text
+  reservedJson       String   @db.Text
+  actualJson         String   @db.Text
+  bestResultJson     String?  @db.Text
+  exhaustedDimension String?  @db.VarChar(32)
+  createdAt          DateTime @db.Timestamptz(3)
+  updatedAt          DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project      V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reservations V2DirectorBudgetReservation[]
+  events       V2DirectorBudgetEvent[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, runId])
+  @@index([workspaceId, projectId, updatedAt(sort: Desc), id])
+  @@index([workspaceId, projectId, status])
+  @@map("director_budgets")
+}
+
+model V2DirectorBudgetReservation {
+  id              String    @id @db.VarChar(128)
+  budgetId        String    @db.VarChar(128)
+  workspaceId     String    @db.VarChar(128)
+  projectId       String    @db.VarChar(128)
+  operationKind   String    @db.VarChar(128)
+  status          String    @db.VarChar(16)
+  estimateJson    String    @db.Text
+  actualJson      String?   @db.Text
+  overrunJson     String?   @db.Text
+  candidateJson   String?   @db.Text
+  createdAt       DateTime  @db.Timestamptz(3)
+  settledAt       DateTime? @db.Timestamptz(3)
+
+  budget    V2DirectorBudget @relation(fields: [budgetId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  events    V2DirectorBudgetEvent[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectId, budgetId, status])
+  @@map("director_budget_reservations")
+}
+
+model V2DirectorBudgetEvent {
+  id                      String   @id @db.VarChar(128)
+  budgetId                String   @db.VarChar(128)
+  reservationId           String?  @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  action                  String   @db.VarChar(32)
+  baseRevision            Int
+  resultRevision          Int
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  estimateJson            String?  @db.Text
+  actualJson              String?  @db.Text
+  outcome                 String   @db.VarChar(64)
+  resultJson              String   @db.Text
+  resultHash              String   @db.Char(64)
+  occurredAt              DateTime @db.Timestamptz(3)
+
+  budget      V2DirectorBudget             @relation(fields: [budgetId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reservation V2DirectorBudgetReservation? @relation(fields: [reservationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace   V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project     V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  actorClient V2ApiClient                  @relation(fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, budgetId, idempotencyKey])
+  @@index([workspaceId, projectId, budgetId, occurredAt, id])
+  @@index([workspaceId, actorContextHash, occurredAt(sort: Desc)])
+  @@map("director_budget_events")
 }
 
 model V2ProjectDirectorOperation {
