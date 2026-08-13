@@ -96,6 +96,7 @@ export interface CompositionProps extends Record<string, unknown> {
   scenes: Scene[];
   subtitles: SubtitleEntry[];
   videoSrc: string;
+  narrationAudioSrc?: string;
   format: '9:16' | '16:9';
   stylePreset?: string;
   // Preset de estilo das legendas (default 'kinetic' = comportamento atual).
