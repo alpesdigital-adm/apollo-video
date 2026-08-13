@@ -38,6 +38,7 @@ import {
   type RubricCriterionId,
 } from '../domain/strategic-rubric.ts'
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
+import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
@@ -891,6 +892,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       storyPlanId,
       treatmentPlanId,
       directorRunId,
+      audioTimelineHash: createEditorialAudioTimelineHash({ fps: context.editPlan.fps, clips }),
       desiredActionRef,
       overlayTracks: desiredAction.visualCta
         ? Object.freeze([Object.freeze({

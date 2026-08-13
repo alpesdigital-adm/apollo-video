@@ -292,6 +292,7 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   const { repository, service } = fixture()
   const result = await service(request())
   const plan = result.run.editPlan
+  assert.match(plan.audioTimelineHash, /^[a-f0-9]{64}$/)
 
   assert.equal(result.replayed, false)
   assert.equal(result.command.type, 'run-director')
