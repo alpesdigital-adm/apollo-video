@@ -59,6 +59,7 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
+import type { StoryPlanRepository } from '../application/ports/story-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
@@ -81,6 +82,7 @@ import type { ContaminationReportRepository } from '../application/ports/contami
 import type { SourceCleanupRepository } from '../application/ports/source-cleanup-repository.ts'
 import type { ValidationEnvelopeRepository } from '../application/ports/validation-envelope-repository.ts'
 import type { ProofNeedRepository } from '../application/ports/proof-need-repository.ts'
+import type { MontageAlternativeRepository } from '../application/ports/montage-alternative-repository.ts'
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -105,6 +107,7 @@ import type { ProjectWorkspaceQueryRepository } from '../application/ports/proje
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
+import type { NarrativeSafetyRepository } from '../application/ports/narrative-safety-repository.ts'
 import type { ManualEditRepository } from '../application/ports/manual-edit-repository.ts'
 import type { SourceTranscriptReplacementRepository } from '../application/ports/source-transcript-replacement-repository.ts'
 import type { VersionCompareRepository } from '../application/ports/version-compare-repository.ts'
@@ -167,6 +170,7 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
+import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
@@ -211,6 +215,7 @@ import { PrismaContaminationReportRepository } from './prisma/contamination-repo
 import { PrismaSourceCleanupRepository } from './prisma/source-cleanup-repository.ts'
 import { PrismaValidationEnvelopeRepository } from './prisma/validation-envelope-repository.ts'
 import { PrismaProofNeedRepository } from './prisma/proof-need-repository.ts'
+import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative-repository.ts'
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
@@ -236,6 +241,7 @@ import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-re
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
+import { PrismaNarrativeSafetyRepository } from './prisma/narrative-safety-repository.ts'
 import { PrismaManualEditRepository } from './prisma/manual-edit-repository.ts'
 import { PrismaSourceTranscriptReplacementRepository } from './prisma/source-transcript-replacement-repository.ts'
 import { PrismaVersionCompareRepository } from './prisma/version-compare-repository.ts'
@@ -402,6 +408,10 @@ export function createTreatmentPlanRepository(): TreatmentPlanRepository {
   return new PrismaTreatmentPlanRepository(resolveV2Client())
 }
 
+export function createStoryPlanRepository(): StoryPlanRepository {
+  return new PrismaStoryPlanRepository(resolveV2Client())
+}
+
 export function createWorkspaceLutRepository(): WorkspaceLutRepository {
   return new PrismaWorkspaceLutRepository(resolveV2Client())
 }
@@ -561,6 +571,10 @@ ValidationEnvelopeRepository {
 
 export function createProofNeedRepository(): ProofNeedRepository {
   return new PrismaProofNeedRepository(resolveV2Client())
+}
+
+export function createMontageAlternativeRepository(): MontageAlternativeRepository {
+  return new PrismaMontageAlternativeRepository(resolveV2Client())
 }
 
 export function createProofIntegrityRepository():
@@ -1601,6 +1615,10 @@ export function createRenderElementMapRepository(): RenderElementMapRepository {
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {
   return new PrismaEditorialCommandRepository(resolveV2Client())
+}
+
+export function createNarrativeSafetyRepository(): NarrativeSafetyRepository {
+  return new PrismaNarrativeSafetyRepository(resolveV2Client())
 }
 
 export function createManualEditRepository(): ManualEditRepository {

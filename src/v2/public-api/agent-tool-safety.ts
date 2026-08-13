@@ -271,6 +271,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one immutable metadata-only editorial plan from versioned project evidence; it changes no media bytes and starts no provider or render work.',
     },
+    'apollo.projects.story-plans.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable, content-addressed narrative plan against an exact ProjectVersion; it does not compile an EditPlan, invoke providers, render, or materialize media.',
+    },
     'apollo.workspace-luts.import': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Imports one size-bounded .cube into an immutable workspace-scoped version, generates one deterministic local preview and performs no provider or project mutation.',
@@ -406,6 +410,10 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.quality-iterations.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable quality report from exact server evidence without approving final export or mutating the project version.',
+    },
+    'apollo.projects.montage-alternatives.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Evaluates bounded candidates against one exact StoryPlan contract and persists an immutable reviewable selection without rendering or mutating the project version.',
     },
     'apollo.projects.final-exports.enqueue': {
       impact: 'bounded', confirmation: 'human-approval',

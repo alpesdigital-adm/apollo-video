@@ -173,6 +173,10 @@ const coverage = Object.freeze({
     mode: 'idempotent-create',
     evidence: 'request fingerprint binds exact project version, immutable Policy Snapshot, server rubric, versioned Perception summary and actor; serializable persistence rechecks project objective, policy hash and active actor',
   },
+  'apollo.projects.story-plans.create': {
+    mode: 'idempotent-create',
+    evidence: 'FR-061 request fingerprint binds exact project/version, complete narrative structure, source references, TreatmentPlan reference and actor; replay cannot mutate or silently replace the plan',
+  },
   'apollo.projects.validated-segments.catalog': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds exact artifact/manifest/SpeechSegment hashes, scope, performance source and actor; serializable persistence rechecks project membership, active source, rights and actor',
   },
@@ -281,6 +285,9 @@ const coverage = Object.freeze({
   },
   'apollo.projects.quality-iterations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds project version, proxy revision/hash, asset selections, rubric evidence, reference dataset and fixed budget; serializable commit rechecks all server evidence',
+  },
+  'apollo.projects.montage-alternatives.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the exact StoryPlan contract, all canonical candidate seeds, policy and authenticated actor before immutable selection persistence',
   },
   'apollo.workspace-luts.import': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds workspace, logical LUT ID, canonical .cube hash, license, compatibility, intensity and actor before preview generation',
@@ -555,7 +562,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 3,
     'explicit-precondition': 10,
-    'idempotent-create': 51,
+    'idempotent-create': 53,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,

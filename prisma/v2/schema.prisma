@@ -168,6 +168,7 @@ model V2Workspace {
   contiguousEvaluationEvidence           V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations            V2ContiguousMomentEvaluation[]
   contiguousExtractions                  V2ContiguousExtraction[]
+  montageAlternativeRuns                V2MontageAlternativeRun[]
 
   @@map("workspaces")
 }
@@ -258,6 +259,7 @@ model V2ApiClient {
   authoredReviewPatchProposals          V2ReviewPatchProposal[]              @relation("ReviewPatchProposalActor")
   authoredReviewPatchBatches            V2ReviewPatchBatch[]                 @relation("ReviewPatchBatchActor")
   authoredPerceptionTimelines            V2PerceptionTimeline[]               @relation("PerceptionTimelineActor")
+  createdMontageAlternativeRuns          V2MontageAlternativeRun[]            @relation("MontageAlternativeRunCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -610,6 +612,7 @@ model V2Project {
   contiguousEvaluationEvidence           V2ContiguousEvaluationEvidence[]
   contiguousMomentEvaluations            V2ContiguousMomentEvaluation[]
   contiguousExtractions                  V2ContiguousExtraction[]
+  montageAlternativeRuns                V2MontageAlternativeRun[]
   colorPipelineCompilations              V2ColorPipelineCompilation[]
   lutSelections                          V2ProjectLutSelection[]
   lutSelectionHead                       V2ProjectLutSelectionHead?
@@ -4077,6 +4080,51 @@ model V2ValidationEnvelopeDecision {
   @@map("validation_envelope_decisions")
 }
 
+model V2MontageAlternativeRun {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  policyVersion           String   @db.VarChar(64)
+  storyPlanId             String   @db.VarChar(128)
+  storyPlanHash           String   @db.Char(64)
+  status                  String   @db.VarChar(16)
+  winnerId                String?  @db.VarChar(128)
+  reason                  String   @db.VarChar(64)
+  candidateCount          Int
+  eligibleCount           Int
+  diversityOverall        Decimal  @db.Decimal(8, 6)
+  selectionJson           String   @db.Text
+  selectionHash           String   @db.Char(64)
+  runJson                 String   @db.Text
+  runHash                 String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy V2ApiClient @relation("MontageAlternativeRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  storyPlan V2StoryPlan @relation(fields: [storyPlanId, workspaceId, projectId, storyPlanHash], references: [id, workspaceId, projectId, storyHash], onDelete: Restrict, map: "montage_alternative_runs_storyPlan_ref_fkey")
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, storyPlanId, storyPlanHash])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@map("montage_alternative_runs")
+}
+
 model V2ProofNeedRun {
   id                      String   @id @db.VarChar(128)
   workspaceId             String   @db.VarChar(128)
@@ -6409,4 +6457,36 @@ model V2SourceCleanupResult {
   @@index([workspaceId, projectId, completedAt(sort: Desc)], map: "source_cleanup_results_workspace_project_completed_idx")
   @@index([workspaceId, passed, completedAt(sort: Desc)], map: "source_cleanup_results_workspace_passed_idx")
   @@map("source_cleanup_results")
+}
+
+model V2StoryPlan {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  schemaVersion        Int
+  treatmentPlanId      String   @db.VarChar(128)
+  treatmentSchemaVersion Int
+  treatmentContentHash String   @db.Char(64)
+  storyJson            String   @db.Text
+  storyHash            String   @db.Char(64)
+  requestFingerprint   String   @db.Char(64)
+  idempotencyKey       String   @db.VarChar(128)
+  createdByClientId    String   @db.VarChar(128)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  montageAlternativeRuns V2MontageAlternativeRun[]
+
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "story_plans_actor_idempotency_key")
+  @@unique([id, workspaceId, projectId], map: "story_plans_id_workspace_project_key")
+  @@unique([id, workspaceId, projectId, storyHash], map: "story_plans_id_workspace_project_hash_key")
+  @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)], map: "story_plans_project_version_created_idx")
+  @@map("story_plans")
 }

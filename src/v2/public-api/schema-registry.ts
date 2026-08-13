@@ -12222,6 +12222,20 @@ const colorPipelineCompilationSchema = {
     compilationHash: sha256Schema,
   },
 } as const
+const storyPlanCoreProperties = {
+  objective: strategicObjectiveSchema,
+  desiredActionRef: { type: 'object' },
+  treatmentPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'schemaVersion', 'contentHash'], properties: { id: idSchema, schemaVersion: { type: 'integer', minimum: 1 }, contentHash: sha256Schema } },
+  targetDurationMs: { type: 'object', additionalProperties: false, required: ['min', 'max'], properties: { min: { type: 'integer', minimum: 1 }, max: { type: 'integer', minimum: 1 } } },
+  acts: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'role', 'blockIds'], properties: { id: idSchema, role: { enum: ['opening', 'development', 'resolution'] }, blockIds: { type: 'array', minItems: 1, items: idSchema } } } },
+  blocks: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'actId', 'role', 'intent', 'dependencies', 'sourceCandidateIds', 'durationTargetMs', 'content', 'presentation'], properties: { id: idSchema, actId: idSchema, role: { enum: ['hook', 'context', 'argument', 'proof', 'cta'] }, intent: { type: 'string', minLength: 1, maxLength: 512 }, dependencies: { type: 'array', items: idSchema }, sourceCandidateIds: { type: 'array', minItems: 1, items: idSchema }, durationTargetMs: { type: 'object', additionalProperties: false, required: ['min', 'ideal', 'max'], properties: { min: { type: 'integer', minimum: 1 }, ideal: { type: 'integer', minimum: 1 }, max: { type: 'integer', minimum: 1 } } }, content: { type: 'object', additionalProperties: false, required: ['claimIds', 'qualifierIds', 'proofIds'], properties: { claimIds: { type: 'array', items: idSchema }, qualifierIds: { type: 'array', items: idSchema }, proofIds: { type: 'array', items: idSchema }, ctaId: idSchema } }, presentation: { enum: ['source-video', 'voiceover', 'cold-open-reference'] }, sourceRangeId: idSchema } } },
+  sourceRanges: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef'], properties: { id: idSchema, artifactId: idSchema, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 }, rightsRef: idSchema, consentRef: idSchema } } },
+  sourceCandidates: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['id', 'sourceRangeId', 'purpose', 'rank'], properties: { id: idSchema, sourceRangeId: idSchema, purpose: { enum: ['hook', 'context', 'argument', 'proof', 'cta'] }, rank: { type: 'integer', minimum: 1 } } } },
+  qualifiers: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'text'], properties: { id: idSchema, text: { type: 'string', minLength: 1, maxLength: 1024 } } } },
+  claims: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'text', 'qualifierIds', 'proofContextIds'], properties: { id: idSchema, text: { type: 'string', minLength: 1, maxLength: 2048 }, qualifierIds: { type: 'array', items: idSchema }, proofContextIds: { type: 'array', items: idSchema } } } },
+  proofContexts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'claimIds', 'sourceCandidateIds', 'attribution'], properties: { id: idSchema, claimIds: { type: 'array', items: idSchema }, sourceCandidateIds: { type: 'array', items: idSchema }, attribution: { type: 'string', minLength: 1, maxLength: 1024 } } } },
+} as const
+const storyPlanSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId', 'objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts', 'storyHash', 'createdBy', 'createdAt', 'requestFingerprint'], properties: { schemaVersion: { const: 3 }, id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, ...storyPlanCoreProperties, storyHash: sha256Schema, createdBy: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } }, createdAt: dateTimeSchema, requestFingerprint: sha256Schema } } as const
 
 const treatmentPerceptionSummarySchema = {
   type: 'object', additionalProperties: false,
@@ -12655,6 +12669,42 @@ const mediaSegmentDataSchema = {
 const imageBoxSchema = { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: 0, maximum: 1 } } as const
 const imageProducerSchema = { type: 'object', additionalProperties: false, required: ['provider', 'model', 'version'], properties: { provider: { type: 'string', minLength: 1, maxLength: 96 }, model: { type: 'string', minLength: 1, maxLength: 96 }, version: { type: 'string', minLength: 1, maxLength: 96 } } } as const
 const imageEntityObservationSchema = { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['label', 'box', 'confidence'], properties: { label: { type: 'string', minLength: 1, maxLength: 120 }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } } as const
+const montageHardGateCodeSchema = { enum: ['HOOK_NOT_SELF_CONTAINED', 'ORDER_NOT_PERMITTED', 'RIGHTS_NOT_APPROVED', 'PATTERN_BUDGET_EXCEEDED', 'STORY_BLOCK_COVERAGE_INVALID'] } as const
+const montageCandidateSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'seed', 'storyPlanRef', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals', 'seedHash', 'status', 'hardGateResults', 'score', 'estimatedCost', 'rejectionReasons', 'candidateHash'],
+  properties: {
+    schemaVersion: { const: 'montage-candidate-seed/v1' }, id: idSchema, seed: idSchema,
+    storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+    mode: { enum: ['chronological', 'cold-open', 'reorganized'] },
+    hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } },
+    blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema },
+    permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } },
+    assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } },
+    patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } },
+    maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 },
+    rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } },
+    seedHash: sha256Schema, status: { enum: ['eligible', 'rejected'] },
+    hardGateResults: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'object', additionalProperties: false, required: ['code', 'passed', 'evidenceRefs'], properties: { code: montageHardGateCodeSchema, passed: { type: 'boolean' }, evidenceRefs: { type: 'array', maxItems: 64, items: idSchema } } } },
+    score: { anyOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] }, estimatedCost: { anyOf: [{ type: 'number', minimum: 0, maximum: 1000000 }, { type: 'null' }] },
+    rejectionReasons: { type: 'array', maxItems: 5, uniqueItems: true, items: montageHardGateCodeSchema }, candidateHash: sha256Schema,
+  },
+} as const
+const montageAlternativeRunSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'policyVersion', 'storyPlanRef', 'selection', 'createdByClientId', 'createdAt', 'runHash'],
+  properties: {
+    schemaVersion: { const: 'montage-alternative-run/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+    selection: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'policyVersion', 'rubric', 'status', 'winnerId', 'reason', 'diversity', 'candidates', 'selectionHash'], properties: {
+      schemaVersion: { const: 'montage-selection/v1' }, policyVersion: { const: 'montage-alternatives-2026-08-v1' },
+      rubric: { type: 'object', additionalProperties: false, required: ['id', 'weights', 'tieTolerance', 'minimumConfidence'], properties: { id: { const: 'montage-rubric-v1' }, weights: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { const: 0.35 }, objective: { const: 0.25 }, continuity: { const: 0.2 }, evidence: { const: 0.2 } } }, tieTolerance: { const: 0.000001 }, minimumConfidence: { const: 0.7 } } },
+      status: { enum: ['selected', 'review', 'blocked'] }, winnerId: { anyOf: [idSchema, { type: 'null' }] }, reason: { enum: ['HIGHEST_RUBRIC_SCORE', 'SCORE_TIE', 'LOW_CONFIDENCE', 'NO_ELIGIBLE_CANDIDATE'] },
+      diversity: { type: 'object', additionalProperties: false, required: ['candidateCount', 'eligibleCount', 'uniqueHooks', 'uniqueOrders', 'uniqueAssetSets', 'uniquePatternSets', 'normalized'], properties: { candidateCount: { type: 'integer', minimum: 1, maximum: 32 }, eligibleCount: { type: 'integer', minimum: 0, maximum: 32 }, uniqueHooks: { type: 'integer', minimum: 1, maximum: 32 }, uniqueOrders: { type: 'integer', minimum: 1, maximum: 32 }, uniqueAssetSets: { type: 'integer', minimum: 1, maximum: 32 }, uniquePatternSets: { type: 'integer', minimum: 1, maximum: 32 }, normalized: { type: 'object', additionalProperties: false, required: ['hooks', 'orders', 'assets', 'patterns', 'overall'], properties: { hooks: { type: 'number', minimum: 0, maximum: 1 }, orders: { type: 'number', minimum: 0, maximum: 1 }, assets: { type: 'number', minimum: 0, maximum: 1 }, patterns: { type: 'number', minimum: 0, maximum: 1 }, overall: { type: 'number', minimum: 0, maximum: 1 } } } } },
+      candidates: { type: 'array', minItems: 1, maxItems: 32, items: montageCandidateSchema }, selectionHash: sha256Schema,
+    } }, createdByClientId: idSchema, createdAt: dateTimeSchema, runHash: sha256Schema,
+  },
+} as const
 const perceptionKindSchema = { enum: ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] } as const
 const perceptionRangeSchema = { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } } as const
 const perceptionProvenanceSchema = { type: 'object', additionalProperties: false, required: ['source', 'model', 'version', 'confidence'], properties: { source: { type: 'string', minLength: 1, maxLength: 256 }, model: { type: 'string', minLength: 1, maxLength: 256 }, version: { type: 'string', minLength: 1, maxLength: 256 }, confidence: { type: 'number', minimum: 0, maximum: 1 } } } as const
@@ -12664,6 +12714,12 @@ const perceptionCoverageSchema = { type: 'object', additionalProperties: false, 
 const perceptionTimelineSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'durationMs', 'observations', 'coverage', 'inventedValues', 'timelineHash'], properties: { schemaVersion: { const: 1 }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 }, timelineHash: sha256Schema } } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
+    policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
+    seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: { id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } }, blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } }, assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } }, patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } }, maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } } } } },
+  } }),
+  defineSchema('montage-alternatives-created', 1, 'Created or replayed montage alternative run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: montageAlternativeRunSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('montage-alternatives-read', 1, 'Immutable montage alternative run', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: montageAlternativeRunSchema } })),
   defineSchema('editorial-grammar-evaluation-request', 1, 'Versioned editorial treatment grammar evaluation request', {
     type: 'object', additionalProperties: false,
     required: ['policyVersion', 'objective', 'durationMs', 'semanticWindows', 'brollRequests', 'motions', 'acts', 'patternBreaks', 'continuityFrames'],
@@ -14005,6 +14061,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['treatmentPlan'],
     properties: { treatmentPlan: persistedTreatmentPlanSchema },
   })),
+  defineSchema('create-story-plan-request', 1, 'Create a validated StoryPlan before EditPlan compilation', { type: 'object', additionalProperties: false, required: ['projectVersionId', 'plan'], properties: { projectVersionId: idSchema, plan: { type: 'object', additionalProperties: false, required: ['objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'], properties: storyPlanCoreProperties } } }),
+  defineSchema('story-plan-mutated', 1, 'Created or replayed immutable StoryPlan', successSchema({ type: 'object', additionalProperties: false, required: ['storyPlan', 'replayed'], properties: { storyPlan: storyPlanSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('story-plan-read', 1, 'Immutable validated StoryPlan', successSchema({ type: 'object', additionalProperties: false, required: ['storyPlan'], properties: { storyPlan: storyPlanSchema } })),
   defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',
     successSchema({
       type: 'object',
@@ -16703,6 +16762,79 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['decision'],
       properties: {
         decision: validatedSegmentReuseDecisionSchema,
+      },
+    }),
+  ),
+  defineSchema('narrative-safety-preflight-request', 1, 'Check one proposed statement trim and order against an exact StoryPlan version', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'expectedBaseHash', 'storyPlanId', 'edit'],
+    properties: { projectVersionId: idSchema, expectedBaseHash: sha256Schema, storyPlanId: idSchema, edit: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'object', additionalProperties: false, required: ['statementId', 'speakerId', 'sourceArtifactId', 'sourceRangeMs', 'preservedText'], properties: { statementId: idSchema, speakerId: idSchema, sourceArtifactId: idSchema, sourceRangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } }, preservedText: { type: 'string', minLength: 3, maxLength: 4000 } } } } },
+  }),
+  defineSchema(
+    'narrative-safety-preflight',
+    1,
+    'Localized fail-closed narrative integrity decision before an editorial Command',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['decision'],
+      properties: {
+        decision: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['schemaVersion', 'projectVersionId', 'projectVersionBaseHash', 'storyPlanId', 'storySnapshotHash', 'contextHash', 'safe', 'issues', 'preflightHash'],
+          properties: {
+            schemaVersion: { const: 'narrative-safety-decision/v1' },
+            projectVersionId: idSchema,
+            projectVersionBaseHash: sha256Schema,
+            storyPlanId: idSchema,
+            storySnapshotHash: sha256Schema,
+            contextHash: sha256Schema,
+            safe: { type: 'boolean' },
+            issues: {
+              type: 'array',
+              maxItems: 500,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['schemaVersion', 'code', 'severity', 'category', 'statementId', 'rangeMs', 'evidence', 'restoreAction'],
+                properties: {
+                  schemaVersion: { const: 'narrative-quality-issue/v1' },
+                  code: { enum: ['UNKNOWN_STATEMENT', 'STATEMENT_DUPLICATED', 'SOURCE_RANGE_CHANGED', 'SOURCE_TEXT_CHANGED', 'ATTRIBUTION_CHANGED', 'CLAIM_CHANGED', 'QUALIFIER_REMOVED', 'NEGATION_REMOVED', 'CAUSALITY_CHANGED', 'DEADLINE_REMOVED', 'DEPENDENCY_REMOVED', 'DEPENDENCY_REORDERED'] },
+                  severity: { const: 'hard' },
+                  category: { const: 'integrity' },
+                  statementId: idSchema,
+                  rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                  evidence: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['kind', 'ref'],
+                      properties: {
+                        kind: { enum: ['source-text', 'speaker', 'source-range', 'dependency', 'critical-token'] },
+                        ref: { type: 'string', minLength: 1, maxLength: 4000 },
+                        rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                      },
+                    },
+                  },
+                  restoreAction: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['kind', 'statementId', 'sourceRangeMs', 'refs'],
+                    properties: {
+                      kind: { enum: ['restore-statement', 'restore-token', 'restore-attribution', 'restore-dependency', 'restore-order'] },
+                      statementId: idSchema,
+                      sourceRangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                      refs: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, maxLength: 4000 } },
+                    },
+                  },
+                },
+              },
+            },
+            preflightHash: sha256Schema,
+          },
+        },
       },
     }),
   ),

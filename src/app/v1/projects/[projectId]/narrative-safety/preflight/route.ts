@@ -1,0 +1,11 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { requireScope } from '@/v2/application/authenticate-api-client'
+import { preflightNarrativeSafetyService } from '@/v2/application/preflight-narrative-safety'
+import { DomainError } from '@/v2/domain/errors'
+import { createNarrativeSafetyRepository } from '@/v2/infrastructure/repository-factory'
+import { authenticateExternalRequest } from '@/v2/public-api/authentication'
+import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { parseNarrativeSafetyPreflightBody } from '@/v2/public-api/narrative-safety-contract'
+import { presentSuccess } from '@/v2/public-api/presenters'
+export const dynamic = 'force-dynamic'
+export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) { const requestId = resolveRequestId(request); try { const actor = await authenticateExternalRequest(request); requireScope(actor, 'projects:read'); let raw: unknown; try { raw = await request.json() } catch { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') }; const body = parseNarrativeSafetyPreflightBody(raw); const { projectId } = await context.params; const decision = await preflightNarrativeSafetyService({ repository: createNarrativeSafetyRepository() })({ workspaceId: actor.workspaceId, projectId, ...body, actor }); return NextResponse.json(presentSuccess({ decision }), { headers: publicApiHeaders(requestId) }) } catch (error) { return respondPublicError(error, requestId) } }

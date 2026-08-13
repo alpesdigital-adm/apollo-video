@@ -2463,6 +2463,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.story-plans.create', version: '1.0.0', title: 'Create a validated StoryPlan',
+    description: 'Validates and persists one immutable StoryPlan bound to an exact ProjectVersion and versioned TreatmentPlan reference before EditPlan compilation.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/create-story-plan-request/v1', outputSchemaRef: 'apollo://schemas/story-plan-mutated/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/story-plans' }, toolName: 'apollo.projects.story-plans.create',
+    supportsDryRun: false, costClass: 'low', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.story-plans.read', version: '1.0.0', title: 'Read an immutable StoryPlan',
+    description: 'Reads a content-addressed StoryPlan with acts, blocks, evidence context, source references and readiness validation.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/story-plan-read/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/story-plans/{storyPlanId}' },
+    toolName: 'apollo.projects.story-plans.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.projects.contiguous-extractions.read',
     version: '1.0.0',
     title: 'Read a contiguous long-form extraction',
@@ -2757,6 +2772,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [200],
     idempotency: 'not-applicable',
     requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.narrative-safety.preflight', version: '1.0.0', title: 'Preflight narrative safety',
+    description: 'Checks a proposed trim and ordering against the exact StoryPlan statements, speaker attribution, critical tokens, source ranges and proof/context dependencies before any Command is created.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    inputSchemaRef: 'apollo://schemas/narrative-safety-preflight-request/v1', outputSchemaRef: 'apollo://schemas/narrative-safety-preflight/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/narrative-safety/preflight' }, toolName: 'apollo.projects.narrative-safety.preflight',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable', requestBodyRequired: true,
   },
   {
     id: 'apollo.projects.semantic-search.documents.catalog',
@@ -4726,6 +4749,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [200],
     idempotency: 'natural',
     requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.montage-alternatives.create', version: '1.0.0', title: 'Create montage alternatives',
+    description: 'Evaluates and persists content-addressed montage candidates after hard gates, using one rubric and deterministic review or block outcomes.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/create-montage-alternatives-request/v1', outputSchemaRef: 'apollo://schemas/montage-alternatives-created/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/montage-alternatives' }, toolName: 'apollo.projects.montage-alternatives.create',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [201, 200], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.montage-alternatives.read', version: '1.0.0', title: 'Read montage alternatives',
+    description: 'Reads one immutable montage selection with every eligible and rejected alternative, diversity metrics and deterministic winner state.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/montage-alternatives-read/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/montage-alternatives/{runId}' },
+    toolName: 'apollo.projects.montage-alternatives.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
   {
     id: 'apollo.projects.rename',
