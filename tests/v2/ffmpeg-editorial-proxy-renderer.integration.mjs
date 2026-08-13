@@ -11,6 +11,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createManualCommandImpact, createReviewPatchCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../src/v2/domain/desired-action.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
 import { materializePatchEditPlan } from '../../src/v2/domain/review-system.ts'
@@ -22,6 +23,119 @@ const ffprobePath = require('ffprobe-static').path
 const colorMetadata = Object.freeze({
   colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709',
   range: 'limited', bitDepth: 8,
+})
+
+test('T-FR-227 talking-head proxy and final renders keep one audio timeline at 30, 60 and 120 seconds', { timeout: 30 * 60_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-talking-head-render-'))
+  const masterPath = join(root, 'speaker.mp4')
+  const brollPath = join(root, 'broll.mp4')
+  const fps = 30
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=30:d=121',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=121',
+      '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-ar', '48000', masterPath,
+    ], { windowsHide: true, timeout: 180_000 })
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=30:d=61',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', brollPath,
+    ], { windowsHide: true, timeout: 180_000 })
+
+    const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+    const sources = [
+      { artifactId: 'artifact-talking-head', path: masterPath, mediaType: 'video', colorPipelineCompilation: colorCompilation('artifact-talking-head') },
+      { artifactId: 'artifact-talking-broll', path: brollPath, mediaType: 'video', colorPipelineCompilation: colorCompilation('artifact-talking-broll') },
+    ]
+    const probeStreams = (path) => JSON.parse(execFileSync(ffprobePath, [
+      '-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,nb_read_frames,duration',
+      '-of', 'json', path,
+    ], { encoding: 'utf8', windowsHide: true }))
+    const pixelAt = (path, second, crop = 'scale=1:1') => execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', path,
+      '-frames:v', '1', '-vf', crop, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 })
+    const brightPixels = (buffer) => {
+      let count = 0
+      for (let index = 0; index < buffer.length; index += 3) {
+        if (buffer[index] > 200 && buffer[index + 1] > 200 && buffer[index + 2] > 200) count += 1
+      }
+      return count
+    }
+
+    for (const durationSeconds of [30, 60, 120]) {
+      const durationFrames = durationSeconds * fps
+      const splitFrame = Math.floor(durationFrames * 2 / 3)
+      const clips = [
+        {
+          id: `speaker-${durationSeconds}`, sourceArtifactId: 'artifact-talking-head',
+          sourceInFrame: 0, sourceOutFrame: splitFrame,
+          timelineInFrame: 0, timelineOutFrame: splitFrame, rate: 1,
+          crop: { x: 0.15, y: 0, width: 0.7, height: 1 },
+        },
+        {
+          id: `broll-${durationSeconds}`, sourceArtifactId: 'artifact-talking-broll',
+          audioSourceArtifactId: 'artifact-talking-head',
+          audioSourceInFrame: splitFrame, audioSourceOutFrame: durationFrames,
+          sourceInFrame: 0, sourceOutFrame: durationFrames - splitFrame,
+          timelineInFrame: splitFrame, timelineOutFrame: durationFrames, rate: 1,
+        },
+      ]
+      const audioTimelineHash = createEditorialAudioTimelineHash({ fps, clips })
+      const outputs = []
+      for (const renderKind of ['proxy', 'final']) {
+        const result = await renderer.render({
+          operationId: `talking-${renderKind}-${durationSeconds}`,
+          renderKind,
+          sources,
+          lutPaths: {},
+          clips,
+          audioTimelineHash,
+          fps,
+          format: '9:16',
+          outputSpec: { width: 270, height: 480, fps },
+          subtitleCues: [{
+            id: `caption-${durationSeconds}`, startFrame: 6, endFrame: 36,
+            text: 'Fala principal', anchor: 'bottom',
+          }],
+          transitions: [{
+            id: `cut-${durationSeconds}`, fromClipId: clips[0].id, toClipId: clips[1].id,
+            atFrame: splitFrame, type: 'straight-cut', audioFadeMs: 120,
+            reason: 'Pattern break canônico no beat de prova.',
+          }],
+          composition: { foregroundScale: 0.9, verticalPosition: 0.45 },
+        })
+        const streams = probeStreams(result.outputPath).streams
+        const video = streams.find((stream) => stream.codec_type === 'video')
+        const audio = streams.find((stream) => stream.codec_type === 'audio')
+        assert.equal(Number(video.nb_read_frames), durationFrames, `${renderKind} ${durationSeconds}s frame count`)
+        assert.ok(audio, `${renderKind} ${durationSeconds}s must contain audio`)
+        assert.ok(Math.abs(Number(video.duration) - durationSeconds) <= 1 / fps)
+        assert.ok(Math.abs(Number(audio.duration) - durationSeconds) <= 1 / fps)
+        assert.ok(Math.abs(Number(video.duration) - Number(audio.duration)) <= 1 / fps, `${renderKind} ${durationSeconds}s A/V drift`)
+        assert.equal(result.renderElementMap.durationFrames, durationFrames)
+        const canvas = renderKind === 'proxy' ? { width: 540, height: 960 } : { width: 270, height: 480 }
+        assert.deepEqual(result.renderElementMap.canvas, canvas)
+        const presenter = result.renderElementMap.elements.find((element) => element.type === 'presenter' && element.clipId === clips[0].id)
+        assert.ok(presenter.bounds.width < canvas.width, 'speaker reframe must leave a measurable face-safe inset')
+        const brollPixel = pixelAt(result.outputPath, durationSeconds * 0.85)
+        assert.ok(brollPixel[2] > brollPixel[0] * 2 + 8, `${renderKind} ${durationSeconds}s must show blue B-roll`)
+        const captionCrop = renderKind === 'proxy' ? 'crop=500:150:20:780' : 'crop=250:90:10:370'
+        const captionInside = pixelAt(result.outputPath, 0.7, captionCrop)
+        const captionOutside = pixelAt(result.outputPath, 2, captionCrop)
+        assert.ok(brightPixels(captionInside) > brightPixels(captionOutside) + 20, `${renderKind} ${durationSeconds}s caption pixels`)
+        outputs.push(result)
+      }
+      assert.equal(audioTimelineHash.length, 64)
+      assert.equal(outputs[0].renderElementMap.durationFrames, outputs[1].renderElementMap.durationFrames)
+      await renderer.cleanup(`talking-proxy-${durationSeconds}`)
+      await renderer.cleanup(`talking-final-${durationSeconds}`)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 function colorCompilation(artifactId) {
