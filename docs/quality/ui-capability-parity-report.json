@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 228,
-    "operableCapabilities": 228,
-    "publicContractCapabilities": 228,
+    "registeredCapabilities": 230,
+    "operableCapabilities": 230,
+    "publicContractCapabilities": 230,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1993,6 +1993,28 @@
       "endpoint": "GET /v1/tools",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/agent-tool-list/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.director-tools.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/director-tools",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-tool-catalog/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.director-tools.execute",
+      "exposure": "public",
+      "endpoint": "POST /v1/director-tools",
+      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v1",
+      "outputSchemaRef": "apollo://schemas/director-tool-execution/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
