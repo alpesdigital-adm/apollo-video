@@ -63384,6 +63384,1589 @@
         }
       }
     },
+    "apollo://schemas/output-format-preset/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "version",
+        "spec",
+        "subtitleBounds",
+        "exportDefaults",
+        "compatiblePlatforms",
+        "presetHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "output-format-preset/v1"
+        },
+        "version": {
+          "const": 1
+        },
+        "spec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "id",
+            "locale",
+            "aspectRatio",
+            "width",
+            "height",
+            "fps",
+            "safeArea"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "locale": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 35
+            },
+            "aspectRatio": {
+              "enum": [
+                "9:16",
+                "16:9",
+                "4:5",
+                "1:1",
+                "21:9"
+              ]
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            "safeArea": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "top",
+                "right",
+                "bottom",
+                "left"
+              ],
+              "properties": {
+                "top": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "right": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "bottom": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                },
+                "left": {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.5
+                }
+              }
+            },
+            "deliveryProfileId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "subtitleBounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "exportDefaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "proxy",
+            "final"
+          ],
+          "properties": {
+            "proxy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "codec",
+                "audioCodec",
+                "container",
+                "pixelFormat",
+                "videoBitrateKbps",
+                "audioBitrateKbps",
+                "width",
+                "height"
+              ],
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "codec": {
+                  "const": "h264"
+                },
+                "audioCodec": {
+                  "const": "aac"
+                },
+                "container": {
+                  "const": "mp4"
+                },
+                "pixelFormat": {
+                  "const": "yuv420p"
+                },
+                "videoBitrateKbps": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "audioBitrateKbps": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "final": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "codec",
+                "audioCodec",
+                "container",
+                "pixelFormat",
+                "videoBitrateKbps",
+                "audioBitrateKbps"
+              ],
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 2
+                },
+                "codec": {
+                  "const": "h264"
+                },
+                "audioCodec": {
+                  "const": "aac"
+                },
+                "container": {
+                  "const": "mp4"
+                },
+                "pixelFormat": {
+                  "const": "yuv420p"
+                },
+                "videoBitrateKbps": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "audioBitrateKbps": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "compatiblePlatforms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "generic",
+              "instagram-reels",
+              "instagram-feed",
+              "youtube",
+              "youtube-shorts",
+              "tiktok",
+              "linkedin"
+            ]
+          }
+        },
+        "presetHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/output-format-registry/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "registryVersion",
+        "presets",
+        "registryHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "output-format-registry/v1"
+        },
+        "registryVersion": {
+          "const": 1
+        },
+        "presets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "9:16",
+            "16:9",
+            "4:5",
+            "1:1",
+            "21:9"
+          ],
+          "properties": {
+            "9:16": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "version",
+                "spec",
+                "subtitleBounds",
+                "exportDefaults",
+                "compatiblePlatforms",
+                "presetHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "output-format-preset/v1"
+                },
+                "version": {
+                  "const": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "locale",
+                    "aspectRatio",
+                    "width",
+                    "height",
+                    "fps",
+                    "safeArea"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "aspectRatio": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    },
+                    "safeArea": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "properties": {
+                        "top": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "right": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "bottom": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "left": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        }
+                      }
+                    },
+                    "deliveryProfileId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "subtitleBounds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "exportDefaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proxy",
+                    "final"
+                  ],
+                  "properties": {
+                    "proxy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps",
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "final": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "compatiblePlatforms": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "generic",
+                      "instagram-reels",
+                      "instagram-feed",
+                      "youtube",
+                      "youtube-shorts",
+                      "tiktok",
+                      "linkedin"
+                    ]
+                  }
+                },
+                "presetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "16:9": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "version",
+                "spec",
+                "subtitleBounds",
+                "exportDefaults",
+                "compatiblePlatforms",
+                "presetHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "output-format-preset/v1"
+                },
+                "version": {
+                  "const": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "locale",
+                    "aspectRatio",
+                    "width",
+                    "height",
+                    "fps",
+                    "safeArea"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "aspectRatio": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    },
+                    "safeArea": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "properties": {
+                        "top": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "right": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "bottom": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "left": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        }
+                      }
+                    },
+                    "deliveryProfileId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "subtitleBounds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "exportDefaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proxy",
+                    "final"
+                  ],
+                  "properties": {
+                    "proxy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps",
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "final": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "compatiblePlatforms": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "generic",
+                      "instagram-reels",
+                      "instagram-feed",
+                      "youtube",
+                      "youtube-shorts",
+                      "tiktok",
+                      "linkedin"
+                    ]
+                  }
+                },
+                "presetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "4:5": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "version",
+                "spec",
+                "subtitleBounds",
+                "exportDefaults",
+                "compatiblePlatforms",
+                "presetHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "output-format-preset/v1"
+                },
+                "version": {
+                  "const": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "locale",
+                    "aspectRatio",
+                    "width",
+                    "height",
+                    "fps",
+                    "safeArea"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "aspectRatio": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    },
+                    "safeArea": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "properties": {
+                        "top": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "right": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "bottom": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "left": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        }
+                      }
+                    },
+                    "deliveryProfileId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "subtitleBounds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "exportDefaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proxy",
+                    "final"
+                  ],
+                  "properties": {
+                    "proxy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps",
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "final": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "compatiblePlatforms": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "generic",
+                      "instagram-reels",
+                      "instagram-feed",
+                      "youtube",
+                      "youtube-shorts",
+                      "tiktok",
+                      "linkedin"
+                    ]
+                  }
+                },
+                "presetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "1:1": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "version",
+                "spec",
+                "subtitleBounds",
+                "exportDefaults",
+                "compatiblePlatforms",
+                "presetHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "output-format-preset/v1"
+                },
+                "version": {
+                  "const": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "locale",
+                    "aspectRatio",
+                    "width",
+                    "height",
+                    "fps",
+                    "safeArea"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "aspectRatio": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    },
+                    "safeArea": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "properties": {
+                        "top": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "right": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "bottom": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "left": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        }
+                      }
+                    },
+                    "deliveryProfileId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "subtitleBounds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "exportDefaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proxy",
+                    "final"
+                  ],
+                  "properties": {
+                    "proxy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps",
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "final": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "compatiblePlatforms": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "generic",
+                      "instagram-reels",
+                      "instagram-feed",
+                      "youtube",
+                      "youtube-shorts",
+                      "tiktok",
+                      "linkedin"
+                    ]
+                  }
+                },
+                "presetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "21:9": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "version",
+                "spec",
+                "subtitleBounds",
+                "exportDefaults",
+                "compatiblePlatforms",
+                "presetHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "output-format-preset/v1"
+                },
+                "version": {
+                  "const": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "locale",
+                    "aspectRatio",
+                    "width",
+                    "height",
+                    "fps",
+                    "safeArea"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "aspectRatio": {
+                      "enum": [
+                        "9:16",
+                        "16:9",
+                        "4:5",
+                        "1:1",
+                        "21:9"
+                      ]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 2
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    },
+                    "safeArea": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "top",
+                        "right",
+                        "bottom",
+                        "left"
+                      ],
+                      "properties": {
+                        "top": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "right": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "bottom": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        },
+                        "left": {
+                          "type": "number",
+                          "minimum": 0,
+                          "exclusiveMaximum": 0.5
+                        }
+                      }
+                    },
+                    "deliveryProfileId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "subtitleBounds": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                },
+                "exportDefaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proxy",
+                    "final"
+                  ],
+                  "properties": {
+                    "proxy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps",
+                        "width",
+                        "height"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    "final": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "codec",
+                        "audioCodec",
+                        "container",
+                        "pixelFormat",
+                        "videoBitrateKbps",
+                        "audioBitrateKbps"
+                      ],
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "height": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "codec": {
+                          "const": "h264"
+                        },
+                        "audioCodec": {
+                          "const": "aac"
+                        },
+                        "container": {
+                          "const": "mp4"
+                        },
+                        "pixelFormat": {
+                          "const": "yuv420p"
+                        },
+                        "videoBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "audioBitrateKbps": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                },
+                "compatiblePlatforms": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 7,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "generic",
+                      "instagram-reels",
+                      "instagram-feed",
+                      "youtube",
+                      "youtube-shorts",
+                      "tiktok",
+                      "linkedin"
+                    ]
+                  }
+                },
+                "presetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "registryHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
     "apollo://schemas/perception-range-response/v1": {
       "type": "object",
       "additionalProperties": false,

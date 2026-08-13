@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { RenderElementMap } from '../domain/review-system.ts'
+import { OUTPUT_ASPECT_RATIOS } from '../domain/output-spec.ts'
+import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 
 export interface RenderApproval {
   projectVersionId: string
@@ -19,13 +21,12 @@ export interface RenderAttempt {
   error?: string
 }
 
-export const PROXY_OUTPUT_SPECS = Object.freeze({
-  '9:16': Object.freeze({ width: 540, height: 960, codec: 'h264', container: 'mp4', quality: 'review' }),
-  '16:9': Object.freeze({ width: 960, height: 540, codec: 'h264', container: 'mp4', quality: 'review' }),
-  '4:5': Object.freeze({ width: 640, height: 800, codec: 'h264', container: 'mp4', quality: 'review' }),
-  '1:1': Object.freeze({ width: 720, height: 720, codec: 'h264', container: 'mp4', quality: 'review' }),
-  '21:9': Object.freeze({ width: 1050, height: 450, codec: 'h264', container: 'mp4', quality: 'review' }),
-} as const)
+export const PROXY_OUTPUT_SPECS = Object.freeze(Object.fromEntries(
+  OUTPUT_ASPECT_RATIOS.map((ratio) => {
+    const spec = OUTPUT_FORMAT_REGISTRY.presets[ratio].exportDefaults.proxy
+    return [ratio, Object.freeze({ width: spec.width, height: spec.height, codec: spec.codec, container: spec.container, quality: 'review' as const })]
+  }),
+) as Record<typeof OUTPUT_ASPECT_RATIOS[number], Readonly<{ width: number; height: number; codec: 'h264'; container: 'mp4'; quality: 'review' }>>)
 
 export type ProxyOutputFormat = keyof typeof PROXY_OUTPUT_SPECS
 export type ProxyReviewStatus = 'blocked' | 'warning-ack-required' | 'ready-for-final'

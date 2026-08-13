@@ -3,9 +3,9 @@ import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
   FINAL_OUTPUT_PROFILE,
   OUTPUT_ASPECT_RATIOS,
-  OUTPUT_PRESETS,
   type OutputAspectRatio,
 } from '../domain/output-spec.ts'
+import { readOutputFormatPreset, validateOutputCompatibility } from '../domain/output-format-registry.ts'
 import { createQueuedPublicOperation } from '../domain/public-operation.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { ProjectFinalExportRepository } from './ports/project-final-export-repository.ts'
@@ -80,8 +80,16 @@ export function enqueueProjectFinalExportService(dependencies: {
     })
     if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Current project version does not have an approved DirectorRun, QualityReport and post-render proxy review')
     assertDomain(source.format === request.format, 'INVALID_OUTPUT_SPEC', 'Final export format must match the approved project format')
-    const outputSpec = OUTPUT_PRESETS[source.format as OutputAspectRatio]
+    const outputSpec = readOutputFormatPreset(source.format as OutputAspectRatio).spec
     assertDomain(Boolean(outputSpec), 'INVALID_OUTPUT_SPEC', 'Approved project format has no final export preset')
+    validateOutputCompatibility({
+      aspectRatio: source.format as OutputAspectRatio,
+      platform: 'generic',
+      codec: FINAL_OUTPUT_PROFILE.codec,
+      audioCodec: FINAL_OUTPUT_PROFILE.audioCodec,
+      container: FINAL_OUTPUT_PROFILE.container,
+      pixelFormat: 'yuv420p',
+    })
     const finalOutputSpec = Object.freeze({
       aspectRatio: outputSpec.aspectRatio,
       width: outputSpec.width,
