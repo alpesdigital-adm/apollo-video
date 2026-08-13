@@ -46,6 +46,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
   telemetry?: OperationTelemetrySink
+  catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -277,6 +278,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         review,
         createdAt: reviewedAt,
       })
+      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
       stopHeartbeat()
       const succeeded = await withLeaseCommand(() =>
         dependencies.operations.succeed(command(clock())))

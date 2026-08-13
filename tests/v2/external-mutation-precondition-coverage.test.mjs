@@ -257,6 +257,12 @@ const coverage = Object.freeze({
   'apollo.projects.media-library.attach': {
     mode: 'natural-idempotent-create', evidence: 'the unique project/artifact/selected-insert reference is a natural idempotency key and the serializable transaction rechecks project locale, artifact lifecycle and current rights',
   },
+  'apollo.projects.images.reuse': {
+    mode: 'natural-idempotent-create', evidence: 'purpose, query, immutable analysis, current rights snapshot and project reference form content-addressed lineage; serializable commit rechecks project locale, artifact lifecycle, rights and consent',
+  },
+  'apollo.projects.perception.put': {
+    mode: 'explicit-precondition', mechanism: 'body-revision', evidence: 'baseRevision is null only for the first timeline and otherwise must equal the latest immutable timelineHash inside the serializable transaction',
+  },
   'apollo.media.segments.create': {
     mode: 'natural-idempotent-create', evidence: 'content-addressed segment identity and hash converge while the serializable transaction rechecks immutable source duration and optional parent bounds',
   },
@@ -535,9 +541,9 @@ test('the current public surface has no unguarded state replacement', () => {
   }, {})
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
-    'explicit-precondition': 9,
+    'explicit-precondition': 10,
     'idempotent-create': 48,
-    'natural-idempotent-create': 2,
+    'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 10,

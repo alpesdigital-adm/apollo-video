@@ -5032,12 +5032,31 @@ const projectLutSelectionDeferredExampleV3 = {
   },
 }
 
+const perceptionKinds = ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] as const
+const perceptionObservation = { id: 'perception-word-1', kind: 'transcript-word', startMs: 0, endMs: 500, value: { text: 'Olá' }, provenance: { source: 'transcript-example-1', model: 'groq/whisper-large-v3', version: 'transcript-v1', confidence: 0.92 } }
+const perceptionInputCoverage = perceptionKinds.map((kind) => ({ kind, ranges: kind === 'transcript-word' ? [[0, 3_000]] : [] }))
+const perceptionCoverage = perceptionInputCoverage.map((entry) => ({ ...entry, state: entry.ranges.length ? 'complete' : 'absent', observedMs: entry.ranges.length ? 3_000 : 0 }))
+const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: [perceptionObservation], coverage: perceptionCoverage, inventedValues: 0, timelineHash: 'c'.repeat(64) }
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
-    'apollo://schemas/image-analysis/v1': [{ data: { schemaVersion: 'image-analysis/v1', id: 'image-analysis-example-1', workspaceId, artifactId, manifestId: 'manifest-image-example-1', sourceSha256: 'a'.repeat(64), dimensions: { width: 1080, height: 1350 }, orientation: 'portrait', dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta válida hoje', language: 'pt-BR', box: [0.1, 0.75, 0.8, 0.1], confidence: 0.91, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['FACE_PROVIDER_NOT_CONFIGURED'] }, objects: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['OBJECT_PROVIDER_NOT_CONFIGURED'] }, observedDescription: 'Imagem portrait 1080×1350 com texto “Oferta válida hoje”.', inferredTags: [{ value: 'oferta', confidence: 0.91, provenance: 'tesseract@v5:ocr:pt-BR' }], derivatives: { thumbnailArtifactId: 'artifact-image-thumbnail-example-1', previewArtifactId: 'artifact-image-preview-example-1', immutableOriginal: true }, createdAt, analysisHash: 'b'.repeat(64) }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/automatic-catalog-record/v1': [{ data: {
+      id: 'catalog-record-example-1', workspaceId, artifactId, manifestId: 'manifest-final-example-1',
+      outputKind: 'final', searchableKind: 'asset', rightsSnapshotId: 'rights-catalog-example-1',
+      rightsSnapshotHash: 'a'.repeat(64), eligibilityEvidenceHash: 'b'.repeat(64),
+      lineage: [{ sourceArtifactId: 'artifact-source-example-1', role: 'base-video', ordinal: 0, provider: 'openai', model: 'video-model', modelVersion: '1' }],
+      recordHash: 'c'.repeat(64), createdAt,
+    }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/perception-timeline-put-request/v1': [{ projectVersionId: 'project-version-example-1', baseRevision: null, durationMs: 3_000, observations: [perceptionObservation], coverage: perceptionInputCoverage }],
+    'apollo://schemas/perception-timeline-put-response/v1': [{ data: { id: 'perception-timeline-example-1', projectId: 'project-example-1', projectVersionId: 'project-version-example-1', timeline: perceptionTimeline, createdAt, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/perception-range-response/v1': [{ data: { id: 'perception-timeline-example-1', workspaceId, projectId: 'project-example-1', projectVersionId: 'project-version-example-1', createdAt, result: { schemaVersion: 'perception-range/v1', timelineHash: 'c'.repeat(64), range: { startMs: 0, endMs: 1_500 }, kinds: ['transcript-word', 'face'], observations: [perceptionObservation], coverage: [{ kind: 'transcript-word', state: 'complete', ranges: [[0, 1_500]], observedMs: 1_500 }, { kind: 'face', state: 'absent', ranges: [], observedMs: 0 }], inventedValues: 0 } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-analysis/v1': [{ data: { schemaVersion: 'image-analysis/v1', id: 'image-analysis-example-1', workspaceId, artifactId, manifestId: 'manifest-image-example-1', sourceSha256: 'a'.repeat(64), dimensions: { width: 1080, height: 1350 }, orientation: 'portrait', dominantColors: ['#102030'], ocr: { state: 'available', values: [{ text: 'Oferta válida hoje', language: 'pt-BR', box: [0.1, 0.75, 0.8, 0.1], confidence: 0.91, importance: 'high' }], producer: { provider: 'tesseract', model: 'por-eng', version: 'v5' }, reasonCodes: [] }, faces: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['FACE_PROVIDER_NOT_CONFIGURED'] }, objects: { state: 'unavailable', values: [], producer: { provider: 'not-configured', model: 'none', version: 'v1' }, reasonCodes: ['OBJECT_PROVIDER_NOT_CONFIGURED'] }, observedDescription: 'Imagem portrait 1080×1350 com texto “Oferta válida hoje”.', inferredTags: [{ value: 'oferta', confidence: 0.91, provenance: 'tesseract:por-eng@v5:ocr:pt-BR' }], derivatives: { thumbnailArtifactId: 'artifact-image-thumbnail-example-1', previewArtifactId: 'artifact-image-preview-example-1', immutableOriginal: true }, createdAt, analysisHash: 'b'.repeat(64) }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/media-segment-create-request/v1': [{ label: 'Promessa central', description: 'Trecho reutilizável', startMs: 1200, endMs: 4800 }],
     'apollo://schemas/media-segment/v1': [{ data: { id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/media-segment-page/v1': [{ data: { items: [{ id: 'segment-example-1', workspaceId, parentAssetId: artifactId, label: 'Promessa central', description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), createdAt }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-reuse-search-result/v1': [{ data: { query: 'oferta premium', usage: 'card', items: [{ artifactId, manifestId: 'manifest-image-example-1', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), label: 'Oferta premium.png', usage: 'card', score: 0.941, matchedTerms: ['oferta', 'premium'], orientation: 'portrait', previewArtifactId: 'artifact-image-preview-example-1', rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), rightsValidUntil: '2026-08-12T12:05:00.000Z' }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/image-reuse-request/v1': [{ artifactId, query: 'oferta premium', usage: 'card' }],
+    'apollo://schemas/image-reuse-reference/v1': [{ data: { schemaVersion: 'image-reuse-reference/v1', id: 'image-reuse-example-1', workspaceId, projectId, artifactId, manifestId: 'manifest-image-example-1', mediaAssetReferenceId: '123e4567-e89b-42d3-a456-426614174077', analysisId: 'image-analysis-example-1', analysisHash: 'b'.repeat(64), rightsSnapshotId: 'rights-example-1', rightsSnapshotHash: 'c'.repeat(64), usage: 'card', query: 'oferta premium', score: 0.941, bytesDuplicated: false, lineageHash: 'd'.repeat(64), replayed: false, createdAt }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/media-library-item/v1': [
       {
         data: {
@@ -5061,6 +5080,37 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             origin: { type: 'upload' },
             preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
             technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' }, createdAt,
+          }],
+          nextCursor: null,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-library-item/v2': [
+      {
+        data: {
+          id: artifactId, workspaceId, kind: 'video', label: 'Entrevista principal.mp4',
+          people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+          rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+          origin: { type: 'upload' },
+          preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+          technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' },
+          source: { type: 'artifact', artifactId, virtual: false, bytesDuplicated: false }, createdAt,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/media-library-page/v2': [
+      {
+        data: {
+          items: [{
+            id: 'segment-example-1', workspaceId, kind: 'segment', label: 'Promessa central',
+            people: ['Ana Martins'], topics: ['Produto premium'], status: 'usable',
+            rights: { status: 'eligible', snapshotId: 'rights-example-1', reasonCodes: [] },
+            origin: { type: 'derived', parentArtifactId: artifactId },
+            preview: { thumbnail: { status: 'available', artifactId: 'artifact-thumbnail-example-1' }, waveform: { status: 'unavailable' } },
+            technical: { mediaType: 'video', container: 'mp4', byteSize: '82463372' },
+            source: { type: 'segment', artifactId, description: 'Trecho reutilizável', semanticRange: { startMs: 1200, endMs: 4800 }, sourceTimeMapping: { sourceStartMs: 1200, sourceEndMs: 4800, rate: 1 }, physicalObjectKey: null, sourceDurationMs: 12000, segmentHash: 'a'.repeat(64), virtual: true, bytesDuplicated: false }, createdAt,
           }],
           nextCursor: null,
         },

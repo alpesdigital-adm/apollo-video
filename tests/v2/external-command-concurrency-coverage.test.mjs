@@ -255,6 +255,12 @@ const coverage = Object.freeze({
   'apollo.projects.media-library.attach': {
     mode: 'durable-covered', evidence: 'F1.012 serializable project-locale rights recheck, unique artifact-role reference and bounded serialization retry',
   },
+  'apollo.projects.images.reuse': {
+    mode: 'durable-covered', evidence: 'F1.014 serializable image/analysis/current-rights recheck, immutable purpose lineage, reference-only attachment and bounded serialization retry',
+  },
+  'apollo.projects.perception.put': {
+    mode: 'durable-covered', evidence: 'F1.016 actor-bound idempotency plus serializable baseRevision CAS over the latest immutable PerceptionTimeline',
+  },
   'apollo.media.segments.create': {
     mode: 'durable-covered', evidence: 'F1.013 serializable source/parent recheck, immutable content hash, database range constraints and natural replay identity',
   },
@@ -345,7 +351,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    99,
+    101,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

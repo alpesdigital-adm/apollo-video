@@ -59,6 +59,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
   telemetry?: OperationTelemetrySink
+  catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
   const leaseDurationMs = dependencies.leaseDurationMs ?? 30_000
@@ -497,6 +498,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         originalFileName: context.originalFileName,
         createdAt: clock().toISOString(),
       })
+      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
       stopHeartbeat()
       const succeeded = await withLeaseCommand(() =>
         dependencies.operations.succeed(command(clock())))

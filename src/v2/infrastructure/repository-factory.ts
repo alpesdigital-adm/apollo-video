@@ -22,6 +22,7 @@ import { runNextPublicOperationService } from '../application/run-public-operati
 import { runNextMediaIngestOperationService } from '../application/run-media-ingest-worker.ts'
 import { runNextProjectProxyRenderOperationService } from '../application/run-project-proxy-render-worker.ts'
 import { runNextProjectFinalExportOperationService } from '../application/run-project-final-export-worker.ts'
+import { catalogApprovedOutputService } from '../application/catalog-approved-output.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
@@ -88,6 +89,7 @@ import type { MediaArtifactQueryRepository } from '../application/ports/media-ar
 import type { MediaLibraryRepository } from '../application/ports/media-library-repository.ts'
 import type { MediaSegmentRepository } from '../application/ports/media-segment-repository.ts'
 import type { ImageAnalysisRepository } from '../application/ports/image-analysis-repository.ts'
+import type { PerceptionTimelineRepository } from '../application/ports/perception-timeline-repository.ts'
 import type { MediaArtifactPersistenceRepository } from '../application/ports/media-artifact-repository.ts'
 import type { MediaArtifactLifecycleRepository } from '../application/ports/media-artifact-lifecycle-repository.ts'
 import type { ProjectMediaRepository } from '../application/ports/media-ingest.ts'
@@ -213,8 +215,10 @@ import { PrismaMediaTransferRepository } from './prisma/media-transfer-repositor
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
 import { PrismaMediaArtifactRepository } from './prisma/media-artifact-repository.ts'
 import { PrismaMediaLibraryRepository } from './prisma/media-library-repository.ts'
+import { PrismaAutomaticCatalogRepository } from './prisma/automatic-catalog-repository.ts'
 import { PrismaMediaSegmentRepository } from './prisma/media-segment-repository.ts'
 import { PrismaImageAnalysisRepository } from './prisma/image-analysis-repository.ts'
+import { PrismaPerceptionTimelineRepository } from './prisma/perception-timeline-repository.ts'
 import { PrismaMediaArtifactLifecycleRepository } from './prisma/media-artifact-lifecycle-repository.ts'
 import { PrismaProtectedRenderInputStore } from './prisma/protected-render-input-store.ts'
 import { PrismaRenderInputAssetAvailability } from './prisma/render-input-asset-availability.ts'
@@ -293,7 +297,7 @@ import { createFfmpegIngestProcessorFromEnvironment } from './media/ffmpeg-inges
 import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
 import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
 import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
-import { TesseractImageVisionProvider } from './image/tesseract-image-vision-provider.ts'
+import { createConfiguredImageVisionProvider } from './image/composite-image-vision-provider.ts'
 import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
@@ -339,6 +343,18 @@ export function createApiAccessControlRepository(): ApiAccessControlRepository {
 
 export function createAssetRightsRepository(): AssetRightsRepository {
   return new PrismaAssetRightsRepository(resolveV2Client())
+}
+
+export function createAutomaticCatalogService(clock: () => Date = () => new Date()) {
+  return catalogApprovedOutputService({
+    repository: new PrismaAutomaticCatalogRepository(resolveV2Client()),
+    rights: createAssetRightsRepository(),
+    clock,
+  })
+}
+
+export function createAutomaticCatalogRepository() {
+  return new PrismaAutomaticCatalogRepository(resolveV2Client())
 }
 
 export function createAssetSelectionRepository(): AssetSelectionRepository {
@@ -739,6 +755,10 @@ export function createMediaSegmentRepository(): MediaSegmentRepository {
 
 export function createImageAnalysisRepository(): ImageAnalysisRepository {
   return new PrismaImageAnalysisRepository(resolveV2Client())
+}
+
+export function createPerceptionTimelineRepository(): PerceptionTimelineRepository {
+  return new PrismaPerceptionTimelineRepository(resolveV2Client())
 }
 
 export function createMediaArtifactLifecycleRepository(): MediaArtifactLifecycleRepository {
@@ -1305,6 +1325,7 @@ export function createMediaIngestWorker(
   const configuredHeartbeat = Number(environment.APOLLO_V2_INGEST_HEARTBEAT_MS ?? environment.APOLLO_V2_WORKER_HEARTBEAT_MS)
   const configuredRetryBase = Number(environment.APOLLO_V2_WORKER_RETRY_BASE_MS)
   const configuredRetryMax = Number(environment.APOLLO_V2_WORKER_RETRY_MAX_MS)
+  const imageVision = createConfiguredImageVisionProvider(environment)
   return runNextMediaIngestOperationService({
     operations: createPublicOperationRepository(telemetry),
     telemetry,
@@ -1320,7 +1341,7 @@ export function createMediaIngestWorker(
     imageAnalysis: {
       processor: new SharpImageAnalysisProcessor(
         join(resolve(environment.APOLLO_V2_RENDER_WORK_ROOT ?? '.apollo/work'), 'image-analysis'),
-        environment.APOLLO_TESSERACT_PATH?.trim() ? new TesseractImageVisionProvider({ binary: environment.APOLLO_TESSERACT_PATH.trim() }) : undefined,
+        imageVision,
       ),
       repository: createImageAnalysisRepository(), integrity: { sha256: calculateFileSha256 },
     },
@@ -1399,6 +1420,7 @@ export function createProjectProxyRenderWorker(
     sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
     proxyReviews: createProxyReviewRepository(),
+    catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
@@ -1456,6 +1478,7 @@ export function createProjectFinalExportWorker(
     telemetry,
     projects: createProjectFinalExportRepository(),
     rights: createAssetRightsRepository(),
+    catalogOutput: createAutomaticCatalogService(clock),
     artifacts: createMediaArtifactPersistenceRepository(environment),
     storage: createVerifiedMediaStorage(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),

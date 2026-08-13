@@ -12572,6 +12572,34 @@ const mediaLibraryItemDataSchema = {
       },
 } as const
 
+const mediaLibrarySourceSchemaV2 = {
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false,
+      required: ['type', 'artifactId', 'virtual', 'bytesDuplicated'],
+      properties: { type: { const: 'artifact' }, artifactId: idSchema, virtual: { const: false }, bytesDuplicated: { const: false } },
+    },
+    {
+      type: 'object', additionalProperties: false,
+      required: ['type', 'artifactId', 'description', 'semanticRange', 'sourceTimeMapping', 'physicalObjectKey', 'sourceDurationMs', 'segmentHash', 'virtual', 'bytesDuplicated'],
+      properties: {
+        type: { const: 'segment' }, artifactId: idSchema, parentSegmentId: idSchema,
+        description: { type: 'string', maxLength: 1000 },
+        semanticRange: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } },
+        sourceTimeMapping: { type: 'object', additionalProperties: false, required: ['sourceStartMs', 'sourceEndMs', 'rate'], properties: { sourceStartMs: { type: 'integer', minimum: 0 }, sourceEndMs: { type: 'integer', minimum: 1 }, rate: { const: 1 } } },
+        physicalObjectKey: { type: 'null' }, sourceDurationMs: { type: 'integer', minimum: 1 }, segmentHash: sha256Schema,
+        virtual: { const: true }, bytesDuplicated: { const: false },
+      },
+    },
+  ],
+} as const
+
+const mediaLibraryItemDataSchemaV2 = {
+  ...mediaLibraryItemDataSchema,
+  required: [...mediaLibraryItemDataSchema.required, 'source'],
+  properties: { ...mediaLibraryItemDataSchema.properties, source: mediaLibrarySourceSchemaV2 },
+} as const
+
 const mediaSegmentDataSchema = {
   type: 'object', additionalProperties: false,
   required: ['id', 'workspaceId', 'parentAssetId', 'label', 'description', 'semanticRange', 'sourceTimeMapping', 'physicalObjectKey', 'sourceDurationMs', 'segmentHash', 'createdAt'],
@@ -12581,12 +12609,62 @@ const mediaSegmentDataSchema = {
 const imageBoxSchema = { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: 0, maximum: 1 } } as const
 const imageProducerSchema = { type: 'object', additionalProperties: false, required: ['provider', 'model', 'version'], properties: { provider: { type: 'string', minLength: 1, maxLength: 96 }, model: { type: 'string', minLength: 1, maxLength: 96 }, version: { type: 'string', minLength: 1, maxLength: 96 } } } as const
 const imageEntityObservationSchema = { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['label', 'box', 'confidence'], properties: { label: { type: 'string', minLength: 1, maxLength: 120 }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } } as const
+const perceptionKindSchema = { enum: ['transcript-word', 'speaker', 'silence', 'face', 'object', 'shot', 'motion', 'ocr', 'image-insert'] } as const
+const perceptionRangeSchema = { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } } as const
+const perceptionProvenanceSchema = { type: 'object', additionalProperties: false, required: ['source', 'model', 'version', 'confidence'], properties: { source: { type: 'string', minLength: 1, maxLength: 256 }, model: { type: 'string', minLength: 1, maxLength: 256 }, version: { type: 'string', minLength: 1, maxLength: 256 }, confidence: { type: 'number', minimum: 0, maximum: 1 } } } as const
+const perceptionObservationSchema = { type: 'object', additionalProperties: false, required: ['id', 'kind', 'startMs', 'endMs', 'value', 'provenance'], properties: { id: idSchema, kind: perceptionKindSchema, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 }, value: {}, provenance: perceptionProvenanceSchema } } as const
+const perceptionCoverageInputSchema = { type: 'object', additionalProperties: false, required: ['kind', 'ranges'], properties: { kind: perceptionKindSchema, ranges: { type: 'array', maxItems: 10000, items: perceptionRangeSchema } } } as const
+const perceptionCoverageSchema = { type: 'object', additionalProperties: false, required: ['kind', 'state', 'ranges', 'observedMs'], properties: { kind: perceptionKindSchema, state: { enum: ['absent', 'partial', 'complete'] }, ranges: { type: 'array', maxItems: 10000, items: perceptionRangeSchema }, observedMs: { type: 'integer', minimum: 0 } } } as const
+const perceptionTimelineSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'durationMs', 'observations', 'coverage', 'inventedValues', 'timelineHash'], properties: { schemaVersion: { const: 1 }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 }, timelineHash: sha256Schema } } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('automatic-catalog-record', 1, 'Immutable automatic catalog eligibility and lineage evidence', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['id', 'workspaceId', 'artifactId', 'manifestId', 'outputKind', 'searchableKind', 'rightsSnapshotId', 'rightsSnapshotHash', 'eligibilityEvidenceHash', 'lineage', 'recordHash', 'createdAt'],
+    properties: {
+      id: idSchema, workspaceId: idSchema, artifactId: idSchema, manifestId: idSchema,
+      outputKind: { enum: ['final', 'proxy', 'deepfake-raw'] }, searchableKind: { enum: ['asset', 'segment'] }, segmentId: idSchema,
+      rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema, eligibilityEvidenceHash: sha256Schema,
+      lineage: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['sourceArtifactId', 'role', 'ordinal'], properties: { sourceArtifactId: idSchema, role: { type: 'string', minLength: 1, maxLength: 64 }, ordinal: { type: 'integer', minimum: 0 }, provider: { type: 'string', minLength: 1, maxLength: 64 }, model: { type: 'string', minLength: 1, maxLength: 128 }, modelVersion: { type: 'string', minLength: 1, maxLength: 64 } } } },
+      recordHash: sha256Schema, createdAt: dateTimeSchema,
+    },
+  })),
+  defineSchema('perception-timeline-put-request', 1, 'Immutable project perception timeline input', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'baseRevision', 'durationMs', 'observations', 'coverage'],
+    properties: { projectVersionId: idSchema, baseRevision: { oneOf: [{ type: 'null' }, sha256Schema] }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageInputSchema } },
+  }),
+  defineSchema('perception-timeline-put-response', 1, 'Persisted immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'projectId', 'projectVersionId', 'timeline', 'createdAt', 'replayed'],
+    properties: { id: idSchema, projectId: idSchema, projectVersionId: idSchema, timeline: perceptionTimelineSchema, createdAt: dateTimeSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('perception-range-response', 1, 'Range query over one immutable project perception timeline', successSchema({
+    type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'createdAt', 'result'],
+    properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, createdAt: dateTimeSchema, result: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'timelineHash', 'range', 'kinds', 'observations', 'coverage', 'inventedValues'], properties: { schemaVersion: { const: 'perception-range/v1' }, timelineHash: sha256Schema, range: { type: 'object', additionalProperties: false, required: ['startMs', 'endMs'], properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } } }, kinds: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: perceptionKindSchema }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 1, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 } } } },
+  })),
   defineSchema('image-analysis', 1, 'Immutable observed and inferred image analysis', successSchema({
     type: 'object', additionalProperties: false,
     required: ['schemaVersion', 'id', 'workspaceId', 'artifactId', 'manifestId', 'sourceSha256', 'dimensions', 'orientation', 'dominantColors', 'ocr', 'faces', 'objects', 'observedDescription', 'inferredTags', 'derivatives', 'createdAt', 'analysisHash'],
     properties: { schemaVersion: { const: 'image-analysis/v1' }, id: idSchema, workspaceId: idSchema, artifactId: idSchema, manifestId: idSchema, sourceSha256: sha256Schema, dimensions: { type: 'object', additionalProperties: false, required: ['width', 'height'], properties: { width: { type: 'integer', minimum: 16, maximum: 100000 }, height: { type: 'integer', minimum: 16, maximum: 100000 } } }, orientation: { enum: ['portrait', 'landscape', 'square'] }, dominantColors: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string', pattern: '^#[a-f0-9]{6}$' } }, ocr: { type: 'object', additionalProperties: false, required: ['state', 'values', 'producer', 'reasonCodes'], properties: { state: { enum: ['available', 'unavailable'] }, values: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['text', 'language', 'box', 'confidence', 'importance'], properties: { text: { type: 'string', minLength: 1, maxLength: 2000 }, language: { type: 'string', pattern: '^(?:[a-z]{2}(?:-[A-Z]{2})?|und)$' }, box: imageBoxSchema, confidence: { type: 'number', minimum: 0, maximum: 1 }, importance: { enum: ['low', 'medium', 'high'] } } } }, producer: imageProducerSchema, reasonCodes: { type: 'array', maxItems: 32, uniqueItems: true, items: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,63}$' } } } }, faces: imageEntityObservationSchema, objects: imageEntityObservationSchema, observedDescription: { type: 'string', minLength: 1, maxLength: 2000 }, inferredTags: { type: 'array', maxItems: 256, items: { type: 'object', additionalProperties: false, required: ['value', 'confidence', 'provenance'], properties: { value: { type: 'string', minLength: 1, maxLength: 120 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, provenance: { type: 'string', minLength: 1, maxLength: 240 } } } }, derivatives: { type: 'object', additionalProperties: false, required: ['thumbnailArtifactId', 'previewArtifactId', 'immutableOriginal'], properties: { thumbnailArtifactId: idSchema, previewArtifactId: idSchema, immutableOriginal: { const: true } } }, createdAt: dateTimeSchema, analysisHash: sha256Schema },
+  })),
+  defineSchema('image-reuse-search-result', 1, 'Purpose-preserving reusable image ranking', successSchema({
+    type: 'object', additionalProperties: false, required: ['query', 'usage', 'items'],
+    properties: {
+      query: { type: 'string', minLength: 2, maxLength: 240 }, usage: { enum: ['b-roll', 'insert', 'card'] },
+      items: { type: 'array', maxItems: 50, items: {
+        type: 'object', additionalProperties: false,
+        required: ['artifactId', 'manifestId', 'analysisId', 'analysisHash', 'label', 'usage', 'score', 'matchedTerms', 'orientation', 'previewArtifactId', 'rightsSnapshotId', 'rightsSnapshotHash', 'rightsValidUntil'],
+        properties: { artifactId: idSchema, manifestId: idSchema, analysisId: idSchema, analysisHash: sha256Schema, label: { type: 'string', minLength: 1, maxLength: 240 }, usage: { enum: ['b-roll', 'insert', 'card'] }, score: { type: 'number', minimum: 0, maximum: 1 }, matchedTerms: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 2, maxLength: 240 } }, orientation: { enum: ['portrait', 'landscape', 'square'] }, previewArtifactId: idSchema, rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema, rightsValidUntil: dateTimeSchema },
+      } },
+    },
+  })),
+  defineSchema('image-reuse-request', 1, 'Immutable image reuse request', {
+    type: 'object', additionalProperties: false, required: ['artifactId', 'query', 'usage'],
+    properties: { artifactId: idSchema, query: { type: 'string', minLength: 2, maxLength: 240 }, usage: { enum: ['b-roll', 'insert', 'card'] } },
+  }),
+  defineSchema('image-reuse-reference', 1, 'Auditable image reuse reference and lineage', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'artifactId', 'manifestId', 'mediaAssetReferenceId', 'analysisId', 'analysisHash', 'rightsSnapshotId', 'rightsSnapshotHash', 'usage', 'query', 'score', 'bytesDuplicated', 'lineageHash', 'replayed', 'createdAt'],
+    properties: { schemaVersion: { const: 'image-reuse-reference/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema, artifactId: idSchema, manifestId: idSchema, mediaAssetReferenceId: idSchema, analysisId: idSchema, analysisHash: sha256Schema, rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema, usage: { enum: ['b-roll', 'insert', 'card'] }, query: { type: 'string', minLength: 2, maxLength: 240 }, score: { type: 'number', minimum: 0, maximum: 1 }, bytesDuplicated: { const: false }, lineageHash: sha256Schema, replayed: { type: 'boolean' }, createdAt: dateTimeSchema },
   })),
   defineSchema('media-segment-create-request', 1, 'Virtual media segment creation request', {
     type: 'object', additionalProperties: false, required: ['label', 'startMs', 'endMs'],
@@ -12604,6 +12682,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object', additionalProperties: false, required: ['items', 'nextCursor'],
       properties: {
         items: { type: 'array', maxItems: 100, items: mediaLibraryItemDataSchema },
+        nextCursor: { type: ['string', 'null'], minLength: 8, maxLength: 512 },
+      },
+    }),
+  ),
+  defineSchema('media-library-item', 2, 'Unified artifact or virtual segment media library item response',
+    successSchema(mediaLibraryItemDataSchemaV2),
+  ),
+  defineSchema('media-library-page', 2, 'Unified artifact and virtual segment media library page response',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['items', 'nextCursor'],
+      properties: {
+        items: { type: 'array', maxItems: 100, items: mediaLibraryItemDataSchemaV2 },
         nextCursor: { type: ['string', 'null'], minLength: 8, maxLength: 512 },
       },
     }),

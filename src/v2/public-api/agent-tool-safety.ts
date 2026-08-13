@@ -426,6 +426,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Adds one rights-cleared immutable artifact reference to one project without copying or deleting media bytes.',
     },
+    'apollo.projects.images.reuse': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Adds one purpose-bound, rights-cleared immutable image reference and audit lineage without copying or deleting media bytes.',
+    },
+    'apollo.projects.perception.put': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable, provenance-bound perception timeline for an exact project version without changing media bytes or starting provider work.',
+    },
     'apollo.media.segments.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable metadata-only range over an existing artifact without copying or changing media bytes.',

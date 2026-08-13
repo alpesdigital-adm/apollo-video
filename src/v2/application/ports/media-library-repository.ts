@@ -2,7 +2,7 @@ import type { MediaLibraryItem, MediaLibraryPage, MediaLibraryQuery, ProjectAsse
 
 export interface MediaLibraryRepository {
   list(query: MediaLibraryQuery, now: Date): Promise<Readonly<MediaLibraryPage>>
-  findById(workspaceId: string, artifactId: string, now: Date, locale?: string): Promise<Readonly<MediaLibraryItem> | null>
+  findById(workspaceId: string, itemId: string, now: Date, locale?: string): Promise<Readonly<MediaLibraryItem> | null>
   attach(input: {
     workspaceId: string
     projectId: string
