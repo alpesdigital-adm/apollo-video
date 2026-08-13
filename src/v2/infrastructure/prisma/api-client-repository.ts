@@ -354,6 +354,62 @@ export class PrismaApiClientRepository
     return rows.map(hydrateClient)
   }
 
+  private async reconcileCreateAfterConcurrentWrite(
+    bundle: CreateApiClientBundle,
+  ): Promise<ApiCredentialMutationResult> {
+    if (!this.client.v2IdempotencyRecord?.findUnique) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'API client creation conflicted with another transaction',
+      )
+    }
+    const existing = await this.client.v2IdempotencyRecord.findUnique({
+      where: {
+        workspaceId_clientId_key: {
+          workspaceId: bundle.idempotency.workspaceId,
+          clientId: bundle.idempotency.actorClientId,
+          key: bundle.idempotency.key,
+        },
+      },
+    })
+    if (!existing || existing.expiresAt <= new Date(bundle.idempotency.createdAt)) {
+      throw new DomainError(
+        'PERSISTENCE_CONFLICT',
+        'API client creation conflicted with another transaction',
+      )
+    }
+    const stored = parseAdministrationResponse(
+      existing,
+      bundle.idempotency.requestFingerprint,
+      'api-client.create',
+    )
+    const [clientRow, credentialRow, commandRow] = await Promise.all([
+      this.client.v2ApiClient.findUnique({ where: { id: stored.clientId } }),
+      this.client.v2ApiCredential.findUnique({
+        where: { id_clientId: { id: stored.credentialId, clientId: stored.clientId } },
+      }),
+      this.client.v2ApiAdministrationCommand.findUnique({
+        where: {
+          workspaceId_action_targetClientId_targetCredentialId: {
+            workspaceId: bundle.idempotency.workspaceId,
+            action: 'api-client.create',
+            targetClientId: stored.clientId,
+            targetCredentialId: stored.credentialId,
+          },
+        },
+      }),
+    ])
+    if (!clientRow || !credentialRow || clientRow.workspaceId !== bundle.client.workspaceId) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Idempotency result is missing')
+    }
+    assertAdministrationReplay(commandRow, bundle.command)
+    return {
+      client: hydrateClient(clientRow),
+      credential: hydrateCredential(credentialRow),
+      replayed: true,
+    }
+  }
+
   async createOrReplay(
     bundle: CreateApiClientBundle,
     concurrentWriteAttempt = 1,
@@ -477,15 +533,12 @@ export class PrismaApiClientRepository
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
-    return result.catch((error: unknown) => {
+    return result.catch(async (error: unknown) => {
       if (!isConcurrentWriteConflict(error)) throw error
       if (concurrentWriteAttempt < 3) {
         return this.createOrReplay(bundle, concurrentWriteAttempt + 1)
       }
-      throw new DomainError(
-        'PERSISTENCE_CONFLICT',
-        'API client creation conflicted with another transaction',
-      )
+      return this.reconcileCreateAfterConcurrentWrite(bundle)
     })
   }
 
