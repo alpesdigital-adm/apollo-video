@@ -22,7 +22,7 @@ CREATE TABLE "story_plans" (
   "createdAt" TIMESTAMPTZ(3) NOT NULL,
   CONSTRAINT "story_plans_workspace_fkey" FOREIGN KEY ("workspaceId") REFERENCES "workspaces"("id") ON DELETE RESTRICT,
   CONSTRAINT "story_plans_project_fkey" FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects"("id", "workspaceId") ON DELETE CASCADE,
-  CONSTRAINT "story_plans_project_version_fkey" FOREIGN KEY ("projectVersionId", "projectId") REFERENCES "project_versions"("id", "projectId") ON DELETE RESTRICT,
+  CONSTRAINT "story_plans_project_version_fkey" FOREIGN KEY ("projectVersionId", "projectId", "workspaceId") REFERENCES "project_versions"("id", "projectId", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "story_plans_created_by_client_fkey" FOREIGN KEY ("createdByClientId", "workspaceId") REFERENCES "api_clients"("id", "workspaceId") ON DELETE RESTRICT,
   CONSTRAINT "story_plans_schema_check" CHECK ("schemaVersion" = 3),
   CONSTRAINT "story_plans_treatment_schema_check" CHECK ("treatmentSchemaVersion" > 0),
