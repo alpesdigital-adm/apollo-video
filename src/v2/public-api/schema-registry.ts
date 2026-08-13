@@ -7,6 +7,7 @@ import {
   MVP_CORE_CRITERION_CHECKS,
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
+import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -22,7 +23,7 @@ const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
 const directorToolNameSchema = {
-  enum: ['search-media', 'create-story-plan', 'propose-asset', 'evaluate-candidate', 'propose-patch'],
+  enum: DIRECTOR_TOOL_DESCRIPTORS.map(({ name }) => name),
 } as const
 const directorToolRightsSchema = {
   type: 'array', maxItems: 100, uniqueItems: true,
@@ -31,35 +32,9 @@ const directorToolRightsSchema = {
     properties: { assetId: idSchema, snapshotHash: sha256Schema },
   },
 } as const
-const directorToolArgumentSchemas = {
-  'search-media': {
-    type: 'object', additionalProperties: false, required: ['query'],
-    properties: { query: { type: 'string', minLength: 1, maxLength: 500 }, limit: { type: 'integer', minimum: 1, maximum: 50 } },
-  },
-  'create-story-plan': {
-    type: 'object', additionalProperties: false, required: ['plan', 'assetIds'],
-    properties: { plan: { type: 'object' }, assetIds: { type: 'array', maxItems: 100, uniqueItems: true, items: idSchema } },
-  },
-  'propose-asset': {
-    type: 'object', additionalProperties: false, required: ['assetId', 'planNodeId', 'purpose'],
-    properties: { assetId: idSchema, planNodeId: idSchema, purpose: { type: 'string', minLength: 1, maxLength: 500 } },
-  },
-  'evaluate-candidate': {
-    type: 'object', additionalProperties: false, required: ['candidates', 'rubric', 'minimumConfidence'],
-    properties: {
-      candidates: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object' } },
-      rubric: { type: 'object' }, minimumConfidence: { type: 'number', minimum: 0, maximum: 1 },
-    },
-  },
-  'propose-patch': {
-    type: 'object', additionalProperties: false, required: ['operations', 'assetIds', 'rationale'],
-    properties: {
-      operations: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' } },
-      assetIds: { type: 'array', maxItems: 100, uniqueItems: true, items: idSchema },
-      rationale: { type: 'string', minLength: 1, maxLength: 1000 },
-    },
-  },
-} as const
+const directorToolArgumentSchemas = Object.freeze(Object.fromEntries(
+  DIRECTOR_TOOL_DESCRIPTORS.map(({ name, inputSchema }) => [name, inputSchema]),
+))
 const directorToolCallSchema = {
   oneOf: Object.entries(directorToolArgumentSchemas).map(([name, argumentsSchema]) => ({
     type: 'object', additionalProperties: false,

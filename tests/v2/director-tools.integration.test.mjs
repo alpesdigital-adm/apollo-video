@@ -140,6 +140,23 @@ test('T-FR-064 application execution resolves authoritative server context befor
   assert.deepEqual(resolutions, [{ workspaceId, projectId, requestedAssetIds: ['asset-eligible'] }])
 })
 
+test('T-FR-064 canonical Wave 5 StoryPlan and montage hashes are mandatory at the tool boundary', async () => {
+  const fake = services()
+  const legacyPlan = structuredClone(STORY_GOLDEN_FIXTURES.linear)
+  legacyPlan.schemaVersion = 2
+  delete legacyPlan.treatmentPlanRef
+  await assert.rejects(
+    () => runDirectorToolModel({ model: { async generateToolCalls() { return [call('legacy-story-call', 'create-story-plan', { plan: legacyPlan, assetIds: ['asset-eligible'] }, 1, ['asset-eligible'])] } }, context: context(), services: fake }),
+    /current StoryPlan v3/,
+  )
+  const staleCandidate = { ...candidate, seedHash: 'f'.repeat(64) }
+  await assert.rejects(
+    () => runDirectorToolModel({ model: { async generateToolCalls() { return [call('stale-montage-call', 'evaluate-candidate', { candidates: [staleCandidate], rubric: { id: MONTAGE_RUBRIC.id, weights: MONTAGE_RUBRIC.weights }, minimumConfidence: MONTAGE_RUBRIC.minimumConfidence }, 0.75, ['asset-eligible'])] } }, context: context(), services: fake }),
+    /canonical hash/,
+  )
+  assert.equal(fake.invocations.length, 0)
+})
+
 test('T-FR-064 context resolver derives version, rights and budget from server-side ports', async () => {
   const snapshot = createAssetRightsSnapshot({
     id: 'rights-director-tools-1', workspaceId, artifactId: 'asset-eligible', sequence: 1,

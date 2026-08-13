@@ -82,6 +82,26 @@ export interface DirectorToolContext {
 const idSchema = Object.freeze({ type: 'string', minLength: 3, maxLength: 128 })
 const hashSchema = Object.freeze({ type: 'string', pattern: '^[a-f0-9]{64}$' })
 const stringSchema = Object.freeze({ type: 'string', minLength: 1, maxLength: 500 })
+const idArraySchema = Object.freeze({ type: 'array', uniqueItems: true, maxItems: 100, items: idSchema })
+const storyDurationSchema = Object.freeze({ type: 'object', additionalProperties: false, required: ['min', 'ideal', 'max'], properties: Object.freeze({ min: Object.freeze({ type: 'integer', minimum: 1 }), ideal: Object.freeze({ type: 'integer', minimum: 1 }), max: Object.freeze({ type: 'integer', minimum: 1 }) }) })
+const storyPlanToolSchema = Object.freeze({
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'],
+  properties: Object.freeze({
+    schemaVersion: Object.freeze({ const: 3 }), objective: Object.freeze({ type: 'string', minLength: 1, maxLength: 160 }),
+    desiredActionRef: Object.freeze({ type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'actionHash', 'action'], properties: Object.freeze({ schemaVersion: Object.freeze({ const: 'desired-action-ref/v1' }), id: idSchema, actionHash: hashSchema, action: Object.freeze({ type: 'object' }) }) }),
+    treatmentPlanRef: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'schemaVersion', 'contentHash'], properties: Object.freeze({ id: idSchema, schemaVersion: Object.freeze({ type: 'integer', minimum: 1 }), contentHash: hashSchema }) }),
+    targetDurationMs: Object.freeze({ type: 'object', additionalProperties: false, required: ['min', 'max'], properties: Object.freeze({ min: Object.freeze({ type: 'integer', minimum: 1 }), max: Object.freeze({ type: 'integer', minimum: 1 }) }) }),
+    acts: Object.freeze({ type: 'array', minItems: 1, maxItems: 20, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'role', 'blockIds'], properties: Object.freeze({ id: idSchema, role: Object.freeze({ enum: ['opening', 'development', 'resolution'] }), blockIds: idArraySchema }) }) }),
+    blocks: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'actId', 'role', 'intent', 'dependencies', 'sourceCandidateIds', 'durationTargetMs', 'content', 'presentation'], properties: Object.freeze({ id: idSchema, actId: idSchema, role: Object.freeze({ enum: ['hook', 'context', 'argument', 'proof', 'cta'] }), intent: stringSchema, dependencies: idArraySchema, sourceCandidateIds: idArraySchema, durationTargetMs: storyDurationSchema, content: Object.freeze({ type: 'object', additionalProperties: false, required: ['claimIds', 'qualifierIds', 'proofIds'], properties: Object.freeze({ claimIds: idArraySchema, qualifierIds: idArraySchema, proofIds: idArraySchema, ctaId: idSchema }) }), presentation: Object.freeze({ enum: ['source-video', 'voiceover', 'cold-open-reference'] }), sourceRangeId: idSchema }) }) }),
+    sourceRanges: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef'], properties: Object.freeze({ id: idSchema, artifactId: idSchema, startMs: Object.freeze({ type: 'integer', minimum: 0 }), endMs: Object.freeze({ type: 'integer', minimum: 1 }), rightsRef: idSchema, consentRef: idSchema }) }) }),
+    sourceCandidates: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'sourceRangeId', 'purpose', 'rank'], properties: Object.freeze({ id: idSchema, sourceRangeId: idSchema, purpose: Object.freeze({ enum: ['hook', 'context', 'argument', 'proof', 'cta'] }), rank: Object.freeze({ type: 'integer', minimum: 1 }) }) }) }),
+    qualifiers: Object.freeze({ type: 'array', maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'text'], properties: Object.freeze({ id: idSchema, text: Object.freeze({ type: 'string', minLength: 1, maxLength: 1024 }) }) }) }),
+    claims: Object.freeze({ type: 'array', maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'text', 'qualifierIds', 'proofContextIds'], properties: Object.freeze({ id: idSchema, text: Object.freeze({ type: 'string', minLength: 1, maxLength: 2048 }), qualifierIds: idArraySchema, proofContextIds: idArraySchema }) }) }),
+    proofContexts: Object.freeze({ type: 'array', maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'claimIds', 'sourceCandidateIds', 'attribution'], properties: Object.freeze({ id: idSchema, claimIds: idArraySchema, sourceCandidateIds: idArraySchema, attribution: Object.freeze({ type: 'string', minLength: 1, maxLength: 1024 }) }) }) }),
+  }),
+})
+const montageCandidateToolSchema = Object.freeze({ type: 'object', additionalProperties: false, required: ['schemaVersion', 'id', 'seed', 'storyPlanRef', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals', 'seedHash'], properties: Object.freeze({ schemaVersion: Object.freeze({ const: 'montage-candidate-seed/v1' }), id: idSchema, seed: idSchema, storyPlanRef: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: Object.freeze({ id: idSchema, hash: hashSchema }) }), mode: Object.freeze({ enum: ['chronological', 'cold-open', 'reorganized'] }), hook: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: Object.freeze({ id: idSchema, selfContained: Object.freeze({ type: 'boolean' }) }) }), blockOrder: idArraySchema, permittedBlockOrders: Object.freeze({ type: 'array', minItems: 1, maxItems: 32, items: idArraySchema }), assets: Object.freeze({ type: 'array', maxItems: 32, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: Object.freeze({ id: idSchema, rightsApproved: Object.freeze({ type: 'boolean' }) }) }) }), patternBreaks: Object.freeze({ type: 'array', maxItems: 64, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: Object.freeze({ id: idSchema, atMs: Object.freeze({ type: 'integer', minimum: 0, maximum: 3600000 }), group: idSchema }) }) }), maximumPatternBreaks: Object.freeze({ type: 'integer', minimum: 0, maximum: 64 }), confidence: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }), rubricSignals: Object.freeze({ type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: Object.freeze({ narrative: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }), objective: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }), continuity: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }), evidence: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }) }) }), seedHash: hashSchema }) })
 
 export const DIRECTOR_TOOL_DESCRIPTORS = Object.freeze([
   Object.freeze({
@@ -99,7 +119,7 @@ export const DIRECTOR_TOOL_DESCRIPTORS = Object.freeze([
     description: 'Create a validated StoryPlan proposal for the exact base version.',
     inputSchema: Object.freeze({
       type: 'object', additionalProperties: false, required: ['plan', 'assetIds'],
-      properties: Object.freeze({ plan: Object.freeze({ type: 'object' }), assetIds: Object.freeze({ type: 'array', uniqueItems: true, maxItems: 100, items: idSchema }) }),
+      properties: Object.freeze({ plan: storyPlanToolSchema, assetIds: idArraySchema }),
     }),
   }),
   Object.freeze({
@@ -118,9 +138,9 @@ export const DIRECTOR_TOOL_DESCRIPTORS = Object.freeze([
     inputSchema: Object.freeze({
       type: 'object', additionalProperties: false, required: ['candidates', 'rubric', 'minimumConfidence'],
       properties: Object.freeze({
-        candidates: Object.freeze({ type: 'array', minItems: 1, maxItems: 20, items: Object.freeze({ type: 'object' }) }),
-        rubric: Object.freeze({ type: 'object' }),
-        minimumConfidence: Object.freeze({ type: 'number', minimum: 0, maximum: 1 }),
+        candidates: Object.freeze({ type: 'array', minItems: 1, maxItems: 20, items: montageCandidateToolSchema }),
+        rubric: Object.freeze({ type: 'object', additionalProperties: false, required: ['id', 'weights'], properties: Object.freeze({ id: Object.freeze({ const: MONTAGE_RUBRIC.id }), weights: Object.freeze({ type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: Object.freeze(Object.fromEntries(Object.entries(MONTAGE_RUBRIC.weights).map(([key, value]) => [key, Object.freeze({ const: value })]))) }) }) }),
+        minimumConfidence: Object.freeze({ const: MONTAGE_RUBRIC.minimumConfidence }),
       }),
     }),
   }),
@@ -131,8 +151,8 @@ export const DIRECTOR_TOOL_DESCRIPTORS = Object.freeze([
     inputSchema: Object.freeze({
       type: 'object', additionalProperties: false, required: ['operations', 'assetIds', 'rationale'],
       properties: Object.freeze({
-        operations: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'object' }) }),
-        assetIds: Object.freeze({ type: 'array', uniqueItems: true, maxItems: 100, items: idSchema }),
+        operations: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'object', additionalProperties: false, required: ['operation', 'path'], properties: Object.freeze({ operation: Object.freeze({ enum: ['add', 'replace', 'remove'] }), path: Object.freeze({ type: 'string', minLength: 1, maxLength: 500 }), value: Object.freeze({}) }) }) }),
+        assetIds: idArraySchema,
         rationale: stringSchema,
       }),
     }),
