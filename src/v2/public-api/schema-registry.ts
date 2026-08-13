@@ -1,4 +1,4 @@
-import { DomainError, assertDomain } from '../domain/errors.ts'
+﻿import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
@@ -27,6 +27,13 @@ const strategicObjectiveSchema = {
     'sale', 'whatsapp', 'booking', 'download',
   ],
 } as const
+const editorialIdSchema = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$' } as const
+const editorialTokenSchema = { type: 'string', minLength: 3, maxLength: 256 } as const
+const editorialIssueSchema = { type: 'object', additionalProperties: false, required: ['code', 'dimension', 'severity', 'subjectIds', 'fromMs', 'toMs', 'detail'], properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{2,127}$' }, dimension: { enum: ['b-roll', 'motion', 'energy', 'pattern-break', 'continuity'] }, severity: { enum: ['block', 'review'] }, subjectIds: { type: 'array', maxItems: 512, uniqueItems: true, items: editorialIdSchema }, fromMs: { type: 'integer', minimum: 0, maximum: 3600000 }, toMs: { type: 'integer', minimum: 0, maximum: 3600000 }, detail: { type: 'string', minLength: 1, maxLength: 512 } } } as const
+const editorialMotionSchema = { type: 'object', additionalProperties: false, required: ['id', 'kind', 'reason', 'evidenceRef', 'startMs', 'endMs', 'amplitude', 'velocity', 'cooldownMs'], properties: { id: editorialIdSchema, kind: { enum: ['zoom', 'pan', 'tilt'] }, reason: editorialTokenSchema, evidenceRef: editorialTokenSchema, startMs: { type: 'integer', minimum: 0, maximum: 3600000 }, endMs: { type: 'integer', minimum: 1, maximum: 3600000 }, amplitude: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, velocity: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, cooldownMs: { type: 'integer', minimum: 0, maximum: 30000 } } } as const
+const editorialActSchema = { type: 'object', additionalProperties: false, required: ['id', 'role', 'startMs', 'endMs'], properties: { id: editorialIdSchema, role: { enum: ['hook', 'body', 'proof', 'cta'] }, startMs: { type: 'integer', minimum: 0, maximum: 3600000 }, endMs: { type: 'integer', minimum: 1, maximum: 3600000 } } } as const
+const editorialPatternBreakSchema = { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'type', 'semanticGroup', 'reason'], properties: { id: editorialIdSchema, atMs: { type: 'integer', minimum: 0, maximum: 3599999 }, type: { enum: ['zoom', 'insert', 'cutaway', 'layout-change'] }, semanticGroup: editorialTokenSchema, reason: editorialTokenSchema } } as const
+const editorialContinuityFrameSchema = { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'eyeLine', 'movement', 'position', 'color', 'audio', 'argument', 'justifiedChanges', 'evidenceRefs'], properties: { id: editorialIdSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, eyeLine: editorialTokenSchema, movement: editorialTokenSchema, position: editorialTokenSchema, color: editorialTokenSchema, audio: editorialTokenSchema, argument: editorialTokenSchema, justifiedChanges: { type: 'array', maxItems: 6, uniqueItems: true, items: { enum: ['eye-line', 'movement', 'position', 'color', 'audio', 'argument'] } }, evidenceRefs: { type: 'array', maxItems: 32, uniqueItems: true, items: editorialTokenSchema } } } as const
 const desiredActionInputSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12216,6 +12223,45 @@ const colorPipelineCompilationSchema = {
   },
 } as const
 
+const treatmentPerceptionSummarySchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'schemaVersion', 'summaryHash', 'confidence', 'speakerCoverage', 'visualVariety', 'evidenceItemCount', 'durationMs'],
+  properties: {
+    id: idSchema, schemaVersion: { type: 'integer', minimum: 1 }, summaryHash: sha256Schema,
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    speakerCoverage: { type: 'number', minimum: 0, maximum: 1 },
+    visualVariety: { type: 'number', minimum: 0, maximum: 1 },
+    evidenceItemCount: { type: 'integer', minimum: 0 }, durationMs: { type: 'integer', minimum: 1 },
+  },
+} as const
+
+const treatmentPlanValueSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'objective', 'mode', 'confidence', 'energy', 'visualDensity', 'grammar', 'patternBreaks', 'proofPolicy', 'ctaPolicy', 'budget', 'assumptions', 'alternatives', 'decisions', 'claimPolicy', 'provenance'],
+  properties: {
+    schemaVersion: { const: 3 },
+    objective: { enum: ['discovery', 'awareness', 'warming', 'lead-generation', 'sale', 'whatsapp', 'booking', 'download'] },
+    mode: { enum: ['talking-head', 'visual-montage', 'media-only'] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 }, energy: { type: 'number', minimum: 0, maximum: 1 }, visualDensity: { type: 'number', minimum: 0, maximum: 1 },
+    grammar: { type: 'object', additionalProperties: false, required: ['primary', 'shotRhythm', 'subtitleMode'], properties: { primary: { enum: ['speaker', 'b-roll'] }, shotRhythm: { enum: ['measured', 'dynamic'] }, subtitleMode: { enum: ['support', 'narrative'] } } },
+    patternBreaks: { type: 'object', additionalProperties: false, required: ['maxPer30s', 'allowed'], properties: { maxPer30s: { type: 'integer', minimum: 0, maximum: 8 }, allowed: { type: 'array', maxItems: 4, uniqueItems: true, items: { enum: ['zoom', 'insert', 'cutaway', 'layout-change'] } } } },
+    proofPolicy: { type: 'object', additionalProperties: false, required: ['required', 'minimumEvidenceItems'], properties: { required: { type: 'boolean' }, minimumEvidenceItems: { type: 'integer', minimum: 0, maximum: 20 } } },
+    ctaPolicy: { type: 'object', additionalProperties: false, required: ['required', 'placement', 'maxOccurrences'], properties: { required: { type: 'boolean' }, placement: { enum: ['none', 'close', 'throughout'] }, maxOccurrences: { type: 'integer', minimum: 0, maximum: 5 } } },
+    budget: { type: 'object', additionalProperties: false, required: ['patternBreaksPer30s', 'proofItems', 'ctaOccurrences', 'decisions'], properties: { patternBreaksPer30s: { type: 'integer', minimum: 0, maximum: 8 }, proofItems: { type: 'integer', minimum: 0, maximum: 20 }, ctaOccurrences: { type: 'integer', minimum: 0, maximum: 5 }, decisions: { type: 'integer', minimum: 2, maximum: 50 } } },
+    assumptions: { type: 'array', maxItems: 20, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } },
+    alternatives: { type: 'array', minItems: 1, maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['id', 'difference', 'tradeoff'], properties: { id: idSchema, difference: { type: 'string', minLength: 1, maxLength: 500 }, tradeoff: { type: 'string', minLength: 1, maxLength: 500 } } } },
+    decisions: { type: 'array', minItems: 2, maxItems: 50, items: { type: 'object', additionalProperties: false, required: ['id', 'field', 'evidenceRefs', 'reason', 'confidence', 'impact'], properties: { id: idSchema, field: { type: 'string', minLength: 1, maxLength: 120 }, evidenceRefs: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: idSchema }, reason: { type: 'string', minLength: 1, maxLength: 500 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, impact: { enum: ['low', 'medium', 'high'] } } } },
+    claimPolicy: { type: 'object', additionalProperties: false, required: ['observedClaims', 'proposedClaims'], properties: { observedClaims: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } }, proposedClaims: { type: 'array', maxItems: 100, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 500 } } } },
+    provenance: { type: 'object', additionalProperties: false, required: ['rubricId', 'rubricVersion', 'rubricHash', 'policySnapshotId', 'policySchemaVersion', 'policySnapshotHash', 'perceptionSummaryId', 'perceptionSchemaVersion', 'perceptionSummaryHash'], properties: { rubricId: idSchema, rubricVersion: { type: 'integer', minimum: 1 }, rubricHash: sha256Schema, policySnapshotId: idSchema, policySchemaVersion: { type: 'integer', minimum: 1 }, policySnapshotHash: sha256Schema, perceptionSummaryId: idSchema, perceptionSchemaVersion: { type: 'integer', minimum: 1 }, perceptionSummaryHash: sha256Schema } },
+  },
+} as const
+
+const persistedTreatmentPlanSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'projectId', 'projectVersionId', 'plan', 'treatmentHash', 'createdByClientId', 'createdAt'],
+  properties: { id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema, plan: treatmentPlanValueSchema, treatmentHash: sha256Schema, createdByClientId: idSchema, createdAt: dateTimeSchema },
+} as const
+
 function projectManualTimelineBody(timeline: Record<string, unknown>) {
   return successSchema({
     type: 'object',
@@ -12618,6 +12664,44 @@ const perceptionCoverageSchema = { type: 'object', additionalProperties: false, 
 const perceptionTimelineSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'durationMs', 'observations', 'coverage', 'inventedValues', 'timelineHash'], properties: { schemaVersion: { const: 1 }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 }, timelineHash: sha256Schema } } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('editorial-grammar-evaluation-request', 1, 'Versioned editorial treatment grammar evaluation request', {
+    type: 'object', additionalProperties: false,
+    required: ['policyVersion', 'objective', 'durationMs', 'semanticWindows', 'brollRequests', 'motions', 'acts', 'patternBreaks', 'continuityFrames'],
+    properties: {
+      policyVersion: { const: 'editorial-grammar-2026-08-v1' }, objective: { enum: ['awareness', 'conversion'] },
+      durationMs: { type: 'integer', minimum: 1000, maximum: 3600000 },
+      semanticWindows: { type: 'array', minItems: 1, maxItems: 128, items: {
+        type: 'object', additionalProperties: false, required: ['id', 'startMs', 'endMs', 'conclusionMs', 'obstructedRanges'],
+        properties: { id: editorialIdSchema, startMs: { type: 'integer', minimum: 0, maximum: 3599999 }, endMs: { type: 'integer', minimum: 1, maximum: 3600000 }, conclusionMs: { type: 'integer', minimum: 1, maximum: 3600000 }, obstructedRanges: { type: 'array', maxItems: 32, items: { type: 'array', minItems: 2, maxItems: 2, prefixItems: [{ type: 'integer', minimum: 0, maximum: 3599999 }, { type: 'integer', minimum: 1, maximum: 3600000 }], items: false } } },
+      } },
+      brollRequests: { type: 'array', maxItems: 128, items: {
+        type: 'object', additionalProperties: false, required: ['id', 'windowId', 'entryCue', 'desiredDurationMs'],
+        properties: { id: editorialIdSchema, windowId: editorialIdSchema, desiredDurationMs: { type: 'integer', minimum: 1, maximum: 3600000 }, entryCue: { type: 'object', additionalProperties: false, required: ['kind', 'atMs', 'evidenceRef'], properties: { kind: { enum: ['semantic-boundary', 'post-setup-pause', 'gaze-change', 'keyword', 'technical-cover'] }, atMs: { type: 'integer', minimum: 0, maximum: 3599999 }, evidenceRef: editorialTokenSchema } } },
+      } },
+      motions: { type: 'array', maxItems: 128, items: editorialMotionSchema },
+      acts: { type: 'array', minItems: 1, maxItems: 32, items: editorialActSchema },
+      patternBreaks: { type: 'array', maxItems: 512, items: editorialPatternBreakSchema },
+      continuityFrames: { type: 'array', minItems: 1, maxItems: 512, items: editorialContinuityFrameSchema },
+    },
+  }),
+  defineSchema('editorial-grammar-evaluation', 1, 'Content-addressed editorial treatment grammar preflight', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['schemaVersion', 'policyVersion', 'objective', 'durationMs', 'valid', 'distribution', 'broll', 'motions', 'energyCurve', 'patternBreakBudget', 'continuityFrames', 'issues', 'evaluationHash'],
+    properties: {
+      schemaVersion: { const: 'editorial-grammar-evaluation/v1' }, policyVersion: { const: 'editorial-grammar-2026-08-v1' },
+      objective: { enum: ['awareness', 'conversion'] }, durationMs: { type: 'integer', minimum: 1000, maximum: 3600000 },
+      valid: { type: 'boolean' }, distribution: { enum: ['excessive', 'scarce', 'adequate'] },
+      broll: { type: 'array', maxItems: 128, items: { oneOf: [
+        { type: 'object', additionalProperties: false, required: ['requestId', 'status', 'placement'], properties: { requestId: editorialIdSchema, status: { const: 'placed' }, placement: { type: 'object', additionalProperties: false, required: ['accepted', 'id', 'windowId', 'startMs', 'endMs', 'entryReason', 'entryEvidenceRef', 'exitReason'], properties: { accepted: { const: true }, id: editorialIdSchema, windowId: editorialIdSchema, startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 }, entryReason: { enum: ['semantic-boundary', 'post-setup-pause', 'gaze-change', 'keyword', 'technical-cover'] }, entryEvidenceRef: editorialTokenSchema, exitReason: { enum: ['semantic-conclusion', 'duration-bound'] } } } } },
+        { type: 'object', additionalProperties: false, required: ['requestId', 'status', 'issue'], properties: { requestId: editorialIdSchema, status: { const: 'rejected' }, issue: editorialIssueSchema } },
+      ] } },
+      motions: { type: 'array', maxItems: 128, items: editorialMotionSchema },
+      energyCurve: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'role', 'startMs', 'endMs', 'energy', 'targetBreakDensityPer30s'], properties: { ...editorialActSchema.properties, energy: { type: 'number', minimum: 0, maximum: 1 }, targetBreakDensityPer30s: { type: 'integer', minimum: 0, maximum: 16 } } } },
+      patternBreakBudget: { type: 'object', additionalProperties: false, required: ['policy', 'items'], properties: { policy: { type: 'object', additionalProperties: false, required: ['windowMs', 'minPerWindow', 'maxPerWindow', 'maxSameType', 'maxSameGroup'], properties: { windowMs: { const: 30000 }, minPerWindow: { type: 'integer', minimum: 1, maximum: 16 }, maxPerWindow: { type: 'integer', minimum: 1, maximum: 16 }, maxSameType: { type: 'integer', minimum: 1, maximum: 16 }, maxSameGroup: { type: 'integer', minimum: 1, maximum: 16 } } }, items: { type: 'array', maxItems: 512, items: editorialPatternBreakSchema } } },
+      continuityFrames: { type: 'array', minItems: 1, maxItems: 512, items: editorialContinuityFrameSchema },
+      issues: { type: 'array', maxItems: 2048, items: editorialIssueSchema }, evaluationHash: sha256Schema,
+    },
+  })),
   defineSchema('automatic-catalog-record', 1, 'Immutable automatic catalog eligibility and lineage evidence', successSchema({
     type: 'object', additionalProperties: false,
     required: ['id', 'workspaceId', 'artifactId', 'manifestId', 'outputKind', 'searchableKind', 'rightsSnapshotId', 'rightsSnapshotHash', 'eligibilityEvidenceHash', 'lineage', 'recordHash', 'createdAt'],
@@ -13902,6 +13986,25 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { compilation: colorPipelineCompilationSchema },
     }),
   ),
+  defineSchema('create-treatment-plan-request', 1, 'Create a TreatmentPlan from versioned rubric, Policy Snapshot and Perception evidence', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'policySnapshotId', 'objective', 'mode', 'perceptionSummary'],
+    properties: {
+      projectVersionId: idSchema,
+      policySnapshotId: idSchema,
+      objective: { enum: ['discovery', 'awareness', 'warming', 'lead-generation', 'sale', 'whatsapp', 'booking', 'download'] },
+      mode: { enum: ['talking-head', 'visual-montage'] },
+      perceptionSummary: treatmentPerceptionSummarySchema,
+    },
+  }),
+  defineSchema('treatment-plan-mutated', 1, 'Created or replayed immutable TreatmentPlan', successSchema({
+    type: 'object', additionalProperties: false, required: ['treatmentPlan', 'replayed'],
+    properties: { treatmentPlan: persistedTreatmentPlanSchema, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('treatment-plan-read', 1, 'Immutable evidence-bound TreatmentPlan', successSchema({
+    type: 'object', additionalProperties: false, required: ['treatmentPlan'],
+    properties: { treatmentPlan: persistedTreatmentPlanSchema },
+  })),
   defineSchema('public-operation-detail', 2, 'Public operation detail response for render and media ingest',
     successSchema({
       type: 'object',

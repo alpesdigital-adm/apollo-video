@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 220,
-    "operableCapabilities": 220,
-    "publicContractCapabilities": 220,
+    "registeredCapabilities": 223,
+    "operableCapabilities": 223,
+    "publicContractCapabilities": 223,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2923,6 +2923,28 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.treatment-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/treatment-plans",
+      "inputSchemaRef": "apollo://schemas/create-treatment-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/treatment-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.treatment-plans.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/treatment-plans/{treatmentPlanId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/treatment-plan-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.contiguous-extractions.read",
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/contiguous-extractions/{extractionId}",
@@ -3742,6 +3764,17 @@
       "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/quality-report",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/director-quality-report-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.editorial-grammar.evaluate",
+      "exposure": "public",
+      "endpoint": "POST /v1/editorial-grammar/evaluations",
+      "inputSchemaRef": "apollo://schemas/editorial-grammar-evaluation-request/v1",
+      "outputSchemaRef": "apollo://schemas/editorial-grammar-evaluation/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -58,6 +58,7 @@ import type { EvidenceSegmentRepository } from '../application/ports/evidence-se
 import type { LongFormIndexRepository } from '../application/ports/long-form-index-repository.ts'
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
+import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
@@ -165,6 +166,7 @@ import { PrismaEvidenceSegmentRepository } from './prisma/evidence-segment-repos
 import { PrismaLongFormIndexRepository } from './prisma/long-form-index-repository.ts'
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
+import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
@@ -394,6 +396,10 @@ ContiguousExtractionRepository {
 export function createColorPipelineCompilationRepository():
 ColorPipelineCompilationRepository {
   return new PrismaColorPipelineCompilationRepository(resolveV2Client())
+}
+
+export function createTreatmentPlanRepository(): TreatmentPlanRepository {
+  return new PrismaTreatmentPlanRepository(resolveV2Client())
 }
 
 export function createWorkspaceLutRepository(): WorkspaceLutRepository {

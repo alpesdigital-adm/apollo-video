@@ -243,26 +243,34 @@ Esses valores são defaults de implementação e devem ser calibrados com datase
 
 ```ts
 interface TreatmentPlan {
-  objectiveRubricId: string
-  narrativeMode: 'tutorial' | 'story' | 'authority' | 'offer' | 'testimonial' | 'montage'
-  hookStrategy: 'chronological' | 'cold-open' | 'promise' | 'proof-first' | 'contrarian'
-  energyCurve: EnergySegment[]
-  visualGrammar: {
-    presenterVisibility: number
-    brollDensityTarget: number
-    typographyDensityTarget: number
-    noveltyBudget: NoveltyBudget
-    movementPolicy: MovementPolicy
-  }
-  subtitlePolicy: SubtitlePolicy
-  colorPolicy: ColorPolicy
-  evidencePolicy: EvidencePolicy
-  reorderPolicy: ReorderPolicy
-  audioPolicy: AudioPolicyStub
+  schemaVersion: 3
+  objective: StrategicObjectiveId
+  mode: 'talking-head' | 'visual-montage' | 'media-only'
+  energy: number
+  visualDensity: number
+  grammar: VisualGrammar
+  patternBreaks: PatternBreakPolicy
+  proofPolicy: ProofPolicy
+  ctaPolicy: CtaPolicy
+  budget: TreatmentBudget
   assumptions: string[]
+  alternatives: TreatmentAlternative[]
+  decisions: TreatmentDecision[]
   confidence: number
+  provenance: {
+    rubricId: string; rubricVersion: number; rubricHash: Sha256
+    policySnapshotId: string; policySchemaVersion: number; policySnapshotHash: Sha256
+    perceptionSummaryId: string; perceptionSchemaVersion: number; perceptionSummaryHash: Sha256
+  }
 }
 ```
+
+Não existe campo de estilo escolhido manualmente. A factory resolve a rubrica
+canônica pelo objetivo, usa o Policy Snapshot da ProjectVersion e aceita apenas
+um resumo de percepção estruturado, versionado e hashado. Limites de pattern
+break, prova, CTA e quantidade de decisões falham fechado antes da persistência.
+O Diretor pode também guardar o plano como ProjectSnapshot; a API externa usa
+`V2TreatmentPlan`, e ambos carregam exatamente o mesmo valor `TreatmentPlan v3`.
 
 ### 9.1 MovementPolicy
 
