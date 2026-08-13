@@ -100,7 +100,14 @@ export function createDirectorDecision(input: Omit<DirectorDecisionLogEntry, 'sc
 function planNodesForDecision(decision: PlannedDirectorDecision, storyPlan: Readonly<StoryPlan>): readonly string[] {
   const ordered = storyPlan.acts.flatMap((act) => act.blockIds)
   const development = storyPlan.acts.find((act) => act.role === 'development')?.blockIds ?? []
-  const selected = decision.category === 'insert' ? development : ordered
+  // An insert decision normally affects the development act. A valid short-form
+  // StoryPlan can consist of a single opening block, though, and the decision to
+  // omit/request an insert still applies to that retained narrative. Preserve an
+  // exact StoryPlan lineage by falling back to the ordered blocks instead of
+  // inventing a development node or dropping the decision log.
+  const selected = decision.category === 'insert' && development.length > 0
+    ? development
+    : ordered
   if (selected.length === 0 || selected.some((nodeId) => !storyPlan.blocks.some((block) => block.id === nodeId))) throw new DomainError('INVALID_COMMAND', `Director decision ${decision.id} has no StoryPlan node`)
   return Object.freeze([...selected])
 }

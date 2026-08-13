@@ -49,6 +49,29 @@ test('T-FR-065 creates a content-addressed decision log with immutable run, plan
   assert.ok(Object.isFrozen(log.entries) && Object.isFrozen(decision))
 })
 
+test('T-FR-065 binds insert decisions to the retained opening when a short StoryPlan has no development act', () => {
+  const insertDecision = {
+    ...plannedDecision,
+    id: 'decision-insert-selection',
+    category: 'insert',
+    choice: 'no-insert',
+    alternatives: ['request-library-search'],
+  }
+  const log = createDirectorDecisionLog({
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    runId: 'run-1',
+    commandId: 'command-7',
+    resultVersionId: 'version-2',
+    actor: { type: 'api-client', id: 'client-1' },
+    storyPlan,
+    decisions: [insertDecision],
+    createdAt: '2026-07-17T20:00:00.000Z',
+  })
+
+  assert.deepEqual(log.entries[0].planNodeIds, ['node-proof'])
+})
+
 test('T-FR-065 rejects ambiguous candidates and detects persisted-log tampering', () => {
   const log = logFixture()
   const input = { ...log.entries[0], candidates: [{ id: 'a-candidate', outcome: 'selected', reason: 'a' }, { id: 'b-candidate', outcome: 'selected', reason: 'b' }] }
