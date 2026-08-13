@@ -2,6 +2,7 @@ import {
   type DirectedEditPlan,
   type DirectedSubtitleCue,
   type DirectorDecision,
+  type DirectorDecisionInput,
   type DirectorPerceptionSnapshot,
   type DirectorQualityIssue,
   type DirectorQualityReport,
@@ -320,7 +321,7 @@ function buildDecisions(input: {
   briefCompilationRef?: string
   mediaOnly: boolean
 }): readonly Readonly<DirectorDecision>[] {
-  return validateDirectorDecisions([
+  const decisions: readonly DirectorDecisionInput[] = [
     {
       id: 'decision-narrative-linear', category: 'narrative', choice: 'preserve-linear-narrative',
       reason: 'The retained source already opens with context and develops one continuous argument; reordering would weaken attribution.',
@@ -338,7 +339,7 @@ function buildDecisions(input: {
     {
       id: 'decision-layout-inset', category: 'layout', choice: 'landscape-inset-on-blurred-source',
       reason: 'Preserves the full head and shoulders in 9:16 without the aggressive crop that previously cut the face.',
-      evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef], confidence: 0.92,
+      evidenceRefs: [input.briefRef, ...(input.briefCompilationRef ? [input.briefCompilationRef] : []), input.editPlanRef], confidence: 0.82,
       alternatives: ['center-crop', 'top-aligned-inset'],
     },
     {
@@ -363,7 +364,8 @@ function buildDecisions(input: {
       evidenceRefs: [input.editPlanRef, input.policyRef], confidence: 1,
       alternatives: ['request-library-search'],
     },
-  ])
+  ]
+  return validateDirectorDecisions(decisions)
 }
 
 function normalizedSpeech(value: string): string {
