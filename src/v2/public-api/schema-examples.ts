@@ -8182,6 +8182,23 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       schemaVersion: 'narrative-safety-decision/v1', projectVersionId: 'project-version-narrative-1', projectVersionBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1', storySnapshotHash: 'b'.repeat(64), contextHash: 'c'.repeat(64), safe: false,
       issues: [{ schemaVersion: 'narrative-quality-issue/v1', code: 'DEPENDENCY_REMOVED', severity: 'hard', category: 'integrity', statementId: 'statement-promise', rangeMs: [4000, 7000], evidence: [{ kind: 'dependency', ref: 'proof:statement-proof' }], restoreAction: { kind: 'restore-dependency', statementId: 'statement-promise', sourceRangeMs: [4000, 7000], refs: ['statement-proof'] } }], preflightHash: 'd'.repeat(64),
     } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/reframe-plan-request/v1': [{
+      baseVersionId: 'project-version-reframe-1', format: '9:16',
+      observationSet: {
+        schemaVersion: 'reframe-observations/v1', id: 'observations-reframe-example', sourceArtifactId: artifactId,
+        sourceManifestId: 'manifest-reframe-example', sourceSha256: 'a'.repeat(64), sourceWidth: 1920, sourceHeight: 1080,
+        fps: 30, durationFrames: 90, contentHash: 'b'.repeat(64),
+        observations: [{ id: 'roi-face-example', subjectId: 'person-example', kind: 'face', startFrame: 0, endFrame: 90, bounds: { x: 0.42, y: 0.2, width: 0.16, height: 0.24 }, confidence: 0.98, priority: 100, critical: true }],
+      },
+      maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
+    }],
+    'apollo://schemas/reframe-plan/v1': [{ data: { plan: {
+      schemaVersion: 'reframe-plan/v1', format: '9:16', observationSetId: 'observations-reframe-example', observationSetHash: 'b'.repeat(64),
+      outputFormatRegistryHash: OUTPUT_FORMAT_REGISTRY.registryHash, outputPresetHash: OUTPUT_FORMAT_REGISTRY.presets['9:16'].presetHash,
+      maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
+      segments: [{ startFrame: 0, endFrame: 90, mode: 'crop', crop: { x: 0.341796875, y: 0, width: 0.31640625, height: 1 }, source: 'face', observationIds: ['roi-face-example'], subjectIds: ['person-example'], velocity: { x: 0, y: 0 } }],
+      issues: [], planHash: 'c'.repeat(64),
+    } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/catalog-semantic-search-document-request/v1': [
       {
         source: {

@@ -5017,6 +5017,31 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.reframe-plans.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/reframe-plans"
+      },
+      "toolName": "apollo.projects.reframe-plans.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.rename": {
       "version": "1.0.0",
       "exposure": "public",
@@ -133981,6 +134006,536 @@
                   "not-needed"
                 ]
               }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/reframe-plan-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "format",
+        "observationSet"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "format": {
+          "enum": [
+            "9:16",
+            "16:9",
+            "4:5",
+            "1:1",
+            "21:9"
+          ]
+        },
+        "observationSet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "id",
+            "sourceArtifactId",
+            "sourceManifestId",
+            "sourceSha256",
+            "sourceWidth",
+            "sourceHeight",
+            "fps",
+            "durationFrames",
+            "observations",
+            "contentHash"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "reframe-observations/v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sourceArtifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sourceManifestId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sourceSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sourceWidth": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 16384
+            },
+            "sourceHeight": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 16384
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            "durationFrames": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2592000
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "observations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "subjectId",
+                  "kind",
+                  "startFrame",
+                  "endFrame",
+                  "bounds",
+                  "confidence",
+                  "priority",
+                  "critical"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "kind": {
+                    "enum": [
+                      "face",
+                      "object",
+                      "screen",
+                      "region-of-interest"
+                    ]
+                  },
+                  "startFrame": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endFrame": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "bounds": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "x",
+                      "y",
+                      "width",
+                      "height"
+                    ],
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "width": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1
+                      },
+                      "height": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "critical": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "overrides": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "format",
+              "startFrame",
+              "endFrame",
+              "crop"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "format": {
+                "enum": [
+                  "9:16",
+                  "16:9",
+                  "4:5",
+                  "1:1",
+                  "21:9"
+                ]
+              },
+              "startFrame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endFrame": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "crop": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "maxVelocityPerSecond": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 2
+        },
+        "maxAccelerationPerSecondSquared": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 4
+        },
+        "safetyMargin": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.2
+        }
+      }
+    },
+    "apollo://schemas/reframe-plan/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan"
+          ],
+          "properties": {
+            "plan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "format",
+                "observationSetId",
+                "observationSetHash",
+                "outputFormatRegistryHash",
+                "outputPresetHash",
+                "maxVelocityPerSecond",
+                "maxAccelerationPerSecondSquared",
+                "safetyMargin",
+                "segments",
+                "issues",
+                "planHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "reframe-plan/v1"
+                },
+                "format": {
+                  "enum": [
+                    "9:16",
+                    "16:9",
+                    "4:5",
+                    "1:1",
+                    "21:9"
+                  ]
+                },
+                "observationSetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "observationSetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "outputFormatRegistryHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "outputPresetHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "planHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "maxVelocityPerSecond": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 2
+                },
+                "maxAccelerationPerSecondSquared": {
+                  "type": "number",
+                  "minimum": 0.01,
+                  "maximum": 4
+                },
+                "safetyMargin": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 0.2
+                },
+                "segments": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 20000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "startFrame",
+                      "endFrame",
+                      "mode",
+                      "crop",
+                      "source",
+                      "observationIds",
+                      "subjectIds",
+                      "velocity"
+                    ],
+                    "properties": {
+                      "startFrame": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endFrame": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "mode": {
+                        "enum": [
+                          "crop",
+                          "contain"
+                        ]
+                      },
+                      "crop": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "x",
+                              "y",
+                              "width",
+                              "height"
+                            ],
+                            "properties": {
+                              "x": {
+                                "type": "number"
+                              },
+                              "y": {
+                                "type": "number"
+                              },
+                              "width": {
+                                "type": "number"
+                              },
+                              "height": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "source": {
+                        "enum": [
+                          "face",
+                          "object",
+                          "screen",
+                          "region-of-interest",
+                          "multiple-subjects",
+                          "manual",
+                          "fallback"
+                        ]
+                      },
+                      "observationIds": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "subjectIds": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "velocity": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "properties": {
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "issues": {
+                  "type": "array",
+                  "maxItems": 20000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code",
+                      "format",
+                      "startFrame",
+                      "endFrame",
+                      "observationIds"
+                    ],
+                    "properties": {
+                      "code": {
+                        "enum": [
+                          "PERCEPTION_UNCERTAIN",
+                          "SUBJECTS_DO_NOT_FIT",
+                          "NO_SUBJECT_OBSERVATION",
+                          "TRACKING_LIMIT_EXCEEDED"
+                        ]
+                      },
+                      "format": {
+                        "enum": [
+                          "9:16",
+                          "16:9",
+                          "4:5",
+                          "1:1",
+                          "21:9"
+                        ]
+                      },
+                      "startFrame": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endFrame": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "observationIds": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
             }
           }
         }

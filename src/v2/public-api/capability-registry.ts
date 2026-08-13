@@ -2782,6 +2782,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.reframe-plans.create', version: '1.0.0', title: 'Create deterministic reframe plan',
+    description: 'Creates a content-addressed per-format crop/contain plan from a hash-verified observation snapshot, bounded tracking policy and exact range overrides without invoking a detector.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    inputSchemaRef: 'apollo://schemas/reframe-plan-request/v1', outputSchemaRef: 'apollo://schemas/reframe-plan/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/reframe-plans' }, toolName: 'apollo.projects.reframe-plans.create',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.semantic-search.documents.catalog',
     version: '1.0.0',
     title: 'Catalog source for hybrid search',

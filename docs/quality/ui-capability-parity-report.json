@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 228,
-    "operableCapabilities": 228,
-    "publicContractCapabilities": 228,
+    "registeredCapabilities": 229,
+    "operableCapabilities": 229,
+    "publicContractCapabilities": 229,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -3082,6 +3082,17 @@
       "endpoint": "POST /v1/projects/{projectId}/narrative-safety/preflight",
       "inputSchemaRef": "apollo://schemas/narrative-safety-preflight-request/v1",
       "outputSchemaRef": "apollo://schemas/narrative-safety-preflight/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.reframe-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/reframe-plans",
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
