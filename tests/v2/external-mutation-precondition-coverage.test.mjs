@@ -254,6 +254,12 @@ const coverage = Object.freeze({
   'apollo.projects.director-runs.enqueue': {
     mode: 'base-version-bound-action', evidence: 'request binds immutable baseVersionId and baseHash before allocating a durable fenced Director operation',
   },
+  'apollo.projects.director-budgets.create': {
+    mode: 'idempotent-create', evidence: 'F1.026 request fingerprint binds the run and immutable six-dimensional limits to one actor audit context',
+  },
+  'apollo.projects.director-budgets.actions.apply': {
+    mode: 'revision-bound-action', evidence: 'F1.026 requires baseRevision and persistence compare-and-swaps that revision before reserve, settle, cancel or conclude',
+  },
   'apollo.projects.editorial-beats.derive': {
     mode: 'idempotent-create', evidence: 'request fingerprint and idempotency bind expectedTranscriptHash, immutable project version and the complete word-signal derivation input',
   },
@@ -566,11 +572,11 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 53,
+    'idempotent-create': 54,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
-    'revision-bound-action': 10,
+    'revision-bound-action': 11,
     'base-version-bound-action': 6,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

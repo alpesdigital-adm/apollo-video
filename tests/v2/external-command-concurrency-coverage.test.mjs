@@ -252,6 +252,12 @@ const coverage = Object.freeze({
   'apollo.projects.director-runs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent enqueue reserves one immutable result ID; worker lease+attempt fences the serializable version, snapshots, Command, DirectorRun, invalidations, outbox and operation settlement commit',
   },
+  'apollo.projects.director-budgets.create': {
+    mode: 'durable-covered', evidence: 'F1.026 serializable creation persists the six-dimensional limits and actor-bound idempotent audit result atomically',
+  },
+  'apollo.projects.director-budgets.actions.apply': {
+    mode: 'durable-covered', evidence: 'F1.026 serializable reservation and settlement transactions compare-and-swap the exact budget revision, reservation status and actor-bound idempotency event',
+  },
   'apollo.projects.editorial-beats.derive': {
     mode: 'durable-covered', evidence: 'F1.017 actor-bound idempotency and transcript-hash CAS persist one content-addressed semantic beat set in a serializable transaction',
   },
