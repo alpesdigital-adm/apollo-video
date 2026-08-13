@@ -3253,6 +3253,81 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.editorial-beats.adjust": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/editorial-beat-adjustment-request/v1",
+      "outputSchemaRef": "apollo://schemas/editorial-beat-adjustment/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/editorial-beats/{beatSetId}/adjustments"
+      },
+      "toolName": "apollo.projects.editorial-beats.adjust",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-beats.derive": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/editorial-beat-derive-request/v1",
+      "outputSchemaRef": "apollo://schemas/editorial-beat-set/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/editorial-beats"
+      },
+      "toolName": "apollo.projects.editorial-beats.derive",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-beats.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/editorial-beat-set/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/editorial-beats/{beatSetId}"
+      },
+      "toolName": "apollo.projects.editorial-beats.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.evidence-segments.catalog": {
       "version": "1.0.0",
       "exposure": "public",
@@ -35590,6 +35665,570 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 120
+        }
+      }
+    },
+    "apollo://schemas/editorial-beat-adjustment-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "beatId",
+        "directorRunId",
+        "startWordId",
+        "endWordId",
+        "reason"
+      ],
+      "properties": {
+        "beatId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "directorRunId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "startWordId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "endWordId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500
+        }
+      }
+    },
+    "apollo://schemas/editorial-beat-adjustment/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "id",
+            "workspaceId",
+            "projectId",
+            "beatSetId",
+            "sourceBeatId",
+            "directorRunId",
+            "reason",
+            "startWordId",
+            "endWordId",
+            "sourceBeatHash",
+            "adjustedBeat",
+            "wordAlignmentHash",
+            "wordAlignmentUnchanged",
+            "adjustmentHash",
+            "idempotencyKey",
+            "requestFingerprint",
+            "actor",
+            "createdAt",
+            "recordHash"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "editorial-beat-adjustment-record/v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "beatSetId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sourceBeatId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "directorRunId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 500
+            },
+            "startWordId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "endWordId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sourceBeatHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "adjustedBeat": {
+              "type": "object"
+            },
+            "wordAlignmentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "wordAlignmentUnchanged": {
+              "const": true
+            },
+            "adjustmentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "requestFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "actor": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "clientId"
+              ],
+              "properties": {
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "recordHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/editorial-beat-derive-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "transcriptId",
+        "expectedTranscriptHash",
+        "signals"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "transcriptId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedTranscriptHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "pauseBoundaryMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 5000
+        },
+        "maxDurationMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "signals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "wordId",
+              "intent",
+              "argumentId",
+              "visualContext"
+            ],
+            "properties": {
+              "wordId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "intent": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "argumentId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "visualContext": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/editorial-beat-set/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schemaVersion",
+            "id",
+            "workspaceId",
+            "projectId",
+            "projectVersionId",
+            "transcriptId",
+            "transcriptHash",
+            "derivationVersion",
+            "pauseBoundaryMs",
+            "maxDurationMs",
+            "words",
+            "wordsHash",
+            "signals",
+            "signalsHash",
+            "beats",
+            "beatsHash",
+            "idempotencyKey",
+            "requestFingerprint",
+            "actor",
+            "createdAt",
+            "recordHash"
+          ],
+          "properties": {
+            "schemaVersion": {
+              "const": "editorial-beat-set/v1"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "workspaceId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "projectVersionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "transcriptId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "transcriptHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "derivationVersion": {
+              "const": "editorial-beat-derivation/v1"
+            },
+            "pauseBoundaryMs": {
+              "type": "integer",
+              "minimum": 100
+            },
+            "maxDurationMs": {
+              "type": "integer",
+              "minimum": 1000
+            },
+            "words": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "index",
+                  "text",
+                  "startMs",
+                  "endMs"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "startMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "wordsHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "signals": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "wordId",
+                  "intent",
+                  "argumentId",
+                  "visualContext"
+                ],
+                "properties": {
+                  "wordId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "argumentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "visualContext": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                }
+              }
+            },
+            "signalsHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "beats": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "ordinal",
+                  "startMs",
+                  "endMs",
+                  "wordIds",
+                  "intent",
+                  "argumentId",
+                  "visualContext",
+                  "boundaryReasons",
+                  "beatHash"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "editorial-beat/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "ordinal": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "startMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "wordIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "argumentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "visualContext": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "boundaryReasons": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "sentence-end",
+                        "intent-change",
+                        "pause",
+                        "argument-change",
+                        "visual-change",
+                        "max-duration"
+                      ]
+                    }
+                  },
+                  "beatHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "beatsHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "requestFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "actor": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "clientId"
+              ],
+              "properties": {
+                "clientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "recordHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

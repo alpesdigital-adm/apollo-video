@@ -39,6 +39,8 @@ model V2Workspace {
   mediaUploadAuditEntries                V2MediaUploadAuditEntry[]
   projectMediaAssets                     V2ProjectMediaAsset[]
   mediaTranscripts                       V2MediaTranscript[]
+  editorialBeatSets                      V2EditorialBeatSet[]
+  editorialBeatAdjustments               V2EditorialBeatAdjustment[]
   mediaIngestOperations                  V2MediaIngestOperation[]
   projectProxyRenderOperations           V2ProjectProxyRenderOperation[]
   projectFinalExportOperations           V2ProjectFinalExportOperation[]
@@ -206,6 +208,8 @@ model V2ApiClient {
   qualityIterations                     V2QualityIteration[]
   mvpCoreGates                          V2MvpCoreGate[]
   speechCatalogRuns                     V2SpeechSegmentCatalogRun[]
+  editorialBeatSets                     V2EditorialBeatSet[]
+  editorialBeatAdjustments              V2EditorialBeatAdjustment[]
   evidenceSegments                      V2EvidenceSegment[]
   longFormIndexRuns                     V2LongFormIndexRun[]
   longFormIndexWorkflows                V2LongFormIndexWorkflow[]
@@ -527,6 +531,8 @@ model V2Project {
   mediaUploads                           V2MediaUpload[]
   mediaAssets                            V2ProjectMediaAsset[]
   mediaTranscripts                       V2MediaTranscript[]
+  editorialBeatSets                      V2EditorialBeatSet[]
+  editorialBeatAdjustments               V2EditorialBeatAdjustment[]
   mediaIngestOperations                  V2MediaIngestOperation[]
   publicOperations                       V2PublicOperation[]
   directorOperations                     V2ProjectDirectorOperation[]
@@ -723,6 +729,7 @@ model V2ProjectVersion {
   proxyRenderOperations         V2ProjectProxyRenderOperation[]
   finalExportOperations         V2ProjectFinalExportOperation[]
   directorRunsAsBase            V2DirectorRun[]                 @relation("DirectorRunBaseVersion")
+  editorialBeatSets             V2EditorialBeatSet[]
   directorOperationsAsBase      V2ProjectDirectorOperation[]
   directorRunAsResult           V2DirectorRun?                  @relation("DirectorRunResultVersion")
   reviewAnnotations             V2ReviewAnnotation[]
@@ -1094,6 +1101,7 @@ model V2DirectorRun {
   supersedesRun         V2DirectorRun?                  @relation("DirectorRunSupersession", fields: [supersedesRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   supersededBy          V2DirectorRun[]                 @relation("DirectorRunSupersession")
   supersedingOperations V2ProjectDirectorOperation[]    @relation("DirectorOperationSupersedes")
+  editorialBeatAdjustments V2EditorialBeatAdjustment[]
 
   @@unique([id, workspaceId])
   @@unique([id, projectId, workspaceId])
@@ -2814,6 +2822,7 @@ model V2MediaTranscript {
   longFormIndexWorkflows           V2LongFormIndexWorkflow[]
   speakerDiarizationRuns           V2SpeakerDiarizationRun[]
   sourceDeconstructionReports      V2SourceDeconstructionReport[]
+  editorialBeatSets                V2EditorialBeatSet[]
 
   @@unique([id, workspaceId])
   @@unique([sourceArtifactId, transcriptHash])
@@ -2821,6 +2830,95 @@ model V2MediaTranscript {
   @@index([workspaceId, sourceArtifactId])
   @@index([workspaceId, sourceArtifactId, provider, model, providerVersion])
   @@map("media_transcripts")
+}
+
+model V2EditorialBeatSet {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  projectVersionId         String   @db.VarChar(128)
+  transcriptId             String   @db.VarChar(128)
+  transcriptHash           String   @db.Char(64)
+  schemaVersion            String   @db.VarChar(64)
+  derivationVersion        String   @db.VarChar(64)
+  pauseBoundaryMs          Int
+  maxDurationMs            Int
+  wordsJson                String   @db.Text
+  wordsHash                String   @db.Char(64)
+  signalsJson              String   @db.Text
+  signalsHash              String   @db.Char(64)
+  beatsJson                String   @db.Text
+  beatsHash                String   @db.Char(64)
+  idempotencyKey           String   @db.VarChar(128)
+  requestFingerprint       String   @db.Char(64)
+  actorClientId            String   @db.VarChar(80)
+  actorCredentialId        String   @db.VarChar(128)
+  actorEnvironment         String   @db.VarChar(16)
+  actorAuthenticationKind  String   @db.VarChar(16)
+  actorContextHash         String   @db.Char(64)
+  actorDelegatedUserId     String?  @db.VarChar(128)
+  actorDelegatedIdentityId String?  @db.VarChar(128)
+  actorWorkspaceRole       String?  @db.VarChar(32)
+  createdAt                DateTime @db.Timestamptz(3)
+  recordHash               String   @db.Char(64)
+
+  workspace   V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project     V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  version     V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  transcript  V2MediaTranscript @relation(fields: [transcriptId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  actor       V2ApiClient       @relation(fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  adjustments V2EditorialBeatAdjustment[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, actorClientId, idempotencyKey], map: "editorial_beat_sets_idempotency_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId, transcriptId], map: "editorial_beat_sets_version_transcript_idx")
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@map("editorial_beat_sets")
+}
+
+model V2EditorialBeatAdjustment {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  beatSetId                String   @db.VarChar(128)
+  sourceBeatId             String   @db.VarChar(128)
+  directorRunId            String   @db.VarChar(128)
+  schemaVersion            String   @db.VarChar(64)
+  reason                   String   @db.VarChar(500)
+  startWordId              String   @db.VarChar(128)
+  endWordId                String   @db.VarChar(128)
+  sourceBeatHash           String   @db.Char(64)
+  adjustedBeatJson         String   @db.Text
+  adjustedBeatHash         String   @db.Char(64)
+  wordAlignmentHash        String   @db.Char(64)
+  wordAlignmentUnchanged   Boolean
+  adjustmentHash           String   @db.Char(64)
+  idempotencyKey           String   @db.VarChar(128)
+  requestFingerprint       String   @db.Char(64)
+  actorClientId            String   @db.VarChar(80)
+  actorCredentialId        String   @db.VarChar(128)
+  actorEnvironment         String   @db.VarChar(16)
+  actorAuthenticationKind  String   @db.VarChar(16)
+  actorContextHash         String   @db.Char(64)
+  actorDelegatedUserId     String?  @db.VarChar(128)
+  actorDelegatedIdentityId String?  @db.VarChar(128)
+  actorWorkspaceRole       String?  @db.VarChar(32)
+  createdAt                DateTime @db.Timestamptz(3)
+  recordHash               String   @db.Char(64)
+
+  workspace   V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project     V2Project           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  beatSet     V2EditorialBeatSet  @relation(fields: [beatSetId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  directorRun V2DirectorRun       @relation(fields: [directorRunId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  actor       V2ApiClient         @relation(fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, beatSetId, actorClientId, idempotencyKey], map: "editorial_beat_adjustments_idempotency_key")
+  @@index([workspaceId, projectId, beatSetId, createdAt(sort: Desc)], map: "editorial_beat_adjustments_project_set_idx")
+  @@index([workspaceId, directorRunId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "editorial_beat_adjustments_actor_idx")
+  @@map("editorial_beat_adjustments")
 }
 
 model V2SpeechSegmentCatalogRun {

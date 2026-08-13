@@ -191,6 +191,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual catalog bound to an exact transcript hash without materializing media or starting provider work.',
     },
+    'apollo.projects.editorial-beats.derive': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one immutable semantic index over an exact transcript alignment without changing project media or starting provider work.',
+    },
+    'apollo.projects.editorial-beats.adjust': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records one DirectorRun-bound word-range adjustment while preserving the original transcript alignment and media.',
+    },
     'apollo.projects.evidence-segments.catalog': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one immutable virtual proof record bound to an exact SpeechSegment hash and current rights snapshot without materializing media.',
