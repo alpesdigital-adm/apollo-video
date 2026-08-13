@@ -588,7 +588,7 @@ test('Director V2 persists an evidence-bound media-only treatment before proxy e
   const { repository, service } = fixture({ ownerText: undefined })
   const result = await service(request({ idempotency: { key: 'director-media-only' } }))
 
-  assert.equal(result.run.treatmentPlan.schemaVersion, 2)
+  assert.equal(result.run.treatmentPlan.schemaVersion, 3)
   assert.equal(result.run.treatmentPlan.mode, 'media-only')
   assert.equal(result.run.treatmentPlan.confidence, .65)
   assert.equal(result.run.treatmentPlan.grammar.primary, 'speaker')
@@ -596,7 +596,7 @@ test('Director V2 persists an evidence-bound media-only treatment before proxy e
   assert.ok(result.run.treatmentPlan.assumptions.includes('treatment-derived-from-observed-media'))
   assert.ok(result.run.treatmentPlan.claimPolicy.observedClaims.includes('Comunicar bem muda resultados.'))
   assert.deepEqual(result.run.treatmentPlan.claimPolicy.proposedClaims, [])
-  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'treatment').contentSchemaVersion, 2)
+  assert.equal(repository.lastBundle.snapshots.find((snapshot) => snapshot.kind === 'treatment').contentSchemaVersion, 3)
   assert.match(result.run.decisions.find((decision) => decision.id === 'decision-motion-none').reason, /No owner brief/u)
 })
 

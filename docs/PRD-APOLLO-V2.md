@@ -760,6 +760,17 @@ O Diretor deve criar plano contendo:
 - audioDirection placeholder;
 - confidence e assumptions.
 
+Implementação local F1.019: `TreatmentPlan v3` é o contrato canônico usado pelo
+Diretor e pela API pública. O plano referencia, por versão e SHA-256, a rubrica
+estratégica, o Policy Snapshot exato da ProjectVersion e um Perception summary
+versionado. Energia, densidade, gramática, pattern breaks, prova, CTA e budgets
+são validados deterministicamente; assumptions, alternativa e decisions log
+permanecem no JSON imutável. `POST/GET
+/v1/projects/{projectId}/treatment-plans` persistem o mesmo contrato com
+idempotência vinculada ao ator. O slice está implementado e testado localmente;
+PostgreSQL real, integração da PerceptionTimeline F1.016, deploy e aceite seguem
+pendentes.
+
 ### FR-061 — StoryPlan
 
 Plano semântico independente de formato e idioma, incluindo tese, atos, blocos, dependências, provas, objeções e CTA.

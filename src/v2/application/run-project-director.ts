@@ -801,6 +801,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
           perceptionConfidence: perception.summary.confidence,
         })
       : undefined
+    const treatmentRubric = resolveStrategicRubric(objective.id)
     const treatmentBase = createTreatmentPlan({
       objective: objective.id,
       mode: mediaOnlyTreatment
@@ -809,13 +810,31 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
         clips.every((clip) => Boolean(clip.audioSourceArtifactId))
         ? 'visual-montage'
         : 'talking-head',
-      rubric: { id: objectiveBinding.rubricRef, version: 1, proofRequired: false },
-      policy: { snapshotId: context.currentVersion.snapshotRefs.policies, maxPatternBreaksPer30s: 2, forbiddenEffects: ['zoom'] },
+      rubric: {
+        id: treatmentRubric.id,
+        version: treatmentRubric.version,
+        proofRequired: treatmentRubric.criteria.some((criterion) => criterion.id === 'proof-strength' && criterion.weight >= .15),
+        rubricHash: calculateVersionHash(treatmentRubric),
+      },
+      policy: {
+        snapshotId: context.currentVersion.snapshotRefs.policies,
+        schemaVersion: Number((context.policies as { schemaVersion?: number }).schemaVersion ?? 1),
+        snapshotHash: calculateVersionHash(context.policies),
+        maxPatternBreaksPer30s: 2,
+        forbiddenEffects: ['zoom'],
+        maxProofItems: 3,
+        maxCtaOccurrences: 1,
+        maxDecisions: 12,
+      },
       perception: {
         summaryId: perception.summary.id,
+        schemaVersion: 1,
+        summaryHash: calculateVersionHash(perception.summary),
         confidence: perception.summary.confidence,
         speakerCoverage: perception.summary.speechCoverage,
         visualVariety: 0,
+        evidenceItemCount: perception.timeline.observations.length,
+        durationMs: Math.round(context.editPlan.durationFrames / context.editPlan.fps * 1_000),
       },
       ...(mediaOnlyTreatment ? { mediaOnly: mediaOnlyTreatment } : {}),
     })
