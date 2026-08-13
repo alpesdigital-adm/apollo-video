@@ -4767,6 +4767,22 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     idempotency: 'not-applicable',
   },
   {
+    id: 'apollo.projects.director-runs.decisions.list', version: '1.0.0', title: 'List Director decisions',
+    description: 'Lists the compact immutable decision log for one exact DirectorRun, including confidence, score, cost, actor and content hashes.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/director-decision-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/director-runs/{directorRunId}/decisions' },
+    toolName: 'apollo.projects.director-runs.decisions.list', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.director-runs.decisions.read', version: '1.0.0', title: 'Read Director decision',
+    description: 'Reads one immutable Director decision with candidates, evidence and exact final-frame lineage, or an explicit bounded reason while final lineage is unavailable.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/director-decision-detail/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/director-runs/{directorRunId}/decisions/{decisionId}' },
+    toolName: 'apollo.projects.director-runs.decisions.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
     id: 'apollo.editorial-grammar.evaluate',
     version: '1.0.0',
     title: 'Evaluate editorial treatment grammar',

@@ -12768,6 +12768,29 @@ const perceptionCoverageInputSchema = { type: 'object', additionalProperties: fa
 const perceptionCoverageSchema = { type: 'object', additionalProperties: false, required: ['kind', 'state', 'ranges', 'observedMs'], properties: { kind: perceptionKindSchema, state: { enum: ['absent', 'partial', 'complete'] }, ranges: { type: 'array', maxItems: 10000, items: perceptionRangeSchema }, observedMs: { type: 'integer', minimum: 0 } } } as const
 const perceptionTimelineSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'durationMs', 'observations', 'coverage', 'inventedValues', 'timelineHash'], properties: { schemaVersion: { const: 1 }, durationMs: { type: 'integer', minimum: 1 }, observations: { type: 'array', maxItems: 100000, items: perceptionObservationSchema }, coverage: { type: 'array', minItems: 9, maxItems: 9, items: perceptionCoverageSchema }, inventedValues: { const: 0 }, timelineHash: sha256Schema } } as const
 
+const directorDecisionCostSchema = {
+  type: 'object', additionalProperties: false, required: ['estimated', 'actual', 'currency', 'source'],
+  properties: { estimated: { type: 'number', minimum: 0 }, actual: { type: 'number', minimum: 0 }, currency: { const: 'credits' }, source: { const: 'deterministic-local' } },
+} as const
+const directorDecisionActorSchema = { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { enum: ['api-client', 'user', 'system'] }, id: idSchema } } as const
+const directorDecisionSummarySchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'planNodeIds', 'decision', 'summary', 'confidence', 'score', 'cost', 'actor', 'createdAt', 'decisionHash'],
+  properties: { id: idSchema, planNodeIds: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: idSchema }, decision: { type: 'string', minLength: 1, maxLength: 500 }, summary: { type: 'string', minLength: 1, maxLength: 500 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, score: { type: 'number', minimum: 0, maximum: 1 }, cost: directorDecisionCostSchema, actor: directorDecisionActorSchema, createdAt: dateTimeSchema, decisionHash: sha256Schema },
+} as const
+const directorDecisionEntrySchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'runId', 'planNodeIds', 'commandId', 'resultTarget', 'actor', 'decision', 'reason', 'candidates', 'evidence', 'confidence', 'score', 'cost', 'summary', 'createdAt', 'decisionHash'],
+  properties: {
+    schemaVersion: { const: 'director-decision/v1' }, id: idSchema, runId: idSchema, planNodeIds: { type: 'array', minItems: 1, maxItems: 256, uniqueItems: true, items: idSchema }, commandId: idSchema,
+    resultTarget: { type: 'object', additionalProperties: false, required: ['projectVersionId', 'artifactRole'], properties: { projectVersionId: idSchema, artifactRole: { const: 'final-output' } } },
+    actor: directorDecisionActorSchema, decision: { type: 'string', minLength: 1, maxLength: 500 }, reason: { type: 'string', minLength: 1, maxLength: 4000 },
+    candidates: { type: 'array', minItems: 1, maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'outcome', 'reason'], properties: { id: idSchema, outcome: { enum: ['selected', 'rejected'] }, reason: { type: 'string', minLength: 1, maxLength: 4000 } } } },
+    evidence: { type: 'array', minItems: 1, maxItems: 128, items: { type: 'object', additionalProperties: false, required: ['ref'], properties: { ref: { type: 'string', minLength: 1, maxLength: 1000 }, rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } } } } },
+    confidence: { type: 'number', minimum: 0, maximum: 1 }, score: { type: 'number', minimum: 0, maximum: 1 }, cost: directorDecisionCostSchema, summary: { type: 'string', minLength: 1, maxLength: 500 }, createdAt: dateTimeSchema, decisionHash: sha256Schema,
+  },
+} as const
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
     policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
@@ -20571,6 +20594,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('director-decision-list', 1, 'Compact immutable decision log for one DirectorRun', successSchema({
+    type: 'object', additionalProperties: false, required: ['decisionLog'], properties: { decisionLog: {
+      type: 'object', additionalProperties: false, required: ['schemaVersion', 'runId', 'commandId', 'resultVersionId', 'logHash', 'decisions'],
+      properties: { schemaVersion: { const: 'director-decision-list/v1' }, runId: idSchema, commandId: idSchema, resultVersionId: idSchema, logHash: sha256Schema, decisions: { type: 'array', minItems: 1, maxItems: 64, items: directorDecisionSummarySchema } },
+    } },
+  })),
+  defineSchema('director-decision-detail', 1, 'Auditable Director decision with candidates, evidence and final-frame lineage status', successSchema({
+    type: 'object', additionalProperties: false, required: ['decision'], properties: { decision: {
+      type: 'object', additionalProperties: false, required: ['schemaVersion', 'logHash', 'decision', 'lineage'], properties: {
+        schemaVersion: { const: 'director-decision-detail/v1' }, logHash: sha256Schema, decision: directorDecisionEntrySchema,
+        lineage: { oneOf: [
+          { type: 'object', additionalProperties: false, required: ['status', 'trace'], properties: { status: { const: 'ready' }, trace: { type: 'object', additionalProperties: false, required: ['schemaVersion', 'decisionId', 'runId', 'commandId', 'artifactId', 'projectVersionId', 'fps', 'frameRanges'], properties: { schemaVersion: { const: 'director-decision-lineage/v1' }, decisionId: idSchema, runId: idSchema, commandId: idSchema, artifactId: idSchema, projectVersionId: idSchema, fps: { type: 'number', exclusiveMinimum: 0 }, frameRanges: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'object', additionalProperties: false, required: ['fromFrame', 'toFrame', 'rangeMs'], properties: { fromFrame: { type: 'integer', minimum: 0 }, toFrame: { type: 'integer', minimum: 1 }, rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } } } } } } } } },
+          { type: 'object', additionalProperties: false, required: ['status', 'reason'], properties: { status: { const: 'unavailable' }, reason: { enum: ['FINAL_ARTIFACT_NOT_READY', 'RENDER_ELEMENT_MAP_NOT_READY', 'PLAN_NODE_NOT_RENDERED'] } } },
+        ] },
+      },
+    } },
+  })),
   defineSchema('director-quality-report-read', 1, 'Read one immutable objective-bound Director quality report with exact rubric evidence and hard gates',
     successSchema({
       type: 'object',

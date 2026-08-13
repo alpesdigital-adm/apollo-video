@@ -3329,6 +3329,52 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.director-runs.decisions.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/director-decision-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/director-runs/{directorRunId}/decisions"
+      },
+      "toolName": "apollo.projects.director-runs.decisions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.director-runs.decisions.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/director-decision-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/director-runs/{directorRunId}/decisions/{decisionId}"
+      },
+      "toolName": "apollo.projects.director-runs.decisions.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.director-runs.enqueue": {
       "version": "3.0.0",
       "exposure": "public",
@@ -36336,6 +36382,569 @@
         },
         "confirmed": {
           "const": true
+        }
+      }
+    },
+    "apollo://schemas/director-decision-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision"
+          ],
+          "properties": {
+            "decision": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "logHash",
+                "decision",
+                "lineage"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "director-decision-detail/v1"
+                },
+                "logHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "decision": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "runId",
+                    "planNodeIds",
+                    "commandId",
+                    "resultTarget",
+                    "actor",
+                    "decision",
+                    "reason",
+                    "candidates",
+                    "evidence",
+                    "confidence",
+                    "score",
+                    "cost",
+                    "summary",
+                    "createdAt",
+                    "decisionHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "director-decision/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "runId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "planNodeIds": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 256,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "resultTarget": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "projectVersionId",
+                        "artifactRole"
+                      ],
+                      "properties": {
+                        "projectVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "artifactRole": {
+                          "const": "final-output"
+                        }
+                      }
+                    },
+                    "actor": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "api-client",
+                            "user",
+                            "system"
+                          ]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "decision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "outcome",
+                          "reason"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "outcome": {
+                            "enum": [
+                              "selected",
+                              "rejected"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        }
+                      }
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 128,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "ref"
+                        ],
+                        "properties": {
+                          "ref": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          },
+                          "rangeMs": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "score": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "cost": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "estimated",
+                        "actual",
+                        "currency",
+                        "source"
+                      ],
+                      "properties": {
+                        "estimated": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "actual": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "currency": {
+                          "const": "credits"
+                        },
+                        "source": {
+                          "const": "deterministic-local"
+                        }
+                      }
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "decisionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "lineage": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "trace"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "ready"
+                        },
+                        "trace": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "schemaVersion",
+                            "decisionId",
+                            "runId",
+                            "commandId",
+                            "artifactId",
+                            "projectVersionId",
+                            "fps",
+                            "frameRanges"
+                          ],
+                          "properties": {
+                            "schemaVersion": {
+                              "const": "director-decision-lineage/v1"
+                            },
+                            "decisionId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "commandId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "artifactId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "projectVersionId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "fps": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "frameRanges": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 500,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "fromFrame",
+                                  "toFrame",
+                                  "rangeMs"
+                                ],
+                                "properties": {
+                                  "fromFrame": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "toFrame": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "rangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "items": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "reason"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "unavailable"
+                        },
+                        "reason": {
+                          "enum": [
+                            "FINAL_ARTIFACT_NOT_READY",
+                            "RENDER_ELEMENT_MAP_NOT_READY",
+                            "PLAN_NODE_NOT_RENDERED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/director-decision-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisionLog"
+          ],
+          "properties": {
+            "decisionLog": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "runId",
+                "commandId",
+                "resultVersionId",
+                "logHash",
+                "decisions"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "director-decision-list/v1"
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "commandId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "logHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "decisions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "planNodeIds",
+                      "decision",
+                      "summary",
+                      "confidence",
+                      "score",
+                      "cost",
+                      "actor",
+                      "createdAt",
+                      "decisionHash"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "planNodeIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 256,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "decision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "score": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "cost": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "estimated",
+                          "actual",
+                          "currency",
+                          "source"
+                        ],
+                        "properties": {
+                          "estimated": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "actual": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "currency": {
+                            "const": "credits"
+                          },
+                          "source": {
+                            "const": "deterministic-local"
+                          }
+                        }
+                      },
+                      "actor": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id"
+                        ],
+                        "properties": {
+                          "type": {
+                            "enum": [
+                              "api-client",
+                              "user",
+                              "system"
+                            ]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "decisionHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

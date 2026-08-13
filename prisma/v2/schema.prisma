@@ -1140,6 +1140,8 @@ model V2DirectorRun {
   editPlanSnapshotId   String   @db.VarChar(128)
   qualitySnapshotId    String   @db.VarChar(128)
   decisionsJson        String   @db.Text
+  decisionLogJson      String?  @db.Text
+  decisionLogHash      String?  @db.Char(64)
   assumptionsJson      String   @db.Text
   initiatedByType      String   @db.VarChar(32)
   initiatedById        String   @db.VarChar(128)
