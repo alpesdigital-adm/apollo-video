@@ -5066,6 +5066,8 @@ const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: 
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/editorial-grammar-evaluation-request/v1': [EDITORIAL_TIMELINE_GOLDENS.adequate],
+    'apollo://schemas/editorial-grammar-evaluation/v1': [{ data: evaluateEditorialGrammar(EDITORIAL_TIMELINE_GOLDENS.adequate), meta: { apiVersion: 'v1' } }],
     'apollo://schemas/automatic-catalog-record/v1': [{ data: {
       id: 'catalog-record-example-1', workspaceId, artifactId, manifestId: 'manifest-final-example-1',
       outputKind: 'final', searchableKind: 'asset', rightsSnapshotId: 'rights-catalog-example-1',
