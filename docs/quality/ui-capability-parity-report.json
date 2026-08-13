@@ -2013,7 +2013,7 @@
       "capabilityId": "apollo.director-tools.execute",
       "exposure": "public",
       "endpoint": "POST /v1/director-tools",
-      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v1",
+      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v2",
       "outputSchemaRef": "apollo://schemas/director-tool-execution/v1",
       "internalOnlySurfaceId": null,
       "tests": [

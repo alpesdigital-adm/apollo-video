@@ -15761,6 +15761,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     type: 'object', additionalProperties: false, required: ['projectId', 'calls'],
     properties: {
       projectId: idSchema,
+      calls: { type: 'array', minItems: 1, maxItems: 20, items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'name', 'arguments', 'scope', 'baseVersionId', 'estimatedCost', 'rights'],
+        properties: { id: idSchema, name: directorToolNameSchema, arguments: { type: 'object' }, scope: { type: 'object', additionalProperties: false, required: ['workspaceId', 'projectId'], properties: { workspaceId: idSchema, projectId: idSchema } }, baseVersionId: idSchema, estimatedCost: { type: 'number', minimum: 0, maximum: 5 }, rights: directorToolRightsSchema },
+      } },
+    },
+  }),
+  defineSchema('director-tool-execution-request', 2, 'Strictly typed Director tool execution request bound to StoryPlan v3 and canonical montage seeds', {
+    type: 'object', additionalProperties: false, required: ['projectId', 'calls'],
+    properties: {
+      projectId: idSchema,
       calls: { type: 'array', minItems: 1, maxItems: 20, items: directorToolCallSchema },
     },
   }),

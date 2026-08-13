@@ -7512,6 +7512,20 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         }],
       },
     ],
+    'apollo://schemas/director-tool-execution-request/v2': [
+      {
+        projectId,
+        calls: [{
+          id: 'director-tool-call-example-2',
+          name: 'search-media',
+          arguments: { query: 'product proof', limit: 10 },
+          scope: { workspaceId, projectId },
+          baseVersionId: 'project-version-example-1',
+          estimatedCost: 0.5,
+          rights: [],
+        }],
+      },
+    ],
     'apollo://schemas/director-tool-execution/v1': [
       {
         data: {
