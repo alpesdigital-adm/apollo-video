@@ -38,6 +38,7 @@ import {
   type RubricCriterionId,
 } from '../domain/strategic-rubric.ts'
 import { validateStoryPlan, type StoryBlock, type StoryPlan } from '../domain/story-plan.ts'
+import { createDirectorDecisionLog } from '../domain/director-decision.ts'
 import { createTreatmentPlan } from '../domain/treatment-plan.ts'
 import { createDirectorRunImpact } from '../domain/director-run-impact.ts'
 import type { DirectorRunRepository } from './ports/director-run-repository.ts'
@@ -1052,6 +1053,19 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       perception, treatmentPlan, storyPlan, editPlan, qualityReport, decisions, assumptions,
       initiatedBy: Object.freeze({ type: 'api-client' as const, id: clientId }), createdAt,
     })
+    const decisionLog = createDirectorDecisionLog({
+      workspaceId,
+      projectId,
+      runId: directorRunId,
+      commandId,
+      resultVersionId: versionId,
+      actor: authenticationAudit.delegatedUserId
+        ? { type: 'user', id: normalizedIdentifier(authenticationAudit.delegatedUserId, 'actor.delegatedUserId') }
+        : { type: 'api-client', id: clientId },
+      storyPlan,
+      decisions,
+      createdAt,
+    })
     const event = createPublicEvent({
       id: dependencies.createEventId(), type: 'project.version.created', version: '1.0.0', workspaceId,
       occurredAt: createdAt, sequence: version.sequence, actor: { clientId },
@@ -1069,7 +1083,7 @@ export function runProjectDirectorService(dependencies: RunProjectDirectorDepend
       },
     })
     return dependencies.repository.commitOrReplay({
-      command, authenticationAudit, requestFingerprint, snapshots, version, run, event,
+      command, authenticationAudit, requestFingerprint, snapshots, version, run, decisionLog, event,
       sourceEvidence: {
         transcriptId: context.transcript.id,
         transcriptHash: context.transcript.transcriptHash,

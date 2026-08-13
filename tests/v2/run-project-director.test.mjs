@@ -314,6 +314,12 @@ test('Director V2 persists perception, treatment, story, edit plan and critic as
   assert.deepEqual(persistedBrief.briefCompilation.compiled.fields.tone, ['direto, natural e sem efeitos gratuitos'])
   assert.ok(result.run.decisions.some((decision) =>
     decision.evidenceRefs.includes(persistedBrief.briefCompilation.audit.outputHash)))
+  assert.equal(repository.lastBundle.decisionLog.runId, result.run.id)
+  assert.equal(repository.lastBundle.decisionLog.commandId, result.command.id)
+  assert.equal(repository.lastBundle.decisionLog.resultVersionId, result.version.id)
+  assert.deepEqual(repository.lastBundle.decisionLog.entries.map((decision) => decision.id), result.run.decisions.map((decision) => decision.id))
+  assert.equal(repository.lastBundle.decisionLog.entries.every((decision) => decision.actor.id === 'client-1' && decision.resultTarget.artifactRole === 'final-output'), true)
+  assert.match(repository.lastBundle.decisionLog.logHash, /^[a-f0-9]{64}$/)
   assert.equal(result.run.perception.timeline.observations.length, compiledEditorialPlan().retimedTranscript.words.length)
   assert.equal(result.run.treatmentPlan.patternBreaks.allowed.includes('zoom'), false)
   assert.equal(result.run.storyPlan.blocks.length, 3)

@@ -40,6 +40,7 @@ import {
 } from '../../domain/strategic-objective.ts'
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { parseStrategicQualityReport } from '../../domain/strategic-rubric.ts'
+import { parseDirectorDecisionLog } from '../../domain/director-decision.ts'
 
 const directorRunInclude = Prisma.validator<Prisma.V2DirectorRunInclude>()({
   command: { include: { artifactInvalidations: true } },
@@ -226,6 +227,18 @@ function hydrateStoredRun(row: StoredDirectorRun, replayed: boolean): Readonly<D
   })
   const brief = parseRecord(row.resultVersion.briefSnapshot.contentJson, 'Director brief')
   const decisions = validateDirectorDecisions(parseArray(row.decisionsJson, 'Director decisions') as unknown as DirectorRun['decisions'])
+  if (!row.decisionLogJson || !row.decisionLogHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director decision log is missing')
+  let decisionLog: ReturnType<typeof parseDirectorDecisionLog>
+  try { decisionLog = parseDirectorDecisionLog(JSON.parse(row.decisionLogJson) as unknown) } catch (error) { if (error instanceof DomainError) throw error; throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director decision log JSON is invalid') }
+  if (
+    decisionLog.logHash !== row.decisionLogHash ||
+    decisionLog.workspaceId !== row.workspaceId ||
+    decisionLog.projectId !== row.projectId ||
+    decisionLog.runId !== row.id ||
+    decisionLog.commandId !== row.commandId ||
+    decisionLog.resultVersionId !== row.resultVersionId ||
+    stableSerialize(decisionLog.entries.map((entry) => entry.id)) !== stableSerialize(decisions.map((decision) => decision.id))
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored Director decision log bindings are inconsistent')
   const assumptions = Object.freeze(parseArray(row.assumptionsJson, 'Director assumptions').map((item) => String(item)))
   const objective = resolveStrategicObjective(row.objective)
   const previousObjective = resolveStrategicObjective(payload.previousObjective)
@@ -546,6 +559,15 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
   }
 
   async commitOrReplay(bundle: DirectorRunCommit, serializationAttempt = 1): Promise<Readonly<DirectorRunResult>> {
+    const decisionLog = parseDirectorDecisionLog(bundle.decisionLog)
+    if (
+      decisionLog.workspaceId !== bundle.run.workspaceId ||
+      decisionLog.projectId !== bundle.run.projectId ||
+      decisionLog.runId !== bundle.run.id ||
+      decisionLog.commandId !== bundle.command.id ||
+      decisionLog.resultVersionId !== bundle.version.id ||
+      stableSerialize(decisionLog.entries.map((entry) => entry.id)) !== stableSerialize(bundle.run.decisions.map((decision) => decision.id))
+    ) throw new DomainError('PERSISTENCE_CONFLICT', 'Director decision log does not match its immutable run')
     const fenceNow = bundle.operationFence
       ? new Date(bundle.operationFence.now)
       : undefined
@@ -823,6 +845,8 @@ export class PrismaDirectorRunRepository implements DirectorRunRepository {
           editPlanSnapshotId: refs.editPlan,
           qualitySnapshotId: refs.quality,
           decisionsJson: stableSerialize(bundle.run.decisions),
+          decisionLogJson: stableSerialize(decisionLog),
+          decisionLogHash: decisionLog.logHash,
           assumptionsJson: stableSerialize(bundle.run.assumptions),
           initiatedByType: bundle.run.initiatedBy.type,
           initiatedById: bundle.run.initiatedBy.id,

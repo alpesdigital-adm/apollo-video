@@ -11,6 +11,7 @@ import type {
   PreviousDirectorObjectiveBinding,
   StrategicObjectiveId,
 } from '../../domain/strategic-objective.ts'
+import type { DirectorDecisionLog } from '../../domain/director-decision.ts'
 
 export interface DirectorRunContext {
   workspaceId: string
@@ -57,6 +58,7 @@ export interface DirectorRunCommit {
   snapshots: readonly Readonly<ProjectSnapshot>[]
   version: Readonly<ProjectVersion>
   run: Readonly<DirectorRun>
+  decisionLog: Readonly<DirectorDecisionLog>
   event: Readonly<PublicEvent>
   sourceEvidence: Readonly<{
     transcriptId: string
