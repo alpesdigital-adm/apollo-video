@@ -268,7 +268,7 @@ extração explícita gerou MP4 de 2,75 s com artifact, manifest e lineage e
 preservou hash/bytes do master. Build Linux e postflight passaram; a VPS
 `590928921` foi destruída com confirmação HTTP 404. FR-042 segue aberto sem
 deploy/aceite e FR-040 ainda precisa incluir segmentos na paginação global.
-| FR-060 | TreatmentPlan | S1 | D2 | objetivo produz gramática/energy policy | golden |
+| FR-060 | TreatmentPlan | S1 | D2 | rubrica + Policy Snapshot + Perception summary versionados produzem plano v3 imutável, sem seletor de estilo | 16 goldens + application/Prisma/API contracts locais; PostgreSQL real pendente |
 | FR-061 | StoryPlan | S1 | D2 | atos/blocos/dependências persistidos | golden |
 | FR-062 | Alternativas de montagem | S1 | D2 | ao menos candidatos elegíveis são comparados | integration |
 | FR-063 | Segurança narrativa | S1 | D2,D7 | qualifier/causalidade não são removidos | policy/golden |

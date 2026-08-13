@@ -166,6 +166,10 @@ const coverage = Object.freeze({
     mode: 'idempotent-create',
     evidence: 'FR-180 request fingerprint binds project, exact source artifact/manifest, output colorimetry, four transform descriptors and actor; the server loads the immutable trusted probe and derives every stage input before canonical persistence',
   },
+  'apollo.projects.treatment-plans.create': {
+    mode: 'idempotent-create',
+    evidence: 'request fingerprint binds exact project version, immutable Policy Snapshot, server rubric, versioned Perception summary and actor; serializable persistence rechecks project objective, policy hash and active actor',
+  },
   'apollo.projects.validated-segments.catalog': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds exact artifact/manifest/SpeechSegment hashes, scope, performance source and actor; serializable persistence rechecks project membership, active source, rights and actor',
   },
@@ -548,7 +552,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 2,
     'explicit-precondition': 10,
-    'idempotent-create': 50,
+    'idempotent-create': 51,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,

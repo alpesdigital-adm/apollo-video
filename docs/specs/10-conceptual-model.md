@@ -119,7 +119,7 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.2 | VariantRecipe | Project | table | V2VariantRecipeRun,V2VariantRecipeLineage | immutable run; batchId+id |
 | 10.2 | DirectorBrief | Project | snapshot | V2ProjectSnapshot kind=brief | project version snapshot |
 | 10.2 | BriefInterpretation | Project | value-object | src/v2/application/compile-brief.ts#CompiledBrief | content-addressed compile result |
-| 10.2 | TreatmentPlan | Project | snapshot | V2ProjectSnapshot kind=treatment | project version snapshot |
+| 10.2 | TreatmentPlan | Project | table | V2TreatmentPlan; V2ProjectSnapshot kind=treatment | immutable API record or Director project-version snapshot; same v3 contract |
 | 10.2 | StoryPlan | Project | snapshot | V2ProjectSnapshot kind=story | project version snapshot |
 | 10.2 | EditPlan | Project | snapshot | V2ProjectSnapshot kind=edit-plan | project version snapshot |
 | 10.2 | FormatVariantPlan | Project | value-object | src/v2/domain/canonical-types.ts#FormatVariantPlan | editPlanId+format |

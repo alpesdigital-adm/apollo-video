@@ -109,6 +109,7 @@ model V2Workspace {
   retrievalScaleEvaluations              V2RetrievalScaleEvaluation[]
   mediaColorProbes                       V2MediaColorProbe[]
   colorPipelineCompilations              V2ColorPipelineCompilation[]
+  treatmentPlans                         V2TreatmentPlan[]
   workspaceLuts                          V2WorkspaceLut[]
   workspaceLutVersions                   V2WorkspaceLutVersion[]
   workspaceLutStatusCommands             V2WorkspaceLutStatusCommand[]
@@ -227,6 +228,7 @@ model V2ApiClient {
   contiguousEvaluationRuns              V2ContiguousEvaluationRun[]
   contiguousExtractions                 V2ContiguousExtraction[]
   colorPipelineCompilations             V2ColorPipelineCompilation[]
+  treatmentPlans                        V2TreatmentPlan[]                    @relation("TreatmentPlanActor")
   workspaceLutVersions                  V2WorkspaceLutVersion[]
   workspaceLutStatusCommands            V2WorkspaceLutStatusCommand[]
   workspaceLutDefaultVersions           V2WorkspaceLutDefaultVersion[]
@@ -547,6 +549,7 @@ model V2Project {
   commandArtifactInvalidations           V2CommandArtifactInvalidation[]
   commandArtifactInvalidationResolutions V2CommandArtifactInvalidationResolution[]
   directorRuns                           V2DirectorRun[]
+  treatmentPlans                         V2TreatmentPlan[]
   reviewAnnotations                      V2ReviewAnnotation[]
   renderElementMaps                      V2RenderElementMap[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
@@ -690,6 +693,7 @@ model V2ProjectSnapshot {
   storyDirectorRuns       V2DirectorRun[]                 @relation("DirectorRunStorySnapshot")
   editPlanDirectorRuns    V2DirectorRun[]                 @relation("DirectorRunEditPlanSnapshot")
   qualityDirectorRuns     V2DirectorRun[]                 @relation("DirectorRunQualitySnapshot")
+  treatmentPlanPolicies  V2TreatmentPlan[]                @relation("TreatmentPlanPolicySnapshot")
   proxyRenderOperations   V2ProjectProxyRenderOperation[] @relation("ProjectProxyEditPlanSnapshot")
   finalEditPlanOperations V2ProjectFinalExportOperation[] @relation("FinalExportEditPlanSnapshot")
   finalExportOperations   V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
@@ -698,6 +702,52 @@ model V2ProjectSnapshot {
   @@unique([projectId, kind, contentHash])
   @@index([workspaceId, kind])
   @@map("project_snapshots")
+}
+
+model V2TreatmentPlan {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  policySnapshotId        String   @db.VarChar(128)
+  schemaVersion           Int
+  objective               String   @db.VarChar(64)
+  mode                    String   @db.VarChar(32)
+  rubricId                String   @db.VarChar(128)
+  rubricVersion           Int
+  rubricHash              String   @db.Char(64)
+  policySchemaVersion     Int
+  policySnapshotHash      String   @db.Char(64)
+  perceptionSummaryId     String   @db.VarChar(128)
+  perceptionSchemaVersion Int
+  perceptionSummaryHash   String   @db.Char(64)
+  treatmentJson           String   @db.Text
+  treatmentHash           String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion V2ProjectVersion  @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  policySnapshot V2ProjectSnapshot @relation("TreatmentPlanPolicySnapshot", fields: [policySnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  actorClient    V2ApiClient        @relation("TreatmentPlanActor", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, treatmentHash])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id])
+  @@index([workspaceId, projectVersionId])
+  @@index([workspaceId, perceptionSummaryId])
+  @@map("treatment_plans")
 }
 
 model V2ProjectVersion {
@@ -738,6 +788,7 @@ model V2ProjectVersion {
   editorialBeatSets             V2EditorialBeatSet[]
   directorOperationsAsBase      V2ProjectDirectorOperation[]
   directorRunAsResult           V2DirectorRun?                  @relation("DirectorRunResultVersion")
+  treatmentPlans                V2TreatmentPlan[]
   reviewAnnotations             V2ReviewAnnotation[]
   renderElementMaps             V2RenderElementMap[]
   patchProposalsAsBase          V2ReviewPatchProposal[]         @relation("PatchProposalBaseVersion")

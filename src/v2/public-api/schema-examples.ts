@@ -146,6 +146,32 @@ const colorPipelineCompilationExample = {
   createdAt,
   compilationHash: '6'.repeat(64),
 }
+const treatmentPerceptionSummaryExample = {
+  id: 'perception-summary-example-1', schemaVersion: 1, summaryHash: '7'.repeat(64),
+  confidence: .92, speakerCoverage: .8, visualVariety: .45, evidenceItemCount: 12, durationMs: 30_000,
+}
+const treatmentPlanValueExample = {
+  schemaVersion: 3, objective: 'sale', mode: 'talking-head', confidence: .92, energy: .72, visualDensity: .54,
+  grammar: { primary: 'speaker', shotRhythm: 'measured', subtitleMode: 'support' },
+  patternBreaks: { maxPer30s: 3, allowed: ['insert', 'cutaway', 'layout-change'] },
+  proofPolicy: { required: true, minimumEvidenceItems: 1 },
+  ctaPolicy: { required: true, placement: 'close', maxOccurrences: 1 },
+  budget: { patternBreaksPer30s: 5, proofItems: 3, ctaOccurrences: 1, decisions: 12 },
+  assumptions: [],
+  alternatives: [{ id: 'lower-density', difference: 'Reduce visual density by 20% while preserving narrative structure.', tradeoff: 'Lower interruption risk at the cost of slower visual pacing.' }],
+  decisions: [
+    { id: 'decision-energy', field: 'energy', evidenceRefs: ['rubric-sale'], reason: 'Objective sale calibrated energy.', confidence: .92, impact: 'high' },
+    { id: 'decision-grammar-primary', field: 'grammar.primary', evidenceRefs: ['perception-summary-example-1'], reason: 'Primary visual follows observed speaker coverage and production mode.', confidence: .92, impact: 'high' },
+    { id: 'decision-pattern-budget', field: 'patternBreaks', evidenceRefs: ['project-snapshot-policy-1'], reason: 'Pattern breaks are bounded by the immutable policy snapshot.', confidence: 1, impact: 'medium' },
+    { id: 'decision-proof-cta', field: 'proofPolicy,ctaPolicy', evidenceRefs: ['rubric-sale', 'project-snapshot-policy-1'], reason: 'Proof and CTA requirements follow objective rubric and policy budgets.', confidence: 1, impact: 'high' },
+  ],
+  claimPolicy: { observedClaims: [], proposedClaims: [] },
+  provenance: { rubricId: 'rubric-sale', rubricVersion: 1, rubricHash: '8'.repeat(64), policySnapshotId: 'project-snapshot-policy-1', policySchemaVersion: 1, policySnapshotHash: '9'.repeat(64), perceptionSummaryId: 'perception-summary-example-1', perceptionSchemaVersion: 1, perceptionSummaryHash: '7'.repeat(64) },
+}
+const persistedTreatmentPlanExample = {
+  id: 'treatment-plan-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1',
+  plan: treatmentPlanValueExample, treatmentHash: 'a'.repeat(64), createdByClientId: clientId, createdAt,
+}
 const rightsSnapshotId = 'rights-example-1'
 const assetRightsRequestExample = {
   owner: 'Alpes Digital',
@@ -5728,6 +5754,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/create-treatment-plan-request/v1': [{ projectVersionId: 'project-version-example-1', policySnapshotId: 'project-snapshot-policy-1', objective: 'sale', mode: 'talking-head', perceptionSummary: treatmentPerceptionSummaryExample }],
+    'apollo://schemas/treatment-plan-mutated/v1': [{ data: { treatmentPlan: persistedTreatmentPlanExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/treatment-plan-read/v1': [{ data: { treatmentPlan: persistedTreatmentPlanExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/public-operation-detail/v2': [
       { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
     ],
