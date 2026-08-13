@@ -113,6 +113,7 @@ import type { SourceTranscriptReplacementRepository } from '../application/ports
 import type { VersionCompareRepository } from '../application/ports/version-compare-repository.ts'
 import type { DirectorRunRepository } from '../application/ports/director-run-repository.ts'
 import type { DirectorDecisionLogRepository } from '../application/ports/director-decision-log-repository.ts'
+import type { DirectorBudgetRepository } from '../application/ports/director-budget-repository.ts'
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
 import type { ProxyReviewRepository } from '../application/ports/proxy-review-repository.ts'
 import type { ProjectFinalExportRepository } from '../application/ports/project-final-export-repository.ts'
@@ -248,6 +249,7 @@ import { PrismaSourceTranscriptReplacementRepository } from './prisma/source-tra
 import { PrismaVersionCompareRepository } from './prisma/version-compare-repository.ts'
 import { PrismaDirectorRunRepository } from './prisma/director-run-repository.ts'
 import { PrismaDirectorDecisionLogRepository } from './prisma/director-decision-log-repository.ts'
+import { PrismaDirectorBudgetRepository } from './prisma/director-budget-repository.ts'
 import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
 import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts'
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
@@ -1641,6 +1643,10 @@ export function createDirectorRunRepository(): DirectorRunRepository {
 
 export function createDirectorDecisionLogRepository(): DirectorDecisionLogRepository {
   return new PrismaDirectorDecisionLogRepository(resolveV2Client())
+}
+
+export function createDirectorBudgetRepository(): DirectorBudgetRepository {
+  return new PrismaDirectorBudgetRepository(resolveV2Client())
 }
 
 export function createWorkspaceRepository(): WorkspaceRepository {

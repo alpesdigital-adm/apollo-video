@@ -5,8 +5,8 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 
 const coverage = Object.freeze({
   'apollo.director-tools.execute': {
-    mode: 'read-only-deterministic',
-    evidence: 'F1.024 performs no project, version, artifact, database or storage mutation; it returns bounded search/evaluation/proposal results only after an atomic fail-closed preflight',
+    mode: 'durable-covered',
+    evidence: 'Wave7 preflights the complete tool batch before serializable budget reservation, then settles realized usage or cancellation against the reserved revision',
   },
   'apollo.api-access.workspace.change': {
     mode: 'durable-covered',
@@ -252,6 +252,12 @@ const coverage = Object.freeze({
   'apollo.projects.director-runs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent enqueue reserves one immutable result ID; worker lease+attempt fences the serializable version, snapshots, Command, DirectorRun, invalidations, outbox and operation settlement commit',
   },
+  'apollo.projects.director-budgets.create': {
+    mode: 'durable-covered', evidence: 'F1.026 serializable creation persists the six-dimensional limits and actor-bound idempotent audit result atomically',
+  },
+  'apollo.projects.director-budgets.actions.apply': {
+    mode: 'durable-covered', evidence: 'F1.026 serializable reservation and settlement transactions compare-and-swap the exact budget revision, reservation status and actor-bound idempotency event',
+  },
   'apollo.projects.editorial-beats.derive': {
     mode: 'durable-covered', evidence: 'F1.017 actor-bound idempotency and transcript-hash CAS persist one content-addressed semantic beat set in a serializable transaction',
   },
@@ -375,10 +381,10 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    106,
+    109,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
-    4,
+    3,
   )
 })

@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 232,
-    "operableCapabilities": 232,
-    "publicContractCapabilities": 232,
+    "registeredCapabilities": 236,
+    "operableCapabilities": 236,
+    "publicContractCapabilities": 236,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -536,7 +536,7 @@
     {
       "uiAction": "src/app/login/LoginForm.tsx:31",
       "capabilityId": "apollo.sessions.login",
-      "capabilityVersion": "2.0.0",
+      "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/session",
       "applicationServices": [
         "createDurableUiSessionService",
@@ -2013,8 +2013,8 @@
       "capabilityId": "apollo.director-tools.execute",
       "exposure": "public",
       "endpoint": "POST /v1/director-tools",
-      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v2",
-      "outputSchemaRef": "apollo://schemas/director-tool-execution/v1",
+      "inputSchemaRef": "apollo://schemas/director-tool-execution-request/v3",
+      "outputSchemaRef": "apollo://schemas/director-tool-execution/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3841,6 +3841,50 @@
       "endpoint": "GET /v1/projects/{projectId}/director-runs/{directorRunId}/decisions/{decisionId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/director-decision-detail/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-budgets.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/director-budgets",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-budget-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-budgets.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/director-budgets",
+      "inputSchemaRef": "apollo://schemas/create-director-budget-request/v1",
+      "outputSchemaRef": "apollo://schemas/director-budget-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-budgets.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/director-budgets/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/director-budget-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.director-budgets.actions.apply",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/director-budgets/{runId}/actions",
+      "inputSchemaRef": "apollo://schemas/director-budget-action-request/v1",
+      "outputSchemaRef": "apollo://schemas/director-budget-mutated/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

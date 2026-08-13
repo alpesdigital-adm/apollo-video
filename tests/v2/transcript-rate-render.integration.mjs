@@ -736,6 +736,8 @@ function assertWorkerContract(rendered, expected) {
   assert.equal(rendered.renderInput.renderKind, 'proxy')
   assert.equal(rendered.renderInput.format, '9:16')
   assert.equal(rendered.renderInput.fps, FPS)
+  assert.match(rendered.renderInput.audioTimelineHash, /^[a-f0-9]{64}$/)
+  assert.equal(rendered.renderInput.audioTimelineHash, rendered.source.editPlan.audioTimelineHash)
   assert.deepEqual(rendered.renderInput.lutPaths, {})
   assert.equal(rendered.renderInput.sources.length, 1)
   assert.equal(
@@ -762,6 +764,7 @@ function assertWorkerContract(rendered, expected) {
     format: '9:16',
     colorPipelineBindings: rendered.enqueuedContext.colorPipelineBindings,
     rangeReuse: null,
+    audioTimelineHash: rendered.renderInput.audioTimelineHash,
     projectLutSelectionId: expected.lutSelectionId,
     projectLutSelectionHash: '7'.repeat(64),
     materializedCubeHash: null,

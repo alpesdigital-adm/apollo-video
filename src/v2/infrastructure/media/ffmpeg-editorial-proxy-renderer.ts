@@ -9,6 +9,7 @@ import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
+import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'

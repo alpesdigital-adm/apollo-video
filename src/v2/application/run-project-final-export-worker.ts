@@ -4,6 +4,7 @@ import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { createReconstructableMediaArtifactManifest } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createRenderInputSpec } from '../domain/render-input.ts'
+import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
@@ -224,6 +225,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const subtitleCues = source.editPlan.subtitleTracks.flatMap((track) => 'cues' in track ? track.cues : [])
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
+      const audioTimelineHash = createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
+      if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before final render')
       await enter('rendering')
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
         dependencies.sources.materialize({
@@ -243,6 +246,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         })),
         lutPaths: materializedLut.lutPaths,
         clips,
+        audioTimelineHash,
         fps: context.outputSpec.fps,
         format: source.format,
         outputSpec: context.outputSpec,
@@ -388,6 +392,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           editPlan: source.editPlan,
           outputSpec: context.outputSpec,
           sourceArtifactIds: source.renderSources.map((asset) => asset.artifactId),
+          audioTimelineHash,
           colorPipelineBindings: context.colorPipelineBindings,
           projectLutSelectionHash: materializedLut.selectionHash,
           materializedCubeHash: materializedLut.materializedCubeHash ?? null,
@@ -404,6 +409,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           version: EDITORIAL_FINAL_RECIPE_VERSION,
           parameters: {
             inputHash: context.inputHash,
+            audioTimelineHash,
             projectVersionId: context.projectVersionId,
             projectVersionHash: context.projectVersionHash,
             editPlanSnapshotId: context.editPlanSnapshotId,
