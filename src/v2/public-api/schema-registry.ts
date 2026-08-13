@@ -16765,6 +16765,79 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('narrative-safety-preflight-request', 1, 'Check one proposed statement trim and order against an exact StoryPlan version', {
+    type: 'object', additionalProperties: false, required: ['projectVersionId', 'expectedBaseHash', 'storyPlanId', 'edit'],
+    properties: { projectVersionId: idSchema, expectedBaseHash: sha256Schema, storyPlanId: idSchema, edit: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'object', additionalProperties: false, required: ['statementId', 'speakerId', 'sourceArtifactId', 'sourceRangeMs', 'preservedText'], properties: { statementId: idSchema, speakerId: idSchema, sourceArtifactId: idSchema, sourceRangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } }, preservedText: { type: 'string', minLength: 3, maxLength: 4000 } } } } },
+  }),
+  defineSchema(
+    'narrative-safety-preflight',
+    1,
+    'Localized fail-closed narrative integrity decision before an editorial Command',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['decision'],
+      properties: {
+        decision: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['schemaVersion', 'projectVersionId', 'projectVersionBaseHash', 'storyPlanId', 'storySnapshotHash', 'contextHash', 'safe', 'issues', 'preflightHash'],
+          properties: {
+            schemaVersion: { const: 'narrative-safety-decision/v1' },
+            projectVersionId: idSchema,
+            projectVersionBaseHash: sha256Schema,
+            storyPlanId: idSchema,
+            storySnapshotHash: sha256Schema,
+            contextHash: sha256Schema,
+            safe: { type: 'boolean' },
+            issues: {
+              type: 'array',
+              maxItems: 500,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['schemaVersion', 'code', 'severity', 'category', 'statementId', 'rangeMs', 'evidence', 'restoreAction'],
+                properties: {
+                  schemaVersion: { const: 'narrative-quality-issue/v1' },
+                  code: { enum: ['UNKNOWN_STATEMENT', 'STATEMENT_DUPLICATED', 'SOURCE_RANGE_CHANGED', 'SOURCE_TEXT_CHANGED', 'ATTRIBUTION_CHANGED', 'CLAIM_CHANGED', 'QUALIFIER_REMOVED', 'NEGATION_REMOVED', 'CAUSALITY_CHANGED', 'DEADLINE_REMOVED', 'DEPENDENCY_REMOVED', 'DEPENDENCY_REORDERED'] },
+                  severity: { const: 'hard' },
+                  category: { const: 'integrity' },
+                  statementId: idSchema,
+                  rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                  evidence: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['kind', 'ref'],
+                      properties: {
+                        kind: { enum: ['source-text', 'speaker', 'source-range', 'dependency', 'critical-token'] },
+                        ref: { type: 'string', minLength: 1, maxLength: 4000 },
+                        rangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                      },
+                    },
+                  },
+                  restoreAction: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['kind', 'statementId', 'sourceRangeMs', 'refs'],
+                    properties: {
+                      kind: { enum: ['restore-statement', 'restore-token', 'restore-attribution', 'restore-dependency', 'restore-order'] },
+                      statementId: idSchema,
+                      sourceRangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0 } },
+                      refs: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, maxLength: 4000 } },
+                    },
+                  },
+                },
+              },
+            },
+            preflightHash: sha256Schema,
+          },
+        },
+      },
+    }),
+  ),
   defineSchema('catalog-semantic-search-document-request', 1, 'Catalog one immutable source identity for full-text and semantic retrieval', {
     type: 'object',
     additionalProperties: false,

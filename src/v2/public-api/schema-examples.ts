@@ -8171,6 +8171,14 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/narrative-safety-preflight-request/v1': [{
+      projectVersionId: 'project-version-narrative-1', expectedBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1',
+      edit: [{ statementId: 'statement-promise', speakerId: 'speaker-expert', sourceArtifactId: artifactId, sourceRangeMs: [4000, 7000], preservedText: 'O método pode melhorar a clareza em até 30 dias.' }],
+    }],
+    'apollo://schemas/narrative-safety-preflight/v1': [{ data: { decision: {
+      schemaVersion: 'narrative-safety-decision/v1', projectVersionId: 'project-version-narrative-1', projectVersionBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1', storySnapshotHash: 'b'.repeat(64), contextHash: 'c'.repeat(64), safe: false,
+      issues: [{ schemaVersion: 'narrative-quality-issue/v1', code: 'DEPENDENCY_REMOVED', severity: 'hard', category: 'integrity', statementId: 'statement-promise', rangeMs: [4000, 7000], evidence: [{ kind: 'dependency', ref: 'proof:statement-proof' }], restoreAction: { kind: 'restore-dependency', statementId: 'statement-promise', sourceRangeMs: [4000, 7000], refs: ['statement-proof'] } }], preflightHash: 'd'.repeat(64),
+    } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/catalog-semantic-search-document-request/v1': [
       {
         source: {

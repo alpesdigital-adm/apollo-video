@@ -107,6 +107,7 @@ import type { ProjectWorkspaceQueryRepository } from '../application/ports/proje
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
+import type { NarrativeSafetyRepository } from '../application/ports/narrative-safety-repository.ts'
 import type { ManualEditRepository } from '../application/ports/manual-edit-repository.ts'
 import type { SourceTranscriptReplacementRepository } from '../application/ports/source-transcript-replacement-repository.ts'
 import type { VersionCompareRepository } from '../application/ports/version-compare-repository.ts'
@@ -240,6 +241,7 @@ import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-re
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
+import { PrismaNarrativeSafetyRepository } from './prisma/narrative-safety-repository.ts'
 import { PrismaManualEditRepository } from './prisma/manual-edit-repository.ts'
 import { PrismaSourceTranscriptReplacementRepository } from './prisma/source-transcript-replacement-repository.ts'
 import { PrismaVersionCompareRepository } from './prisma/version-compare-repository.ts'
@@ -1613,6 +1615,10 @@ export function createRenderElementMapRepository(): RenderElementMapRepository {
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {
   return new PrismaEditorialCommandRepository(resolveV2Client())
+}
+
+export function createNarrativeSafetyRepository(): NarrativeSafetyRepository {
+  return new PrismaNarrativeSafetyRepository(resolveV2Client())
 }
 
 export function createManualEditRepository(): ManualEditRepository {
