@@ -80,6 +80,9 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
   return Object.freeze(issues)
 }
 
+const geometryHash = (value: unknown): boolean =>
+  value === undefined || value === null || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))
+
 function parseFormatQuality(value: string | null): Readonly<ProxyReview>['formatQuality'] {
   if (value === null) return undefined
   const candidate = parseJson(value, 'proxy format quality verdict') as Record<string, unknown>
@@ -89,10 +92,14 @@ function parseFormatQuality(value: string | null): Readonly<ProxyReview>['format
     typeof candidate.reportHash !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.reportHash) ||
     !['passed', 'warning', 'blocked'].includes(String(candidate.status)) ||
     typeof candidate.exportAllowed !== 'boolean' || typeof candidate.explanation !== 'string' ||
-    candidate.exportAllowed !== (candidate.status !== 'blocked')
+    candidate.exportAllowed !== (candidate.status !== 'blocked') ||
+    // The verdict is only readable together with the geometry it judged.
+    !geometryHash(candidate.placementPlanHash) || !geometryHash(candidate.reframePlanHash)
   ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy format quality verdict is invalid')
   return Object.freeze({
     outputPresetHash: candidate.outputPresetHash,
+    placementPlanHash: (candidate.placementPlanHash ?? null) as string | null,
+    reframePlanHash: (candidate.reframePlanHash ?? null) as string | null,
     status: candidate.status as 'passed' | 'warning' | 'blocked',
     exportAllowed: candidate.exportAllowed,
     explanation: candidate.explanation,

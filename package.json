@@ -29,6 +29,7 @@
     "test:integration:reframe": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/reframe-plan-render.integration.mjs",
     "test:integration:output-formats": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/output-formats-render.integration.mjs",
     "test:integration:responsive-placement": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/responsive-placement-visual.integration.mjs",
+    "test:integration:render-geometry": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/render-geometry-render.integration.mjs",
     "test:integration:format-critic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/format-quality-critic.integration.mjs",
     "test:integration:format-quality-by-output": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-format-quality-by-output.integration.mjs",
     "test:integration:transcript-rate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/transcript-rate-render.integration.mjs",

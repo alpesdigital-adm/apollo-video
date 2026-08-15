@@ -41,6 +41,9 @@ export interface ProxyQualityIssue {
   targetId?: string
   outputSpecId?: string
   outputPresetHash?: string
+  /** Geometry the issue was observed against; carried verbatim from the format critic. */
+  placementPlanHash?: string | null
+  reframePlanHash?: string | null
   /** Half-open frame interval `[startFrame, endFrame)` where the evidence lives. */
   evidenceRange?: Readonly<{ startFrame: number; endFrame: number }>
   elementIds?: readonly string[]
@@ -51,6 +54,9 @@ export interface ProxyQualityIssue {
 /** Per-output verdict of the format critic, explaining why this exact variant passed or failed. */
 export interface ProxyFormatQualityVerdict {
   outputPresetHash: string
+  /** Geometry actually rendered for this variant; `null` when the render carried no such plan. */
+  placementPlanHash: string | null
+  reframePlanHash: string | null
   status: 'passed' | 'warning' | 'blocked'
   exportAllowed: boolean
   explanation: string
@@ -192,7 +198,7 @@ export function evaluateRenderedProxy(input: {
   subtitleSafeRegion?: readonly [number, number, number, number]
   criticIssues?: readonly Readonly<ProxyQualityIssue>[]
   warningsAcknowledged?: boolean
-  formatCritic?: Readonly<{ outputSpecId: string; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number }>
+  formatCritic?: Readonly<{ outputSpecId: string; placementPlanHash?: string | null; reframePlanHash?: string | null; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number }>
 }): Readonly<ProxyReview> {
   const spec = PROXY_OUTPUT_SPECS[input.format as ProxyOutputFormat]
   assertDomain(Boolean(spec), 'INVALID_OUTPUT_SPEC', 'Proxy format is not supported')
@@ -259,11 +265,15 @@ export function evaluateRenderedProxy(input: {
       message: 'Rendered element map does not match proxy dimensions or duration.', correctable: false,
     })
   }
+  // The critic runs after the geometry was materialized and rendered, and every issue it emits is
+  // stamped with the exact placement plan and crop trajectory that produced these frames.
   const formatReport = input.formatCritic ? critiqueOutputFormat({
     outputSpecId: input.formatCritic.outputSpecId,
     format: input.format as ProxyOutputFormat,
     proxyHash: input.proxySha256,
     map: input.map,
+    placementPlanHash: input.formatCritic.placementPlanHash ?? null,
+    reframePlanHash: input.formatCritic.reframePlanHash ?? null,
     subjects: input.formatCritic.subjects,
     densityLimit: input.formatCritic.densityLimit,
   }) : undefined
@@ -308,6 +318,8 @@ export function evaluateRenderedProxy(input: {
       ? {
           formatQuality: Object.freeze({
             outputPresetHash: formatReport.outputPresetHash,
+            placementPlanHash: formatReport.placementPlanHash,
+            reframePlanHash: formatReport.reframePlanHash,
             status: formatReport.status,
             exportAllowed: formatReport.exportAllowed,
             explanation: formatReport.explanation,

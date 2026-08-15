@@ -5202,6 +5202,15 @@ const projectSubtitleDisabledResultExample = {
   replayed: false,
 }
 
+/**
+ * The retired v1 result shape, kept published for clients that pinned it. The runtime only ever
+ * emits v2 — this literal documents the older contract without keeping a legacy code path.
+ */
+const responsivePlacementResultV1Example = (() => {
+  const { subtitleRegion: _subtitleRegion, ...body } = RESPONSIVE_VISUAL_GOLDENS[0]!.placement
+  return Object.freeze({ ...body, schemaVersion: 'responsive-placement/v1' as const })
+})()
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
@@ -5211,7 +5220,14 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
       protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
     }],
-    'apollo://schemas/responsive-placement-result/v1': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/responsive-placement-result/v1': [{ data: responsivePlacementResultV1Example, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/responsive-placement-request/v2': [{
+      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
+      protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
+      subtitlePresetId: 'kinetic',
+    }],
+    'apollo://schemas/responsive-placement-result/v2': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY],
     'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
     'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],

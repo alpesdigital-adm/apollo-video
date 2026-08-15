@@ -8,6 +8,8 @@ import type {
   ProtectedRegionKind,
   ResponsivePlacementInput,
 } from '../domain/responsive-output.ts'
+import { deriveSubtitleRegion } from '../domain/subtitle-region.ts'
+import { SUBTITLE_PRESET_IDS } from '../domain/subtitle-system.ts'
 
 function record(value: unknown, field: string, keys: readonly string[]): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new DomainError('INVALID_ARGUMENT', `${field} must be an object`)
@@ -59,21 +61,28 @@ function protectedRegion(value: unknown, index: number): ProtectedPlacementRegio
 }
 
 export function parseResponsivePlacementBody(value: unknown): ResponsivePlacementInput {
-  const body = record(value, 'body', ['outputSpec', 'elements', 'protectedRegions'])
+  const body = record(value, 'body', ['outputSpec', 'elements', 'protectedRegions', 'subtitlePresetId'])
   const output = record(body.outputSpec, 'body.outputSpec', ['schemaVersion', 'id', 'locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea', 'deliveryProfileId'])
   const safe = record(output.safeArea, 'body.outputSpec.safeArea', ['top', 'right', 'bottom', 'left'])
   if (!Array.isArray(body.elements) || body.elements.length < 1 || body.elements.length > 64) throw new DomainError('INVALID_ARGUMENT', 'body.elements must be a bounded array')
   if (body.protectedRegions !== undefined && (!Array.isArray(body.protectedRegions) || body.protectedRegions.length > 128)) throw new DomainError('INVALID_ARGUMENT', 'body.protectedRegions must be a bounded array')
   if (output.schemaVersion !== 1) throw new DomainError('INVALID_ARGUMENT', 'body.outputSpec.schemaVersion is unsupported')
-  return {
-    spec: createOutputSpec({
+  const spec = createOutputSpec({
       id: text(output.id, 'body.outputSpec.id'), locale: text(output.locale, 'body.outputSpec.locale'),
       aspectRatio: member(output.aspectRatio, 'body.outputSpec.aspectRatio', ['9:16', '16:9', '4:5', '1:1', '21:9']) as OutputAspectRatio,
       width: integer(output.width, 'body.outputSpec.width'), height: integer(output.height, 'body.outputSpec.height'), fps: integer(output.fps, 'body.outputSpec.fps'),
       safeArea: { top: finite(safe.top, 'body.outputSpec.safeArea.top'), right: finite(safe.right, 'body.outputSpec.safeArea.right'), bottom: finite(safe.bottom, 'body.outputSpec.safeArea.bottom'), left: finite(safe.left, 'body.outputSpec.safeArea.left') },
       ...(output.deliveryProfileId === undefined ? {} : { deliveryProfileId: text(output.deliveryProfileId, 'body.outputSpec.deliveryProfileId') }),
-    }),
+  })
+  // The caller names the resolved preset; the geometry itself is derived from the registry, never
+  // accepted from the request. A client cannot hand the solver a subtitle rectangle of its own.
+  const subtitleRegion = body.subtitlePresetId === undefined
+    ? undefined
+    : deriveSubtitleRegion({ spec, presetId: member(body.subtitlePresetId, 'body.subtitlePresetId', SUBTITLE_PRESET_IDS) })
+  return {
+    spec,
     elements: body.elements.map(placementElement),
     protectedRegions: (body.protectedRegions as unknown[] | undefined)?.map(protectedRegion) ?? [],
+    ...(subtitleRegion ? { subtitleRegion } : {}),
   }
 }

@@ -272,6 +272,30 @@ const responsivePlacementResultSchema = {
     reviewRequired: { type: 'boolean' }, placementHash: sha256Schema,
   },
 } as const
+const subtitlePresetIdSchemaV2 = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'] } as const
+const subtitleRegionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'presetId', 'presetVersion', 'presetHash', 'registryHash', 'subtitleFormat', 'outputSpecId', 'bounds'],
+  properties: {
+    schemaVersion: { const: 'subtitle-region/v1' }, presetId: subtitlePresetIdSchemaV2, presetVersion: { const: 1 },
+    presetHash: sha256Schema, registryHash: sha256Schema, subtitleFormat: { enum: ['9:16', '16:9'] }, outputSpecId: idSchema,
+    bounds: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } },
+  },
+} as const
+/** v2 = v1 plus the resolved subtitle preset whose responsive limits derive the subtitle band. */
+const responsivePlacementRequestSchemaV2 = {
+  type: 'object', additionalProperties: false, required: ['outputSpec', 'elements'],
+  properties: { outputSpec: outputSpecSchema, elements: { type: 'array', minItems: 1, maxItems: 64, items: responsivePlacementElementSchema }, protectedRegions: { type: 'array', maxItems: 128, items: responsiveProtectedRegionSchema }, subtitlePresetId: subtitlePresetIdSchemaV2 },
+} as const
+const responsivePlacementResultSchemaV2 = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'policyVersion', 'registryHash', 'format', 'canvas', 'safeArea', 'subtitleRegion', 'elements', 'issues', 'reviewRequired', 'placementHash'],
+  properties: {
+    ...responsivePlacementResultSchema.properties,
+    schemaVersion: { const: 'responsive-placement/v2' },
+    subtitleRegion: { anyOf: [{ type: 'null' }, subtitleRegionSchema] },
+  },
+} as const
 const subtitlePresetIdSchema = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'] } as const
 const subtitleMvpFormatSchema = { enum: ['9:16', '16:9'] } as const
 const subtitleColorSchema = { type: 'string', pattern: '^#[0-9A-F]{6}$' } as const
@@ -13007,6 +13031,8 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('output-format-registry', 1, 'Content-addressed required output format registry', outputFormatRegistrySchema),
   defineSchema('responsive-placement-request', 1, 'Format-specific responsive placement request', responsivePlacementRequestSchema),
   defineSchema('responsive-placement-result', 1, 'Content-addressed responsive placement result', successSchema(responsivePlacementResultSchema)),
+  defineSchema('responsive-placement-request', 2, 'Format-specific responsive placement request with the resolved subtitle preset', responsivePlacementRequestSchemaV2),
+  defineSchema('responsive-placement-result', 2, 'Content-addressed responsive placement result carrying its subtitle region provenance', successSchema(responsivePlacementResultSchemaV2)),
   defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
     policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
     seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: { id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } }, blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } }, assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } }, patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } }, maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } } } } },

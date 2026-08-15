@@ -2,6 +2,8 @@ import { customizeOutputFormatPreset, OUTPUT_FORMAT_REGISTRY } from './output-fo
 import { OUTPUT_ASPECT_RATIOS, type OutputAspectRatio, type OutputSpec } from './output-spec.ts'
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
+import { deriveSubtitleRegion, type SubtitleRegionV1 } from './subtitle-region.ts'
+import { SUBTITLE_STYLE_REGISTRY } from './subtitle-system.ts'
 
 export const VERSIONED_OUTPUT_PRESETS = Object.freeze(Object.fromEntries(OUTPUT_ASPECT_RATIOS.map((ratio) => {
   const preset = OUTPUT_FORMAT_REGISTRY.presets[ratio]
@@ -39,6 +41,13 @@ export interface ResponsivePlacementInput {
   spec: Readonly<OutputSpec>
   elements: readonly Readonly<PlacementElement>[]
   protectedRegions?: readonly Readonly<ProtectedPlacementRegion>[]
+  /**
+   * Subtitle geometry derived from the resolved subtitle preset + this OutputSpec
+   * (`deriveSubtitleRegion`). When present it *is* the subtitle candidate: width, height and the
+   * preferred box come from the registry, not from a rectangle authored here. `subtitle` elements
+   * fall back to the format rule below only when no region was resolved (e.g. subtitles are off).
+   */
+  subtitleRegion?: Readonly<SubtitleRegionV1>
 }
 
 export interface PlacedElement {
@@ -61,12 +70,18 @@ export interface PlacementIssue {
 }
 
 export interface ResponsivePlacementResult {
-  schemaVersion: 'responsive-placement/v1'
+  schemaVersion: 'responsive-placement/v2'
   policyVersion: typeof RESPONSIVE_PLACEMENT_POLICY_VERSION
   registryHash: string
   format: OutputAspectRatio
   canvas: Readonly<{ width: number; height: number }>
   safeArea: Readonly<{ top: number; right: number; bottom: number; left: number }>
+  /**
+   * Provenance of the subtitle geometry used by this solve, or `null` when no subtitle preset was
+   * resolved. Being hash-covered, a reviewer can prove which registry preset produced the
+   * subtitle box instead of trusting that some shared constant was the right one.
+   */
+  subtitleRegion: Readonly<SubtitleRegionV1> | null
   elements: readonly Readonly<PlacedElement>[]
   issues: readonly Readonly<PlacementIssue>[]
   reviewRequired: boolean
@@ -159,31 +174,60 @@ function assertPlacementInput(input: ResponsivePlacementInput): void {
   }
 }
 
+/**
+ * Re-derives the supplied region from this exact OutputSpec and preset. A region copied from
+ * another format, another preset or another registry revision cannot survive this check, so the
+ * solve can never place a subtitle against geometry that belongs to a different variant.
+ */
+function assertSubtitleRegion(spec: Readonly<OutputSpec>, region: Readonly<SubtitleRegionV1>): void {
+  assertDomain(region.schemaVersion === 'subtitle-region/v1', 'INVALID_ARGUMENT', 'Subtitle region schema version is unsupported')
+  assertDomain(region.registryHash === SUBTITLE_STYLE_REGISTRY.registryHash, 'INVALID_ARGUMENT', 'Subtitle region registry hash drifted from the subtitle style registry')
+  const rederived = deriveSubtitleRegion({ spec, presetId: region.presetId, presetHash: region.presetHash, registryHash: region.registryHash })
+  assertDomain(
+    rederived.outputSpecId === region.outputSpecId && rederived.subtitleFormat === region.subtitleFormat &&
+    (['x', 'y', 'width', 'height'] as const).every((key) => Math.abs(rederived.bounds[key] - region.bounds[key]) <= 1e-9),
+    'INVALID_ARGUMENT', 'Subtitle region was not derived from this output spec and preset',
+  )
+}
+
 export function solveResponsivePlacement(input: ResponsivePlacementInput): Readonly<ResponsivePlacementResult> {
   assertPlacementInput(input)
   const { spec } = input
+  const subtitleRegion = input.subtitleRegion ?? null
+  if (subtitleRegion) assertSubtitleRegion(spec, subtitleRegion)
   const safe = Object.freeze({ x: spec.safeArea.left, y: spec.safeArea.top, width: 1 - spec.safeArea.left - spec.safeArea.right, height: 1 - spec.safeArea.top - spec.safeArea.bottom })
   const placed: PlacedElement[] = []
   const issues: PlacementIssue[] = []
   const ordered = [...input.elements].toSorted((left, right) => right.priority - left.priority || left.readingOrder - right.readingOrder || left.id.localeCompare(right.id))
   for (const element of ordered) {
     const rule = FORMAT_RULES[spec.aspectRatio][element.kind]
-    const width = Math.min(element.maxWidth, Math.max(element.minWidth, rule.width))
-    const height = Math.min(element.maxHeight, Math.max(element.minHeight, rule.height))
+    const reserved = element.kind === 'subtitle' ? subtitleRegion : null
+    const width = Math.min(element.maxWidth, Math.max(element.minWidth, reserved?.bounds.width ?? rule.width))
+    const height = Math.min(element.maxHeight, Math.max(element.minHeight, reserved?.bounds.height ?? rule.height))
     const anchors = element.anchor === 'auto'
       ? rule.anchors
       : Object.freeze([element.anchor, ...rule.anchors.filter((anchor) => anchor !== element.anchor)])
+    // The registry-derived region is the first candidate for a subtitle; the format anchors stay
+    // available (with the region's own dimensions) so a face or ROI collision still has an exit.
+    const candidates: readonly Readonly<{ anchor: Exclude<PlacementAnchor, 'auto'>; box: NormalizedBox }>[] = Object.freeze([
+      ...(reserved && width === reserved.bounds.width && height === reserved.bounds.height
+        ? [Object.freeze({ anchor: 'bottom-center' as const, box: Object.freeze({ ...reserved.bounds }) })]
+        : []),
+      ...anchors.map((anchor) => Object.freeze({ anchor, box: boxForAnchor(anchor, width, height, safe) })),
+    ])
     const attempted: string[] = []
     let selected: { anchor: Exclude<PlacementAnchor, 'auto'>; box: NormalizedBox } | undefined
+    let selectedIndex = -1
     const avoided = new Set<ProtectedRegionKind>()
-    for (const anchor of anchors) {
-      attempted.push(anchor)
-      const box = boxForAnchor(anchor, width, height, safe)
+    for (const [index, candidate] of candidates.entries()) {
+      if (!attempted.includes(candidate.anchor)) attempted.push(candidate.anchor)
+      const { box } = candidate
       if (box.x < safe.x || box.y < safe.y || box.x + box.width > safe.x + safe.width || box.y + box.height > safe.y + safe.height) continue
       const collidingRegions = (input.protectedRegions ?? []).filter((region) => overlaps(box, region))
       collidingRegions.forEach((region) => avoided.add(region.kind))
       if (!collidingRegions.length && !placed.some((existing) => overlaps(box, existing))) {
-        selected = { anchor, box }
+        selected = { anchor: candidate.anchor, box }
+        selectedIndex = index
         break
       }
     }
@@ -191,17 +235,20 @@ export function solveResponsivePlacement(input: ResponsivePlacementInput): Reado
       issues.push(Object.freeze({ elementId: element.id, code: 'IMPOSSIBLE_CONSTRAINTS' as const, severity: 'review' as const, reason: 'No format-specific candidate satisfies safe area, protected regions and collision constraints.', attemptedAnchors: Object.freeze(attempted) }))
       continue
     }
-    if (selected.anchor !== anchors[0]) issues.push(Object.freeze({ elementId: element.id, code: 'ANCHOR_FALLBACK' as const, severity: 'warning' as const, reason: `Preferred anchor ${anchors[0]} was blocked; ${selected.anchor} was selected.`, attemptedAnchors: Object.freeze(attempted) }))
+    if (selectedIndex !== 0) issues.push(Object.freeze({ elementId: element.id, code: 'ANCHOR_FALLBACK' as const, severity: 'warning' as const, reason: `Preferred anchor ${candidates[0]!.anchor} was blocked; ${selected.anchor} was selected.`, attemptedAnchors: Object.freeze(attempted) }))
     for (const kind of [...avoided].sort()) issues.push(Object.freeze({ elementId: element.id, code: kind === 'face' ? 'FACE_COLLISION_AVOIDED' as const : kind === 'roi' ? 'ROI_COLLISION_AVOIDED' as const : 'READING_ORDER_COLLISION_AVOIDED' as const, severity: 'warning' as const, reason: `A ${kind} protected region blocked an earlier candidate.`, attemptedAnchors: Object.freeze(attempted) }))
     placed.push(Object.freeze({ id: element.id, kind: element.kind, anchor: selected.anchor, readingOrder: element.readingOrder, ...selected.box }))
   }
   const visible = placed.toSorted((left, right) => left.readingOrder - right.readingOrder)
-  const body = Object.freeze({ schemaVersion: 'responsive-placement/v1' as const, policyVersion: RESPONSIVE_PLACEMENT_POLICY_VERSION, registryHash: OUTPUT_FORMAT_REGISTRY.registryHash, format: spec.aspectRatio, canvas: Object.freeze({ width: spec.width, height: spec.height }), safeArea: Object.freeze({ ...spec.safeArea }), elements: Object.freeze(visible), issues: Object.freeze(issues), reviewRequired: issues.some((issue) => issue.severity === 'review') })
+  const body = Object.freeze({ schemaVersion: 'responsive-placement/v2' as const, policyVersion: RESPONSIVE_PLACEMENT_POLICY_VERSION, registryHash: OUTPUT_FORMAT_REGISTRY.registryHash, format: spec.aspectRatio, canvas: Object.freeze({ width: spec.width, height: spec.height }), safeArea: Object.freeze({ ...spec.safeArea }), subtitleRegion, elements: Object.freeze(visible), issues: Object.freeze(issues), reviewRequired: issues.some((issue) => issue.severity === 'review') })
   return Object.freeze({ ...body, placementHash: calculateCanonicalHash(body) })
 }
 
 export function validateResponsivePlacement(result: Readonly<ResponsivePlacementResult>): void {
-  assertDomain(result.schemaVersion === 'responsive-placement/v1' && result.policyVersion === RESPONSIVE_PLACEMENT_POLICY_VERSION && result.registryHash === OUTPUT_FORMAT_REGISTRY.registryHash, 'INVALID_ARGUMENT', 'Responsive placement identity is invalid')
+  assertDomain(result.schemaVersion === 'responsive-placement/v2' && result.policyVersion === RESPONSIVE_PLACEMENT_POLICY_VERSION && result.registryHash === OUTPUT_FORMAT_REGISTRY.registryHash, 'INVALID_ARGUMENT', 'Responsive placement identity is invalid')
+  if (result.subtitleRegion) {
+    assertDomain(result.subtitleRegion.registryHash === SUBTITLE_STYLE_REGISTRY.registryHash, 'INVALID_ARGUMENT', 'Responsive placement subtitle region is not bound to the published subtitle registry')
+  }
   const { placementHash: _hash, ...body } = result
   assertDomain(result.placementHash === calculateCanonicalHash(body), 'INVALID_ARGUMENT', 'Responsive placement hash is invalid')
   assertDomain([result.safeArea.top, result.safeArea.right, result.safeArea.bottom, result.safeArea.left].every((value) => Number.isFinite(value) && value >= 0 && value < 0.5) && result.safeArea.top + result.safeArea.bottom < 1 && result.safeArea.left + result.safeArea.right < 1, 'INVALID_ARGUMENT', 'Responsive placement safe area is invalid')

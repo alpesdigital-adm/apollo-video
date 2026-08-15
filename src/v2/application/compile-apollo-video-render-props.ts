@@ -4,6 +4,10 @@ import type {
   MaterializedRenderInputV1,
 } from '../domain/render-input.ts'
 import {
+  requireRenderInputSubtitleRegistry,
+  type RenderInputSubtitleSection,
+} from '../domain/render-input-subtitles.ts'
+import {
   readSubtitlePreset,
   resolveSubtitleMvpFormat,
   type SubtitleMvpFormat,
@@ -384,6 +388,13 @@ function compileSubtitle(
 export function compileApolloVideoRenderProps(
   input: MaterializedRenderInputV1,
   loadedRenderData?: Readonly<LoadedApolloVideoRenderData>,
+  /**
+   * Persisted subtitle resolution (F1.034) for this exact variant. The compiler validates it
+   * against the F1.033 registry before compiling a single cue, so a resolution taken from another
+   * registry revision, another variant or a tampered document fails closed here instead of
+   * reaching the renderer.
+   */
+  subtitleSection?: Readonly<RenderInputSubtitleSection<unknown>>,
 ): ApolloVideoRenderPropsV1 {
   assertDomain(
     input.composition.id === 'apollo-video' &&
@@ -447,8 +458,22 @@ export function compileApolloVideoRenderProps(
   const scenes = Object.freeze(
     props.scenes.map((scene, index) => compileScene(scene, index, input, assets)),
   )
+  const resolvedSubtitles = subtitleSection
+    ? requireRenderInputSubtitleRegistry(subtitleSection)
+    : undefined
+  if (resolvedSubtitles) {
+    assertDomain(
+      resolvedSubtitles.variantId === input.output.aspectRatio,
+      'INVALID_RENDER_INPUT',
+      'Subtitle resolution belongs to another output variant',
+    )
+  }
+  // `none` suppresses the rendered cues and nothing else: the transcript identity travelled with
+  // the section and every other prop is compiled exactly as it would have been.
   const subtitles = Object.freeze(
-    props.subtitles.map((subtitle, index) => compileSubtitle(subtitle, index, input)),
+    resolvedSubtitles && !resolvedSubtitles.enabled
+      ? []
+      : props.subtitles.map((subtitle, index) => compileSubtitle(subtitle, index, input)),
   )
   const compiled: ApolloVideoRenderPropsV1 = {
     scenes,
@@ -507,6 +532,22 @@ export function compileApolloVideoRenderProps(
     )
     compiled.subtitleStyle = props.subtitleStyle as SubtitleStyle
     compiled.subtitlePreset = readSubtitlePreset(compiled.subtitleStyle)
+  }
+  if (resolvedSubtitles?.enabled) {
+    // The persisted resolution wins over a style declared in props: an operator cannot repaint a
+    // resolution the Command already recorded by editing the RenderInput.
+    assertDomain(
+      props.subtitleStyle === undefined || props.subtitleStyle === resolvedSubtitles.presetId,
+      'INVALID_RENDER_INPUT',
+      'props.subtitleStyle contradicts the persisted subtitle resolution',
+    )
+    compiled.subtitleStyle = resolvedSubtitles.presetId! as SubtitleStyle
+    compiled.subtitlePreset = readSubtitlePreset(resolvedSubtitles.presetId!)
+    assertDomain(
+      compiled.subtitlePreset.presetHash === resolvedSubtitles.presetHash,
+      'INVALID_RENDER_INPUT',
+      'Persisted subtitle preset hash drifted from the registry preset the compiler resolved',
+    )
   }
   if (props.gradePreset !== undefined) {
     assertDomain(

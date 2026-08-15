@@ -19,21 +19,26 @@ export interface FormatSubjectEvidenceV1 {
 }
 
 /**
- * A format quality issue is localized by four independent coordinates so a reviewer can
+ * A format quality issue is localized by six independent coordinates so a reviewer can
  * reach the exact pixel evidence without opening the plan:
  * - the output identity (`outputSpecId` plus the content-addressed `outputPresetHash`);
+ * - the **geometry actually rendered** (`placementPlanHash`, `reframePlanHash`), so an issue can
+ *   never be read against a placement or a crop trajectory other than the one that produced the
+ *   frames — `null` means the render carried no such plan, which is itself evidence;
  * - the frame interval `evidenceRange`, always **half-open** `[startFrame, endFrame)`
  *   (`endFrame` is the first frame that no longer carries the defect) and its `rangeMs` mirror;
  * - the render element identities (`elementIds`);
  * - the perception/evidence identities (`evidenceIds`).
  * `code` is the reason code and `severity` decides whether the variant is blocked.
  */
-export interface FormatQualityIssueV1 {
+export interface FormatQualityIssueV2 {
   code: FormatQualityCode
   severity: 'hard' | 'warning'
   category: 'editorial'
   outputSpecId: string
   outputPresetHash: string
+  placementPlanHash: string | null
+  reframePlanHash: string | null
   format: OutputAspectRatio
   message: string
   rangeMs: readonly [number, number]
@@ -43,23 +48,27 @@ export interface FormatQualityIssueV1 {
   correctable: boolean
 }
 
-export interface FormatQualityReportV1 {
-  schemaVersion: 'format-quality-report/v1'
+export interface FormatQualityReportV2 {
+  schemaVersion: 'format-quality-report/v2'
   outputSpecId: string
   format: OutputAspectRatio
   proxyHash: string
   renderElementMapHash: string
   outputPresetHash: string
+  placementPlanHash: string | null
+  reframePlanHash: string | null
   status: 'passed' | 'warning' | 'blocked'
   exportAllowed: boolean
   explanation: string
-  issues: readonly Readonly<FormatQualityIssueV1>[]
+  issues: readonly Readonly<FormatQualityIssueV2>[]
   reportHash: string
 }
 
-export interface FormatVariantDecisionV1 {
+export interface FormatVariantDecisionV2 {
   outputSpecId: string
   outputPresetHash: string
+  placementPlanHash: string | null
+  reframePlanHash: string | null
   format: OutputAspectRatio
   status: 'passed' | 'warning' | 'blocked'
   exportAllowed: boolean
@@ -96,11 +105,22 @@ export function critiqueOutputFormat(input: Readonly<{
   format: OutputAspectRatio
   proxyHash: string
   map: Readonly<RenderElementMap>
+  /** Content address of the placement geometry that produced these frames, when the render had one. */
+  placementPlanHash?: string | null
+  /** Content address of the crop trajectory that produced these frames, when the render had one. */
+  reframePlanHash?: string | null
   subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]
   densityLimit?: number
-}>): Readonly<FormatQualityReportV1> {
+}>): Readonly<FormatQualityReportV2> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')
+  const placementPlanHash = input.placementPlanHash ?? null
+  const reframePlanHash = input.reframePlanHash ?? null
+  assertDomain(
+    (placementPlanHash === null || SHA256.test(placementPlanHash)) &&
+    (reframePlanHash === null || SHA256.test(reframePlanHash)),
+    'INVALID_RENDER_INPUT', 'Format critic geometry identity is invalid',
+  )
   assertDomain(input.map.fps > 0 && Number.isFinite(input.map.fps) && input.map.durationFrames > 0, 'INVALID_RENDER_INPUT', 'Format critic timeline is invalid')
   const preset = readOutputFormatPreset(input.format)
   assertDomain(input.outputSpecId === preset.spec.id, 'INVALID_OUTPUT_SPEC', 'Format critic outputSpecId does not match the canonical registry preset')
@@ -110,11 +130,12 @@ export function critiqueOutputFormat(input: Readonly<{
     assertDomain(ID.test(subject.id) && Number.isSafeInteger(subject.startFrame) && Number.isSafeInteger(subject.endFrame) && subject.startFrame >= 0 && subject.endFrame > subject.startFrame && subject.endFrame <= input.map.durationFrames && validBounds(subject.bounds), 'INVALID_RENDER_INPUT', 'Format subject evidence is invalid')
     return Object.freeze({ ...subject, bounds: Object.freeze({ ...subject.bounds }) })
   })
-  const issues: FormatQualityIssueV1[] = []
-  const add = (issue: Omit<FormatQualityIssueV1, 'category' | 'outputSpecId' | 'outputPresetHash' | 'format' | 'rangeMs' | 'correctable'>) => {
+  const issues: FormatQualityIssueV2[] = []
+  const add = (issue: Omit<FormatQualityIssueV2, 'category' | 'outputSpecId' | 'outputPresetHash' | 'placementPlanHash' | 'reframePlanHash' | 'format' | 'rangeMs' | 'correctable'>) => {
     assertDomain(issue.evidenceRange.endFrame > issue.evidenceRange.startFrame, 'INVALID_RENDER_INPUT', 'Format issue frame range must be a non-empty half-open interval')
     issues.push(Object.freeze({
-      ...issue, category: 'editorial' as const, outputSpecId: input.outputSpecId, outputPresetHash: preset.presetHash, format: input.format,
+      ...issue, category: 'editorial' as const, outputSpecId: input.outputSpecId, outputPresetHash: preset.presetHash,
+      placementPlanHash, reframePlanHash, format: input.format,
       rangeMs: rangeMs(issue.evidenceRange.startFrame, issue.evidenceRange.endFrame, input.map.fps), correctable: true,
       evidenceRange: Object.freeze({ ...issue.evidenceRange }), elementIds: Object.freeze([...issue.elementIds]), evidenceIds: Object.freeze([...issue.evidenceIds]),
     }))
@@ -145,7 +166,7 @@ export function critiqueOutputFormat(input: Readonly<{
     if (presenterFrames.length === 0) add({ code: 'SUBJECT_NOT_VISIBLE', severity: 'hard', message: `Critical subject ${subject.id} is not visible in ${input.format}.`, evidenceRange: { startFrame: subject.startFrame, endFrame: subject.endFrame }, elementIds: [], evidenceIds: [subject.id] })
   }
   const sortedIssues = issues.toSorted((left, right) => left.code.localeCompare(right.code) || left.elementIds.join(':').localeCompare(right.elementIds.join(':')) || left.evidenceIds.join(':').localeCompare(right.evidenceIds.join(':')) || left.evidenceRange.startFrame - right.evidenceRange.startFrame)
-  const grouped: FormatQualityIssueV1[] = []
+  const grouped: FormatQualityIssueV2[] = []
   for (const issue of sortedIssues) {
     const previous = grouped.at(-1)
     if (previous && previous.code === issue.code && previous.severity === issue.severity && previous.elementIds.join(':') === issue.elementIds.join(':') && previous.evidenceIds.join(':') === issue.evidenceIds.join(':') && previous.evidenceRange.endFrame === issue.evidenceRange.startFrame) {
@@ -155,18 +176,19 @@ export function critiqueOutputFormat(input: Readonly<{
   const canonicalIssues = Object.freeze(grouped.toSorted((left, right) => left.evidenceRange.startFrame - right.evidenceRange.startFrame || left.code.localeCompare(right.code) || left.elementIds.join(':').localeCompare(right.elementIds.join(':'))))
   const status = canonicalIssues.some((issue) => issue.severity === 'hard') ? 'blocked' as const : canonicalIssues.length ? 'warning' as const : 'passed' as const
   const body = Object.freeze({
-    schemaVersion: 'format-quality-report/v1' as const, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
-    renderElementMapHash: calculateCanonicalHash(input.map), outputPresetHash: preset.presetHash, status, exportAllowed: status !== 'blocked',
+    schemaVersion: 'format-quality-report/v2' as const, outputSpecId: input.outputSpecId, format: input.format, proxyHash: input.proxyHash,
+    renderElementMapHash: calculateCanonicalHash(input.map), outputPresetHash: preset.presetHash,
+    placementPlanHash, reframePlanHash, status, exportAllowed: status !== 'blocked',
     explanation: explain(input.outputSpecId, input.format, status, canonicalIssues, input.map.durationFrames), issues: canonicalIssues,
   })
   return Object.freeze({ ...body, reportHash: calculateCanonicalHash(body) })
 }
 
-function distinctCodes(issues: readonly Readonly<FormatQualityIssueV1>[], severity: 'hard' | 'warning'): readonly FormatQualityCode[] {
+function distinctCodes(issues: readonly Readonly<FormatQualityIssueV2>[], severity: 'hard' | 'warning'): readonly FormatQualityCode[] {
   return Object.freeze([...new Set(issues.filter((issue) => issue.severity === severity).map((issue) => issue.code))].toSorted())
 }
 
-function explain(outputSpecId: string, format: OutputAspectRatio, status: 'passed' | 'warning' | 'blocked', issues: readonly Readonly<FormatQualityIssueV1>[], durationFrames: number): string {
+function explain(outputSpecId: string, format: OutputAspectRatio, status: 'passed' | 'warning' | 'blocked', issues: readonly Readonly<FormatQualityIssueV2>[], durationFrames: number): string {
   const blocking = distinctCodes(issues, 'hard')
   const warnings = distinctCodes(issues, 'warning')
   if (status === 'blocked') {
@@ -178,10 +200,10 @@ function explain(outputSpecId: string, format: OutputAspectRatio, status: 'passe
   return `${outputSpecId} (${format}) passed every format check over ${durationFrames} frames: no clipping, safe area, subject visibility, subtitle collision or density issue was found.`
 }
 
-export function selectExportableVariants(reports: readonly Readonly<FormatQualityReportV1>[]): Readonly<{
+export function selectExportableVariants(reports: readonly Readonly<FormatQualityReportV2>[]): Readonly<{
   approvedOutputSpecIds: readonly string[]
   blockedOutputSpecIds: readonly string[]
-  decisions: readonly Readonly<FormatVariantDecisionV1>[]
+  decisions: readonly Readonly<FormatVariantDecisionV2>[]
 }> {
   const ordered = [...reports].toSorted((left, right) => left.outputSpecId.localeCompare(right.outputSpecId))
   for (const report of ordered) {
@@ -189,13 +211,17 @@ export function selectExportableVariants(reports: readonly Readonly<FormatQualit
     assertDomain(SHA256.test(reportHash) && reportHash === calculateCanonicalHash(body), 'INVALID_RENDER_INPUT', 'Format quality report hash is inconsistent')
     assertDomain(readOutputFormatPreset(report.format).spec.id === report.outputSpecId, 'INVALID_OUTPUT_SPEC', 'Format quality report is not bound to the canonical output preset')
     assertDomain(report.issues.every((issue) => issue.outputSpecId === report.outputSpecId && issue.outputPresetHash === report.outputPresetHash), 'INVALID_OUTPUT_SPEC', 'Format quality issue is not localized in its own output')
+    // An issue always carries the geometry of the render it came from; a report that mixes two
+    // placement plans or two trajectories is not evidence about any single variant.
+    assertDomain(report.issues.every((issue) => issue.placementPlanHash === report.placementPlanHash && issue.reframePlanHash === report.reframePlanHash), 'INVALID_RENDER_INPUT', 'Format quality issue is not bound to the geometry of its own render')
   }
   assertDomain(new Set(ordered.map((report) => report.outputSpecId)).size === ordered.length, 'INVALID_ARGUMENT', 'Format quality reports must be unique per output')
   return Object.freeze({
     approvedOutputSpecIds: Object.freeze(ordered.filter((report) => report.exportAllowed).map((report) => report.outputSpecId)),
     blockedOutputSpecIds: Object.freeze(ordered.filter((report) => !report.exportAllowed).map((report) => report.outputSpecId)),
     decisions: Object.freeze(ordered.map((report) => Object.freeze({
-      outputSpecId: report.outputSpecId, outputPresetHash: report.outputPresetHash, format: report.format,
+      outputSpecId: report.outputSpecId, outputPresetHash: report.outputPresetHash,
+      placementPlanHash: report.placementPlanHash, reframePlanHash: report.reframePlanHash, format: report.format,
       status: report.status, exportAllowed: report.exportAllowed,
       blockingCodes: distinctCodes(report.issues, 'hard'), warningCodes: distinctCodes(report.issues, 'warning'),
       explanation: report.explanation, reportHash: report.reportHash,
