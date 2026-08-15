@@ -42,12 +42,12 @@ export interface CreatorProfile {
 
 // Subtitle preset styles (decupados das referências). 'kinetic' é o padrão e
 // preserva o comportamento atual (sem caixa, highlight no accent, pop).
-export type SubtitleStyle =
-  | 'kinetic'
-  | 'karaoke-box'
-  | 'karaoke-pill'
-  | 'caps-stroke'
-  | 'clean-color';
+import type {
+  SubtitleMvpFormat,
+  SubtitlePresetId,
+  SubtitleStylePreset,
+} from '../../../src/v2/domain/subtitle-style-tokens';
+export type SubtitleStyle = SubtitlePresetId;
 
 // Base-video color grade preset (decupado das referências). 'natural' é o
 // padrão e substitui o cru sem parecer um filtro pesado de Instagram.
@@ -101,6 +101,10 @@ export interface CompositionProps extends Record<string, unknown> {
   stylePreset?: string;
   // Preset de estilo das legendas (default 'kinetic' = comportamento atual).
   subtitleStyle?: SubtitleStyle;
+  subtitlePreset?: SubtitleStylePreset;
+  // MVP subtitle format resolved by the compiler from the declared output aspect ratio. The
+  // renderer never re-derives it from the canvas, so 16:9 always gets its own authored tokens.
+  subtitleFormat?: SubtitleMvpFormat;
   // Preset de correção de cor do vídeo base do narrador (default 'natural').
   gradePreset?: GradePreset;
   // Título-hook persistente no topo do vídeo inteiro (opcional).

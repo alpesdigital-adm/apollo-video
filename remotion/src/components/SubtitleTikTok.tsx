@@ -7,6 +7,12 @@ import {
   spring,
 } from 'remotion';
 import { SubtitleEntry, ColorPalette, SubtitleWord, SubtitleStyle } from '../lib/types';
+import {
+  resolveSubtitleRenderMetrics,
+  subtitleFontStackCss,
+  type SubtitleMvpFormat,
+  type SubtitleStylePreset,
+} from '../../../src/v2/domain/subtitle-style-tokens';
 
 const DEFAULT_ACCENT = '#FFB800';
 
@@ -26,6 +32,9 @@ interface SubtitleTikTokProps {
   // Multiplier folded into the block opacity, used by the top/bottom positional
   // crossfade in SubtitleOverlay. Defaults to 1.
   placementOpacity?: number;
+  fontFamily?: 'ApolloResourceFont';
+  subtitlePreset: SubtitleStylePreset;
+  subtitleFormat: SubtitleMvpFormat;
 }
 
 // Per-preset spec for the parametrized subtitle presets (everything except the
@@ -40,72 +49,17 @@ interface SubtitlePresetSpec {
   pastColor: string;
   futureColor: string;
   pop: boolean;
-  stroke: boolean;
+  strokePx: number;
+  strokeColor: string;
   dropShadow: boolean;
   uppercase: boolean;
   lowercase: boolean;
   fontSize: number;
   fontWeight: number;
+  maxWidth: number;
+  bottom: number;
+  fontFamily: string;
 }
-
-const PRESET_SPECS: Record<Exclude<SubtitleStyle, 'kinetic'>, SubtitlePresetSpec> = {
-  'karaoke-box': {
-    chunkSize: 3,
-    container: 'box',
-    activeColor: '#FFD400',
-    pastColor: '#FFFFFF',
-    futureColor: '#FFFFFF',
-    pop: true,
-    stroke: false,
-    dropShadow: false,
-    uppercase: false,
-    lowercase: false,
-    fontSize: 58,
-    fontWeight: 800,
-  },
-  'karaoke-pill': {
-    chunkSize: 5,
-    container: 'pill',
-    activeColor: '#FFFFFF',
-    pastColor: '#FFFFFF',
-    futureColor: 'rgba(255,255,255,0.45)',
-    pop: false,
-    stroke: false,
-    dropShadow: false,
-    uppercase: false,
-    lowercase: false,
-    fontSize: 52,
-    fontWeight: 700,
-  },
-  'caps-stroke': {
-    chunkSize: 3,
-    container: 'none',
-    activeColor: '#FFD400',
-    pastColor: '#FFFFFF',
-    futureColor: '#FFFFFF',
-    pop: true,
-    stroke: true,
-    dropShadow: false,
-    uppercase: true,
-    lowercase: false,
-    fontSize: 66,
-    fontWeight: 800,
-  },
-  'clean-color': {
-    chunkSize: 2,
-    container: 'none',
-    activeColor: '@accent',
-    pastColor: '#FFFFFF',
-    futureColor: '#FFFFFF',
-    pop: false,
-    stroke: false,
-    dropShadow: true,
-    uppercase: false,
-    lowercase: true,
-    fontSize: 62,
-    fontWeight: 800,
-  },
-};
 
 // Returns the frame at which the given timed word starts, relative to the
 // composition timeline (not relative to the subtitle).
@@ -150,6 +104,9 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   subtitleStyle = 'kinetic',
   placement = 'bottom',
   placementOpacity = 1,
+  fontFamily,
+  subtitlePreset,
+  subtitleFormat,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -162,8 +119,14 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   // Vertical anchor for the block (top-of-head displacement vs. lower third).
   // ~14% clears both a centered statement and, on the rare crossfade-edge frame
   // where they coexist, a two-line manchete sitting at ~8%.
-  const vpos: React.CSSProperties =
-    placement === 'top' ? { top: '14%' } : { bottom: 560 };
+  // FAIL-CLOSED: the format comes from the compiled RenderInput, never from the canvas geometry,
+  // and `resolveSubtitleRenderMetrics` throws when the preset has no limits authored for it. A
+  // 16:9 render can therefore never fall back to the portrait tokens or to a generic default.
+  const registeredPreset = subtitlePreset;
+  const metrics = resolveSubtitleRenderMetrics(registeredPreset, subtitleFormat, config.height);
+  const vpos: React.CSSProperties = placement === 'top'
+    ? { top: '14%' }
+    : { bottom: metrics.bottomPx };
 
   const accentColor = palette?.accent ?? DEFAULT_ACCENT;
 
@@ -243,8 +206,29 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   // seam, when a non-default preset is selected we re-chunk by word count and
   // render the chosen box/pill/stroke/color style. 'kinetic' falls through to
   // the original path untouched.
-  if (subtitleStyle !== 'kinetic') {
-    const spec = PRESET_SPECS[subtitleStyle];
+  {
+    const spec: SubtitlePresetSpec = {
+      chunkSize: registeredPreset.lineBreaking.chunkWords,
+      container: registeredPreset.background.shape,
+      activeColor: registeredPreset.highlight.mode === 'none' ? registeredPreset.highlight.inactiveColor : registeredPreset.highlight.color,
+      pastColor: registeredPreset.highlight.inactiveColor,
+      futureColor: registeredPreset.highlight.inactiveColor,
+      pop: registeredPreset.animation.kind === 'scale',
+      // Legibility comes from registry tokens, not from a preset-id comparison: the outline width
+      // scales with the rendered font so proxy and delivery renders read identically.
+      strokePx: metrics.strokePx,
+      strokeColor: registeredPreset.stroke.color,
+      dropShadow: registeredPreset.background.shape === 'none',
+      uppercase: registeredPreset.typography.uppercase,
+      lowercase: false,
+      fontSize: metrics.fontPx,
+      fontWeight: registeredPreset.typography.weight,
+      maxWidth: metrics.limits.maxWidth,
+      bottom: metrics.limits.bottom,
+      // Materialized licensed asset first, then the preset's registered family, then its
+      // registered fallbacks — the asset never erases the preset's declared typeface.
+      fontFamily: subtitleFontStackCss(registeredPreset, fontFamily),
+    };
     const chunk = getChunkWords(
       subtitle,
       timedWords,
@@ -260,20 +244,20 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
       flexWrap: 'wrap',
       justifyContent: 'center',
       alignItems: 'baseline',
-      maxWidth: '82%',
+      maxWidth: `${spec.maxWidth * 100}%`,
       gap: '0 0.28em',
       textAlign: 'center',
-      fontFamily: 'Aptos, Segoe UI, Helvetica, Arial, sans-serif',
+      fontFamily: spec.fontFamily,
       lineHeight: 1.1,
     };
     if (spec.container === 'box') {
-      containerStyle.background = 'rgba(0,0,0,0.8)';
-      containerStyle.borderRadius = 12;
-      containerStyle.padding = '10px 22px';
+      containerStyle.background = `rgba(0,0,0,${registeredPreset.background.opacity})`;
+      containerStyle.borderRadius = registeredPreset.background.radius;
+      containerStyle.padding = `${registeredPreset.background.paddingYEm}em ${registeredPreset.background.paddingXEm}em`;
     } else if (spec.container === 'pill') {
-      containerStyle.background = 'rgba(10,10,14,0.82)';
-      containerStyle.borderRadius = 9999;
-      containerStyle.padding = '14px 34px';
+      containerStyle.background = `rgba(24,24,27,${registeredPreset.background.opacity})`;
+      containerStyle.borderRadius = registeredPreset.background.radius;
+      containerStyle.padding = `${registeredPreset.background.paddingYEm}em ${registeredPreset.background.paddingXEm}em`;
     }
 
     return (
@@ -324,9 +308,13 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
       return cDist < bestDist ? c : best;
     }, null);
 
-    if (activeChunk) {
+    const activeStart = activeChunk?.start;
+    const activeEnd = activeChunk?.end;
+    if (activeStart !== undefined && activeEnd !== undefined) {
+      const boundedStart = Number(activeStart);
+      const boundedEnd = Number(activeEnd);
       chunkTimedWords = timedWords.filter(
-        (tw) => tw.start >= activeChunk.start - 0.04 && tw.end <= activeChunk.end + 0.08
+        (tw) => tw.start >= boundedStart - 0.04 && tw.end <= boundedEnd + 0.08
       );
     }
   }
@@ -602,8 +590,8 @@ const PresetWordSpan: React.FC<PresetWordSpanProps> = ({
   };
   if (spec.uppercase) style.textTransform = 'uppercase';
   if (spec.lowercase) style.textTransform = 'lowercase';
-  if (spec.stroke) {
-    style.WebkitTextStroke = '8px #000000';
+  if (spec.strokePx > 0) {
+    style.WebkitTextStroke = `${spec.strokePx.toFixed(2)}px ${spec.strokeColor}`;
     style.paintOrder = 'stroke fill';
     style.textShadow = '0 3px 10px rgba(0,0,0,0.55)';
   } else if (spec.dropShadow) {
