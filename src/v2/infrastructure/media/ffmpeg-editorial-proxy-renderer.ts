@@ -473,6 +473,13 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const slices = ranges.map((range) => sliceRenderRange(input, range))
     for (const slice of slices) for (const clip of slice.clips) assertClipTimeline(clip)
     const renderClips = rangeReuse ? slices.flatMap((slice) => slice.clips) : input.clips
+    // Structural and content-address checks on the materialized geometry run
+    // BEFORE any FFmpeg process starts. They need nothing but the plans
+    // themselves, so a tampered `placementPlanHash`/`reframePlanHash` must never
+    // buy even the colour-normalization pre-pass below. The richer checks that
+    // depend on probes and canvas dimensions stay where they are.
+    if (input.reframePlan) validateRenderReframePlan(input.reframePlan)
+    if (input.placementPlan) validateRenderPlacementPlan(input.placementPlan)
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const renderSources = await Promise.all(input.sources.map(async (source, index) => {

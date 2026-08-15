@@ -24,6 +24,8 @@ import { createDirectorRunInvalidations, parseDirectorRunImpact } from '../../sr
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createProductionBrief } from '../../src/v2/domain/production-brief.ts'
+import { createRenderPlacementPlan } from '../../src/v2/domain/render-placement-plan.ts'
+import { readOutputFormatPreset } from '../../src/v2/domain/output-format-registry.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import {
   advancePublicOperationPhase,
@@ -757,6 +759,19 @@ function assertWorkerContract(rendered, expected) {
   // Manifest: recipe identity, content-addressed parameters and lineage.
   assert.equal(rendered.manifest.recipe.id, 'editorial-proxy')
   assert.equal(rendered.manifest.recipe.version, EDITORIAL_PROXY_RECIPE_VERSION)
+  // The recipe also content-addresses the materialized geometry: the placement plan the
+  // worker solves before rendering (recomputed here from the same builder — neither fixture
+  // sets a CTA overlay or a subtitle preset, so it solves against zero elements), plus the
+  // reframe-plan and subtitle-registry hashes, both `null` because nothing in this codebase
+  // yet persists a reframe plan or a subtitle resolution onto the render source.
+  const outputPreset = readOutputFormatPreset('9:16')
+  const placementPlan = createRenderPlacementPlan({
+    format: '9:16',
+    canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
+    durationFrames: expected.durationFrames,
+    subtitlePresetId: null,
+    elements: [],
+  })
   assert.equal(rendered.manifest.recipe.parametersHash, calculateCanonicalHash({
     inputHash: rendered.expectedInputHash,
     projectVersionId: expected.projectVersionId,
@@ -768,6 +783,9 @@ function assertWorkerContract(rendered, expected) {
     projectLutSelectionId: expected.lutSelectionId,
     projectLutSelectionHash: '7'.repeat(64),
     materializedCubeHash: null,
+    placementPlanHash: placementPlan.placementPlanHash,
+    reframePlanHash: null,
+    subtitleRegistryHash: null,
   }))
   assert.equal(rendered.manifest.artifact.artifactKey, rendered.stored.key)
   assert.equal(rendered.manifest.artifact.sha256, rendered.stored.sha256)

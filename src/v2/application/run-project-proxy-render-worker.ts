@@ -323,6 +323,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           outputSpecId: outputPreset.spec.id,
           placementPlanHash: placementPlan.placementPlanHash,
           reframePlanHash: reframePlan?.reframePlanHash ?? null,
+          // Subject evidence persisted for this variant. Forwarded untouched: without it the
+          // subject-dependent reason codes could never fire on a real render.
+          ...(source.formatSubjects ? { subjects: source.formatSubjects } : {}),
         },
       })
       await dependencies.proxyReviews.persistGenerated({

@@ -1,5 +1,6 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
 import type { SubtitlePresetId } from '../../domain/subtitle-system.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
@@ -78,6 +79,14 @@ export interface ProjectProxyRenderSource {
    * persisted and fails closed when it does not describe this render.
    */
   reframePlan?: Readonly<RenderReframePlanV1>
+  /**
+   * Protected subject evidence already projected onto **this** variant's canvas, as perception
+   * persisted it. Without it two of the five format reason codes — `SUBTITLE_SUBJECT_COLLISION`
+   * and `SUBJECT_NOT_VISIBLE` — are unreachable from the runtime, because the critic only knows
+   * about subjects the worker hands it. The worker forwards this list untouched; it never invents
+   * or re-detects a subject.
+   */
+  formatSubjects?: readonly Readonly<FormatSubjectEvidenceV1>[]
   /** Drawable placement assets (logo/insert) already bound to the version, with their digests. */
   placementAssets?: readonly Readonly<{
     elementId: string
