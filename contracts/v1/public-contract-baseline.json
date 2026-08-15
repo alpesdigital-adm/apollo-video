@@ -6150,6 +6150,67 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.subtitle-configuration.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/project-subtitle-configuration-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/subtitle-configuration"
+      },
+      "toolName": "apollo.projects.subtitle-configuration.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "variantId",
+          "required": true,
+          "description": "Output variant whose subtitle configuration is read; each variant carries its own head.",
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.subtitle-configuration.set": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/project-subtitle-configuration-set-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-subtitle-configuration-applied/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/subtitle-configuration"
+      },
+      "toolName": "apollo.projects.subtitle-configuration.set",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.timeline.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -107511,6 +107572,1270 @@
           }
         }
       }
+    },
+    "apollo://schemas/project-subtitle-configuration-applied/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "version",
+            "configuration",
+            "resolution",
+            "impact",
+            "replayed"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "configuration": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "resolution": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "configurationId",
+                "configurationHash",
+                "variantId",
+                "action",
+                "previousConfigurationId",
+                "mode",
+                "origin",
+                "enabled",
+                "presetId",
+                "presetVersion",
+                "presetHash",
+                "workspaceDefaultRevision",
+                "transcriptHash",
+                "createdAt"
+              ],
+              "properties": {
+                "configurationId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "configurationHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "variantId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "action": {
+                  "enum": [
+                    "set",
+                    "revert"
+                  ]
+                },
+                "previousConfigurationId": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "auto",
+                    "workspace-default",
+                    "manual",
+                    "none"
+                  ]
+                },
+                "origin": {
+                  "enum": [
+                    "director",
+                    "workspace",
+                    "project",
+                    "disabled"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "presetId": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "enum": [
+                        "kinetic",
+                        "karaoke-box",
+                        "karaoke-pill",
+                        "caps-stroke",
+                        "clean-color"
+                      ]
+                    }
+                  ]
+                },
+                "presetVersion": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "const": 1
+                    }
+                  ]
+                },
+                "presetHash": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  ]
+                },
+                "workspaceDefaultRevision": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  ]
+                },
+                "transcriptHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "impact": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "commandId",
+                "commandType",
+                "baseVersionId",
+                "resultVersionId",
+                "variantId",
+                "configurationId",
+                "configurationHash",
+                "action",
+                "requestedMode",
+                "origin",
+                "resolvedPresetId",
+                "resolvedPresetHash",
+                "transcriptHash",
+                "changeKinds",
+                "dependencyTypes",
+                "affectedRanges",
+                "affectedVariantIds",
+                "affectedArtifacts",
+                "minimalRenders",
+                "renderSemanticsChanged",
+                "renderDeferredUntilTimeline",
+                "impactHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "project-subtitle-configuration-impact/v1"
+                },
+                "commandId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "commandType": {
+                  "const": "set-project-subtitle-mode"
+                },
+                "baseVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "variantId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "configurationId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "configurationHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "action": {
+                  "enum": [
+                    "set",
+                    "revert"
+                  ]
+                },
+                "requestedMode": {
+                  "enum": [
+                    "auto",
+                    "workspace-default",
+                    "manual",
+                    "none"
+                  ]
+                },
+                "origin": {
+                  "enum": [
+                    "director",
+                    "workspace",
+                    "project",
+                    "disabled"
+                  ]
+                },
+                "resolvedPresetId": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "enum": [
+                        "kinetic",
+                        "karaoke-box",
+                        "karaoke-pill",
+                        "caps-stroke",
+                        "clean-color"
+                      ]
+                    }
+                  ]
+                },
+                "resolvedPresetHash": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  ]
+                },
+                "transcriptHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "changeKinds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": {
+                    "const": "subtitle-configuration"
+                  }
+                },
+                "dependencyTypes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": {
+                    "const": "visual"
+                  }
+                },
+                "affectedRanges": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "startFrame",
+                      "endFrame"
+                    ],
+                    "properties": {
+                      "startFrame": {
+                        "const": 0
+                      },
+                      "endFrame": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                },
+                "affectedVariantIds": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "affectedArtifacts": {
+                  "type": "array",
+                  "maxItems": 200,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "artifactId",
+                      "kind",
+                      "sourceVersionId",
+                      "variantId"
+                    ],
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "kind": {
+                        "enum": [
+                          "proxy",
+                          "final"
+                        ]
+                      },
+                      "sourceVersionId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "minimalRenders": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "variantId",
+                      "ranges"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "proxy"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "ranges": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "startFrame",
+                            "endFrame"
+                          ],
+                          "properties": {
+                            "startFrame": {
+                              "const": 0
+                            },
+                            "endFrame": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "renderSemanticsChanged": {
+                  "const": true
+                },
+                "renderDeferredUntilTimeline": {
+                  "type": "boolean"
+                },
+                "impactHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-subtitle-configuration-impact/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "commandType",
+        "baseVersionId",
+        "resultVersionId",
+        "variantId",
+        "configurationId",
+        "configurationHash",
+        "action",
+        "requestedMode",
+        "origin",
+        "resolvedPresetId",
+        "resolvedPresetHash",
+        "transcriptHash",
+        "changeKinds",
+        "dependencyTypes",
+        "affectedRanges",
+        "affectedVariantIds",
+        "affectedArtifacts",
+        "minimalRenders",
+        "renderSemanticsChanged",
+        "renderDeferredUntilTimeline",
+        "impactHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "project-subtitle-configuration-impact/v1"
+        },
+        "commandId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "commandType": {
+          "const": "set-project-subtitle-mode"
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "resultVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "configurationId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "configurationHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "action": {
+          "enum": [
+            "set",
+            "revert"
+          ]
+        },
+        "requestedMode": {
+          "enum": [
+            "auto",
+            "workspace-default",
+            "manual",
+            "none"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "director",
+            "workspace",
+            "project",
+            "disabled"
+          ]
+        },
+        "resolvedPresetId": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "kinetic",
+                "karaoke-box",
+                "karaoke-pill",
+                "caps-stroke",
+                "clean-color"
+              ]
+            }
+          ]
+        },
+        "resolvedPresetHash": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          ]
+        },
+        "transcriptHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "changeKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "subtitle-configuration"
+          }
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "const": "visual"
+          }
+        },
+        "affectedRanges": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startFrame",
+              "endFrame"
+            ],
+            "properties": {
+              "startFrame": {
+                "const": 0
+              },
+              "endFrame": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "affectedVariantIds": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        "affectedArtifacts": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifactId",
+              "kind",
+              "sourceVersionId",
+              "variantId"
+            ],
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "kind": {
+                "enum": [
+                  "proxy",
+                  "final"
+                ]
+              },
+              "sourceVersionId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        "minimalRenders": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "variantId",
+              "ranges"
+            ],
+            "properties": {
+              "kind": {
+                "const": "proxy"
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "ranges": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startFrame",
+                    "endFrame"
+                  ],
+                  "properties": {
+                    "startFrame": {
+                      "const": 0
+                    },
+                    "endFrame": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "renderSemanticsChanged": {
+          "const": true
+        },
+        "renderDeferredUntilTimeline": {
+          "type": "boolean"
+        },
+        "impactHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/project-subtitle-configuration-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result"
+          ],
+          "properties": {
+            "result": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "version",
+                    "configuration",
+                    "resolution",
+                    "impact",
+                    "replayed"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "version": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "configuration": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "resolution": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "configurationId",
+                        "configurationHash",
+                        "variantId",
+                        "action",
+                        "previousConfigurationId",
+                        "mode",
+                        "origin",
+                        "enabled",
+                        "presetId",
+                        "presetVersion",
+                        "presetHash",
+                        "workspaceDefaultRevision",
+                        "transcriptHash",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "configurationId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "configurationHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "action": {
+                          "enum": [
+                            "set",
+                            "revert"
+                          ]
+                        },
+                        "previousConfigurationId": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          ]
+                        },
+                        "mode": {
+                          "enum": [
+                            "auto",
+                            "workspace-default",
+                            "manual",
+                            "none"
+                          ]
+                        },
+                        "origin": {
+                          "enum": [
+                            "director",
+                            "workspace",
+                            "project",
+                            "disabled"
+                          ]
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "presetId": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "enum": [
+                                "kinetic",
+                                "karaoke-box",
+                                "karaoke-pill",
+                                "caps-stroke",
+                                "clean-color"
+                              ]
+                            }
+                          ]
+                        },
+                        "presetVersion": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "const": 1
+                            }
+                          ]
+                        },
+                        "presetHash": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          ]
+                        },
+                        "workspaceDefaultRevision": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          ]
+                        },
+                        "transcriptHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "impact": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "commandId",
+                        "commandType",
+                        "baseVersionId",
+                        "resultVersionId",
+                        "variantId",
+                        "configurationId",
+                        "configurationHash",
+                        "action",
+                        "requestedMode",
+                        "origin",
+                        "resolvedPresetId",
+                        "resolvedPresetHash",
+                        "transcriptHash",
+                        "changeKinds",
+                        "dependencyTypes",
+                        "affectedRanges",
+                        "affectedVariantIds",
+                        "affectedArtifacts",
+                        "minimalRenders",
+                        "renderSemanticsChanged",
+                        "renderDeferredUntilTimeline",
+                        "impactHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "project-subtitle-configuration-impact/v1"
+                        },
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "commandType": {
+                          "const": "set-project-subtitle-mode"
+                        },
+                        "baseVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "resultVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "configurationId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "configurationHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "action": {
+                          "enum": [
+                            "set",
+                            "revert"
+                          ]
+                        },
+                        "requestedMode": {
+                          "enum": [
+                            "auto",
+                            "workspace-default",
+                            "manual",
+                            "none"
+                          ]
+                        },
+                        "origin": {
+                          "enum": [
+                            "director",
+                            "workspace",
+                            "project",
+                            "disabled"
+                          ]
+                        },
+                        "resolvedPresetId": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "enum": [
+                                "kinetic",
+                                "karaoke-box",
+                                "karaoke-pill",
+                                "caps-stroke",
+                                "clean-color"
+                              ]
+                            }
+                          ]
+                        },
+                        "resolvedPresetHash": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          ]
+                        },
+                        "transcriptHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "changeKinds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "items": {
+                            "const": "subtitle-configuration"
+                          }
+                        },
+                        "dependencyTypes": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "items": {
+                            "const": "visual"
+                          }
+                        },
+                        "affectedRanges": {
+                          "type": "array",
+                          "maxItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "startFrame",
+                              "endFrame"
+                            ],
+                            "properties": {
+                              "startFrame": {
+                                "const": 0
+                              },
+                              "endFrame": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            }
+                          }
+                        },
+                        "affectedVariantIds": {
+                          "type": "array",
+                          "maxItems": 1,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "affectedArtifacts": {
+                          "type": "array",
+                          "maxItems": 200,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "artifactId",
+                              "kind",
+                              "sourceVersionId",
+                              "variantId"
+                            ],
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "kind": {
+                                "enum": [
+                                  "proxy",
+                                  "final"
+                                ]
+                              },
+                              "sourceVersionId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            }
+                          }
+                        },
+                        "minimalRenders": {
+                          "type": "array",
+                          "maxItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind",
+                              "variantId",
+                              "ranges"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "proxy"
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "ranges": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 1,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "startFrame",
+                                    "endFrame"
+                                  ],
+                                  "properties": {
+                                    "startFrame": {
+                                      "const": 0
+                                    },
+                                    "endFrame": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "renderSemanticsChanged": {
+                          "const": true
+                        },
+                        "renderDeferredUntilTimeline": {
+                          "type": "boolean"
+                        },
+                        "impactHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/project-subtitle-configuration-set-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "variantId"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "action": {
+          "enum": [
+            "set",
+            "revert"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "workspace-default",
+            "manual",
+            "none"
+          ]
+        },
+        "presetId": {
+          "enum": [
+            "kinetic",
+            "karaoke-box",
+            "karaoke-pill",
+            "caps-stroke",
+            "clean-color"
+          ]
+        },
+        "presetVersion": {
+          "const": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "revert"
+            },
+            "mode": false,
+            "presetId": false,
+            "presetVersion": false
+          },
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "set"
+            },
+            "mode": {
+              "const": "manual"
+            },
+            "presetId": {
+              "enum": [
+                "kinetic",
+                "karaoke-box",
+                "karaoke-pill",
+                "caps-stroke",
+                "clean-color"
+              ]
+            },
+            "presetVersion": {
+              "const": 1
+            }
+          },
+          "required": [
+            "mode",
+            "presetId",
+            "presetVersion"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "set"
+            },
+            "mode": {
+              "enum": [
+                "auto",
+                "workspace-default",
+                "none"
+              ]
+            },
+            "presetId": false,
+            "presetVersion": false
+          },
+          "required": [
+            "mode"
+          ]
+        }
+      ]
     },
     "apollo://schemas/project-version-comparison-action-request/v1": {
       "type": "object",

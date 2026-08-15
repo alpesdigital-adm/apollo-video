@@ -41,6 +41,11 @@ import {
   parseProjectPolicyOverridesImpact,
 } from '../../src/v2/domain/project-policy-overrides-impact.ts'
 import {
+  createProjectSubtitleConfigurationImpact,
+  parseProjectSubtitleConfigurationImpact,
+} from '../../src/v2/domain/project-subtitle-configuration.ts'
+import { subtitlePresetReference } from '../../src/v2/domain/subtitle-system.ts'
+import {
   createSourceTranscriptReplacementImpact,
   parseSourceTranscriptReplacementImpact,
 } from '../../src/v2/domain/source-transcript-replacement.ts'
@@ -175,6 +180,25 @@ function lutSelectionImpact(frames = durationFrames) {
   })
 }
 
+function subtitleConfigurationImpact(frames = durationFrames) {
+  return createProjectSubtitleConfigurationImpact({
+    commandId: 'edit-command-registry-subtitle',
+    baseVersionId,
+    resultVersionId,
+    variantId: '9:16',
+    configurationId: 'project-subtitle-configuration-registry-1',
+    configurationHash: hashA,
+    action: 'set',
+    requestedMode: 'manual',
+    origin: 'project',
+    resolvedPresetId: 'caps-stroke',
+    resolvedPresetHash: subtitlePresetReference('caps-stroke').presetHash,
+    transcriptHash: hashB,
+    durationFrames: frames,
+    affectedArtifacts: frames > 0 ? outputs : [],
+  })
+}
+
 function sourceTranscriptImpact() {
   return createSourceTranscriptReplacementImpact({
     commandId: 'edit-command-registry-transcript',
@@ -221,6 +245,7 @@ const IMPACT_FIXTURES = {
   'remove-spoken-content': { build: editorialCutImpact, parse: parseEditorialCutImpact },
   'run-director': { build: directorRunImpact, parse: parseDirectorRunImpact },
   'set-project-lut-selection': { build: () => lutSelectionImpact(), parse: parseProjectLutSelectionImpact },
+  'set-project-subtitle-mode': { build: () => subtitleConfigurationImpact(), parse: parseProjectSubtitleConfigurationImpact },
   'replace-source-transcript': { build: sourceTranscriptImpact, parse: parseSourceTranscriptReplacementImpact },
   'set-project-policy-overrides': { build: projectPolicyImpact, parse: parseProjectPolicyOverridesImpact },
 }
@@ -244,7 +269,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 9)
+  assert.equal(EDIT_COMMAND_TYPES.length, 10)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -328,7 +353,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 9, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 10, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -368,7 +393,7 @@ test('T-F0-027 partial-range types narrow renders to the edited region', () => {
 test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('full-timeline')],
-    ['remove-spoken-content', 'run-director', 'set-project-lut-selection'],
+    ['remove-spoken-content', 'run-director', 'set-project-lut-selection', 'set-project-subtitle-mode'],
   )
   for (const type of editCommandTypesByRenderPolicy('full-timeline')) {
     const impact = IMPACT_FIXTURES[type].build()
@@ -409,6 +434,18 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
   assert.deepEqual([...beforeTimeline.affectedRanges], [])
   assert.deepEqual([...beforeTimeline.affectedArtifacts], [])
   assert.equal(lutSelectionImpact().renderDeferredUntilTimeline, false)
+
+  // The subtitle mode defers the same way, and never widens past its own variant.
+  assert.equal(editCommandPolicy('set-project-subtitle-mode').deferralReason, 'timeline')
+  const subtitleBeforeTimeline = subtitleConfigurationImpact(0)
+  assert.equal(subtitleBeforeTimeline.renderDeferredUntilTimeline, true)
+  assert.deepEqual([...subtitleBeforeTimeline.minimalRenders], [])
+  assert.deepEqual([...subtitleBeforeTimeline.affectedRanges], [])
+  assert.deepEqual([...subtitleBeforeTimeline.affectedArtifacts], [])
+  const subtitleImpact = subtitleConfigurationImpact()
+  assert.equal(subtitleImpact.renderDeferredUntilTimeline, false)
+  assert.deepEqual([...subtitleImpact.affectedVariantIds], ['9:16'])
+  assert.deepEqual([...subtitleImpact.minimalRenders], [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: durationFrames }] }])
 })
 
 test('T-F0-027 no-render types carry an explicit zero impact and preserve their version', () => {
@@ -481,6 +518,17 @@ test('T-F0-027 an impact belonging to another type is rejected by the declared p
   assert.throws(() => parseDirectorRunImpact(cut))
   assert.throws(() => parseProjectLutSelectionImpact(cut))
   assert.throws(() => parseSourceTranscriptReplacementImpact(cut))
+
+  const subtitle = JSON.parse(JSON.stringify(subtitleConfigurationImpact()))
+  assert.throws(() => parseCommandImpact(subtitle))
+  assert.throws(() => parseProjectLutSelectionImpact(subtitle))
+  assert.throws(() => parseProjectSubtitleConfigurationImpact(lut))
+  assert.throws(() => parseProjectSubtitleConfigurationImpact({ ...subtitle, commandType: 'set-project-lut-selection' }))
+  assert.throws(() => parseProjectSubtitleConfigurationImpact({ ...subtitle, transcriptHash: hashA }), 'the transcript binding is part of the identity')
+  assert.throws(() => parseProjectSubtitleConfigurationImpact({ ...subtitle, resolvedPresetHash: hashA }), 'the versioned preset reference is part of the identity')
+  assert.throws(() => parseProjectSubtitleConfigurationImpact({ ...subtitle, origin: 'disabled' }))
+  assert.throws(() => parseProjectSubtitleConfigurationImpact({ ...subtitle, minimalRenders: [] }))
+  assert.equal(parseProjectSubtitleConfigurationImpact(subtitle).impactHash, subtitleConfigurationImpact().impactHash)
 
   // Tampering with the declared identity of a valid document is rejected too.
   assert.throws(() => parseCommandImpact({ ...manual, commandType: 'run-director' }))

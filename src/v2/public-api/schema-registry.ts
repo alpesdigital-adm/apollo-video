@@ -8,6 +8,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -6143,6 +6144,66 @@ const compareActionImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const SUBTITLE_PRESET_IDS = Object.keys(SUBTITLE_PRESETS)
+const subtitleFrameRangeSchema = {
+  type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+  properties: { startFrame: { const: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+} as const
+const projectSubtitleResolutionSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['configurationId', 'configurationHash', 'variantId', 'action', 'previousConfigurationId', 'mode', 'origin', 'enabled', 'presetId', 'presetVersion', 'presetHash', 'workspaceDefaultRevision', 'transcriptHash', 'createdAt'],
+  properties: {
+    configurationId: idSchema, configurationHash: sha256Schema, variantId: idSchema,
+    action: { enum: ['set', 'revert'] }, previousConfigurationId: { anyOf: [{ type: 'null' }, idSchema] },
+    mode: { enum: [...SUBTITLE_MODES] }, origin: { enum: [...SUBTITLE_ORIGINS] }, enabled: { type: 'boolean' },
+    presetId: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_PRESET_IDS] }] },
+    presetVersion: { anyOf: [{ type: 'null' }, { const: 1 }] },
+    presetHash: { anyOf: [{ type: 'null' }, sha256Schema] },
+    workspaceDefaultRevision: { anyOf: [{ type: 'null' }, { type: 'integer', minimum: 0 }] },
+    transcriptHash: sha256Schema, createdAt: dateTimeSchema,
+  },
+} as const
+const projectSubtitleConfigurationImpactSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId', 'variantId',
+    'configurationId', 'configurationHash', 'action', 'requestedMode', 'origin', 'resolvedPresetId',
+    'resolvedPresetHash', 'transcriptHash', 'changeKinds', 'dependencyTypes', 'affectedRanges',
+    'affectedVariantIds', 'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged',
+    'renderDeferredUntilTimeline', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'project-subtitle-configuration-impact/v1' },
+    commandId: idSchema, commandType: { const: 'set-project-subtitle-mode' },
+    baseVersionId: idSchema, resultVersionId: idSchema, variantId: idSchema,
+    configurationId: idSchema, configurationHash: sha256Schema,
+    action: { enum: ['set', 'revert'] }, requestedMode: { enum: [...SUBTITLE_MODES] }, origin: { enum: [...SUBTITLE_ORIGINS] },
+    resolvedPresetId: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_PRESET_IDS] }] },
+    resolvedPresetHash: { anyOf: [{ type: 'null' }, sha256Schema] },
+    transcriptHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'subtitle-configuration' } },
+    dependencyTypes: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'visual' } },
+    affectedRanges: { type: 'array', maxItems: 1, items: subtitleFrameRangeSchema },
+    affectedVariantIds: { type: 'array', maxItems: 1, items: idSchema },
+    affectedArtifacts: {
+      type: 'array', maxItems: 200,
+      items: {
+        type: 'object', additionalProperties: false, required: ['artifactId', 'kind', 'sourceVersionId', 'variantId'],
+        properties: { artifactId: idSchema, kind: { enum: ['proxy', 'final'] }, sourceVersionId: idSchema, variantId: idSchema },
+      },
+    },
+    minimalRenders: {
+      type: 'array', maxItems: 1,
+      items: {
+        type: 'object', additionalProperties: false, required: ['kind', 'variantId', 'ranges'],
+        properties: { kind: { const: 'proxy' }, variantId: idSchema, ranges: { type: 'array', minItems: 1, maxItems: 1, items: subtitleFrameRangeSchema } },
+      },
+    },
+    renderSemanticsChanged: { const: true },
+    renderDeferredUntilTimeline: { type: 'boolean' },
+    impactHash: sha256Schema,
+  },
+} as const
 const projectLutSelectionResultSchemaV2 = {
   ...projectLutSelectionResultSchema,
   required: [...projectLutSelectionResultSchema.required, 'impact', 'invalidations'],
@@ -21266,6 +21327,40 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   })),
   defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
+  defineSchema('project-subtitle-configuration-set-request', 1, 'Set one closed subtitle mode for an output variant, or revert it to the previous origin', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId'], properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, variantId: idSchema,
+      action: { enum: ['set', 'revert'] },
+      mode: { enum: [...SUBTITLE_MODES] },
+      presetId: { enum: [...SUBTITLE_PRESET_IDS] }, presetVersion: { const: 1 }, reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    // Exactly one of the three legal shapes: a revert (which names no mode), a
+    // manual set (which pins preset id and version) or an inherited/disabled set.
+    oneOf: [
+      { properties: { action: { const: 'revert' }, mode: false, presetId: false, presetVersion: false }, required: ['action'] },
+      { properties: { action: { const: 'set' }, mode: { const: 'manual' }, presetId: { enum: [...SUBTITLE_PRESET_IDS] }, presetVersion: { const: 1 } }, required: ['mode', 'presetId', 'presetVersion'] },
+      { properties: { action: { const: 'set' }, mode: { enum: SUBTITLE_MODES.filter((mode) => mode !== 'manual') }, presetId: false, presetVersion: false }, required: ['mode'] },
+    ],
+  }),
+  defineSchema('project-subtitle-configuration-impact', 1, 'Variant-scoped subtitle configuration impact with its versioned preset reference', projectSubtitleConfigurationImpactSchemaV1),
+  defineSchema('project-subtitle-configuration-applied', 1, 'Applied content-addressed subtitle configuration and immutable result version', successSchema({
+    type: 'object', additionalProperties: false, required: ['command', 'version', 'configuration', 'resolution', 'impact', 'replayed'], properties: {
+      command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true }, configuration: { type: 'object', additionalProperties: true },
+      resolution: projectSubtitleResolutionSchemaV1, impact: projectSubtitleConfigurationImpactSchemaV1, replayed: { type: 'boolean' },
+    },
+  })),
+  defineSchema('project-subtitle-configuration-response', 1, 'Current variant subtitle configuration including preset origin and transcript binding', successSchema({
+    type: 'object', additionalProperties: false, required: ['result'], properties: {
+      result: {
+        anyOf: [{ type: 'null' }, {
+          type: 'object', additionalProperties: false, required: ['command', 'version', 'configuration', 'resolution', 'impact', 'replayed'], properties: {
+            command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true }, configuration: { type: 'object', additionalProperties: true },
+            resolution: projectSubtitleResolutionSchemaV1, impact: projectSubtitleConfigurationImpactSchemaV1, replayed: { type: 'boolean' },
+          },
+        }],
+      },
+    },
   })),
   defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({
     type: 'object', additionalProperties: false, required: ['entries'], properties: {

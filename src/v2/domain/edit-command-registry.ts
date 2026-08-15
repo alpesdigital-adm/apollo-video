@@ -31,6 +31,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'director-run-impact/v1',
   'source-transcript-replacement-impact/v1',
   'project-lut-selection-impact/v1',
+  'project-subtitle-configuration-impact/v1',
   'project-policy-overrides-impact/v1',
   'compare-action-impact/v1',
 ] as const
@@ -112,6 +113,21 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     evidence: 'project-lut-selection-impact.ts:85 range covers { startFrame: 0, endFrame: '
       + 'durationFrames }; :106 minimalRenders stay empty and renderDeferredUntilTimeline is true '
       + 'while durationFrames is 0',
+  }),
+  'set-project-subtitle-mode': Object.freeze({
+    // Not partial-range: a subtitle mode is a property of the whole compiled
+    // timeline of one variant, not of an edited region. Every cue of that variant
+    // appears or disappears at once, so the honest classification is full-timeline
+    // scoped to the target variant — and the impact says exactly that.
+    renderPolicy: 'full-timeline',
+    impactSchema: 'project-subtitle-configuration-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: 'timeline',
+    evidence: 'project-subtitle-configuration.ts:180 affectedRanges cover { startFrame: 0, '
+      + 'endFrame: durationFrames } and :186 minimalRenders repeat that single range for the '
+      + 'target variant only; :185 affectedArtifacts and affectedVariantIds are filtered to '
+      + 'impact.variantId, and :188 renderDeferredUntilTimeline is true while durationFrames is 0',
   }),
   'replace-source-transcript': Object.freeze({
     renderPolicy: 'deferred',
