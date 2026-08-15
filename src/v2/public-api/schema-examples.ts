@@ -1,6 +1,11 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
+import {
+  createProjectSubtitleConfiguration,
+  createProjectSubtitleConfigurationImpact,
+} from '../domain/project-subtitle-configuration.ts'
+import { subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -5092,6 +5097,87 @@ const perceptionInputCoverage = perceptionKinds.map((kind) => ({ kind, ranges: k
 const perceptionCoverage = perceptionInputCoverage.map((entry) => ({ ...entry, state: entry.ranges.length ? 'complete' : 'absent', observedMs: entry.ranges.length ? 3_000 : 0 }))
 const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: [perceptionObservation], coverage: perceptionCoverage, inventedValues: 0, timelineHash: 'c'.repeat(64) }
 
+/**
+ * Subtitle examples come out of the real factories, so the published preset hash is
+ * the hash of the registered preset and the impact hash is the hash of a document
+ * the declared parser accepts.
+ */
+const projectSubtitleConfigurationExample = createProjectSubtitleConfiguration({
+  id: 'project-subtitle-configuration-example-1',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-subtitle-2',
+  commandId: 'project-subtitle-command-example-1', variantId: '9:16',
+  action: 'set', previousConfigurationId: null,
+  requested: { mode: 'manual', presetId: 'caps-stroke', presetVersion: 1 },
+  resolved: { enabled: true, ...subtitlePresetReference('caps-stroke') },
+  origin: 'project',
+  transcriptHash: 'b'.repeat(64),
+  createdAt,
+})
+const projectSubtitleDisabledConfigurationExample = createProjectSubtitleConfiguration({
+  id: 'project-subtitle-configuration-example-2',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-subtitle-2', resultVersionId: 'project-version-example-subtitle-3',
+  commandId: 'project-subtitle-command-example-2', variantId: '9:16',
+  action: 'revert', previousConfigurationId: projectSubtitleConfigurationExample.id,
+  requested: { mode: 'none' },
+  resolved: { enabled: false },
+  origin: 'disabled',
+  transcriptHash: 'b'.repeat(64),
+  createdAt,
+})
+const projectSubtitleConfigurationImpactExample = createProjectSubtitleConfigurationImpact({
+  commandId: projectSubtitleConfigurationExample.commandId,
+  baseVersionId: projectSubtitleConfigurationExample.baseVersionId,
+  resultVersionId: projectSubtitleConfigurationExample.resultVersionId,
+  variantId: '9:16',
+  configurationId: projectSubtitleConfigurationExample.id,
+  configurationHash: projectSubtitleConfigurationExample.configurationHash,
+  action: 'set', requestedMode: 'manual', origin: 'project',
+  resolvedPresetId: 'caps-stroke', resolvedPresetHash: subtitlePresetReference('caps-stroke').presetHash,
+  transcriptHash: projectSubtitleConfigurationExample.transcriptHash,
+  durationFrames: 2380,
+  affectedArtifacts: [{ artifactId: 'artifact-project-subtitle-proxy-example-1', kind: 'proxy', sourceVersionId: projectSubtitleConfigurationExample.baseVersionId, variantId: '9:16' }],
+})
+const projectSubtitleDisabledImpactExample = createProjectSubtitleConfigurationImpact({
+  commandId: projectSubtitleDisabledConfigurationExample.commandId,
+  baseVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId,
+  resultVersionId: projectSubtitleDisabledConfigurationExample.resultVersionId,
+  variantId: '9:16',
+  configurationId: projectSubtitleDisabledConfigurationExample.id,
+  configurationHash: projectSubtitleDisabledConfigurationExample.configurationHash,
+  action: 'revert', requestedMode: 'none', origin: 'disabled',
+  transcriptHash: projectSubtitleDisabledConfigurationExample.transcriptHash,
+  durationFrames: 0,
+  affectedArtifacts: [],
+})
+const subtitleResolutionOf = (configuration: typeof projectSubtitleConfigurationExample) => ({
+  configurationId: configuration.id, configurationHash: configuration.configurationHash, variantId: configuration.variantId,
+  action: configuration.action, previousConfigurationId: configuration.previousConfigurationId,
+  mode: configuration.requested.mode, origin: configuration.origin, enabled: configuration.resolved.enabled,
+  presetId: configuration.resolved.enabled ? configuration.resolved.presetId : null,
+  presetVersion: configuration.resolved.enabled ? configuration.resolved.presetVersion : null,
+  presetHash: configuration.resolved.enabled ? configuration.resolved.presetHash : null,
+  workspaceDefaultRevision: configuration.workspaceDefaultRevision ?? null,
+  transcriptHash: configuration.transcriptHash, createdAt: configuration.createdAt,
+})
+const projectSubtitleConfigurationResultExample = {
+  command: { id: projectSubtitleConfigurationExample.commandId, type: 'set-project-subtitle-mode', baseVersionId: projectSubtitleConfigurationExample.baseVersionId, author: { type: 'api-client', id: clientId }, reason: 'Fixar o preset aprovado nesta variante.', createdAt },
+  version: { id: projectSubtitleConfigurationExample.resultVersionId, sequence: 2, parentVersionId: projectSubtitleConfigurationExample.baseVersionId, baseHash: 'd'.repeat(64), current: true, previewAvailable: false, createdAt },
+  configuration: projectSubtitleConfigurationExample,
+  resolution: subtitleResolutionOf(projectSubtitleConfigurationExample),
+  impact: projectSubtitleConfigurationImpactExample,
+  replayed: false,
+}
+const projectSubtitleDisabledResultExample = {
+  command: { id: projectSubtitleDisabledConfigurationExample.commandId, type: 'set-project-subtitle-mode', baseVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId, author: { type: 'api-client', id: clientId }, createdAt },
+  version: { id: projectSubtitleDisabledConfigurationExample.resultVersionId, sequence: 3, parentVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId, baseHash: 'e'.repeat(64), current: true, previewAvailable: false, createdAt },
+  configuration: projectSubtitleDisabledConfigurationExample,
+  resolution: subtitleResolutionOf(projectSubtitleDisabledConfigurationExample),
+  impact: projectSubtitleDisabledImpactExample,
+  replayed: false,
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
@@ -9716,6 +9802,21 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/editorial-cut-impact/v1': [editorialCutImpactExample],
     'apollo://schemas/director-run-impact/v1': [directorRunImpactExample],
     'apollo://schemas/project-lut-selection-impact/v1': [projectLutSelectionImpactExample, projectLutSelectionDeferredImpactExample],
+    'apollo://schemas/project-subtitle-configuration-impact/v1': [projectSubtitleConfigurationImpactExample, projectSubtitleDisabledImpactExample],
+    'apollo://schemas/project-subtitle-configuration-set-request/v1': [
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', mode: 'manual', presetId: 'caps-stroke', presetVersion: 1, reason: 'Fixar o preset aprovado nesta variante.' },
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', action: 'set', mode: 'workspace-default' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', mode: 'none' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', action: 'revert' },
+    ],
+    'apollo://schemas/project-subtitle-configuration-applied/v1': [
+      { data: projectSubtitleConfigurationResultExample, meta: { apiVersion: 'v1' } },
+      { data: projectSubtitleDisabledResultExample, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-subtitle-configuration-response/v1': [
+      { data: { result: projectSubtitleConfigurationResultExample }, meta: { apiVersion: 'v1' } },
+      { data: { result: null }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/project-edit-command-applied/v3': [
       {
         data: {

@@ -5382,6 +5382,23 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.subtitle-configuration.read', version: '1.0.0', title: 'Read project subtitle configuration',
+    description: 'Reads the content-addressed subtitle mode, resolved versioned preset, origin and transcript binding for one output variant.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/project-subtitle-configuration-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/subtitle-configuration' }, toolName: 'apollo.projects.subtitle-configuration.read',
+    queryParameters: [
+      { name: 'variantId', required: true, description: 'Output variant whose subtitle configuration is read; each variant carries its own head.', schema: { type: 'string', minLength: 3, maxLength: 128 } },
+    ],
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.subtitle-configuration.set', version: '1.0.0', title: 'Set project subtitle configuration',
+    description: 'Creates a variant-scoped EditCommand and immutable ProjectVersion for auto, workspace-default, manual or none without mutating transcript evidence.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/project-subtitle-configuration-set-request/v1', outputSchemaRef: 'apollo://schemas/project-subtitle-configuration-applied/v1', endpoint: { method: 'POST', path: '/v1/projects/{projectId}/subtitle-configuration' }, toolName: 'apollo.projects.subtitle-configuration.set',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.policy-overrides.read', version: '1.0.0', title: 'Read project policy overrides',
     description: 'Reads all ten allowlisted brand and guardrail values from the current immutable Policy Snapshot, including each resolved origin.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],

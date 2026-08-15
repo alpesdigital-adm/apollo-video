@@ -62,6 +62,7 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { StoryPlanRepository } from '../application/ports/story-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
+import type { ProjectSubtitleConfigurationRepository } from '../application/ports/project-subtitle-configuration-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
@@ -175,6 +176,7 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
+import { PrismaProjectSubtitleConfigurationRepository } from './prisma/project-subtitle-configuration-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
@@ -422,6 +424,10 @@ export function createWorkspaceLutRepository(): WorkspaceLutRepository {
 
 export function createProjectLutSelectionRepository(): ProjectLutSelectionRepository {
   return new PrismaProjectLutSelectionRepository(resolveV2Client())
+}
+
+export function createProjectSubtitleConfigurationRepository(): ProjectSubtitleConfigurationRepository {
+  return new PrismaProjectSubtitleConfigurationRepository(resolveV2Client())
 }
 
 export function createProjectPolicyOverridesRepository(): ProjectPolicyOverridesRepository {

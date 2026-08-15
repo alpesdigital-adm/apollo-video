@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { calculateCanonicalHash } from './canonical-hash.ts'
 import { DomainError } from './errors.ts'
 import type { OutputAspectRatio } from './output-spec.ts'
 
@@ -9,9 +9,90 @@ export const SUBTITLE_PRESETS = Object.freeze({ kinetic: preset('kinetic', { ani
 const luminance = (hex: string) => { const values = [1,3,5].map((index) => parseInt(hex.slice(index,index+2),16)/255).map((value) => value <= .03928 ? value/12.92 : ((value+.055)/1.055)**2.4); return .2126*values[0]+.7152*values[1]+.0722*values[2] }
 export function validateSubtitlePreset(value: SubtitleStylePreset) { if (value.version !== 1 || !value.typography.licensed || value.typography.glyphCoverage !== 'latin-ext') throw new DomainError('INVALID_ARGUMENT','Subtitle font must be licensed with latin-ext coverage'); if (value.lineBreaking.maxLines < 1 || value.lineBreaking.maxLines > 3 || value.lineBreaking.maxCharacters < 8 || value.lineBreaking.maxCharacters > 48) throw new DomainError('INVALID_ARGUMENT','Subtitle line limits are invalid'); if (value.responsive.minFontPx < 20 || value.responsive.maxFontPx > 120 || value.responsive.minFontPx > value.responsive.maxFontPx) throw new DomainError('INVALID_ARGUMENT','Subtitle responsive font limits are invalid'); if (value.background.opacity >= .5 && Math.abs(luminance(value.highlight.color)-luminance(value.background.color)) < .25) throw new DomainError('INVALID_ARGUMENT','Subtitle contrast is insufficient'); return Object.freeze(value) }
 export function quickSubtitlePreview(presetId: SubtitlePresetId, input: { text: string; format: OutputAspectRatio; background: 'light' | 'dark' }) { const style=validateSubtitlePreset(SUBTITLE_PRESETS[presetId]);return Object.freeze({presetId,version:style.version,text:input.text,format:input.format,background:input.background,tokens:style,renderKind:'instant-css-preview' as const}) }
-export type SubtitleMode = 'auto' | 'workspace-default' | 'manual' | 'none'
-export interface SubtitleConfig { mode: SubtitleMode; presetId?: SubtitlePresetId; origin: 'director' | 'workspace' | 'project' | 'disabled'; variantId: string; transcriptHash: string }
-export function resolveSubtitleConfig(input:{mode:SubtitleMode;workspacePreset:SubtitlePresetId;manualPreset?:SubtitlePresetId;variantId:string;transcript:unknown}) : Readonly<SubtitleConfig> { const transcriptHash=createHash('sha256').update(JSON.stringify(input.transcript)).digest('hex'); if(input.mode==='none')return Object.freeze({mode:'none',origin:'disabled',variantId:input.variantId,transcriptHash}); if(input.mode==='manual'&&!input.manualPreset)throw new DomainError('INVALID_ARGUMENT','Manual subtitle mode requires a preset');return Object.freeze({mode:input.mode,presetId:input.mode==='workspace-default'?input.workspacePreset:input.mode==='manual'?input.manualPreset:input.workspacePreset,origin:input.mode==='workspace-default'?'workspace':input.mode==='manual'?'project':'director',variantId:input.variantId,transcriptHash}) }
+export const SUBTITLE_MODES = ['auto', 'workspace-default', 'manual', 'none'] as const
+export type SubtitleMode = (typeof SUBTITLE_MODES)[number]
+export const SUBTITLE_ORIGINS = ['director', 'workspace', 'project', 'disabled'] as const
+export type SubtitleOrigin = (typeof SUBTITLE_ORIGINS)[number]
+export type SubtitleModeRequest =
+  | Readonly<{ mode: 'auto' }>
+  | Readonly<{ mode: 'workspace-default' }>
+  | Readonly<{ mode: 'manual'; presetId: SubtitlePresetId; presetVersion: 1 }>
+  | Readonly<{ mode: 'none' }>
+export type SubtitlePresetReference = Readonly<{ presetId: SubtitlePresetId; presetVersion: 1; presetHash: string }>
+export interface SubtitleConfig {
+  schemaVersion: 'subtitle-config/v1'
+  requested: SubtitleModeRequest
+  resolved: Readonly<{ enabled: false }> | (Readonly<{ enabled: true }> & SubtitlePresetReference)
+  origin: SubtitleOrigin
+  variantId: string
+  transcriptHash: string
+  workspaceDefaultRevision?: number
+  configHash: string
+}
+
+/**
+ * Versioned identity of a preset. A configuration stores this reference — never a
+ * copy of the mutable style tokens — so a later edit to `SUBTITLE_PRESETS` can
+ * never silently reinterpret an already persisted resolution: the stored hash
+ * stops matching and the persistence guard rejects it.
+ */
+export function subtitlePresetHash(presetId: SubtitlePresetId): string {
+  const preset = SUBTITLE_PRESETS[presetId]
+  if (!preset) throw new DomainError('INVALID_ARGUMENT', 'presetId is not a registered subtitle preset')
+  return calculateCanonicalHash(validateSubtitlePreset(preset))
+}
+export function subtitlePresetReference(presetId: SubtitlePresetId): SubtitlePresetReference {
+  return Object.freeze({ presetId: presetIdentity(presetId, 'presetId'), presetVersion: 1 as const, presetHash: subtitlePresetHash(presetId) })
+}
+const presetIdentity = (value: unknown, field: string): SubtitlePresetId => {
+  if (typeof value !== 'string' || !Object.prototype.hasOwnProperty.call(SUBTITLE_PRESETS, value)) throw new DomainError('INVALID_ARGUMENT', `${field} is not a registered subtitle preset`)
+  validateSubtitlePreset(SUBTITLE_PRESETS[value as SubtitlePresetId])
+  return value as SubtitlePresetId
+}
+export function resolveSubtitleConfig(input: {
+  requested?: SubtitleModeRequest
+  mode?: SubtitleMode
+  workspacePreset?: SubtitlePresetId
+  workspaceDefaultRevision?: number
+  directorPreset?: SubtitlePresetId
+  manualPreset?: SubtitlePresetId
+  variantId: string
+  transcript: unknown
+}): Readonly<SubtitleConfig> {
+  if (typeof input.variantId !== 'string' || input.variantId.trim().length < 1 || input.variantId.length > 128) throw new DomainError('INVALID_ARGUMENT', 'variantId is invalid')
+  const requested: SubtitleModeRequest = input.requested ?? (input.mode === 'manual'
+    ? { mode: 'manual', presetId: input.manualPreset as SubtitlePresetId, presetVersion: 1 }
+    : { mode: input.mode as Exclude<SubtitleMode, 'manual'> })
+  if (!requested || !SUBTITLE_MODES.includes(requested.mode)) throw new DomainError('INVALID_ARGUMENT', 'Subtitle mode is unsupported')
+  const transcriptHash = calculateCanonicalHash(input.transcript)
+  let resolved: SubtitleConfig['resolved']; let origin: SubtitleConfig['origin']; let workspaceDefaultRevision: number | undefined
+  if (requested.mode === 'none') { resolved = Object.freeze({ enabled: false }); origin = 'disabled' }
+  else if (requested.mode === 'manual') {
+    if (requested.presetVersion !== 1) throw new DomainError('INVALID_ARGUMENT', 'Manual subtitle preset version is unsupported')
+    resolved = Object.freeze({ enabled: true as const, ...subtitlePresetReference(presetIdentity(requested.presetId, 'requested.presetId')) }); origin = 'project'
+  } else if (requested.mode === 'workspace-default') {
+    const presetId = presetIdentity(input.workspacePreset, 'workspacePreset')
+    if (!Number.isSafeInteger(input.workspaceDefaultRevision) || input.workspaceDefaultRevision! < 0) throw new DomainError('INVALID_ARGUMENT', 'Workspace subtitle default revision is required')
+    resolved = Object.freeze({ enabled: true as const, ...subtitlePresetReference(presetId) }); origin = 'workspace'; workspaceDefaultRevision = input.workspaceDefaultRevision
+  } else {
+    resolved = Object.freeze({ enabled: true as const, ...subtitlePresetReference(presetIdentity(input.directorPreset ?? input.workspacePreset, 'directorPreset')) }); origin = 'director'
+  }
+  const body = Object.freeze({ schemaVersion: 'subtitle-config/v1' as const, requested: Object.freeze({ ...requested }), resolved, origin, variantId: input.variantId.trim(), transcriptHash, ...(workspaceDefaultRevision !== undefined ? { workspaceDefaultRevision } : {}) })
+  return Object.freeze({ ...body, configHash: calculateCanonicalHash(body) })
+}
+export function validateSubtitleConfig(config: Readonly<SubtitleConfig>, transcript: unknown): void {
+  const { configHash, ...body } = config
+  if (configHash !== calculateCanonicalHash(body) || config.transcriptHash !== calculateCanonicalHash(transcript)) throw new DomainError('INVALID_ARGUMENT', 'Subtitle config identity or transcript binding changed')
+  if (config.requested.mode === 'none' !== !config.resolved.enabled) throw new DomainError('INVALID_ARGUMENT', 'Subtitle disabled state is inconsistent')
+  if (config.resolved.enabled) {
+    presetIdentity(config.resolved.presetId, 'resolved.presetId')
+    if (config.resolved.presetVersion !== 1 || config.resolved.presetHash !== subtitlePresetHash(config.resolved.presetId)) throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset reference no longer matches the registered preset version')
+  }
+}
+export function materializeSubtitleRenderPolicy<T>(config: Readonly<SubtitleConfig>, cues: readonly T[]): Readonly<{ cues: readonly T[]; presetId: SubtitlePresetId | null; presetHash: string | null; transcriptHash: string }> {
+  if (!config.resolved.enabled) return Object.freeze({ cues: Object.freeze([]), presetId: null, presetHash: null, transcriptHash: config.transcriptHash })
+  return Object.freeze({ cues: Object.freeze([...cues]), presetId: config.resolved.presetId, presetHash: config.resolved.presetHash, transcriptHash: config.transcriptHash })
+}
 export interface OccupiedRegion { id:string;kind:'face'|'ocr'|'cta'|'logo'|'insert';box:readonly[number,number,number,number] }
 export type SubtitleAnchor='top'|'upper-third'|'center'|'lower-third'|'bottom'
 const anchorBoxes:Record<SubtitleAnchor,readonly[number,number,number,number]>={top:[.1,.06,.8,.16],'upper-third':[.1,.22,.8,.16],center:[.1,.42,.8,.16],'lower-third':[.1,.64,.8,.16],bottom:[.1,.8,.8,.14]}
