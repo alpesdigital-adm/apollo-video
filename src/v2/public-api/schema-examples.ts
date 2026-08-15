@@ -746,6 +746,7 @@ const proxyReviewExample = {
   proxyArtifactId: 'artifact-editorial-proxy-example-1',
   proxyManifestId: 'manifest-editorial-proxy-example-1',
   inputHash: '8'.repeat(64),
+  outputSpecId: 'preset-9x16',
   rangeCacheKey: '9'.repeat(64),
   spec: {
     width: 540,
@@ -758,14 +759,26 @@ const proxyReviewExample = {
   status: 'warning-ack-required',
   technicalIssues: [],
   criticIssues: [{
-    code: 'PATTERN_DENSITY',
+    code: 'OUTPUT_SAFE_AREA',
     severity: 'warning',
     category: 'editorial',
-    message: 'Pattern breaks are dense in this range.',
+    message: 'subtitle leaves the 9:16 safe area.',
     rangeMs: [2000, 4200],
-    targetId: 'scene-example-1',
+    targetId: 'subtitle-example-1',
+    outputSpecId: 'preset-9x16',
+    outputPresetHash: 'c'.repeat(64),
+    evidenceRange: { startFrame: 60, endFrame: 126 },
+    elementIds: ['subtitle-example-1'],
+    evidenceIds: ['render-map:' + '8'.repeat(64)],
     correctable: true,
   }],
+  formatQuality: {
+    outputPresetHash: 'c'.repeat(64),
+    status: 'warning',
+    exportAllowed: true,
+    explanation: 'preset-9x16 (9:16) is exportable with 1 warning reason code(s): OUTPUT_SAFE_AREA. No hard clipping, subject visibility or subtitle collision issue was found.',
+    reportHash: 'd'.repeat(64),
+  },
   warningsAcknowledged: false,
   finalAllowed: false,
   uploadReceivedAt: '2026-07-12T19:58:00.000Z',
@@ -775,6 +788,15 @@ const proxyReviewExample = {
   revision: 1,
   createdAt,
   updatedAt: createdAt,
+}
+const {
+  outputSpecId: _legacyProxyOutputSpecId,
+  formatQuality: _legacyProxyFormatQuality,
+  ...proxyReviewExampleWithoutOutput
+} = proxyReviewExample
+const proxyReviewExampleV1 = {
+  ...proxyReviewExampleWithoutOutput,
+  criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
 }
 const assetBriefExample = {
   intention: 'Reforçar visualmente o ganho de clareza sem interromper a fala.',
@@ -10661,9 +10683,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/project-policy-overrides-applied/v1': [{ data: projectPolicyAppliedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
-        data: { review: proxyReviewExample },
+        data: { review: proxyReviewExampleV1 },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/project-proxy-review-response/v2': [
+      { data: { review: proxyReviewExample }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1': [
       {
@@ -10678,7 +10703,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           review: {
-            ...proxyReviewExample,
+            ...proxyReviewExampleV1,
             status: 'ready-for-final',
             warningsAcknowledged: true,
             finalAllowed: true,
@@ -10695,6 +10720,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             resultReviewHash: 'b'.repeat(64),
             createdAt,
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v2': [
+      {
+        data: {
+          review: { ...proxyReviewExample, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },
+          decision: { id: 'proxy-review-decision-example-1', proxyReviewId: proxyReviewExample.id, action: 'acknowledge-warnings', actor: { type: 'api-client', id: clientId }, baseReviewHash: proxyReviewExample.reviewHash, resultReviewHash: 'b'.repeat(64), createdAt },
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

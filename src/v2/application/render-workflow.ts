@@ -5,6 +5,7 @@ import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { RenderElementMap } from '../domain/review-system.ts'
 import { OUTPUT_ASPECT_RATIOS } from '../domain/output-spec.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
+import { critiqueOutputFormat, type FormatSubjectEvidenceV1 } from '../domain/format-quality-critic.ts'
 
 export interface RenderApproval {
   projectVersionId: string
@@ -38,7 +39,22 @@ export interface ProxyQualityIssue {
   message: string
   rangeMs?: readonly [number, number]
   targetId?: string
+  outputSpecId?: string
+  outputPresetHash?: string
+  /** Half-open frame interval `[startFrame, endFrame)` where the evidence lives. */
+  evidenceRange?: Readonly<{ startFrame: number; endFrame: number }>
+  elementIds?: readonly string[]
+  evidenceIds?: readonly string[]
   correctable: boolean
+}
+
+/** Per-output verdict of the format critic, explaining why this exact variant passed or failed. */
+export interface ProxyFormatQualityVerdict {
+  outputPresetHash: string
+  status: 'passed' | 'warning' | 'blocked'
+  exportAllowed: boolean
+  explanation: string
+  reportHash: string
 }
 
 export interface ProxyReview {
@@ -47,6 +63,7 @@ export interface ProxyReview {
   proxyArtifactId: string
   proxyManifestId: string
   inputHash: string
+  outputSpecId: string
   rangeCacheKey: string
   spec: Readonly<{
     width: number
@@ -59,6 +76,7 @@ export interface ProxyReview {
   status: ProxyReviewStatus
   technicalIssues: readonly Readonly<ProxyQualityIssue>[]
   criticIssues: readonly Readonly<ProxyQualityIssue>[]
+  formatQuality?: Readonly<ProxyFormatQualityVerdict>
   warningsAcknowledged: boolean
   finalAllowed: boolean
   uploadReceivedAt: string
@@ -174,6 +192,7 @@ export function evaluateRenderedProxy(input: {
   subtitleSafeRegion?: readonly [number, number, number, number]
   criticIssues?: readonly Readonly<ProxyQualityIssue>[]
   warningsAcknowledged?: boolean
+  formatCritic?: Readonly<{ outputSpecId: string; subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]; densityLimit?: number }>
 }): Readonly<ProxyReview> {
   const spec = PROXY_OUTPUT_SPECS[input.format as ProxyOutputFormat]
   assertDomain(Boolean(spec), 'INVALID_OUTPUT_SPEC', 'Proxy format is not supported')
@@ -240,8 +259,17 @@ export function evaluateRenderedProxy(input: {
       message: 'Rendered element map does not match proxy dimensions or duration.', correctable: false,
     })
   }
+  const formatReport = input.formatCritic ? critiqueOutputFormat({
+    outputSpecId: input.formatCritic.outputSpecId,
+    format: input.format as ProxyOutputFormat,
+    proxyHash: input.proxySha256,
+    map: input.map,
+    subjects: input.formatCritic.subjects,
+    densityLimit: input.formatCritic.densityLimit,
+  }) : undefined
   const criticIssues = Object.freeze([
     ...(input.criticIssues ?? []),
+    ...(formatReport?.issues.map((issue) => ({ ...issue, targetId: issue.elementIds[0] })) ?? []),
     ...groupedSubtitleIssues({
       map: input.map,
       ...(input.faceSafeRegion ? { faceSafeRegion: input.faceSafeRegion } : {}),
@@ -263,6 +291,7 @@ export function evaluateRenderedProxy(input: {
     proxyArtifactId: input.proxyArtifactId,
     proxyManifestId: input.proxyManifestId,
     inputHash: input.inputHash,
+    outputSpecId: input.formatCritic?.outputSpecId ?? OUTPUT_FORMAT_REGISTRY.presets[input.format as ProxyOutputFormat].spec.id,
     rangeCacheKey: calculateCanonicalHash({
       kind: 'proxy-range-cache/v1',
       projectVersionId: input.projectVersionId,
@@ -275,6 +304,17 @@ export function evaluateRenderedProxy(input: {
     status,
     technicalIssues: Object.freeze(technicalIssues),
     criticIssues,
+    ...(formatReport
+      ? {
+          formatQuality: Object.freeze({
+            outputPresetHash: formatReport.outputPresetHash,
+            status: formatReport.status,
+            exportAllowed: formatReport.exportAllowed,
+            explanation: formatReport.explanation,
+            reportHash: formatReport.reportHash,
+          }),
+        }
+      : {}),
     warningsAcknowledged,
     finalAllowed: status === 'ready-for-final',
     uploadReceivedAt: uploadReceivedAt.toISOString(),

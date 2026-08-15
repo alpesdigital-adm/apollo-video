@@ -740,6 +740,10 @@ interface ProxyReviewIssueData {
   message: string
   rangeMs?: [number, number]
   targetId?: string
+  outputSpecId?: string
+  evidenceRange?: { startFrame: number; endFrame: number }
+  elementIds?: string[]
+  evidenceIds?: string[]
   correctable: boolean
 }
 interface ProxyReviewData {
@@ -750,11 +754,13 @@ interface ProxyReviewData {
   proxyArtifactId: string
   proxyManifestId: string
   inputHash: string
+  outputSpecId: string
   rangeCacheKey: string
   spec: { width: number; height: number; codec: 'h264'; container: 'mp4'; quality: 'review'; reusableRanges: true }
   status: 'blocked' | 'warning-ack-required' | 'ready-for-final'
   technicalIssues: ProxyReviewIssueData[]
   criticIssues: ProxyReviewIssueData[]
+  formatQuality?: { outputPresetHash: string; status: 'passed' | 'warning' | 'blocked'; exportAllowed: boolean; explanation: string; reportHash: string }
   warningsAcknowledged: boolean
   finalAllowed: boolean
   uploadReceivedAt: string
@@ -3298,12 +3304,25 @@ export default function ProjectWorkspacePage() {
                   <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Bloqueios</p><p className="mt-1 font-mono text-[10px] text-[#d57c7c]">{[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.severity === 'hard').length}</p></div>
                   <div><p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Ressalvas</p><p className="mt-1 font-mono text-[10px] text-[#d3af5d]">{[...proxyReview.technicalIssues, ...proxyReview.criticIssues].filter((issue) => issue.severity === 'warning').length}</p></div>
                 </div>
+                <div className="mt-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-2.5 py-2" data-testid="proxy-review-format-verdict">
+                  <p className="text-[8px] uppercase tracking-[0.14em] text-[#625f58]">Veredito por formato</p>
+                  <p className={`mt-1 text-[9px] leading-4 ${proxyReview.formatQuality?.exportAllowed === false ? 'text-[#dc7777]' : 'text-[#8e8980]'}`}>
+                    <span className="font-mono text-[#aaa49a]">{proxyReview.outputSpecId}</span>
+                    {' · '}
+                    {proxyReview.formatQuality
+                      ? `${proxyReview.formatQuality.exportAllowed ? 'Exporta' : 'Bloqueado para export'} · ${proxyReview.formatQuality.explanation}`
+                      : 'Sem crítica de formato registrada para esta variante.'}
+                  </p>
+                  <p className="mt-1 font-mono text-[8px] text-[#625f58]">
+                    {proxyReview.formatQuality ? `preset ${proxyReview.formatQuality.outputPresetHash.slice(0, 12)} · laudo ${proxyReview.formatQuality.reportHash.slice(0, 12)}` : `revisão ${proxyReview.reviewHash.slice(0, 12)}`}
+                  </p>
+                </div>
                 {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].length ? (
                   <div className="mt-3 space-y-1.5" data-testid="proxy-review-issues">
                     {[...proxyReview.technicalIssues, ...proxyReview.criticIssues].slice(0, 4).map((issue) => (
                       <div className="flex items-start gap-2 border-l border-white/[0.09] pl-2 text-[9px] leading-4 text-[#8e8980]" key={`${issue.code}:${issue.targetId ?? 'proxy'}`}>
                         <span className={issue.severity === 'hard' ? 'text-[#dc7777]' : 'text-[#d5ae52]'}>{issue.severity === 'hard' ? '!' : '△'}</span>
-                        <span>{issue.message}</span>
+                        <span><span className="font-mono text-[#aaa49a]">{issue.outputSpecId ?? proxyReview.outputSpecId}</span> · {issue.message}{issue.evidenceRange ? ` · frames ${issue.evidenceRange.startFrame}–${issue.evidenceRange.endFrame}` : ''}</span>
                       </div>
                     ))}
                   </div>

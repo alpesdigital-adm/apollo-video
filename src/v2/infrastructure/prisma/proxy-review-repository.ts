@@ -45,10 +45,22 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
       typeof candidate.correctable !== 'boolean'
     ) throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
     const range = candidate.rangeMs
+    const evidenceRange = candidate.evidenceRange
     if (
       range !== undefined &&
       (!Array.isArray(range) || range.length !== 2 || range.some((item) => !Number.isSafeInteger(item) || item < 0))
     ) throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} range is invalid`)
+    if (evidenceRange !== undefined && (
+      typeof evidenceRange !== 'object' || evidenceRange === null || Array.isArray(evidenceRange) ||
+      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).startFrame) ||
+      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).endFrame) ||
+      Number((evidenceRange as Record<string, unknown>).startFrame) < 0 ||
+      Number((evidenceRange as Record<string, unknown>).endFrame) <= Number((evidenceRange as Record<string, unknown>).startFrame)
+    )) throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} evidence range is invalid`)
+    if ((candidate.elementIds !== undefined && (!Array.isArray(candidate.elementIds) || candidate.elementIds.some((item: unknown) => typeof item !== 'string'))) ||
+      (candidate.evidenceIds !== undefined && (!Array.isArray(candidate.evidenceIds) || candidate.evidenceIds.some((item: unknown) => typeof item !== 'string')))) {
+      throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} evidence identities are invalid`)
+    }
     return Object.freeze({
       code: candidate.code,
       severity: candidate.severity as 'hard' | 'warning',
@@ -56,10 +68,36 @@ function parseIssueArray(value: string, field: string): readonly Readonly<ProxyQ
       message: candidate.message,
       ...(range ? { rangeMs: Object.freeze([range[0], range[1]] as [number, number]) } : {}),
       ...(typeof candidate.targetId === 'string' ? { targetId: candidate.targetId } : {}),
+      ...(typeof candidate.outputSpecId === 'string' ? { outputSpecId: candidate.outputSpecId } : {}),
+      ...(evidenceRange
+        ? { evidenceRange: Object.freeze({ startFrame: Number((evidenceRange as Record<string, unknown>).startFrame), endFrame: Number((evidenceRange as Record<string, unknown>).endFrame) }) }
+        : {}),
+      ...(Array.isArray(candidate.elementIds) ? { elementIds: Object.freeze(candidate.elementIds.map(String)) } : {}),
+      ...(Array.isArray(candidate.evidenceIds) ? { evidenceIds: Object.freeze(candidate.evidenceIds.map(String)) } : {}),
       correctable: candidate.correctable,
     })
   })
   return Object.freeze(issues)
+}
+
+function parseFormatQuality(value: string | null): Readonly<ProxyReview>['formatQuality'] {
+  if (value === null) return undefined
+  const candidate = parseJson(value, 'proxy format quality verdict') as Record<string, unknown>
+  if (
+    typeof candidate !== 'object' || candidate === null || Array.isArray(candidate) ||
+    typeof candidate.outputPresetHash !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.outputPresetHash) ||
+    typeof candidate.reportHash !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.reportHash) ||
+    !['passed', 'warning', 'blocked'].includes(String(candidate.status)) ||
+    typeof candidate.exportAllowed !== 'boolean' || typeof candidate.explanation !== 'string' ||
+    candidate.exportAllowed !== (candidate.status !== 'blocked')
+  ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored proxy format quality verdict is invalid')
+  return Object.freeze({
+    outputPresetHash: candidate.outputPresetHash,
+    status: candidate.status as 'passed' | 'warning' | 'blocked',
+    exportAllowed: candidate.exportAllowed,
+    explanation: candidate.explanation,
+    reportHash: candidate.reportHash,
+  })
 }
 
 export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedProxyReview> {
@@ -79,6 +117,7 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
     proxyArtifactId: row.proxyArtifactId,
     proxyManifestId: row.proxyManifestId,
     inputHash: row.inputHash,
+    outputSpecId: row.outputSpecId,
     rangeCacheKey: row.rangeCacheKey,
     spec: Object.freeze({
       width: spec.width,
@@ -91,6 +130,7 @@ export function hydrateProxyReview(row: StoredProxyReview): Readonly<PersistedPr
     status: row.status as ProxyReview['status'],
     technicalIssues: parseIssueArray(row.technicalIssuesJson, 'proxy technical issues'),
     criticIssues: parseIssueArray(row.criticIssuesJson, 'proxy critic issues'),
+    ...(row.formatQualityJson === null ? {} : { formatQuality: parseFormatQuality(row.formatQualityJson) }),
     warningsAcknowledged: row.warningsAcknowledged,
     finalAllowed: row.finalAllowed,
     uploadReceivedAt: row.uploadReceivedAt.toISOString(),
@@ -173,11 +213,13 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           proxyArtifactId: input.review.proxyArtifactId,
           proxyManifestId: input.review.proxyManifestId,
           inputHash: input.review.inputHash,
+          outputSpecId: input.review.outputSpecId,
           rangeCacheKey: input.review.rangeCacheKey,
           specJson: stableSerialize(input.review.spec),
           status: input.review.status,
           technicalIssuesJson: stableSerialize(input.review.technicalIssues),
           criticIssuesJson: stableSerialize(input.review.criticIssues),
+          formatQualityJson: input.review.formatQuality ? stableSerialize(input.review.formatQuality) : null,
           warningsAcknowledged: input.review.warningsAcknowledged,
           finalAllowed: input.review.finalAllowed,
           reviewHash: input.review.reviewHash,
@@ -367,11 +409,13 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
           proxyArtifactId: hydrated.proxyArtifactId,
           proxyManifestId: hydrated.proxyManifestId,
           inputHash: hydrated.inputHash,
+          outputSpecId: hydrated.outputSpecId,
           rangeCacheKey: hydrated.rangeCacheKey,
           spec: hydrated.spec,
           status: 'ready-for-final',
           technicalIssues: hydrated.technicalIssues,
           criticIssues: hydrated.criticIssues,
+          ...(hydrated.formatQuality ? { formatQuality: hydrated.formatQuality } : {}),
           warningsAcknowledged: true,
           finalAllowed: true,
           uploadReceivedAt: hydrated.uploadReceivedAt,

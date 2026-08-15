@@ -475,6 +475,20 @@ test('T-FR-230 project editor exposes the persisted proxy verdict and blocks fin
   assert.match(projectEditorSource, /Aguardando liberação do proxy/)
 })
 
+test('T-FR-165 project editor explains the affected output and visual evidence range', () => {
+  assert.match(projectEditorSource, /issue\.outputSpecId \?\? proxyReview\.outputSpecId/)
+  assert.match(projectEditorSource, /frames \$\{issue\.evidenceRange\.startFrame\}/)
+})
+
+test('T-FR-165 project editor states per-variant why the output passed or was blocked', () => {
+  assert.match(projectEditorSource, /data-testid="proxy-review-format-verdict"/)
+  assert.match(projectEditorSource, /Veredito por formato/)
+  assert.match(projectEditorSource, /proxyReview\.formatQuality\.exportAllowed \? 'Exporta' : 'Bloqueado para export'/)
+  assert.match(projectEditorSource, /proxyReview\.formatQuality\.explanation/)
+  assert.match(projectEditorSource, /Sem crítica de formato registrada para esta variante\./)
+  assert.match(projectEditorSource, /proxyReview\.formatQuality\.outputPresetHash\.slice\(0, 12\)/)
+})
+
 test('T-FR-010 project editor governs all strategic objectives and preserves retry identity', () => {
   assert.match(projectEditorSource, /STRATEGIC_OBJECTIVES/)
   assert.match(projectEditorSource, /data-testid="director-objective-governance"/)

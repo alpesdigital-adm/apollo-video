@@ -441,6 +441,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         sourceArtifactId,
         sourceManifestId,
         inputHash: proxyInputHash,
+        outputSpecId: 'preset-9x16',
         outputArtifactId: proxyArtifactId,
         outputManifestId: proxyManifestId,
         originalFileName: 'final-export-proxy.mp4',
@@ -463,6 +464,7 @@ test('T-FR-231 approves, retries, renders, validates, downloads and reconstructs
         proxyArtifactId,
         proxyManifestId,
         inputHash: proxyInputHash,
+        outputSpecId: 'preset-9x16',
         rangeCacheKey: calculateVersionHash({ proxyReviewId, ranges: [] }),
         specJson: stableSerialize({
           width: 540,

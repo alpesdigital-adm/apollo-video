@@ -9,6 +9,8 @@ import type {
 import { stableSerialize } from '../../application/version-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { projectStatusTransitionPath } from '../../domain/project.ts'
+import { readOutputFormatPreset } from '../../domain/output-format-registry.ts'
+import type { OutputAspectRatio } from '../../domain/output-spec.ts'
 import { PrismaProjectProxyRenderRepository } from './project-proxy-render-repository.ts'
 
 function parseQuality(value: string): { status: string; score: number } {
@@ -43,6 +45,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     proxyReviewId?: string
     proxyReviewHash?: string
     proxyArtifactId?: string
+    outputSpecId: string
     requireCurrent: boolean
   }) {
     const project = await this.client.v2Project.findFirst({
@@ -72,6 +75,7 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
         proxyReviews: {
           where: {
             projectVersionId: input.projectVersionId,
+            outputSpecId: input.outputSpecId,
             finalAllowed: true,
             status: 'ready-for-final',
             ...(input.proxyReviewId ? { id: input.proxyReviewId } : {}),
@@ -114,10 +118,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     projectVersionId: string
     projectVersionHash: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const [source, approval] = await Promise.all([
-      this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId }),
-      this.readApproval({ ...input, requireCurrent: true }),
-    ])
+    const source = await this.sourceReader.readCurrentSource({ workspaceId: input.workspaceId, projectId: input.projectId })
+    if (!source) return null
+    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: true })
     if (!source || !approval || source.projectVersionId !== input.projectVersionId) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
@@ -137,10 +140,9 @@ export class PrismaProjectFinalExportRepository implements ProjectFinalExportRep
     sourceArtifactId: string
     sourceManifestId: string
   }): Promise<Readonly<ApprovedProjectFinalExportSource> | null> {
-    const [source, approval] = await Promise.all([
-      this.sourceReader.readImmutableSource(input),
-      this.readApproval({ ...input, requireCurrent: false }),
-    ])
+    const source = await this.sourceReader.readImmutableSource(input)
+    if (!source) return null
+    const approval = await this.readApproval({ ...input, outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id, requireCurrent: false })
     if (!source || !approval) return null
     return Object.freeze({ ...source, projectVersionHash: input.projectVersionHash, ...approval })
   }
