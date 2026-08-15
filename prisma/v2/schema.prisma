@@ -2783,11 +2783,13 @@ model V2ProxyReview {
   proxyArtifactId      String    @db.VarChar(128)
   proxyManifestId      String    @db.VarChar(128)
   inputHash            String    @db.Char(64)
+  outputSpecId         String    @db.VarChar(128)
   rangeCacheKey        String    @db.Char(64)
   specJson             String    @db.Text
   status               String    @db.VarChar(32)
   technicalIssuesJson  String    @db.Text
   criticIssuesJson     String    @db.Text
+  formatQualityJson    String?   @db.Text
   warningsAcknowledged Boolean   @default(false)
   finalAllowed         Boolean   @default(false)
   reviewHash           String    @db.Char(64)
@@ -2818,6 +2820,7 @@ model V2ProxyReview {
   @@unique([workspaceId, projectVersionId, inputHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, projectVersionId, status])
+  @@index([workspaceId, projectVersionId, outputSpecId, finalAllowed], map: "proxy_reviews_workspaceId_projectVersionId_outputSpecId_fin_idx")
   @@index([workspaceId, proxyArtifactId])
   @@index([workspaceId, finalAllowed, updatedAt(sort: Desc)])
   @@map("proxy_reviews")

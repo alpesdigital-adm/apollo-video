@@ -38,10 +38,18 @@ function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQu
       typeof candidate.correctable !== 'boolean'
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport issue is invalid')
     const range = candidate.rangeMs
+    const evidenceRange = candidate.evidenceRange
     if (
       range !== undefined &&
       (!Array.isArray(range) || range.length !== 2 || range.some((item) => !Number.isSafeInteger(item) || item < 0))
     ) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport range is invalid')
+    if (evidenceRange !== undefined && (
+      typeof evidenceRange !== 'object' || evidenceRange === null || Array.isArray(evidenceRange) ||
+      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).startFrame) ||
+      !Number.isSafeInteger((evidenceRange as Record<string, unknown>).endFrame) ||
+      Number((evidenceRange as Record<string, unknown>).startFrame) < 0 ||
+      Number((evidenceRange as Record<string, unknown>).endFrame) <= Number((evidenceRange as Record<string, unknown>).startFrame)
+    )) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored project proxy QualityReport evidence range is invalid')
     return Object.freeze({
       code: candidate.code,
       severity: candidate.severity as 'hard' | 'warning',
@@ -49,6 +57,12 @@ function parseCriticIssues(value: string | undefined): readonly Readonly<ProxyQu
       message: candidate.message,
       ...(range ? { rangeMs: Object.freeze([range[0], range[1]] as [number, number]) } : {}),
       ...(typeof candidate.targetId === 'string' ? { targetId: candidate.targetId } : {}),
+      ...(typeof candidate.outputSpecId === 'string' ? { outputSpecId: candidate.outputSpecId } : {}),
+      ...(evidenceRange
+        ? { evidenceRange: Object.freeze({ startFrame: Number((evidenceRange as Record<string, unknown>).startFrame), endFrame: Number((evidenceRange as Record<string, unknown>).endFrame) }) }
+        : {}),
+      ...(Array.isArray(candidate.elementIds) ? { elementIds: Object.freeze(candidate.elementIds.map(String)) } : {}),
+      ...(Array.isArray(candidate.evidenceIds) ? { evidenceIds: Object.freeze(candidate.evidenceIds.map(String)) } : {}),
       correctable: candidate.correctable,
     })
   }))

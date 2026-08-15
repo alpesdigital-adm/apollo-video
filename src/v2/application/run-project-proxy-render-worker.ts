@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
+import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
+import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -269,6 +271,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             }
           : {}),
         criticIssues: source.criticIssues,
+        formatCritic: { outputSpecId: readOutputFormatPreset(source.format as OutputAspectRatio).spec.id },
       })
       await dependencies.proxyReviews.persistGenerated({
         id: `proxy-review-${createHash('sha256').update(operation.id).digest('hex').slice(0, 32)}`,

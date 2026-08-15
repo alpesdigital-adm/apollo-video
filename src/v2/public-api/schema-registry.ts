@@ -6095,6 +6095,14 @@ const proxyQualityIssueSchema = {
       items: false,
     },
     targetId: idSchema,
+    outputSpecId: idSchema,
+    outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    evidenceRange: {
+      type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    elementIds: { type: 'array', maxItems: 1000, items: idSchema },
+    evidenceIds: { type: 'array', maxItems: 1000, items: { type: 'string', minLength: 3, maxLength: 200 } },
     correctable: { type: 'boolean' },
   },
 }
@@ -6116,6 +6124,7 @@ const proxyReviewSchema = {
     proxyArtifactId: idSchema,
     proxyManifestId: idSchema,
     inputHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    outputSpecId: idSchema,
     rangeCacheKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     spec: {
       type: 'object',
@@ -6133,6 +6142,18 @@ const proxyReviewSchema = {
     status: { enum: ['blocked', 'warning-ack-required', 'ready-for-final'] },
     technicalIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchema },
     criticIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchema },
+    formatQuality: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['outputPresetHash', 'status', 'exportAllowed', 'explanation', 'reportHash'],
+      properties: {
+        outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        status: { enum: ['passed', 'warning', 'blocked'] },
+        exportAllowed: { type: 'boolean' },
+        explanation: { type: 'string', minLength: 1, maxLength: 1000 },
+        reportHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      },
+    },
     warningsAcknowledged: { type: 'boolean' },
     finalAllowed: { type: 'boolean' },
     uploadReceivedAt: dateTimeSchema,
@@ -6152,6 +6173,19 @@ const proxyReviewSchema = {
     },
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
+  },
+}
+const proxyQualityIssueSchemaV1 = {
+  ...proxyQualityIssueSchema,
+  properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
+    !['outputSpecId', 'outputPresetHash', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
+}
+const proxyReviewSchemaV1 = {
+  ...proxyReviewSchema,
+  properties: {
+    ...Object.fromEntries(Object.entries(proxyReviewSchema.properties).filter(([key]) => !['outputSpecId', 'formatQuality'].includes(key))),
+    technicalIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchemaV1 },
+    criticIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchemaV1 },
   },
 }
 const assetBriefSchema = {
@@ -20670,6 +20704,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object',
       additionalProperties: false,
       required: ['review'],
+      properties: { review: proxyReviewSchemaV1 },
+    }),
+  ),
+  defineSchema('project-proxy-review-response', 2, 'Version-bound post-render proxy review with output-specific visual evidence',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review'],
       properties: { review: proxyReviewSchema },
     }),
   ),
@@ -20691,7 +20731,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['review', 'decision', 'replayed'],
       properties: {
-        review: proxyReviewSchema,
+        review: proxyReviewSchemaV1,
         decision: {
           type: 'object',
           additionalProperties: false,
@@ -20712,6 +20752,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             baseReviewHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
             resultReviewHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
             createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-review-warning-acknowledgement-result', 2, 'Auditable output-specific proxy warning acknowledgement result',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
+      properties: {
+        review: proxyReviewSchema,
+        decision: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'proxyReviewId', 'action', 'actor', 'baseReviewHash', 'resultReviewHash', 'createdAt'],
+          properties: {
+            id: idSchema, proxyReviewId: idSchema, action: { const: 'acknowledge-warnings' },
+            actor: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } },
+            baseReviewHash: sha256Schema, resultReviewHash: sha256Schema, createdAt: dateTimeSchema,
           },
         },
         replayed: { type: 'boolean' },
