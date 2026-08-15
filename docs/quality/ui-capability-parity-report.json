@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 236,
-    "operableCapabilities": 236,
-    "publicContractCapabilities": 236,
+    "registeredCapabilities": 242,
+    "operableCapabilities": 242,
+    "publicContractCapabilities": 242,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -580,7 +580,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1183",
+      "uiAction": "src/app/projects/[id]/page.tsx:1189",
       "capabilityId": "apollo.projects.workspace.current.read",
       "capabilityVersion": "10.0.0",
       "endpoint": "GET /v1/projects/{projectId}/workspace",
@@ -600,7 +600,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1184",
+      "uiAction": "src/app/projects/[id]/page.tsx:1190",
       "capabilityId": "apollo.projects.policy-overrides.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/policy-overrides",
@@ -620,7 +620,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1224",
+      "uiAction": "src/app/projects/[id]/page.tsx:1230",
       "capabilityId": "apollo.projects.timeline.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/projects/{projectId}/timeline",
@@ -640,7 +640,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1253",
+      "uiAction": "src/app/projects/[id]/page.tsx:1259",
       "capabilityId": "apollo.projects.source-deconstructions.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/source-deconstructions",
@@ -660,7 +660,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1293",
+      "uiAction": "src/app/projects/[id]/page.tsx:1299",
       "capabilityId": "apollo.projects.contamination-reports.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/contamination-reports",
@@ -680,7 +680,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1333",
+      "uiAction": "src/app/projects/[id]/page.tsx:1339",
       "capabilityId": "apollo.projects.source-cleanups.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/source-cleanups",
@@ -700,7 +700,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1369",
+      "uiAction": "src/app/projects/[id]/page.tsx:1375",
       "capabilityId": "apollo.projects.validation-envelope-reuses.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/validation-envelope-reuses",
@@ -720,7 +720,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1410",
+      "uiAction": "src/app/projects/[id]/page.tsx:1416",
       "capabilityId": "apollo.projects.proof-needs.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-needs",
@@ -740,7 +740,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1450",
+      "uiAction": "src/app/projects/[id]/page.tsx:1456",
       "capabilityId": "apollo.projects.proof-integrity-runs.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-integrity-runs",
@@ -760,7 +760,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1492",
+      "uiAction": "src/app/projects/[id]/page.tsx:1498",
       "capabilityId": "apollo.projects.proof-mode-runs.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proof-mode-runs",
@@ -780,7 +780,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1553",
+      "uiAction": "src/app/projects/[id]/page.tsx:1559",
       "capabilityId": "apollo.projects.proof-mode-runs.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/proof-mode-runs",
@@ -800,7 +800,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1622",
+      "uiAction": "src/app/projects/[id]/page.tsx:1628",
       "capabilityId": "apollo.projects.annotations.list",
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects/{projectId}/annotations",
@@ -820,9 +820,9 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1643",
+      "uiAction": "src/app/projects/[id]/page.tsx:1649",
       "capabilityId": "apollo.projects.proxy-reviews.read",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
         "admitGovernedCapabilityService",
@@ -840,7 +840,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1898",
+      "uiAction": "src/app/projects/[id]/page.tsx:1904",
       "capabilityId": "apollo.projects.long-form-moments.search",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/long-form-moments",
@@ -860,7 +860,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:1974",
+      "uiAction": "src/app/projects/[id]/page.tsx:1980",
       "capabilityId": "apollo.projects.contiguous-extractions.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/contiguous-extractions",
@@ -880,7 +880,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2016",
+      "uiAction": "src/app/projects/[id]/page.tsx:2022",
       "capabilityId": "apollo.projects.manual-edits.apply",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/manual-edits",
@@ -901,7 +901,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2194",
+      "uiAction": "src/app/projects/[id]/page.tsx:2200",
       "capabilityId": "apollo.projects.version-comparisons.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/version-comparisons",
@@ -921,7 +921,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2200",
+      "uiAction": "src/app/projects/[id]/page.tsx:2206",
       "capabilityId": "apollo.projects.annotations.list",
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/projects/{projectId}/annotations",
@@ -941,7 +941,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2232",
+      "uiAction": "src/app/projects/[id]/page.tsx:2238",
       "capabilityId": "apollo.projects.version-comparisons.act",
       "capabilityVersion": "4.0.0",
       "endpoint": "POST /v1/projects/{projectId}/version-comparisons",
@@ -964,7 +964,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2397",
+      "uiAction": "src/app/projects/[id]/page.tsx:2403",
       "capabilityId": "apollo.projects.render-elements.resolve",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/render-elements",
@@ -984,7 +984,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2550",
+      "uiAction": "src/app/projects/[id]/page.tsx:2556",
       "capabilityId": "apollo.projects.annotations.create",
       "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/annotations",
@@ -1004,7 +1004,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2585",
+      "uiAction": "src/app/projects/[id]/page.tsx:2591",
       "capabilityId": "apollo.projects.review-patches.propose",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals",
@@ -1024,7 +1024,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2616",
+      "uiAction": "src/app/projects/[id]/page.tsx:2622",
       "capabilityId": "apollo.projects.review-patches.apply",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals/{proposalId}/apply",
@@ -1046,7 +1046,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2647",
+      "uiAction": "src/app/projects/[id]/page.tsx:2653",
       "capabilityId": "apollo.projects.review-patches.propose",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-proposals",
@@ -1066,7 +1066,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2663",
+      "uiAction": "src/app/projects/[id]/page.tsx:2669",
       "capabilityId": "apollo.projects.review-patch-batches.propose",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches",
@@ -1086,7 +1086,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2694",
+      "uiAction": "src/app/projects/[id]/page.tsx:2700",
       "capabilityId": "apollo.projects.review-patch-batches.apply",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/projects/{projectId}/patch-batches/{batchId}/apply",
@@ -1108,7 +1108,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2718",
+      "uiAction": "src/app/projects/[id]/page.tsx:2724",
       "capabilityId": "apollo.media.uploads.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/media/uploads/{uploadId}",
@@ -1127,7 +1127,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2723",
+      "uiAction": "src/app/projects/[id]/page.tsx:2729",
       "capabilityId": "apollo.media.uploads.begin",
       "capabilityVersion": "3.0.0",
       "endpoint": "POST /v1/media/uploads",
@@ -1146,7 +1146,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2737",
+      "uiAction": "src/app/projects/[id]/page.tsx:2743",
       "capabilityId": "apollo.media.uploads.session.issue",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/media/uploads/{uploadId}/session",
@@ -1165,7 +1165,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2742",
+      "uiAction": "src/app/projects/[id]/page.tsx:2748",
       "capabilityId": "apollo.media.uploads.content.put",
       "capabilityVersion": "1.0.0",
       "endpoint": "PUT /v1/media/uploads/{uploadId}/content",
@@ -1179,7 +1179,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2747",
+      "uiAction": "src/app/projects/[id]/page.tsx:2753",
       "capabilityId": "apollo.media.uploads.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/media/uploads/{uploadId}",
@@ -1198,7 +1198,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2756",
+      "uiAction": "src/app/projects/[id]/page.tsx:2762",
       "capabilityId": "apollo.media.uploads.content.put",
       "capabilityVersion": "1.0.0",
       "endpoint": "PUT /v1/media/uploads/{uploadId}/content",
@@ -1212,7 +1212,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2763",
+      "uiAction": "src/app/projects/[id]/page.tsx:2769",
       "capabilityId": "apollo.media.uploads.complete",
       "capabilityVersion": "2.1.0",
       "endpoint": "POST /v1/media/uploads/{uploadId}/complete",
@@ -1232,7 +1232,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2809",
+      "uiAction": "src/app/projects/[id]/page.tsx:2815",
       "capabilityId": "apollo.media.uploads.abort",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/media/uploads/{uploadId}/abort",
@@ -1251,7 +1251,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2864",
+      "uiAction": "src/app/projects/[id]/page.tsx:2870",
       "capabilityId": "apollo.projects.commands.apply",
       "capabilityVersion": "9.0.0",
       "endpoint": "POST /v1/projects/{projectId}/commands",
@@ -1275,7 +1275,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2913",
+      "uiAction": "src/app/projects/[id]/page.tsx:2919",
       "capabilityId": "apollo.projects.final-exports.enqueue",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/exports",
@@ -1295,9 +1295,9 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2943",
+      "uiAction": "src/app/projects/[id]/page.tsx:2949",
       "capabilityId": "apollo.projects.proxy-reviews.acknowledge-warnings",
-      "capabilityVersion": "1.0.0",
+      "capabilityVersion": "2.0.0",
       "endpoint": "POST /v1/projects/{projectId}/proxy-reviews",
       "applicationServices": [
         "acknowledgeProxyWarningsService",
@@ -1315,7 +1315,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:2986",
+      "uiAction": "src/app/projects/[id]/page.tsx:2992",
       "capabilityId": "apollo.projects.source-cleanups.create",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/source-cleanups",
@@ -1335,7 +1335,7 @@
       ]
     },
     {
-      "uiAction": "src/app/projects/[id]/page.tsx:3056",
+      "uiAction": "src/app/projects/[id]/page.tsx:3062",
       "capabilityId": "apollo.projects.validation-envelope-reuses.approve",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/validation-envelope-reuses/{reusePlanId}/approval",
@@ -1993,6 +1993,28 @@
       "endpoint": "GET /v1/tools",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/agent-tool-list/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.subtitle-styles.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/subtitle-styles",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/subtitle-style-registry/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.subtitle-styles.preview",
+      "exposure": "public",
+      "endpoint": "POST /v1/subtitle-styles",
+      "inputSchemaRef": "apollo://schemas/subtitle-css-preview-request/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-css-preview/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -3110,6 +3132,17 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.reframe-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/reframe-plans",
+      "inputSchemaRef": "apollo://schemas/reframe-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/reframe-plan/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.semantic-search.documents.catalog",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/semantic-search/documents",
@@ -3891,6 +3924,17 @@
       ]
     },
     {
+      "capabilityId": "apollo.responsive-placement.solve",
+      "exposure": "public",
+      "endpoint": "POST /v1/responsive-placement/solve",
+      "inputSchemaRef": "apollo://schemas/responsive-placement-request/v2",
+      "outputSchemaRef": "apollo://schemas/responsive-placement-result/v2",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.editorial-grammar.evaluate",
       "exposure": "public",
       "endpoint": "POST /v1/editorial-grammar/evaluations",
@@ -4027,7 +4071,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/projects/{projectId}/proxy-reviews",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/project-proxy-review-response/v1",
+      "outputSchemaRef": "apollo://schemas/project-proxy-review-response/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4038,7 +4082,7 @@
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/proxy-reviews",
       "inputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1",
-      "outputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-result/v1",
+      "outputSchemaRef": "apollo://schemas/project-proxy-review-warning-acknowledgement-result/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
@@ -4237,6 +4281,28 @@
       "endpoint": "POST /v1/projects/{projectId}/lut-selection",
       "inputSchemaRef": "apollo://schemas/project-lut-selection-set-request/v1",
       "outputSchemaRef": "apollo://schemas/project-lut-selection-applied/v3",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.subtitle-configuration.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/subtitle-configuration",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/project-subtitle-configuration-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.subtitle-configuration.set",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/subtitle-configuration",
+      "inputSchemaRef": "apollo://schemas/project-subtitle-configuration-set-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-subtitle-configuration-applied/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

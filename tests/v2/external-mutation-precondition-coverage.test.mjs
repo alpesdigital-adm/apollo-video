@@ -36,6 +36,9 @@ const coverage = Object.freeze({
   'apollo.editorial-grammar.evaluate': {
     mode: 'read-only-preflight', evidence: 'deterministic content-addressed editorial grammar evaluation with no persistence',
   },
+  'apollo.responsive-placement.solve': {
+    mode: 'read-only-preflight', evidence: 'deterministic content-addressed format-specific placement evaluation with no persistence',
+  },
   'apollo.artifacts.render.enqueue': {
     mode: 'idempotent-create', evidence: 'F0-066',
   },
@@ -314,6 +317,9 @@ const coverage = Object.freeze({
   'apollo.projects.lut-selection.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus resolved workspace default or active LUT',
   },
+  'apollo.projects.subtitle-configuration.set': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus the per-variant configuration head the command claims to replace',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
   },
@@ -570,14 +576,14 @@ test('the current public surface has no unguarded state replacement', () => {
     return result
   }, {})
   assert.deepEqual(counts, {
-    'read-only-preflight': 3,
+    'read-only-preflight': 4,
     'explicit-precondition': 10,
     'idempotent-create': 54,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,
-    'base-version-bound-action': 6,
+    'base-version-bound-action': 7,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,

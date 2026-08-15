@@ -120,6 +120,8 @@ model V2Workspace {
   workspaceLutDefaultVersions            V2WorkspaceLutDefaultVersion[]
   projectLutSelections                   V2ProjectLutSelection[]
   projectLutSelectionHeads               V2ProjectLutSelectionHead[]
+  projectSubtitleConfigurations          V2ProjectSubtitleConfiguration[]
+  projectSubtitleConfigurationHeads      V2ProjectSubtitleConfigurationHead[]
   semanticReuseRuns                      V2SemanticReuseRun[]
   hierarchicalProcessingRuns             V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks           V2HierarchicalProcessingChunk[]
@@ -623,6 +625,8 @@ model V2Project {
   colorPipelineCompilations              V2ColorPipelineCompilation[]
   lutSelections                          V2ProjectLutSelection[]
   lutSelectionHead                       V2ProjectLutSelectionHead?
+  subtitleConfigurations                 V2ProjectSubtitleConfiguration[]
+  subtitleConfigurationHeads             V2ProjectSubtitleConfigurationHead[]
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
@@ -813,6 +817,8 @@ model V2ProjectVersion {
   mvpCoreGatesAsCompanion       V2MvpCoreGate[]                 @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase           V2ProjectLutSelection[]         @relation("ProjectLutSelectionBase")
   lutSelectionAsResult          V2ProjectLutSelection?          @relation("ProjectLutSelectionResult")
+  subtitleConfigurationsAsBase  V2ProjectSubtitleConfiguration[] @relation("ProjectSubtitleConfigurationBase")
+  subtitleConfigurationAsResult V2ProjectSubtitleConfiguration?  @relation("ProjectSubtitleConfigurationResult")
   creationCommand               V2ProjectCreationCommand?
   artifactInvalidationsAsBase   V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationResultVersion")
@@ -856,6 +862,7 @@ model V2EditCommand {
   resultVersion         V2ProjectVersion?               @relation("CommandResultVersion")
   directorRun           V2DirectorRun?                  @relation("DirectorRunCommand")
   lutSelection          V2ProjectLutSelection?
+  subtitleConfiguration V2ProjectSubtitleConfiguration?
   artifactInvalidations V2CommandArtifactInvalidation[]
   proxyReuseOperations  V2ProjectProxyRenderOperation[] @relation("ProjectProxyReuseCommand")
 
@@ -2041,6 +2048,61 @@ model V2ProjectLutSelection {
   @@map("project_lut_selections")
 }
 
+model V2ProjectSubtitleConfigurationHead {
+  workspaceId    String   @db.VarChar(128)
+  projectId      String   @db.VarChar(128)
+  variantId      String   @db.VarChar(128)
+  configurationId String  @db.VarChar(128)
+  updatedAt      DateTime @db.Timestamptz(3)
+
+  workspace     V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project       V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  configuration V2ProjectSubtitleConfiguration @relation(fields: [configurationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([projectId, workspaceId, variantId])
+  @@unique([configurationId, workspaceId])
+  @@map("project_subtitle_configuration_heads")
+}
+
+model V2ProjectSubtitleConfiguration {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  commandId                String   @db.VarChar(128)
+  baseVersionId            String   @db.VarChar(128)
+  resultVersionId          String   @db.VarChar(128)
+  variantId                String   @db.VarChar(128)
+  action                   String   @db.VarChar(16)
+  previousConfigurationId  String?  @db.VarChar(128)
+  requestedMode            String   @db.VarChar(32)
+  resolvedPresetId         String?  @db.VarChar(64)
+  resolvedPresetHash       String?  @db.Char(64)
+  origin                   String   @db.VarChar(16)
+  transcriptHash           String   @db.Char(64)
+  workspaceDefaultRevision Int?
+  configurationJson        String   @db.Text
+  configurationHash        String   @db.Char(64)
+  impactJson               String   @db.Text
+  impactHash               String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command            V2EditCommand                    @relation(fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion        V2ProjectVersion                 @relation("ProjectSubtitleConfigurationBase", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion      V2ProjectVersion                 @relation("ProjectSubtitleConfigurationResult", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousConfiguration V2ProjectSubtitleConfiguration?  @relation("ProjectSubtitleConfigurationChain", fields: [previousConfigurationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacedBy         V2ProjectSubtitleConfiguration[] @relation("ProjectSubtitleConfigurationChain")
+  currentForProjects V2ProjectSubtitleConfigurationHead[]
+
+  @@unique([id, workspaceId])
+  @@unique([commandId, workspaceId])
+  @@unique([resultVersionId, workspaceId])
+  @@unique([previousConfigurationId, workspaceId])
+  @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)])
+  @@map("project_subtitle_configurations")
+}
+
 model V2MediaArtifactLineage {
   id               String   @id @db.VarChar(128)
   workspaceId      String   @db.VarChar(128)
@@ -2882,11 +2944,13 @@ model V2ProxyReview {
   proxyArtifactId      String    @db.VarChar(128)
   proxyManifestId      String    @db.VarChar(128)
   inputHash            String    @db.Char(64)
+  outputSpecId         String    @db.VarChar(128)
   rangeCacheKey        String    @db.Char(64)
   specJson             String    @db.Text
   status               String    @db.VarChar(32)
   technicalIssuesJson  String    @db.Text
   criticIssuesJson     String    @db.Text
+  formatQualityJson    String?   @db.Text
   warningsAcknowledged Boolean   @default(false)
   finalAllowed         Boolean   @default(false)
   reviewHash           String    @db.Char(64)
@@ -2917,6 +2981,7 @@ model V2ProxyReview {
   @@unique([workspaceId, projectVersionId, inputHash])
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, projectVersionId, status])
+  @@index([workspaceId, projectVersionId, outputSpecId, finalAllowed], map: "proxy_reviews_workspaceId_projectVersionId_outputSpecId_fin_idx")
   @@index([workspaceId, proxyArtifactId])
   @@index([workspaceId, finalAllowed, updatedAt(sort: Desc)])
   @@map("proxy_reviews")

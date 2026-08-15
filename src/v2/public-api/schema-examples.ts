@@ -1,6 +1,11 @@
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
+import {
+  createProjectSubtitleConfiguration,
+  createProjectSubtitleConfigurationImpact,
+} from '../domain/project-subtitle-configuration.ts'
+import { subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
   MVP_CORE_ACCEPTANCE_CRITERIA,
@@ -12,6 +17,8 @@ import {
 } from '../domain/editorial-grammar.ts'
 import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
+import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
+import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -745,6 +752,7 @@ const proxyReviewExample = {
   proxyArtifactId: 'artifact-editorial-proxy-example-1',
   proxyManifestId: 'manifest-editorial-proxy-example-1',
   inputHash: '8'.repeat(64),
+  outputSpecId: 'preset-9x16',
   rangeCacheKey: '9'.repeat(64),
   spec: {
     width: 540,
@@ -757,14 +765,26 @@ const proxyReviewExample = {
   status: 'warning-ack-required',
   technicalIssues: [],
   criticIssues: [{
-    code: 'PATTERN_DENSITY',
+    code: 'OUTPUT_SAFE_AREA',
     severity: 'warning',
     category: 'editorial',
-    message: 'Pattern breaks are dense in this range.',
+    message: 'subtitle leaves the 9:16 safe area.',
     rangeMs: [2000, 4200],
-    targetId: 'scene-example-1',
+    targetId: 'subtitle-example-1',
+    outputSpecId: 'preset-9x16',
+    outputPresetHash: 'c'.repeat(64),
+    evidenceRange: { startFrame: 60, endFrame: 126 },
+    elementIds: ['subtitle-example-1'],
+    evidenceIds: ['render-map:' + '8'.repeat(64)],
     correctable: true,
   }],
+  formatQuality: {
+    outputPresetHash: 'c'.repeat(64),
+    status: 'warning',
+    exportAllowed: true,
+    explanation: 'preset-9x16 (9:16) is exportable with 1 warning reason code(s): OUTPUT_SAFE_AREA. No hard clipping, subject visibility or subtitle collision issue was found.',
+    reportHash: 'd'.repeat(64),
+  },
   warningsAcknowledged: false,
   finalAllowed: false,
   uploadReceivedAt: '2026-07-12T19:58:00.000Z',
@@ -774,6 +794,15 @@ const proxyReviewExample = {
   revision: 1,
   createdAt,
   updatedAt: createdAt,
+}
+const {
+  outputSpecId: _legacyProxyOutputSpecId,
+  formatQuality: _legacyProxyFormatQuality,
+  ...proxyReviewExampleWithoutOutput
+} = proxyReviewExample
+const proxyReviewExampleV1 = {
+  ...proxyReviewExampleWithoutOutput,
+  criticIssues: proxyReviewExample.criticIssues.map(({ outputSpecId: _o, outputPresetHash: _p, evidenceRange: _r, elementIds: _e, evidenceIds: _v, ...issue }) => issue),
 }
 const assetBriefExample = {
   intention: 'Reforçar visualmente o ganho de clareza sem interromper a fala.',
@@ -5092,10 +5121,116 @@ const perceptionInputCoverage = perceptionKinds.map((kind) => ({ kind, ranges: k
 const perceptionCoverage = perceptionInputCoverage.map((entry) => ({ ...entry, state: entry.ranges.length ? 'complete' : 'absent', observedMs: entry.ranges.length ? 3_000 : 0 }))
 const perceptionTimeline = { schemaVersion: 1, durationMs: 3_000, observations: [perceptionObservation], coverage: perceptionCoverage, inventedValues: 0, timelineHash: 'c'.repeat(64) }
 
+/**
+ * Subtitle examples come out of the real factories, so the published preset hash is
+ * the hash of the registered preset and the impact hash is the hash of a document
+ * the declared parser accepts.
+ */
+const projectSubtitleConfigurationExample = createProjectSubtitleConfiguration({
+  id: 'project-subtitle-configuration-example-1',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-1', resultVersionId: 'project-version-example-subtitle-2',
+  commandId: 'project-subtitle-command-example-1', variantId: '9:16',
+  action: 'set', previousConfigurationId: null,
+  requested: { mode: 'manual', presetId: 'caps-stroke', presetVersion: 1 },
+  resolved: { enabled: true, ...subtitlePresetReference('caps-stroke') },
+  origin: 'project',
+  transcriptHash: 'b'.repeat(64),
+  createdAt,
+})
+const projectSubtitleDisabledConfigurationExample = createProjectSubtitleConfiguration({
+  id: 'project-subtitle-configuration-example-2',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-subtitle-2', resultVersionId: 'project-version-example-subtitle-3',
+  commandId: 'project-subtitle-command-example-2', variantId: '9:16',
+  action: 'revert', previousConfigurationId: projectSubtitleConfigurationExample.id,
+  requested: { mode: 'none' },
+  resolved: { enabled: false },
+  origin: 'disabled',
+  transcriptHash: 'b'.repeat(64),
+  createdAt,
+})
+const projectSubtitleConfigurationImpactExample = createProjectSubtitleConfigurationImpact({
+  commandId: projectSubtitleConfigurationExample.commandId,
+  baseVersionId: projectSubtitleConfigurationExample.baseVersionId,
+  resultVersionId: projectSubtitleConfigurationExample.resultVersionId,
+  variantId: '9:16',
+  configurationId: projectSubtitleConfigurationExample.id,
+  configurationHash: projectSubtitleConfigurationExample.configurationHash,
+  action: 'set', requestedMode: 'manual', origin: 'project',
+  resolvedPresetId: 'caps-stroke', resolvedPresetHash: subtitlePresetReference('caps-stroke').presetHash,
+  transcriptHash: projectSubtitleConfigurationExample.transcriptHash,
+  durationFrames: 2380,
+  affectedArtifacts: [{ artifactId: 'artifact-project-subtitle-proxy-example-1', kind: 'proxy', sourceVersionId: projectSubtitleConfigurationExample.baseVersionId, variantId: '9:16' }],
+})
+const projectSubtitleDisabledImpactExample = createProjectSubtitleConfigurationImpact({
+  commandId: projectSubtitleDisabledConfigurationExample.commandId,
+  baseVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId,
+  resultVersionId: projectSubtitleDisabledConfigurationExample.resultVersionId,
+  variantId: '9:16',
+  configurationId: projectSubtitleDisabledConfigurationExample.id,
+  configurationHash: projectSubtitleDisabledConfigurationExample.configurationHash,
+  action: 'revert', requestedMode: 'none', origin: 'disabled',
+  transcriptHash: projectSubtitleDisabledConfigurationExample.transcriptHash,
+  durationFrames: 0,
+  affectedArtifacts: [],
+})
+const subtitleResolutionOf = (configuration: typeof projectSubtitleConfigurationExample) => ({
+  configurationId: configuration.id, configurationHash: configuration.configurationHash, variantId: configuration.variantId,
+  action: configuration.action, previousConfigurationId: configuration.previousConfigurationId,
+  mode: configuration.requested.mode, origin: configuration.origin, enabled: configuration.resolved.enabled,
+  presetId: configuration.resolved.enabled ? configuration.resolved.presetId : null,
+  presetVersion: configuration.resolved.enabled ? configuration.resolved.presetVersion : null,
+  presetHash: configuration.resolved.enabled ? configuration.resolved.presetHash : null,
+  workspaceDefaultRevision: configuration.workspaceDefaultRevision ?? null,
+  transcriptHash: configuration.transcriptHash, createdAt: configuration.createdAt,
+})
+const projectSubtitleConfigurationResultExample = {
+  command: { id: projectSubtitleConfigurationExample.commandId, type: 'set-project-subtitle-mode', baseVersionId: projectSubtitleConfigurationExample.baseVersionId, author: { type: 'api-client', id: clientId }, reason: 'Fixar o preset aprovado nesta variante.', createdAt },
+  version: { id: projectSubtitleConfigurationExample.resultVersionId, sequence: 2, parentVersionId: projectSubtitleConfigurationExample.baseVersionId, baseHash: 'd'.repeat(64), current: true, previewAvailable: false, createdAt },
+  configuration: projectSubtitleConfigurationExample,
+  resolution: subtitleResolutionOf(projectSubtitleConfigurationExample),
+  impact: projectSubtitleConfigurationImpactExample,
+  replayed: false,
+}
+const projectSubtitleDisabledResultExample = {
+  command: { id: projectSubtitleDisabledConfigurationExample.commandId, type: 'set-project-subtitle-mode', baseVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId, author: { type: 'api-client', id: clientId }, createdAt },
+  version: { id: projectSubtitleDisabledConfigurationExample.resultVersionId, sequence: 3, parentVersionId: projectSubtitleDisabledConfigurationExample.baseVersionId, baseHash: 'e'.repeat(64), current: true, previewAvailable: false, createdAt },
+  configuration: projectSubtitleDisabledConfigurationExample,
+  resolution: subtitleResolutionOf(projectSubtitleDisabledConfigurationExample),
+  impact: projectSubtitleDisabledImpactExample,
+  replayed: false,
+}
+
+/**
+ * The retired v1 result shape, kept published for clients that pinned it. The runtime only ever
+ * emits v2 — this literal documents the older contract without keeping a legacy code path.
+ */
+const responsivePlacementResultV1Example = (() => {
+  const { subtitleRegion: _subtitleRegion, ...body } = RESPONSIVE_VISUAL_GOLDENS[0]!.placement
+  return Object.freeze({ ...body, schemaVersion: 'responsive-placement/v1' as const })
+})()
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
     'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
+    'apollo://schemas/responsive-placement-request/v1': [{
+      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
+      protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
+    }],
+    'apollo://schemas/responsive-placement-result/v1': [{ data: responsivePlacementResultV1Example, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/responsive-placement-request/v2': [{
+      outputSpec: OUTPUT_FORMAT_REGISTRY.presets['9:16'].spec,
+      elements: [{ id: 'subtitle-example-1', kind: 'subtitle', anchor: 'auto', priority: 10, readingOrder: 0, minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.3 }],
+      protectedRegions: [{ id: 'face-example-1', kind: 'face', x: 0.35, y: 0.15, width: 0.3, height: 0.35 }],
+      subtitlePresetId: 'kinetic',
+    }],
+    'apollo://schemas/responsive-placement-result/v2': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY],
+    'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
+    'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
     'apollo://schemas/montage-alternatives-created/v1': [{ data: { run: montageRunExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/montage-alternatives-read/v1': [{ data: { run: montageRunExample }, meta: { apiVersion: 'v1' } }],
@@ -8252,6 +8387,23 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       schemaVersion: 'narrative-safety-decision/v1', projectVersionId: 'project-version-narrative-1', projectVersionBaseHash: 'a'.repeat(64), storyPlanId: 'story-plan-narrative-1', storySnapshotHash: 'b'.repeat(64), contextHash: 'c'.repeat(64), safe: false,
       issues: [{ schemaVersion: 'narrative-quality-issue/v1', code: 'DEPENDENCY_REMOVED', severity: 'hard', category: 'integrity', statementId: 'statement-promise', rangeMs: [4000, 7000], evidence: [{ kind: 'dependency', ref: 'proof:statement-proof' }], restoreAction: { kind: 'restore-dependency', statementId: 'statement-promise', sourceRangeMs: [4000, 7000], refs: ['statement-proof'] } }], preflightHash: 'd'.repeat(64),
     } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/reframe-plan-request/v1': [{
+      baseVersionId: 'project-version-reframe-1', format: '9:16',
+      observationSet: {
+        schemaVersion: 'reframe-observations/v1', id: 'observations-reframe-example', sourceArtifactId: artifactId,
+        sourceManifestId: 'manifest-reframe-example', sourceSha256: 'a'.repeat(64), sourceWidth: 1920, sourceHeight: 1080,
+        fps: 30, durationFrames: 90, contentHash: 'b'.repeat(64),
+        observations: [{ id: 'roi-face-example', subjectId: 'person-example', kind: 'face', startFrame: 0, endFrame: 90, bounds: { x: 0.42, y: 0.2, width: 0.16, height: 0.24 }, confidence: 0.98, priority: 100, critical: true }],
+      },
+      maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
+    }],
+    'apollo://schemas/reframe-plan/v1': [{ data: { plan: {
+      schemaVersion: 'reframe-plan/v1', format: '9:16', observationSetId: 'observations-reframe-example', observationSetHash: 'b'.repeat(64),
+      outputFormatRegistryHash: OUTPUT_FORMAT_REGISTRY.registryHash, outputPresetHash: OUTPUT_FORMAT_REGISTRY.presets['9:16'].presetHash,
+      maxVelocityPerSecond: 0.35, maxAccelerationPerSecondSquared: 0.8, safetyMargin: 0.02,
+      segments: [{ startFrame: 0, endFrame: 90, mode: 'crop', crop: { x: 0.341796875, y: 0, width: 0.31640625, height: 1 }, source: 'face', observationIds: ['roi-face-example'], subjectIds: ['person-example'], velocity: { x: 0, y: 0 } }],
+      issues: [], planHash: 'c'.repeat(64),
+    } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/catalog-semantic-search-document-request/v1': [
       {
         source: {
@@ -9716,6 +9868,21 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/editorial-cut-impact/v1': [editorialCutImpactExample],
     'apollo://schemas/director-run-impact/v1': [directorRunImpactExample],
     'apollo://schemas/project-lut-selection-impact/v1': [projectLutSelectionImpactExample, projectLutSelectionDeferredImpactExample],
+    'apollo://schemas/project-subtitle-configuration-impact/v1': [projectSubtitleConfigurationImpactExample, projectSubtitleDisabledImpactExample],
+    'apollo://schemas/project-subtitle-configuration-set-request/v1': [
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', mode: 'manual', presetId: 'caps-stroke', presetVersion: 1, reason: 'Fixar o preset aprovado nesta variante.' },
+      { baseVersionId: 'project-version-example-1', baseHash: 'a'.repeat(64), variantId: '9:16', action: 'set', mode: 'workspace-default' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', mode: 'none' },
+      { baseVersionId: 'project-version-example-subtitle-2', baseHash: 'd'.repeat(64), variantId: '9:16', action: 'revert' },
+    ],
+    'apollo://schemas/project-subtitle-configuration-applied/v1': [
+      { data: projectSubtitleConfigurationResultExample, meta: { apiVersion: 'v1' } },
+      { data: projectSubtitleDisabledResultExample, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/project-subtitle-configuration-response/v1': [
+      { data: { result: projectSubtitleConfigurationResultExample }, meta: { apiVersion: 'v1' } },
+      { data: { result: null }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/project-edit-command-applied/v3': [
       {
         data: {
@@ -10637,9 +10804,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/project-policy-overrides-applied/v1': [{ data: projectPolicyAppliedExample, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/project-proxy-review-response/v1': [
       {
-        data: { review: proxyReviewExample },
+        data: { review: proxyReviewExampleV1 },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/project-proxy-review-response/v2': [
+      { data: { review: proxyReviewExample }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-proxy-review-warning-acknowledgement-request/v1': [
       {
@@ -10654,7 +10824,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           review: {
-            ...proxyReviewExample,
+            ...proxyReviewExampleV1,
             status: 'ready-for-final',
             warningsAcknowledged: true,
             finalAllowed: true,
@@ -10671,6 +10841,16 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
             resultReviewHash: 'b'.repeat(64),
             createdAt,
           },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/project-proxy-review-warning-acknowledgement-result/v2': [
+      {
+        data: {
+          review: { ...proxyReviewExample, status: 'ready-for-final', warningsAcknowledged: true, finalAllowed: true, reviewHash: 'b'.repeat(64), revision: 2, acknowledgedBy: { type: 'api-client', id: clientId, at: createdAt } },
+          decision: { id: 'proxy-review-decision-example-1', proxyReviewId: proxyReviewExample.id, action: 'acknowledge-warnings', actor: { type: 'api-client', id: clientId }, baseReviewHash: proxyReviewExample.reviewHash, resultReviewHash: 'b'.repeat(64), createdAt },
           replayed: false,
         },
         meta: { apiVersion: 'v1' },

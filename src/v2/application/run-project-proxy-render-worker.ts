@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
+import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
+import type { OutputAspectRatio } from '../domain/output-spec.ts'
+import { createRenderPlacementPlan, validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
+import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
+import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -152,6 +157,44 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
       const audioTimelineHash = createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before proxy render')
+      // ---- Materialized geometry, decided and validated before the renderer is asked to run ----
+      const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
+      const durationFrames = source.editPlan.durationFrames
+      const subtitleResolution = source.subtitleResolution
+      if (subtitleResolution) {
+        // A resolution persisted against another registry revision (or a tampered preset hash) can
+        // never reach the renderer: the subtitle geometry it implies would not be the one drawn.
+        if (
+          subtitleResolution.registryHash !== SUBTITLE_STYLE_REGISTRY.registryHash ||
+          (subtitleResolution.enabled && subtitleResolution.presetHash !== subtitlePresetHash(subtitleResolution.presetId))
+        ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle resolution drifted from the subtitle style registry')
+      }
+      const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
+        id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
+        kind: 'cta' as const, anchor: 'auto' as const, priority: 80, readingOrder: index,
+        minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
+        timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
+      }))
+      const placementPlan = createRenderPlacementPlan({
+        format: source.format as OutputAspectRatio,
+        canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
+        durationFrames,
+        // The subtitle band is reserved from the *resolved* preset, so a CTA is never solved into
+        // the rows the subtitles already own — and never from a rectangle authored here.
+        subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
+        elements: placementElements,
+      })
+      validateRenderPlacementPlan(placementPlan)
+      const reframePlan = source.reframePlan
+      if (reframePlan) {
+        validateRenderReframePlan(reframePlan)
+        if (
+          reframePlan.variantId !== source.format ||
+          reframePlan.format !== source.format ||
+          reframePlan.durationFrames !== durationFrames ||
+          Math.abs(reframePlan.fps - source.editPlan.fps) > 0.01
+        ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted reframe plan does not describe this render')
+      }
       await enter('rendering')
       const materializedSources = await Promise.all(source.renderSources.map((asset) =>
         dependencies.sources.materialize({
@@ -181,6 +224,8 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         clips, audioTimelineHash, fps: source.editPlan.fps, format: source.format, subtitleCues,
         ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions, ...(composition ? { composition } : {}),
+        placementPlan,
+        ...(reframePlan ? { reframePlan } : {}),
         ...(source.rangeReuse ? {
           rangeReuse: {
             ...source.rangeReuse,
@@ -209,7 +254,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,
@@ -272,6 +317,16 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             }
           : {}),
         criticIssues: source.criticIssues,
+        // The critic runs on the rendered proxy, after the geometry above was materialized, and
+        // every issue it produces is bound to the exact plans that produced these frames.
+        formatCritic: {
+          outputSpecId: outputPreset.spec.id,
+          placementPlanHash: placementPlan.placementPlanHash,
+          reframePlanHash: reframePlan?.reframePlanHash ?? null,
+          // Subject evidence persisted for this variant. Forwarded untouched: without it the
+          // subject-dependent reason codes could never fire on a real render.
+          ...(source.formatSubjects ? { subjects: source.formatSubjects } : {}),
+        },
       })
       await dependencies.proxyReviews.persistGenerated({
         id: `proxy-review-${createHash('sha256').update(operation.id).digest('hex').slice(0, 32)}`,

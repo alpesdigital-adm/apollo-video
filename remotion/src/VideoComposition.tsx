@@ -109,6 +109,8 @@ export const VideoComposition: React.FC<CompositionProps> = ({
   palette,
   stylePreset,
   subtitleStyle,
+  subtitlePreset,
+  subtitleFormat,
   hookTitle,
   fontSrc,
   fontFamily,
@@ -618,6 +620,9 @@ export const VideoComposition: React.FC<CompositionProps> = ({
         subtitleStyle={subtitleStyle}
         topFactor={subtitleTopFactor}
         hideFactor={subtitleHideFactor}
+        fontFamily={fontFamily}
+        subtitlePreset={subtitlePreset!}
+        subtitleFormat={subtitleFormat!}
       />
 
       {/* Persistent hook headline (top) — renders nothing when unset; hides

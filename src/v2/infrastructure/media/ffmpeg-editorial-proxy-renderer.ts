@@ -9,6 +9,8 @@ import { MAX_PARTIAL_RENDER_RANGES } from '../../application/ports/project-proxy
 import { assertClipRate, timelineSpanForRate } from '../../domain/clip-timing.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
+import { validateRenderPlacementPlan, type RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
+import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -137,6 +139,93 @@ function normalizedCropFilter(
     throw new DomainError('INVALID_RENDER_INPUT', 'Editorial clip crop has no encodable pixels')
   }
   return `crop=${width}:${height}:${x}:${y},`
+}
+
+const evenFloor = (value: number, maximum: number): number =>
+  Math.max(0, Math.min(maximum, Math.floor(value / 2) * 2))
+
+/**
+ * Deterministic crop for one reframe range.
+ *
+ * A single keyframe collapses to the constant `crop=w:h:x:y` the renderer already emitted. Two or
+ * more keyframes become an FFmpeg expression on `n` — the crop filter re-evaluates `x`/`y` for
+ * every frame, so the trajectory is computed by the filter itself instead of being approximated by
+ * a stack of trimmed segments. Frame indices are integers and the piecewise slopes are fixed at
+ * build time, so two runs of the same plan emit byte-identical filter strings.
+ *
+ * Crop *size* is constant by construction (the plan rejects a changing one), because a stream
+ * whose frame size changes mid-clip cannot be encoded deterministically.
+ */
+export function buildReframeCropFilter(input: Readonly<{
+  range: Readonly<RenderReframeRangeV1>
+  source: Readonly<{ width: number; height: number }>
+}>): string {
+  const { range, source } = input
+  const first = range.keyframes[0]!
+  const availableWidth = source.width - source.width % 2
+  const availableHeight = source.height - source.height % 2
+  const width = Math.min(availableWidth, Math.floor(first.crop.width * source.width / 2) * 2)
+  const height = Math.min(availableHeight, Math.floor(first.crop.height * source.height / 2) * 2)
+  if (width < 2 || height < 2) throw new DomainError('INVALID_RENDER_INPUT', 'Reframe crop has no encodable pixels')
+  const maxX = availableWidth - width
+  const maxY = availableHeight - height
+  if (range.keyframes.length === 1) {
+    return `crop=${width}:${height}:${evenFloor(first.crop.x * source.width, maxX)}:${evenFloor(first.crop.y * source.height, maxY)},`
+  }
+  const axis = (key: 'x' | 'y', scale: number, limit: number): string => {
+    const points = range.keyframes.map((keyframe) => Object.freeze({
+      frame: keyframe.frame - range.startFrame,
+      value: Math.max(0, Math.min(limit, keyframe.crop[key] * scale)),
+    }))
+    let expression = points.at(-1)!.value.toFixed(4)
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      const from = points[index]!
+      const to = points[index + 1]!
+      const slope = (to.value - from.value) / (to.frame - from.frame)
+      const segment = range.interpolation === 'hold'
+        ? from.value.toFixed(4)
+        : `${from.value.toFixed(4)}+(${slope.toFixed(6)})*(n-${from.frame})`
+      expression = `if(lt(n,${to.frame}),${segment},${expression})`
+    }
+    return `2*floor(min(max(${expression},0),${limit})/2)`
+  }
+  // Single quotes keep the commas of the expression inside one filter argument.
+  return `crop=${width}:${height}:'${axis('x', source.width, maxX)}':'${axis('y', source.height, maxY)}',`
+}
+
+/**
+ * Painter-ordered overlay chain for the drawable placements of a plan. Each asset is scaled to the
+ * pixel box its normalized bounds describe and gated by `enable='between(n,start,end-1)'` — the
+ * half-open `[startFrame, endFrame)` interval of the plan, expressed in FFmpeg's inclusive form.
+ */
+export function buildPlacementOverlayFilters(input: Readonly<{
+  plan: Readonly<RenderPlacementPlanV1>
+  assetInputIndexByElementId: Readonly<Record<string, number>>
+  inputLabel: string
+  outputLabel: string
+}>): readonly string[] {
+  const drawable = input.plan.placements.filter((placement) => placement.assetArtifactId !== null)
+  if (!drawable.length) return Object.freeze([`[${input.inputLabel}]null[${input.outputLabel}]`])
+  const { width, height } = input.plan.canvas
+  const filters: string[] = []
+  let current = input.inputLabel
+  drawable.forEach((placement, index) => {
+    const inputIndex = input.assetInputIndexByElementId[placement.elementId]
+    if (inputIndex === undefined) throw new DomainError('INVALID_RENDER_INPUT', 'Placement asset input is missing')
+    const boxWidth = Math.max(2, Math.round(placement.bounds.width * width / 2) * 2)
+    const boxHeight = Math.max(2, Math.round(placement.bounds.height * height / 2) * 2)
+    const x = Math.max(0, Math.min(width - boxWidth, Math.round(placement.bounds.x * width)))
+    const y = Math.max(0, Math.min(height - boxHeight, Math.round(placement.bounds.y * height)))
+    const next = index === drawable.length - 1 ? input.outputLabel : `geo${index + 1}`
+    filters.push(`[${inputIndex}:v]scale=${boxWidth}:${boxHeight},format=rgba,setsar=1[plc${index}]`)
+    filters.push(
+      `[${current}][plc${index}]overlay=${x}:${y}:` +
+      `enable='between(n,${placement.timeRange.startFrame},${placement.timeRange.endFrame - 1})':` +
+      `eof_action=repeat[${next}]`,
+    )
+    current = next
+  })
+  return Object.freeze(filters)
 }
 
 type PartialRange = Readonly<{ startFrame: number; endFrame: number }>
@@ -384,6 +473,13 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const slices = ranges.map((range) => sliceRenderRange(input, range))
     for (const slice of slices) for (const clip of slice.clips) assertClipTimeline(clip)
     const renderClips = rangeReuse ? slices.flatMap((slice) => slice.clips) : input.clips
+    // Structural and content-address checks on the materialized geometry run
+    // BEFORE any FFmpeg process starts. They need nothing but the plans
+    // themselves, so a tampered `placementPlanHash`/`reframePlanHash` must never
+    // buy even the colour-normalization pre-pass below. The richer checks that
+    // depend on probes and canvas dimensions stay where they are.
+    if (input.reframePlan) validateRenderReframePlan(input.reframePlan)
+    if (input.placementPlan) validateRenderPlacementPlan(input.placementPlan)
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
     const renderSources = await Promise.all(input.sources.map(async (source, index) => {
@@ -473,6 +569,63 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const stagingHeight = stagingProbe.height
     const outputPath = join(directory, input.renderKind === 'final' ? 'editorial-final.mp4' : 'editorial-proxy.mp4')
     const [width, height] = dimensions
+    // ---- Materialized geometry: validated before a single frame is produced ----
+    const reframePlan = input.reframePlan
+    const reframeRangeByClipId = new Map<string, Readonly<RenderReframeRangeV1>>()
+    if (reframePlan) {
+      if (rangeReuse) throw new DomainError('INVALID_RENDER_INPUT', 'A reframe plan cannot be combined with partial range reuse')
+      validateRenderReframePlan(reframePlan)
+      if (
+        reframePlan.format !== input.format ||
+        reframePlan.durationFrames !== fullExpectedFrames ||
+        Math.abs(reframePlan.fps - outputFps) > 0.01 ||
+        reframePlan.ranges.length !== input.clips.length
+      ) throw new DomainError('INVALID_RENDER_INPUT', 'Reframe plan does not describe this render input')
+      for (const clip of input.clips) {
+        const range = reframePlan.ranges.find((candidate) => candidate.clipId === clip.id)
+        if (
+          !range || range.startFrame !== clip.timelineInFrame || range.endFrame !== clip.timelineOutFrame
+        ) throw new DomainError('INVALID_RENDER_INPUT', 'Reframe range does not cover its clip exactly')
+        const probe = videoProbeByArtifactId.get(clip.sourceArtifactId)
+        if (!probe || probe.width !== reframePlan.source.width || probe.height !== reframePlan.source.height) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Reframe plan source dimensions do not match the rendered source')
+        }
+        // `n` inside the crop filter counts source frames, so a trajectory is only reproducible
+        // frame-for-frame on a real-time clip. A retimed clip with a moving crop fails closed.
+        if (range.keyframes.length > 1 && clip.rate !== 1) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'A reframe trajectory requires a real-time clip')
+        }
+        reframeRangeByClipId.set(clip.id, range)
+      }
+    }
+    const placementPlan = input.placementPlan
+    const placementAssets = input.placementAssets ?? []
+    const assetInputIndexByElementId: Record<string, number> = {}
+    const placementInputs: { elementId: string; path: string; sha256: string }[] = []
+    if (placementPlan) {
+      validateRenderPlacementPlan(placementPlan)
+      if (
+        placementPlan.format !== input.format ||
+        placementPlan.canvas.width !== width || placementPlan.canvas.height !== height ||
+        placementPlan.durationFrames !== fullExpectedFrames
+      ) throw new DomainError('INVALID_RENDER_INPUT', 'Placement plan does not describe this render canvas')
+      const drawable = placementPlan.placements.filter((placement) => placement.assetArtifactId !== null)
+      if (drawable.length && rangeReuse) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Drawable placements cannot be combined with partial range reuse')
+      }
+      for (const placement of drawable) {
+        const asset = placementAssets.find((candidate) => candidate.elementId === placement.elementId)
+        if (!asset || !isAbsolute(asset.path) || asset.sha256 !== placement.assetSha256) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Placement asset is missing or does not match its planned digest')
+        }
+        // Last gate before pixels: the bytes on disk, not the promise about them.
+        if (await calculateFileSha256(asset.path) !== placement.assetSha256) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Placement asset bytes do not match their planned sha256')
+        }
+        assetInputIndexByElementId[placement.elementId] = renderSources.length + placementInputs.length
+        placementInputs.push({ elementId: placement.elementId, path: asset.path, sha256: asset.sha256 })
+      }
+    }
     // A single stale range keeps the legacy `editorial-proxy-range.mp4` name so
     // existing partial-render goldens stay byte-for-byte comparable; two or more
     // ranges get one indexed composition file each.
@@ -511,9 +664,13 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         const audioEnd = audioOutFrame / input.fps
         const rate = clip.rate
         const timelineSpan = clip.timelineOutFrame - clip.timelineInFrame
-        const cropFilter = clip.crop
-          ? normalizedCropFilter(clip.crop, videoProbeByArtifactId.get(clip.sourceArtifactId)!)
-          : ''
+        const sourceProbe = videoProbeByArtifactId.get(clip.sourceArtifactId)!
+        const reframeRange = reframeRangeByClipId.get(clip.id)
+        const cropFilter = reframeRange
+          ? buildReframeCropFilter({ range: reframeRange, source: { width: sourceProbe.width, height: sourceProbe.height } })
+          : clip.crop
+            ? normalizedCropFilter(clip.crop, sourceProbe)
+            : ''
         // Real-time clips keep the historical filtergraph verbatim. Retimed clips
         // rescale PTS, then re-sample to the output fps and hard-trim to the exact
         // timeline span so rounding never accumulates across the concat.
@@ -553,6 +710,17 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       const verticalPosition = input.composition?.verticalPosition ?? 0.5
       filters.push(`[foreground0]scale=${width}:${height}:force_original_aspect_ratio=decrease,scale=iw*${foregroundScale.toFixed(4)}:ih*${foregroundScale.toFixed(4)}[foreground]`)
       filters.push(`[background][foreground]overlay=(W-w)/2:max(0\\,min(H-h\\,H*${verticalPosition.toFixed(4)}-h/2)):shortest=1,format=yuv420p[composed]`)
+      // Placement overlays land on the composed frame, under the caption layer: a logo or insert
+      // never hides a subtitle the Director already positioned.
+      const composedLabel = placementPlan && placementInputs.length ? 'placed' : 'composed'
+      if (placementPlan && placementInputs.length) {
+        filters.push(...buildPlacementOverlayFilters({
+          plan: placementPlan,
+          assetInputIndexByElementId,
+          inputLabel: 'composed',
+          outputLabel: 'placed',
+        }))
+      }
       if (composition.subtitleCues?.length || composition.ctaOverlays?.length) {
         await writeFile(
           composition.subtitlePath,
@@ -565,8 +733,8 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
           }),
           'utf8',
         )
-        filters.push(`[composed]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
-      } else filters.push('[composed]null[outv]')
+        filters.push(`[${composedLabel}]subtitles=filename='${escapeSubtitleFilterPath(composition.subtitlePath)}'[outv]`)
+      } else filters.push(`[${composedLabel}]null[outv]`)
       return filters
     }
     try {
@@ -575,6 +743,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         await execFileAsync(this.ffmpegPath, [
           '-hide_banner', '-loglevel', 'error', '-y',
           ...renderSources.flatMap((source) => ['-i', source.path]),
+          ...placementInputs.flatMap((asset) => ['-i', asset.path]),
           '-filter_complex', filters.join(';'), '-map', '[outv]', '-map', '[outa]',
           '-r', String(outputFps), '-c:v', 'libx264', '-preset', input.renderKind === 'final' ? 'medium' : 'veryfast', '-crf', input.renderKind === 'final' ? '18' : '23',
           '-c:a', 'aac', '-b:a', input.renderKind === 'final' ? '192k' : '160k', '-ar', '48000', '-movflags', '+faststart', composition.outputPath,

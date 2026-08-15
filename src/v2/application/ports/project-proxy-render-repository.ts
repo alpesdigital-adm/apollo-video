@@ -1,5 +1,8 @@
 import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
+import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
+import type { SubtitlePresetId } from '../../domain/subtitle-system.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
 
 /**
@@ -65,6 +68,33 @@ export interface ProjectProxyRenderSource {
   rangeReuse?: Readonly<ProjectProxyRangeReuse>
   unchangedReuse?: Readonly<ProjectProxyUnchangedReuse>
   unchangedReuseRequired?: true
+  /**
+   * Persisted subtitle resolution for this variant, when the project has one. It carries the
+   * F1.033 `registryHash`, so the worker can bind the subtitle geometry of the placement plan to
+   * the preset the Command actually recorded instead of guessing a default.
+   */
+  subtitleResolution?: Readonly<{ presetId: SubtitlePresetId; presetHash: string; registryHash: string; enabled: boolean }>
+  /**
+   * Crop trajectory materialized upstream. The worker never invents one: it forwards what was
+   * persisted and fails closed when it does not describe this render.
+   */
+  reframePlan?: Readonly<RenderReframePlanV1>
+  /**
+   * Protected subject evidence already projected onto **this** variant's canvas, as perception
+   * persisted it. Without it two of the five format reason codes — `SUBTITLE_SUBJECT_COLLISION`
+   * and `SUBJECT_NOT_VISIBLE` — are unreachable from the runtime, because the critic only knows
+   * about subjects the worker hands it. The worker forwards this list untouched; it never invents
+   * or re-detects a subject.
+   */
+  formatSubjects?: readonly Readonly<FormatSubjectEvidenceV1>[]
+  /** Drawable placement assets (logo/insert) already bound to the version, with their digests. */
+  placementAssets?: readonly Readonly<{
+    elementId: string
+    artifactId: string
+    artifactKey: string
+    sha256: string
+    byteSize: number
+  }>[]
 }
 
 export interface ProjectProxyRenderRepository {

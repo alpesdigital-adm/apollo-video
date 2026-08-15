@@ -41,6 +41,8 @@ test('foundation registry exposes health and discovery without scopes', () => {
       'apollo.sessions.logout',
       'apollo.capabilities.list',
       'apollo.tools.list',
+      'apollo.subtitle-styles.list',
+      'apollo.subtitle-styles.preview',
       'apollo.director-tools.list',
       'apollo.events.catalog.read',
       'apollo.sessions.switch-workspace',

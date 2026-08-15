@@ -1,7 +1,7 @@
 import React from 'react';
 import { SubtitleEntry, ColorPalette, LayoutSegment, SubtitleStyle } from '../lib/types';
+import type { SubtitleMvpFormat, SubtitleStylePreset } from '../../../src/v2/domain/subtitle-style-tokens';
 import { SubtitleTikTok } from './SubtitleTikTok';
-import { SubtitleStandard } from './SubtitleStandard';
 import { findActiveLayoutSegment } from './LayoutSegmentLayer';
 import { useCurrentFrame, useVideoConfig } from 'remotion';
 
@@ -19,6 +19,9 @@ interface SubtitleOverlayProps {
   // 0-1. 1 = uma camada de LEITURA full-canvas (tweet-card) está ativa e a
   // legenda se ESCONDE por completo (o card é o texto do momento). Defaults 0.
   hideFactor?: number;
+  fontFamily?: 'ApolloResourceFont';
+  subtitlePreset?: SubtitleStylePreset;
+  subtitleFormat?: SubtitleMvpFormat;
 }
 
 // LEI DE COORDENAÇÃO DA LEGENDA (matriz única — casos novos entram AQUI, nunca
@@ -45,6 +48,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitleStyle,
   topFactor = 0,
   hideFactor = 0,
+  fontFamily,
+  subtitlePreset,
+  subtitleFormat,
 }) => {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
@@ -81,6 +87,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
           isVisible={!!currentSubtitle}
           mode="two-word-center"
           subtitleStyle={subtitleStyle}
+          fontFamily={fontFamily}
+          subtitlePreset={subtitlePreset!}
+          subtitleFormat={subtitleFormat!}
         />
       );
     }
@@ -109,6 +118,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             subtitleStyle={subtitleStyle}
             placement="bottom"
             placementOpacity={bottomOpacity}
+            fontFamily={fontFamily}
+            subtitlePreset={subtitlePreset!}
+            subtitleFormat={subtitleFormat!}
           />
         )}
         {topOpacity > 0.01 && (
@@ -120,6 +132,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
             subtitleStyle={subtitleStyle}
             placement="top"
             placementOpacity={topOpacity}
+            fontFamily={fontFamily}
+            subtitlePreset={subtitlePreset!}
+            subtitleFormat={subtitleFormat!}
           />
         )}
       </>
@@ -127,10 +142,17 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   }
 
   return (
-    <SubtitleStandard
+    <SubtitleTikTok
       subtitle={currentSubtitle}
       palette={palette}
       isVisible={!!currentSubtitle}
+      mode="default"
+      subtitleStyle={subtitleStyle}
+      placement={currentSubtitle.anchor === 'top' ? 'top' : 'bottom'}
+      placementOpacity={1 - hf}
+      fontFamily={fontFamily}
+      subtitlePreset={subtitlePreset!}
+      subtitleFormat={subtitleFormat!}
     />
   );
 };

@@ -8,6 +8,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -180,6 +181,16 @@ const productionBriefSchema = {
     readyForExpensiveGeneration: { const: false },
   },
 } as const
+const normalizedInsetsSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['top', 'right', 'bottom', 'left'],
+  properties: {
+    top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+    left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
+  },
+} as const
 const outputSpecSchema = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'locale', 'aspectRatio', 'width', 'height', 'fps', 'safeArea'],
@@ -189,16 +200,7 @@ const outputSpecSchema = {
     aspectRatio: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
     width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 },
     fps: { type: 'integer', minimum: 1, maximum: 120 },
-    safeArea: {
-      type: 'object', additionalProperties: false,
-      required: ['top', 'right', 'bottom', 'left'],
-      properties: {
-        top: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        right: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        bottom: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-        left: { type: 'number', minimum: 0, exclusiveMaximum: 0.5 },
-      },
-    },
+    safeArea: normalizedInsetsSchema,
     deliveryProfileId: idSchema,
   },
 } as const
@@ -239,6 +241,86 @@ const outputFormatRegistrySchema = {
     registryHash: sha256Schema,
   },
 } as const
+const responsivePlacementElementSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'kind', 'anchor', 'priority', 'readingOrder', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'],
+  properties: {
+    id: idSchema, kind: { enum: ['subtitle', 'logo', 'cta', 'insert'] },
+    anchor: { enum: ['auto', 'top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'] },
+    priority: { type: 'integer', minimum: 0, maximum: 100 }, readingOrder: { type: 'integer', minimum: 0, maximum: 63 },
+    minWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, maxWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+    minHeight: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, maxHeight: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+  },
+} as const
+const responsiveProtectedRegionSchema = {
+  type: 'object', additionalProperties: false, required: ['id', 'kind', 'x', 'y', 'width', 'height'],
+  properties: { id: idSchema, kind: { enum: ['face', 'roi', 'reading-order'] }, x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } },
+} as const
+const responsivePlacementRequestSchema = {
+  type: 'object', additionalProperties: false, required: ['outputSpec', 'elements'],
+  properties: { outputSpec: outputSpecSchema, elements: { type: 'array', minItems: 1, maxItems: 64, items: responsivePlacementElementSchema }, protectedRegions: { type: 'array', maxItems: 128, items: responsiveProtectedRegionSchema } },
+} as const
+const responsivePlacementResultSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'policyVersion', 'registryHash', 'format', 'canvas', 'safeArea', 'elements', 'issues', 'reviewRequired', 'placementHash'],
+  properties: {
+    schemaVersion: { const: 'responsive-placement/v1' }, policyVersion: { const: 'responsive-placement-2026-08-v1' }, registryHash: sha256Schema,
+    format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, canvas: { type: 'object', additionalProperties: false, required: ['width', 'height'], properties: { width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 } } },
+    safeArea: normalizedInsetsSchema,
+    elements: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'kind', 'anchor', 'readingOrder', 'x', 'y', 'width', 'height'], properties: { id: idSchema, kind: { enum: ['subtitle', 'logo', 'cta', 'insert'] }, anchor: { enum: ['top-left', 'top-center', 'top-right', 'center-left', 'center', 'center-right', 'bottom-left', 'bottom-center', 'bottom-right'] }, readingOrder: { type: 'integer', minimum: 0, maximum: 63 }, x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } },
+    issues: { type: 'array', maxItems: 256, items: { type: 'object', additionalProperties: false, required: ['elementId', 'code', 'severity', 'reason', 'attemptedAnchors'], properties: { elementId: idSchema, code: { enum: ['IMPOSSIBLE_CONSTRAINTS', 'ANCHOR_FALLBACK', 'FACE_COLLISION_AVOIDED', 'ROI_COLLISION_AVOIDED', 'READING_ORDER_COLLISION_AVOIDED'] }, severity: { enum: ['warning', 'review'] }, reason: { type: 'string', minLength: 1, maxLength: 512 }, attemptedAnchors: { type: 'array', minItems: 1, maxItems: 9, uniqueItems: true, items: { type: 'string' } } } } },
+    reviewRequired: { type: 'boolean' }, placementHash: sha256Schema,
+  },
+} as const
+const subtitlePresetIdSchemaV2 = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'] } as const
+const subtitleRegionSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'presetId', 'presetVersion', 'presetHash', 'registryHash', 'subtitleFormat', 'outputSpecId', 'bounds'],
+  properties: {
+    schemaVersion: { const: 'subtitle-region/v1' }, presetId: subtitlePresetIdSchemaV2, presetVersion: { const: 1 },
+    presetHash: sha256Schema, registryHash: sha256Schema, subtitleFormat: { enum: ['9:16', '16:9'] }, outputSpecId: idSchema,
+    bounds: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } },
+  },
+} as const
+/** v2 = v1 plus the resolved subtitle preset whose responsive limits derive the subtitle band. */
+const responsivePlacementRequestSchemaV2 = {
+  type: 'object', additionalProperties: false, required: ['outputSpec', 'elements'],
+  properties: { outputSpec: outputSpecSchema, elements: { type: 'array', minItems: 1, maxItems: 64, items: responsivePlacementElementSchema }, protectedRegions: { type: 'array', maxItems: 128, items: responsiveProtectedRegionSchema }, subtitlePresetId: subtitlePresetIdSchemaV2 },
+} as const
+const responsivePlacementResultSchemaV2 = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'policyVersion', 'registryHash', 'format', 'canvas', 'safeArea', 'subtitleRegion', 'elements', 'issues', 'reviewRequired', 'placementHash'],
+  properties: {
+    ...responsivePlacementResultSchema.properties,
+    schemaVersion: { const: 'responsive-placement/v2' },
+    subtitleRegion: { anyOf: [{ type: 'null' }, subtitleRegionSchema] },
+  },
+} as const
+const subtitlePresetIdSchema = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'] } as const
+const subtitleMvpFormatSchema = { enum: ['9:16', '16:9'] } as const
+const subtitleColorSchema = { type: 'string', pattern: '^#[0-9A-F]{6}$' } as const
+const subtitleFormatLimitsSchema = { type: 'object', additionalProperties: false, required: ['referenceHeight', 'fontPx', 'maxWidth', 'bottom'], properties: { referenceHeight: { type: 'integer', minimum: 240, maximum: 4320 }, fontPx: { type: 'number' }, maxWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, bottom: { type: 'number', minimum: 0, maximum: .5 } } } as const
+const subtitleStylePresetSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'version', 'typography', 'lineBreaking', 'highlight', 'background', 'stroke', 'animation', 'margins', 'responsive', 'presetHash'],
+  properties: {
+    schemaVersion: { const: 'subtitle-style-preset/v1' }, id: subtitlePresetIdSchema, version: { const: 1 },
+    typography: { type: 'object', additionalProperties: false, required: ['fontFamily', 'fallback', 'licensed', 'licenseSpdx', 'licenseUrl', 'glyphCoverage', 'weight', 'uppercase'], properties: {
+      fontFamily: { type: 'string', minLength: 1, maxLength: 128 }, fallback: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 128 } }, licensed: { const: true }, licenseSpdx: { const: 'OFL-1.1' }, licenseUrl: { type: 'string', minLength: 1, maxLength: 256 }, glyphCoverage: { const: 'latin-ext' }, weight: { type: 'integer', minimum: 100, maximum: 900 }, uppercase: { type: 'boolean' },
+    } },
+    lineBreaking: { type: 'object', additionalProperties: false, required: ['maxLines', 'maxCharacters', 'chunkWords'], properties: { maxLines: { type: 'integer', minimum: 1, maximum: 3 }, maxCharacters: { type: 'integer', minimum: 8, maximum: 48 }, chunkWords: { type: 'integer', minimum: 1, maximum: 8 } } },
+    highlight: { type: 'object', additionalProperties: false, required: ['mode', 'color', 'inactiveColor'], properties: { mode: { enum: ['word', 'phrase', 'none'] }, color: subtitleColorSchema, inactiveColor: subtitleColorSchema } },
+    background: { type: 'object', additionalProperties: false, required: ['shape', 'color', 'opacity', 'radius', 'paddingXEm', 'paddingYEm'], properties: { shape: { enum: ['none', 'box', 'pill'] }, color: subtitleColorSchema, opacity: { type: 'number', minimum: 0, maximum: 1 }, radius: { type: 'number', minimum: 0 }, paddingXEm: { type: 'number', minimum: 0, maximum: 2 }, paddingYEm: { type: 'number', minimum: 0, maximum: 2 } } },
+    stroke: { type: 'object', additionalProperties: false, required: ['widthEm', 'color'], properties: { widthEm: { type: 'number', minimum: 0, maximum: .3 }, color: subtitleColorSchema } },
+    animation: { type: 'object', additionalProperties: false, required: ['kind', 'version', 'durationMs', 'reducedMotion'], properties: { kind: { enum: ['scale', 'karaoke', 'fade'] }, version: { const: 1 }, durationMs: { type: 'integer', minimum: 0, maximum: 1000 }, reducedMotion: { enum: ['fade', 'none'] } } },
+    margins: { type: 'object', additionalProperties: false, required: ['horizontal', 'vertical'], properties: { horizontal: { type: 'number', minimum: 0, maximum: .5 }, vertical: { type: 'number', minimum: 0, maximum: .5 } } },
+    responsive: { type: 'object', additionalProperties: false, required: ['minFontPx', 'maxFontPx', 'formats'], properties: { minFontPx: { type: 'number', minimum: 20 }, maxFontPx: { type: 'number', maximum: 120 }, formats: { type: 'object', additionalProperties: false, required: ['9:16', '16:9'], properties: { '9:16': subtitleFormatLimitsSchema, '16:9': subtitleFormatLimitsSchema } } } },
+    presetHash: sha256Schema,
+  },
+} as const
+const subtitleStyleRegistrySchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v1' }, registryVersion: { const: 1 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchema, 'karaoke-box': subtitleStylePresetSchema, 'karaoke-pill': subtitleStylePresetSchema, 'caps-stroke': subtitleStylePresetSchema, 'clean-color': subtitleStylePresetSchema } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
+const subtitleCssPreviewRequestSchema = { type: 'object', additionalProperties: false, required: ['presetId', 'text', 'format', 'background'], properties: { presetId: subtitlePresetIdSchema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] } } } as const
+const subtitleCssPreviewSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'renderKind', 'presetId', 'presetHash', 'registryHash', 'text', 'format', 'background', 'css', 'previewHash'], properties: { schemaVersion: { const: 'subtitle-css-preview/v1' }, renderKind: { const: 'instant-css-preview' }, presetId: subtitlePresetIdSchema, presetHash: sha256Schema, registryHash: sha256Schema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] }, css: { type: 'string', minLength: 1, maxLength: 10000 }, previewHash: sha256Schema } } as const
 const projectBriefSchemaV9 = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'objective', 'desiredAction', 'outputSpec', 'productionBrief', 'createdAt'],
@@ -6086,6 +6168,66 @@ const compareActionImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+const SUBTITLE_PRESET_IDS = Object.keys(SUBTITLE_PRESETS)
+const subtitleFrameRangeSchema = {
+  type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+  properties: { startFrame: { const: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+} as const
+const projectSubtitleResolutionSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['configurationId', 'configurationHash', 'variantId', 'action', 'previousConfigurationId', 'mode', 'origin', 'enabled', 'presetId', 'presetVersion', 'presetHash', 'workspaceDefaultRevision', 'transcriptHash', 'createdAt'],
+  properties: {
+    configurationId: idSchema, configurationHash: sha256Schema, variantId: idSchema,
+    action: { enum: ['set', 'revert'] }, previousConfigurationId: { anyOf: [{ type: 'null' }, idSchema] },
+    mode: { enum: [...SUBTITLE_MODES] }, origin: { enum: [...SUBTITLE_ORIGINS] }, enabled: { type: 'boolean' },
+    presetId: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_PRESET_IDS] }] },
+    presetVersion: { anyOf: [{ type: 'null' }, { const: 1 }] },
+    presetHash: { anyOf: [{ type: 'null' }, sha256Schema] },
+    workspaceDefaultRevision: { anyOf: [{ type: 'null' }, { type: 'integer', minimum: 0 }] },
+    transcriptHash: sha256Schema, createdAt: dateTimeSchema,
+  },
+} as const
+const projectSubtitleConfigurationImpactSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId', 'variantId',
+    'configurationId', 'configurationHash', 'action', 'requestedMode', 'origin', 'resolvedPresetId',
+    'resolvedPresetHash', 'transcriptHash', 'changeKinds', 'dependencyTypes', 'affectedRanges',
+    'affectedVariantIds', 'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged',
+    'renderDeferredUntilTimeline', 'impactHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'project-subtitle-configuration-impact/v1' },
+    commandId: idSchema, commandType: { const: 'set-project-subtitle-mode' },
+    baseVersionId: idSchema, resultVersionId: idSchema, variantId: idSchema,
+    configurationId: idSchema, configurationHash: sha256Schema,
+    action: { enum: ['set', 'revert'] }, requestedMode: { enum: [...SUBTITLE_MODES] }, origin: { enum: [...SUBTITLE_ORIGINS] },
+    resolvedPresetId: { anyOf: [{ type: 'null' }, { enum: [...SUBTITLE_PRESET_IDS] }] },
+    resolvedPresetHash: { anyOf: [{ type: 'null' }, sha256Schema] },
+    transcriptHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'subtitle-configuration' } },
+    dependencyTypes: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'visual' } },
+    affectedRanges: { type: 'array', maxItems: 1, items: subtitleFrameRangeSchema },
+    affectedVariantIds: { type: 'array', maxItems: 1, items: idSchema },
+    affectedArtifacts: {
+      type: 'array', maxItems: 200,
+      items: {
+        type: 'object', additionalProperties: false, required: ['artifactId', 'kind', 'sourceVersionId', 'variantId'],
+        properties: { artifactId: idSchema, kind: { enum: ['proxy', 'final'] }, sourceVersionId: idSchema, variantId: idSchema },
+      },
+    },
+    minimalRenders: {
+      type: 'array', maxItems: 1,
+      items: {
+        type: 'object', additionalProperties: false, required: ['kind', 'variantId', 'ranges'],
+        properties: { kind: { const: 'proxy' }, variantId: idSchema, ranges: { type: 'array', minItems: 1, maxItems: 1, items: subtitleFrameRangeSchema } },
+      },
+    },
+    renderSemanticsChanged: { const: true },
+    renderDeferredUntilTimeline: { type: 'boolean' },
+    impactHash: sha256Schema,
+  },
+} as const
 const projectLutSelectionResultSchemaV2 = {
   ...projectLutSelectionResultSchema,
   required: [...projectLutSelectionResultSchema.required, 'impact', 'invalidations'],
@@ -6169,6 +6311,14 @@ const proxyQualityIssueSchema = {
       items: false,
     },
     targetId: idSchema,
+    outputSpecId: idSchema,
+    outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    evidenceRange: {
+      type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    elementIds: { type: 'array', maxItems: 1000, items: idSchema },
+    evidenceIds: { type: 'array', maxItems: 1000, items: { type: 'string', minLength: 3, maxLength: 200 } },
     correctable: { type: 'boolean' },
   },
 }
@@ -6190,6 +6340,7 @@ const proxyReviewSchema = {
     proxyArtifactId: idSchema,
     proxyManifestId: idSchema,
     inputHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    outputSpecId: idSchema,
     rangeCacheKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     spec: {
       type: 'object',
@@ -6207,6 +6358,18 @@ const proxyReviewSchema = {
     status: { enum: ['blocked', 'warning-ack-required', 'ready-for-final'] },
     technicalIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchema },
     criticIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchema },
+    formatQuality: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['outputPresetHash', 'status', 'exportAllowed', 'explanation', 'reportHash'],
+      properties: {
+        outputPresetHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        status: { enum: ['passed', 'warning', 'blocked'] },
+        exportAllowed: { type: 'boolean' },
+        explanation: { type: 'string', minLength: 1, maxLength: 1000 },
+        reportHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      },
+    },
     warningsAcknowledged: { type: 'boolean' },
     finalAllowed: { type: 'boolean' },
     uploadReceivedAt: dateTimeSchema,
@@ -6226,6 +6389,19 @@ const proxyReviewSchema = {
     },
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
+  },
+}
+const proxyQualityIssueSchemaV1 = {
+  ...proxyQualityIssueSchema,
+  properties: Object.fromEntries(Object.entries(proxyQualityIssueSchema.properties).filter(([key]) =>
+    !['outputSpecId', 'outputPresetHash', 'evidenceRange', 'elementIds', 'evidenceIds'].includes(key))),
+}
+const proxyReviewSchemaV1 = {
+  ...proxyReviewSchema,
+  properties: {
+    ...Object.fromEntries(Object.entries(proxyReviewSchema.properties).filter(([key]) => !['outputSpecId', 'formatQuality'].includes(key))),
+    technicalIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchemaV1 },
+    criticIssues: { type: 'array', maxItems: 1000, items: proxyQualityIssueSchemaV1 },
   },
 }
 const assetBriefSchema = {
@@ -12848,8 +13024,15 @@ const directorDecisionEntrySchema = {
 } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
+  defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchema),
+  defineSchema('subtitle-css-preview-request', 1, 'Instant subtitle CSS preview request', subtitleCssPreviewRequestSchema),
+  defineSchema('subtitle-css-preview', 1, 'Content-addressed instant subtitle CSS preview', subtitleCssPreviewSchema),
   defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),
   defineSchema('output-format-registry', 1, 'Content-addressed required output format registry', outputFormatRegistrySchema),
+  defineSchema('responsive-placement-request', 1, 'Format-specific responsive placement request', responsivePlacementRequestSchema),
+  defineSchema('responsive-placement-result', 1, 'Content-addressed responsive placement result', successSchema(responsivePlacementResultSchema)),
+  defineSchema('responsive-placement-request', 2, 'Format-specific responsive placement request with the resolved subtitle preset', responsivePlacementRequestSchemaV2),
+  defineSchema('responsive-placement-result', 2, 'Content-addressed responsive placement result carrying its subtitle region provenance', successSchema(responsivePlacementResultSchemaV2)),
   defineSchema('create-montage-alternatives-request', 1, 'Create one idempotent montage alternative run', { type: 'object', additionalProperties: false, required: ['policyVersion', 'storyPlanRef', 'seeds'], properties: {
     policyVersion: { const: 'montage-alternatives-2026-08-v1' }, storyPlanRef: { type: 'object', additionalProperties: false, required: ['id', 'hash'], properties: { id: idSchema, hash: sha256Schema } },
     seeds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'seed', 'mode', 'hook', 'blockOrder', 'permittedBlockOrders', 'assets', 'patternBreaks', 'maximumPatternBreaks', 'confidence', 'rubricSignals'], properties: { id: idSchema, seed: idSchema, mode: { enum: ['chronological', 'cold-open', 'reorganized'] }, hook: { type: 'object', additionalProperties: false, required: ['id', 'selfContained'], properties: { id: idSchema, selfContained: { type: 'boolean' } } }, blockOrder: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema }, permittedBlockOrders: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema } }, assets: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['id', 'rightsApproved'], properties: { id: idSchema, rightsApproved: { type: 'boolean' } } } }, patternBreaks: { type: 'array', maxItems: 64, items: { type: 'object', additionalProperties: false, required: ['id', 'atMs', 'group'], properties: { id: idSchema, atMs: { type: 'integer', minimum: 0, maximum: 3600000 }, group: idSchema } } }, maximumPatternBreaks: { type: 'integer', minimum: 0, maximum: 64 }, confidence: { type: 'number', minimum: 0, maximum: 1 }, rubricSignals: { type: 'object', additionalProperties: false, required: ['narrative', 'objective', 'continuity', 'evidence'], properties: { narrative: { type: 'number', minimum: 0, maximum: 1 }, objective: { type: 'number', minimum: 0, maximum: 1 }, continuity: { type: 'number', minimum: 0, maximum: 1 }, evidence: { type: 'number', minimum: 0, maximum: 1 } } } } } },
@@ -17060,6 +17243,41 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('reframe-plan-request', 1, 'Create one crop plan from immutable observation evidence', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'format', 'observationSet'],
+    properties: {
+      baseVersionId: idSchema,
+      format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] },
+      observationSet: {
+        type: 'object', additionalProperties: false,
+        required: ['schemaVersion', 'id', 'sourceArtifactId', 'sourceManifestId', 'sourceSha256', 'sourceWidth', 'sourceHeight', 'fps', 'durationFrames', 'observations', 'contentHash'],
+        properties: {
+          schemaVersion: { const: 'reframe-observations/v1' }, id: idSchema, sourceArtifactId: idSchema, sourceManifestId: idSchema,
+          sourceSha256: sha256Schema, sourceWidth: { type: 'integer', minimum: 2, maximum: 16384 }, sourceHeight: { type: 'integer', minimum: 2, maximum: 16384 },
+          fps: { type: 'integer', minimum: 1, maximum: 120 }, durationFrames: { type: 'integer', minimum: 1, maximum: 2592000 }, contentHash: sha256Schema,
+          observations: { type: 'array', minItems: 1, maxItems: 10000, items: {
+            type: 'object', additionalProperties: false, required: ['id', 'subjectId', 'kind', 'startFrame', 'endFrame', 'bounds', 'confidence', 'priority', 'critical'],
+            properties: { id: idSchema, subjectId: idSchema, kind: { enum: ['face', 'object', 'screen', 'region-of-interest'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, bounds: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } }, confidence: { type: 'number', minimum: 0, maximum: 1 }, priority: { type: 'integer', minimum: 0, maximum: 100 }, critical: { type: 'boolean' } },
+          } },
+        },
+      },
+      overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'format', 'startFrame', 'endFrame', 'crop'], properties: { id: idSchema, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, crop: { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } } } },
+      maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
+    },
+  }),
+  defineSchema('reframe-plan', 1, 'Content-addressed per-format reframe plan with localized fallbacks', successSchema({
+    type: 'object', additionalProperties: false, required: ['plan'], properties: { plan: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'format', 'observationSetId', 'observationSetHash', 'outputFormatRegistryHash', 'outputPresetHash', 'maxVelocityPerSecond', 'maxAccelerationPerSecondSquared', 'safetyMargin', 'segments', 'issues', 'planHash'],
+      properties: {
+        schemaVersion: { const: 'reframe-plan/v1' }, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, observationSetId: idSchema,
+        observationSetHash: sha256Schema, outputFormatRegistryHash: sha256Schema, outputPresetHash: sha256Schema, planHash: sha256Schema,
+        maxVelocityPerSecond: { type: 'number', minimum: 0.01, maximum: 2 }, maxAccelerationPerSecondSquared: { type: 'number', minimum: 0.01, maximum: 4 }, safetyMargin: { type: 'number', minimum: 0, maximum: 0.2 },
+        segments: { type: 'array', minItems: 1, maxItems: 20000, items: { type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame', 'mode', 'crop', 'source', 'observationIds', 'subjectIds', 'velocity'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, mode: { enum: ['crop', 'contain'] }, crop: { oneOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' } } }] }, source: { enum: ['face', 'object', 'screen', 'region-of-interest', 'multiple-subjects', 'manual', 'fallback'] }, observationIds: { type: 'array', uniqueItems: true, items: idSchema }, subjectIds: { type: 'array', uniqueItems: true, items: idSchema }, velocity: { type: 'object', additionalProperties: false, required: ['x', 'y'], properties: { x: { type: 'number' }, y: { type: 'number' } } } } } },
+        issues: { type: 'array', maxItems: 20000, items: { type: 'object', additionalProperties: false, required: ['code', 'format', 'startFrame', 'endFrame', 'observationIds'], properties: { code: { enum: ['PERCEPTION_UNCERTAIN', 'SUBJECTS_DO_NOT_FIT', 'NO_SUBJECT_OBSERVATION', 'TRACKING_LIMIT_EXCEEDED'] }, format: { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }, startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 }, observationIds: { type: 'array', uniqueItems: true, items: idSchema } } } },
+      },
+    } },
+  })),
   defineSchema('catalog-semantic-search-document-request', 1, 'Catalog one immutable source identity for full-text and semantic retrieval', {
     type: 'object',
     additionalProperties: false,
@@ -20879,6 +21097,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       type: 'object',
       additionalProperties: false,
       required: ['review'],
+      properties: { review: proxyReviewSchemaV1 },
+    }),
+  ),
+  defineSchema('project-proxy-review-response', 2, 'Version-bound post-render proxy review with output-specific visual evidence',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review'],
       properties: { review: proxyReviewSchema },
     }),
   ),
@@ -20900,7 +21124,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['review', 'decision', 'replayed'],
       properties: {
-        review: proxyReviewSchema,
+        review: proxyReviewSchemaV1,
         decision: {
           type: 'object',
           additionalProperties: false,
@@ -20921,6 +21145,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             baseReviewHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
             resultReviewHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
             createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('project-proxy-review-warning-acknowledgement-result', 2, 'Auditable output-specific proxy warning acknowledgement result',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['review', 'decision', 'replayed'],
+      properties: {
+        review: proxyReviewSchema,
+        decision: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'proxyReviewId', 'action', 'actor', 'baseReviewHash', 'resultReviewHash', 'createdAt'],
+          properties: {
+            id: idSchema, proxyReviewId: idSchema, action: { const: 'acknowledge-warnings' },
+            actor: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { const: 'api-client' }, id: idSchema } },
+            baseReviewHash: sha256Schema, resultReviewHash: sha256Schema, createdAt: dateTimeSchema,
           },
         },
         replayed: { type: 'boolean' },
@@ -21111,6 +21353,40 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   })),
   defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
+  defineSchema('project-subtitle-configuration-set-request', 1, 'Set one closed subtitle mode for an output variant, or revert it to the previous origin', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId'], properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, variantId: idSchema,
+      action: { enum: ['set', 'revert'] },
+      mode: { enum: [...SUBTITLE_MODES] },
+      presetId: { enum: [...SUBTITLE_PRESET_IDS] }, presetVersion: { const: 1 }, reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    // Exactly one of the three legal shapes: a revert (which names no mode), a
+    // manual set (which pins preset id and version) or an inherited/disabled set.
+    oneOf: [
+      { properties: { action: { const: 'revert' }, mode: false, presetId: false, presetVersion: false }, required: ['action'] },
+      { properties: { action: { const: 'set' }, mode: { const: 'manual' }, presetId: { enum: [...SUBTITLE_PRESET_IDS] }, presetVersion: { const: 1 } }, required: ['mode', 'presetId', 'presetVersion'] },
+      { properties: { action: { const: 'set' }, mode: { enum: SUBTITLE_MODES.filter((mode) => mode !== 'manual') }, presetId: false, presetVersion: false }, required: ['mode'] },
+    ],
+  }),
+  defineSchema('project-subtitle-configuration-impact', 1, 'Variant-scoped subtitle configuration impact with its versioned preset reference', projectSubtitleConfigurationImpactSchemaV1),
+  defineSchema('project-subtitle-configuration-applied', 1, 'Applied content-addressed subtitle configuration and immutable result version', successSchema({
+    type: 'object', additionalProperties: false, required: ['command', 'version', 'configuration', 'resolution', 'impact', 'replayed'], properties: {
+      command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true }, configuration: { type: 'object', additionalProperties: true },
+      resolution: projectSubtitleResolutionSchemaV1, impact: projectSubtitleConfigurationImpactSchemaV1, replayed: { type: 'boolean' },
+    },
+  })),
+  defineSchema('project-subtitle-configuration-response', 1, 'Current variant subtitle configuration including preset origin and transcript binding', successSchema({
+    type: 'object', additionalProperties: false, required: ['result'], properties: {
+      result: {
+        anyOf: [{ type: 'null' }, {
+          type: 'object', additionalProperties: false, required: ['command', 'version', 'configuration', 'resolution', 'impact', 'replayed'], properties: {
+            command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true }, configuration: { type: 'object', additionalProperties: true },
+            resolution: projectSubtitleResolutionSchemaV1, impact: projectSubtitleConfigurationImpactSchemaV1, replayed: { type: 'boolean' },
+          },
+        }],
+      },
+    },
   })),
   defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({
     type: 'object', additionalProperties: false, required: ['entries'], properties: {
