@@ -3,6 +3,12 @@ import type {
   MaterializedRenderInputAsset,
   MaterializedRenderInputV1,
 } from '../domain/render-input.ts'
+import {
+  readSubtitlePreset,
+  resolveSubtitleMvpFormat,
+  type SubtitleMvpFormat,
+  type SubtitleStylePreset,
+} from '../domain/subtitle-system.ts'
 
 const SCENE_TYPES = [
   'fullscreen',
@@ -68,6 +74,8 @@ export interface ApolloVideoRenderPropsV1 extends Record<string, unknown> {
   }>
   stylePreset?: string
   subtitleStyle?: SubtitleStyle
+  subtitlePreset: Readonly<SubtitleStylePreset>
+  subtitleFormat: SubtitleMvpFormat
   gradePreset?: GradePreset
   hookTitle?: string
   fontSrc?: string
@@ -452,6 +460,10 @@ export function compileApolloVideoRenderProps(
       ? '9:16'
       : '16:9',
     palette: compilePalette(props.palette),
+    subtitlePreset: readSubtitlePreset('kinetic'),
+    // Resolved from the declared output, never inferred from pixel dimensions downstream: 16:9 can
+    // only ever be rendered with the 16:9 tokens the preset actually authored.
+    subtitleFormat: resolveSubtitleMvpFormat(input.output.aspectRatio),
   }
   if (props.fontAssetId !== undefined) {
     compiled.fontSrc = resolveAsset(
@@ -494,6 +506,7 @@ export function compileApolloVideoRenderProps(
       'props.subtitleStyle is invalid',
     )
     compiled.subtitleStyle = props.subtitleStyle as SubtitleStyle
+    compiled.subtitlePreset = readSubtitlePreset(compiled.subtitleStyle)
   }
   if (props.gradePreset !== undefined) {
     assertDomain(

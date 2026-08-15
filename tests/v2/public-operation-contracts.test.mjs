@@ -61,6 +61,8 @@ const DIRECT_PUBLIC_API_BOUNDARIES = Object.freeze({
   'apollo.events.catalog.read': 'the event catalog is the versioned public contract itself',
   'apollo.contracts.openapi.read': 'OpenAPI is generated directly from the public contract registry',
   'apollo.contracts.schemas.read': 'JSON Schemas are read directly from the public schema registry',
+  'apollo.subtitle-styles.list': 'the content-addressed subtitle style registry is the versioned public contract itself',
+  'apollo.subtitle-styles.preview': 'the instant CSS preview is derived deterministically from the registry, with no persisted state',
 })
 
 function routeSourceFor(capability) {
@@ -102,7 +104,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 236)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 238)
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
@@ -192,5 +194,5 @@ test('T-FR-241 every public operation has an executable, versioned contract test
   }
 
   assert.equal(endpoints.size, FOUNDATION_CAPABILITIES.length)
-  assert.equal(Object.keys(DIRECT_PUBLIC_API_BOUNDARIES).length, 4)
+  assert.equal(Object.keys(DIRECT_PUBLIC_API_BOUNDARIES).length, 6)
 })

@@ -12,6 +12,7 @@ import {
 } from '../domain/editorial-grammar.ts'
 import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
+import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -5096,6 +5097,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
   Object.freeze({
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
     'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
+    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY],
+    'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
+    'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
     'apollo://schemas/montage-alternatives-created/v1': [{ data: { run: montageRunExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/montage-alternatives-read/v1': [{ data: { run: montageRunExample }, meta: { apiVersion: 'v1' } }],
