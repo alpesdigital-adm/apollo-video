@@ -30,11 +30,48 @@ async function waitForServer(baseUrl, server) {
       throw new Error(`Next server exited with ${server.exitCode}`)
     }
     try {
-      if ((await fetch(`${baseUrl}/v1/health`)).ok) return
+      if ((await globalThis.fetch(`${baseUrl}/v1/health`)).ok) return
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error('Timed out waiting for Next server')
+}
+
+/**
+ * Legitimate client behaviour against the real governance limiter: `/v1`
+ * denies authenticated bursts with 429 `GOVERNANCE_LIMIT_EXCEEDED` once
+ * `evaluateGovernanceAnomalies` sees more than `requestMinimum` requests in
+ * its 60 s signal window. The harness asserts that contract and waits it out
+ * instead of relaxing the limiter. Denied admissions are persisted and keep
+ * counting inside the window, so the backoff is real waiting.
+ */
+const RATE_LIMIT_BACKOFF_MS = Object.freeze([
+  3_000, 8_000, 15_000, 30_000, 45_000, 60_000,
+])
+
+async function apiFetch(input, init) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await globalThis.fetch(input, init)
+    if (response.status !== 429) return response
+    const payload = await response.clone().json().catch(() => null)
+    assert.equal(
+      payload?.error?.code,
+      'GOVERNANCE_LIMIT_EXCEEDED',
+      `unexpected 429 payload: ${JSON.stringify(payload)}`,
+    )
+    assert.equal(payload?.error?.category, 'quota')
+    assert.equal(payload?.error?.retryable, true)
+    if (attempt >= RATE_LIMIT_BACKOFF_MS.length) {
+      throw new Error(
+        `governance limiter did not clear after ${attempt} retries: ${JSON.stringify(payload)}`,
+      )
+    }
+    const retryAfter = Number(response.headers.get('retry-after'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(60_000, Math.ceil(retryAfter) * 1_000)
+      : RATE_LIMIT_BACKOFF_MS[attempt]
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
 }
 
 async function stopServer(server) {
@@ -599,7 +636,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       'content-type': 'application/json',
     }
     const post = async (endpoint, key, payload) => {
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: 'POST',
         headers: { ...headers, 'idempotency-key': key },
         body: JSON.stringify(payload),
@@ -843,7 +880,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       includedContext: 'true',
       limit: '20',
     })
-    const evidenceSearch = await fetch(
+    const evidenceSearch = await apiFetch(
       `${baseUrl}/v1/projects/${projectId}` +
       `/evidence-segments?${evidenceQuery}`,
       { headers },
@@ -919,9 +956,9 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       await client.v2MediaArtifactManifest.count({ where: { workspaceId } })
     const contextRange = proofNeedItem.selectedEvidence.contextRangeMs
 
-    assert.equal((await fetch(integrityEndpoint)).status, 401)
+    assert.equal((await apiFetch(integrityEndpoint)).status, 401)
     assert.equal(
-      (await fetch(integrityEndpoint, {
+      (await apiFetch(integrityEndpoint, {
         headers: { authorization: 'Bearer proof-integrity-e2e-invalid' },
       })).status,
       401,
@@ -1317,7 +1354,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       false,
     )
 
-    const read = await fetch(`${integrityEndpoint}/${run.id}`, { headers })
+    const read = await apiFetch(`${integrityEndpoint}/${run.id}`, { headers })
     assert.equal(read.status, 200)
     const readPayload = await read.json()
     assert.equal(readPayload.data.run.runHash, run.runHash)
@@ -1327,13 +1364,13 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     )
     assert.equal('idempotencyKey' in readPayload.data.run, false)
     assert.equal('requestFingerprint' in readPayload.data.run, false)
-    const list = await fetch(
+    const list = await apiFetch(
       `${integrityEndpoint}?outcome=blocked&readyForAssembly=false&limit=10`,
       { headers },
     )
     assert.equal(list.status, 200)
     assert.equal((await list.json()).data.runs.length, 3)
-    const missing = await fetch(
+    const missing = await apiFetch(
       `${integrityEndpoint}/proof-integrity-run-absent-${suffix}`,
       { headers },
     )
@@ -1351,7 +1388,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       ),
       run.id,
     )
-    const tamperedRead = await fetch(`${integrityEndpoint}/${run.id}`, {
+    const tamperedRead = await apiFetch(`${integrityEndpoint}/${run.id}`, {
       headers,
     })
     assert.equal(
@@ -1368,7 +1405,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       originalRunJson,
       run.id,
     )
-    const restoredRead = await fetch(`${integrityEndpoint}/${run.id}`, {
+    const restoredRead = await apiFetch(`${integrityEndpoint}/${run.id}`, {
       headers,
     })
     assert.equal(restoredRead.status, 200)
@@ -1387,7 +1424,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       originalEvaluationJson.replace('period:2026', 'period:2027'),
       storedEvaluation.id,
     )
-    const tamperedEvaluationRead = await fetch(
+    const tamperedEvaluationRead = await apiFetch(
       `${integrityEndpoint}/${run.id}`,
       { headers },
     )
@@ -1398,7 +1435,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       storedEvaluation.id,
     )
     assert.equal(
-      (await fetch(`${integrityEndpoint}/${run.id}`, { headers })).status,
+      (await apiFetch(`${integrityEndpoint}/${run.id}`, { headers })).status,
       200,
     )
 

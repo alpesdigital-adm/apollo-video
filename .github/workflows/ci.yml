@@ -225,12 +225,22 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      # The harness already backs off and retries a legitimate 429
+      # (GOVERNANCE_LIMIT_EXCEEDED). APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM
+      # additionally declares the size of this one supervised burst — 66
+      # authenticated /v1 calls — so the request-rate anomaly does not read a
+      # scripted E2E as an attack and cost the job minutes of backoff. It is an
+      # env knob that already exists (governanceAnomalyPolicyFromEnvironment);
+      # no product default changes, and every other governance control
+      # (rate limit, concurrency, quota, spend and error-rate anomaly) stays at
+      # its production value for this run.
       - name: Run ProofMode API and PostgreSQL E2E with tamper and stale rejection
         run: npm run test:e2e:proof-modes
         env:
           APOLLO_COMPATIBILITY_GRAPH_E2E: "1"
           APOLLO_E2E_SERVER_MODE: dev
           APOLLO_API_ENVIRONMENT: production
+          APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: "200"
           APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
           APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
