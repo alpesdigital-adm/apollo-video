@@ -163,7 +163,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -218,21 +218,6 @@ jobs:
           APOLLO_API_ENVIRONMENT: production
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-integrity-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
-      - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
-        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-vertical-smoke.integration.mjs
-        env:
-          APOLLO_V2_VERTICAL_SMOKE: "1"
-          APOLLO_V2_S3_RECONSTRUCTION_SMOKE: "1"
-          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
-          APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/apollo-v2-s3-staging
-          APOLLO_V2_RENDER_WORK_ROOT: ${{ runner.temp }}/apollo-v2-s3-render
-          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
-          APOLLO_V2_S3_REGION: us-east-1
-          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
-          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
-          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
-          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
-
       - name: Provision the isolated ProofMode E2E database
         run: |
           docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e
@@ -255,16 +240,6 @@ jobs:
         run: |
           orphans="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-ci-proof-modes'")"
           test "$orphans" = 0
-
-      - name: Verify PostgreSQL and versioned object round-trip
-        run: |
-          table_count="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from information_schema.tables where table_schema = 'public'")"
-          test "$table_count" -ge 128
-          version_info="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc version info "local/$APOLLO_V2_S3_BUCKET")"
-          printf '%s' "$version_info" | grep -qi enabled
-          printf apollo-v2-compose-smoke | docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc pipe "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt"
-          object_value="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc cat "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt")"
-          test "$object_value" = apollo-v2-compose-smoke
 
       - name: Resume long-form indexing on a disposable Compose database
         env:
@@ -299,6 +274,31 @@ jobs:
           printf 'postflight e2e backends: %s\n' "$orphans"
           test "$orphans" = 0
 
+      - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-vertical-smoke.integration.mjs
+        env:
+          APOLLO_V2_VERTICAL_SMOKE: "1"
+          APOLLO_V2_S3_RECONSTRUCTION_SMOKE: "1"
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/apollo-v2-s3-staging
+          APOLLO_V2_RENDER_WORK_ROOT: ${{ runner.temp }}/apollo-v2-s3-render
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+
+      - name: Verify PostgreSQL and versioned object round-trip
+        run: |
+          table_count="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from information_schema.tables where table_schema = 'public'")"
+          test "$table_count" -ge 128
+          version_info="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc version info "local/$APOLLO_V2_S3_BUCKET")"
+          printf '%s' "$version_info" | grep -qi enabled
+          printf apollo-v2-compose-smoke | docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc pipe "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt"
+          object_value="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc cat "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt")"
+          test "$object_value" = apollo-v2-compose-smoke
+
       - name: Start supervised app and workers
         run: |
           printf '%s\n' \
@@ -331,6 +331,44 @@ jobs:
             test "$(docker inspect --format '{{.State.Status}}' "$container_id")" = running
             test "$(docker inspect --format '{{.RestartCount}}' "$container_id")" = 0
           done
+
+      - name: Run cross-asset semantic search E2E on a dedicated database
+        env:
+          APOLLO_HYBRID_SEARCH_E2E: "1"
+          APOLLO_API_ENVIRONMENT: sandbox
+          APOLLO_SEMANTIC_EMBEDDING_PROVIDER: openai
+          OPENAI_API_KEY: ci-not-a-real-openai-credential-0
+          APOLLO_E2E_HYBRID_SEARCH_DATABASE: apollo_v2_e2e_hybrid_search
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          orphans="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          printf 'preflight e2e backends=%s\n' "$orphans"
+          test "$orphans" = 0
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "create database \"$APOLLO_E2E_HYBRID_SEARCH_DATABASE\" owner \"$POSTGRES_USER\""
+          export V2_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:$POSTGRES_TUNNEL_PORT/$APOLLO_E2E_HYBRID_SEARCH_DATABASE?schema=public&application_name=$APOLLO_E2E_HYBRID_SEARCH_APP_NAME&connection_limit=5&pool_timeout=10&connect_timeout=10"
+          npm run db:v2:migrate:deploy
+          npm run build
+          npm run test:e2e:hybrid-search
+
+      - name: Verify zero orphan E2E backends after semantic search E2E
+        if: always()
+        env:
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_E2E_HYBRID_SEARCH_APP_NAME'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$backends"
+            if test "$backends" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-%'"
+          exit 1
 
       - name: Stop isolated infrastructure
         if: always()
