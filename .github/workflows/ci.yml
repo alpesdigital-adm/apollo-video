@@ -123,6 +123,11 @@ jobs:
       - name: Run authorized Remotion smoke render
         run: npm run test:integration:render
 
+      - name: Run proof mode goldens and worker-produced proof MP4s
+        run: npm run test:integration:proof-mode-goldens
+        env:
+          APOLLO_PROOF_MODE_VISUAL_E2E: "1"
+
       - name: Build production application
         run: npm run build
 
@@ -227,6 +232,29 @@ jobs:
           APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
           APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
           APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+
+      - name: Provision the isolated ProofMode E2E database
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run ProofMode API and PostgreSQL E2E with tamper and stale rejection
+        run: npm run test:e2e:proof-modes
+        env:
+          APOLLO_COMPATIBILITY_GRAPH_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify no orphan ProofMode E2E backends remain
+        if: always()
+        run: |
+          orphans="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-ci-proof-modes'")"
+          test "$orphans" = 0
 
       - name: Verify PostgreSQL and versioned object round-trip
         run: |
