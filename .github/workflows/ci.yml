@@ -158,7 +158,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -219,6 +219,39 @@ jobs:
           printf apollo-v2-compose-smoke | docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc pipe "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt"
           object_value="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T minio mc cat "local/$APOLLO_V2_S3_BUCKET/gates/smoke.txt")"
           test "$object_value" = apollo-v2-compose-smoke
+
+      - name: Resume long-form indexing on a disposable Compose database
+        env:
+          APOLLO_LONG_FORM_WORKFLOW_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_long_form?schema=public&application_name=apollo-video-e2e-long-form-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          GROQ_API_KEY: ci-not-a-real-groq-credential-000
+          GROQ_TRANSCRIBE_MODEL: whisper-large-v3
+          GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR: "1"
+          OPENAI_API_KEY: ci-not-a-real-openai-credential-0
+          OPENAI_DIARIZATION_MODEL: gpt-4o-transcribe-diarize
+          OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR: "1"
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        run: |
+          set -euo pipefail
+          administer() {
+            docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"
+          }
+          preflight="$(administer "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          printf 'preflight e2e backends: %s\n' "$preflight"
+          test "$preflight" = 0
+          administer "create database apollo_v2_e2e_long_form"
+          npm run db:v2:migrate:deploy
+          npm run test:e2e:long-form-index-workflow
+          orphans=1
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            orphans="$(administer "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-long-form-ci%'")"
+            if test "$orphans" = 0; then break; fi
+            sleep 1
+          done
+          printf 'postflight e2e backends: %s\n' "$orphans"
+          test "$orphans" = 0
 
       - name: Start supervised app and workers
         run: |
