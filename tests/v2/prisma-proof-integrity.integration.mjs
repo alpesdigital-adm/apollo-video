@@ -820,6 +820,55 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     )
     const evidence = evidenceCreated.payload.data.evidence
     assert.equal(evidence.physicalMaterialized, false)
+    assert.deepEqual(
+      evidence.integrityReasons,
+      [],
+      'the catalogued evidence must carry current rights and consent: ' +
+        JSON.stringify({
+          integrityStatus: evidence.integrityStatus,
+          rightsSnapshotId: evidence.rightsSnapshotId,
+        }),
+    )
+    assert.equal(
+      evidence.integrityStatus,
+      'context-required',
+      'a qualified testimonial is valid but must travel with its context',
+    )
+
+    const evidenceQuery = new URLSearchParams({
+      q: lines.proof,
+      category: 'testimonial',
+      offerId: 'offer-apollo',
+      intendedClaim: lines.proof,
+      includedContext: 'true',
+      limit: '20',
+    })
+    const evidenceSearch = await fetch(
+      `${baseUrl}/v1/projects/${projectId}` +
+      `/evidence-segments?${evidenceQuery}`,
+      { headers },
+    )
+    const evidenceSearchPayload = await evidenceSearch.json()
+    assert.equal(
+      evidenceSearch.status,
+      200,
+      JSON.stringify(evidenceSearchPayload),
+    )
+    const searchResults = evidenceSearchPayload.data.results
+    const searchHit = searchResults.find((result) =>
+      result.evidence.id === evidence.id)
+    assert.ok(
+      searchHit,
+      'the catalogued evidence must be searchable by its exact claim, ' +
+        `category and offer: ${JSON.stringify(searchResults)}`,
+    )
+    assert.deepEqual(
+      searchHit.reuseDecision.reasons,
+      [],
+      'the authorized evidence must carry no reuse blockers before the ' +
+        `ProofNeed selects it: ${JSON.stringify(searchHit.reuseDecision)}`,
+    )
+    assert.equal(searchHit.reuseDecision.allowed, true)
 
     const proofNeedEndpoint =
       `${baseUrl}/v1/projects/${projectId}/proof-needs`
@@ -853,7 +902,12 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     )
     const proofNeedRun = proofNeed.payload.data.run
     const proofNeedItem = proofNeedRun.items[0]
-    assert.equal(proofNeedItem.resolution, 'selected-evidence')
+    assert.equal(
+      proofNeedItem.resolution,
+      'selected-evidence',
+      'the ProofNeed must select the authorized evidence; search state: ' +
+        JSON.stringify(proofNeedItem.search),
+    )
     assert.equal(proofNeedItem.selectedEvidence.id, evidence.id)
 
     const integrityEndpoint =
@@ -1106,6 +1160,10 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
             entry === 'resultado'),
           claimText: lines.proof,
           claimKind: 'outcome',
+          // the operator still asks for proof of the authorized offer; the
+          // drift lives in the recipe node, which declares another product,
+          // and must be caught by the integrity gate, not by the search
+          offerId: 'offer-apollo',
         }],
       },
     )
@@ -1116,7 +1174,12 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     )
     const driftedNeedRun = driftedNeed.payload.data.run
     const driftedItem = driftedNeedRun.items[0]
-    assert.equal(driftedItem.resolution, 'selected-evidence')
+    assert.equal(
+      driftedItem.resolution,
+      'selected-evidence',
+      'the drifted recipe must still select the same authorized evidence; ' +
+        `search state: ${JSON.stringify(driftedItem.search)}`,
+    )
     assert.equal(driftedItem.selectedEvidence.id, evidence.id)
     const driftedIntegrity = await post(
       integrityEndpoint,
