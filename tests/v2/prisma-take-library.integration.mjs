@@ -105,6 +105,8 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     createProductionBatch,
     deriveBatchStatus,
   } = await import('../../src/v2/domain/production-batch.ts')
+  const { productionBatchItemOperationId } =
+    await import('../../src/v2/domain/batch-item-result.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
   const { createApiAccessAuditContext } =
@@ -301,6 +303,11 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     await client.v2ProductionBatchItem.createMany({
       data: productionBatch.items.map((item, sequence) => ({
         id: item.id,
+        operationId: productionBatchItemOperationId({
+          workspaceId,
+          batchId,
+          itemId: item.id,
+        }),
         workspaceId,
         batchId,
         sequence,

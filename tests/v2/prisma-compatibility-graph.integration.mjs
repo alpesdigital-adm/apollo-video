@@ -160,6 +160,8 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     createProductionBatch,
     deriveBatchStatus,
   } = await import('../../src/v2/domain/production-batch.ts')
+  const { productionBatchItemOperationId } =
+    await import('../../src/v2/domain/batch-item-result.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } =
@@ -338,6 +340,11 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     await client.v2ProductionBatchItem.createMany({
       data: batch.items.map((item, sequence) => ({
         id: item.id,
+        operationId: productionBatchItemOperationId({
+          workspaceId,
+          batchId,
+          itemId: item.id,
+        }),
         workspaceId,
         batchId,
         sequence,

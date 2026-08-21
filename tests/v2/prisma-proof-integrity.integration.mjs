@@ -192,6 +192,8 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     createProductionBatch,
     deriveBatchStatus,
   } = await import('../../src/v2/domain/production-batch.ts')
+  const { productionBatchItemOperationId } =
+    await import('../../src/v2/domain/batch-item-result.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } =
@@ -357,6 +359,11 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     await client.v2ProductionBatchItem.createMany({
       data: batch.items.map((item, sequence) => ({
         id: item.id,
+        operationId: productionBatchItemOperationId({
+          workspaceId,
+          batchId,
+          itemId: item.id,
+        }),
         workspaceId,
         batchId,
         sequence,
