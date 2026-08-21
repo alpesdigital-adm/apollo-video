@@ -58,6 +58,7 @@ import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/
 import { PrismaProxyReviewRepository } from '../../src/v2/infrastructure/prisma/proxy-review-repository.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
 import { PrismaRenderElementMapRepository } from '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
+import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
 import { PrismaWorkspaceRepository } from '../../src/v2/infrastructure/prisma/workspace-repository.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
 import { createMediaUploadSessionSignerFromEnvironment } from '../../src/v2/infrastructure/security/media-upload-session-signer.ts'
@@ -493,6 +494,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       storage,
       renderer: observedRenderer,
       renderElementMaps: new PrismaRenderElementMapRepository(prisma),
+      perceptionTimelines: new PrismaPerceptionTimelineRepository(prisma),
       proxyReviews: new PrismaProxyReviewRepository(prisma),
       colorPipelines,
       luts: new LocalProjectLutRenderMaterializer(

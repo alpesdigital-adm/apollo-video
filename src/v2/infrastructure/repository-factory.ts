@@ -1454,6 +1454,7 @@ export function createProjectProxyRenderWorker(
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
     sources: createArtifactSourceMaterializer(environment), clock,
     renderElementMaps: createRenderElementMapRepository(),
+    perceptionTimelines: createPerceptionTimelineRepository(),
     proxyReviews: createProxyReviewRepository(),
     catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),

@@ -15,6 +15,7 @@ import {
   FFMPEG_EDITORIAL_RENDERER_VERSION,
   type EditorialProxyRenderer,
 } from './ports/editorial-proxy-renderer.ts'
+import type { PerceptionTimelineRepository } from './ports/perception-timeline-repository.ts'
 import type { ProjectProxyRenderRepository } from './ports/project-proxy-render-repository.ts'
 import type { ProxyReviewRepository } from './ports/proxy-review-repository.ts'
 import type { PublicOperationRepository } from './ports/public-operation-repository.ts'
@@ -42,6 +43,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   storage: VerifiedMediaStorage
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
+  /**
+   * F1.036 / FR-173. The worker reads the persisted perception timeline of the project so the
+   * subtitle anchor is decided from real observations. It is a repository, not a payload: nothing
+   * the render request carries can substitute for the evidence actually stored.
+   */
+  perceptionTimelines: PerceptionTimelineRepository
   proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
   luts: ProjectLutRenderMaterializer
@@ -185,6 +192,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         minWidth: 0.1, maxWidth: 0.9, minHeight: 0.05, maxHeight: 0.5,
         timeRange: { startFrame: overlay.startFrame, endFrame: overlay.endFrame },
       }))
+      // Perception evidence for *this* version. A timeline recorded against another version is not
+      // evidence about these frames, so it is ignored rather than approximated — the anchor then
+      // falls back to the reserved bottom band, which is the Director's face-safe fallback.
+      const persistedPerception = subtitleResolution?.enabled && subtitleCues.length
+        ? await dependencies.perceptionTimelines.findLatest({ workspaceId: operation.workspaceId, projectId: context.projectId })
+        : null
+      const perceptionTimeline = persistedPerception && persistedPerception.projectVersionId === context.projectVersionId
+        ? persistedPerception.timeline
+        : undefined
       const placementPlan = createRenderPlacementPlan({
         format: source.format as OutputAspectRatio,
         canvas: { width: outputPreset.exportDefaults.proxy.width, height: outputPreset.exportDefaults.proxy.height },
@@ -193,6 +209,13 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         // the rows the subtitles already own — and never from a rectangle authored here.
         subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null,
         elements: placementElements,
+        ...(subtitleResolution?.enabled && subtitleCues.length ? {
+          subtitleAnchor: {
+            fps: source.editPlan.fps,
+            cues: subtitleCues.map((cue) => ({ id: cue.id, startFrame: cue.startFrame, endFrame: cue.endFrame })),
+            ...(perceptionTimeline ? { perceptionTimeline } : {}),
+          },
+        } : {}),
       })
       validateRenderPlacementPlan(placementPlan)
       const reframePlan = source.reframePlan
@@ -264,7 +287,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,
@@ -336,6 +359,9 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           // Subject evidence persisted for this variant. Forwarded untouched: without it the
           // subject-dependent reason codes could never fire on a real render.
           ...(source.formatSubjects ? { subjects: source.formatSubjects } : {}),
+          // The anchor decision reports into the variant verdict: a cue that had no safe band
+          // blocks this output instead of shipping a subtitle over a face.
+          subtitleAnchorPlan: placementPlan.subtitleAnchorPlan,
         },
       })
       await dependencies.proxyReviews.persistGenerated({
