@@ -9,9 +9,15 @@ import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
  * 1.7.0 adds the materialized geometry sections (`placementPlan`, `reframePlan`) to the render
  * input and their content addresses to the recipe parameters. Both are additive: a render without
  * geometry produces the same filtergraph 1.6.0 produced.
+ *
+ * 1.8.0 lets the placement plan carry a `subtitleAnchorPlan` (F1.036 / FR-173). When it is present
+ * the ASS events are positioned on the decided band instead of the Director's fallback anchor, and
+ * a cue with no safe band is not written at all — so the same cue list can produce different
+ * pixels. That is a new recipe, not a variation of 1.7.0: proxies are addressed by recipe version,
+ * and reusing a 1.7.0 proxy for an anchored render would show subtitles in the wrong place.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.7.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.7.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.8.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.8.0'
 export const EDITORIAL_FINAL_RECIPE_VERSION = '1.3.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */

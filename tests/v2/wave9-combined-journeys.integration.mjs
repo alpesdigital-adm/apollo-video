@@ -645,6 +645,9 @@ async function renderThroughRealWorker(input) {
         return renderer.cleanup(operationId)
       },
     },
+    // No perception persisted for these journeys: the F1.036 anchor then has nothing to consult and
+    // the cues keep the reserved bottom band.
+    perceptionTimelines: { async findLatest() { return null } },
     renderElementMaps: {
       async persistOrReplay(persist) {
         captured.elementMap = persist.map
@@ -841,7 +844,7 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
 
     // --- Journey 3: the 9:16 blocker is localized ---------------------------
     const portraitIssues = portrait.review.criticIssues
-    console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame]))}`)
+    console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange?.startFrame ?? null, issue.evidenceRange?.endFrame ?? null]))}`)
     console.log(`journey 3 16:9 reason codes: ${JSON.stringify(landscape.review.criticIssues.map((issue) => [issue.code, issue.severity]))}`)
     const collision = portraitIssues.find((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION')
     assert.ok(collision, 'the 9:16 subtitle band overlaps subject-lower and must raise a hard reason code')
