@@ -37,6 +37,24 @@ const CORPUS_WORDS = [
   'margem',
 ]
 
+// `project_media_assets.id` is a native `@db.Uuid` column, so the corpus
+// cannot label those rows with a readable identifier. Derive an RFC 4122
+// name-based UUID from the corpus seed instead, keeping the fixture
+// reproducible across runs without hard-coding literals.
+function deterministicUuid(seed) {
+  const bytes = createHash('sha256').update(seed).digest().subarray(0, 16)
+  bytes[6] = (bytes[6] & 0x0f) | 0x50
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = bytes.toString('hex')
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-')
+}
+
 async function mapWithConcurrency(items, limit, worker) {
   const results = new Array(items.length)
   let cursor = 0
@@ -1527,7 +1545,9 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       })
       await client.v2ProjectMediaAsset.createMany({
         data: indexes.map((index) => ({
-          id: `hybrid-corpus-asset-${index}-${suffix}`,
+          id: deterministicUuid(
+            `project-media-asset:${suffix}:${index}`,
+          ),
           workspaceId,
           projectId,
           artifactId: corpusArtifactId(index),
