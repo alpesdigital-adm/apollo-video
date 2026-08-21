@@ -90,6 +90,7 @@ model V2Workspace {
   directorBudgetEvents                   V2DirectorBudgetEvent[]
   reviewAnnotations                      V2ReviewAnnotation[]
   renderElementMaps                      V2RenderElementMap[]
+  subtitleSidecars                       V2ProjectSubtitleSidecar[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
   reviewPatchBatches                     V2ReviewPatchBatch[]
   proxyReviews                           V2ProxyReview[]
@@ -563,6 +564,7 @@ model V2Project {
   treatmentPlans                         V2TreatmentPlan[]
   reviewAnnotations                      V2ReviewAnnotation[]
   renderElementMaps                      V2RenderElementMap[]
+  subtitleSidecars                       V2ProjectSubtitleSidecar[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
   reviewPatchBatches                     V2ReviewPatchBatch[]
   proxyReviews                           V2ProxyReview[]
@@ -805,6 +807,7 @@ model V2ProjectVersion {
   treatmentPlans                V2TreatmentPlan[]
   reviewAnnotations             V2ReviewAnnotation[]
   renderElementMaps             V2RenderElementMap[]
+  subtitleSidecars              V2ProjectSubtitleSidecar[]
   patchProposalsAsBase          V2ReviewPatchProposal[]         @relation("PatchProposalBaseVersion")
   patchProposalAsResult         V2ReviewPatchProposal?          @relation("PatchProposalResultVersion")
   patchBatchesAsBase            V2ReviewPatchBatch[]            @relation("PatchBatchBaseVersion")
@@ -1134,6 +1137,51 @@ model V2RenderElementMap {
   @@map("render_element_maps")
 }
 
+/// FR-175 — one immutable SRT/VTT sidecar derived from the alignment of one
+/// rendered artifact. `lineageHash` is the content address of that derivation
+/// (version, variant, MP4, RenderInput, cue map, format, locale); the same
+/// lineage always resolves to the same row and the same sidecar artifact.
+model V2ProjectSubtitleSidecar {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  variantId            String   @db.VarChar(128)
+  outputKind           String   @db.VarChar(16)
+  outputArtifactId     String   @db.VarChar(128)
+  outputManifestId     String   @db.VarChar(128)
+  outputSha256         String   @db.Char(64)
+  format               String   @db.VarChar(8)
+  locale               String   @db.VarChar(32)
+  artifactId           String   @db.VarChar(128)
+  manifestId           String   @db.VarChar(128)
+  artifactKey          String   @db.VarChar(512)
+  sha256               String   @db.Char(64)
+  byteSize             Int
+  encoding             String   @db.VarChar(32)
+  cueCount             Int
+  lineageHash          String   @db.Char(64)
+  renderElementMapHash String   @db.Char(64)
+  renderInputHash      String   @db.Char(64)
+  editPlanSnapshotId   String   @db.VarChar(128)
+  idempotencyKey       String   @db.VarChar(128)
+  requestFingerprint   String   @db.Char(64)
+  createdAt            DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  outputArtifact V2MediaArtifact  @relation("SubtitleSidecarOutputArtifact", fields: [outputArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifact       V2MediaArtifact  @relation("SubtitleSidecarArtifact", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, lineageHash])
+  @@unique([workspaceId, projectId, idempotencyKey])
+  @@index([workspaceId, projectId, projectVersionId, variantId, createdAt(sort: Desc)])
+  @@index([workspaceId, artifactId])
+  @@map("project_subtitle_sidecars")
+}
+
 model V2DirectorRun {
   id                   String   @id @db.VarChar(128)
   workspaceId          String   @db.VarChar(128)
@@ -1371,6 +1419,8 @@ model V2MediaArtifact {
   productionBatchArtifacts     V2ProductionBatchItemArtifact[]
   reviewAnnotations            V2ReviewAnnotation[]
   renderElementMaps            V2RenderElementMap[]
+  subtitleSidecarsAsOutput     V2ProjectSubtitleSidecar[]                @relation("SubtitleSidecarOutputArtifact")
+  subtitleSidecarsAsFile       V2ProjectSubtitleSidecar[]                @relation("SubtitleSidecarArtifact")
   proxyReviews                 V2ProxyReview[]
   selectedByAssetSelections    V2AssetSelection[]                        @relation("AssetSelectionSelectedArtifact")
   sourceDeconstructionReports  V2SourceDeconstructionReport[]

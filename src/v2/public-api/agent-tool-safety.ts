@@ -383,6 +383,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one version-bound review note without mutating the project or starting a provider job.',
     },
+    'apollo.projects.subtitle-sidecars.export': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Derives one immutable SRT or VTT file from the cue alignment already persisted for a rendered artifact; it creates no project version, starts no render and replays onto the same artifact when repeated.',
+    },
     'apollo.projects.review-patches.propose': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one impact proposal and four deterministic gates without mutating the project version.',

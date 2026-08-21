@@ -4,9 +4,9 @@
     "uiActions": 98,
     "capabilities": 88,
     "endpoints": 88,
-    "registeredCapabilities": 242,
-    "operableCapabilities": 242,
-    "publicContractCapabilities": 242,
+    "registeredCapabilities": 244,
+    "operableCapabilities": 244,
+    "publicContractCapabilities": 244,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -2114,6 +2114,28 @@
       "endpoint": "GET /v1/projects/{projectId}/render-elements",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/render-element-hit-test/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.subtitle-sidecars.export",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/subtitle-sidecars",
+      "inputSchemaRef": "apollo://schemas/export-subtitle-sidecar-request/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-exported/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.subtitle-sidecars.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/subtitle-sidecars",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/subtitle-sidecar-list/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
