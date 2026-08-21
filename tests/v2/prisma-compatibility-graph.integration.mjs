@@ -483,7 +483,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: ['rendering', 'editorial-reuse'],
         },
       },
-      actor: authenticatedActor,
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const validatedArtifactSha256 = '9'.repeat(64)
     const validatedArtifactKey =
@@ -605,7 +605,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: [],
         },
       },
-      actor: authenticatedActor,
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const alignment = createScriptAlignmentRun({
       id: alignmentId,

@@ -490,7 +490,7 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
         artifactId,
         baseRevision: assetRightsRevision(artifactId, revision),
         draft,
-        actor: authenticatedActor,
+        actor: { type: 'api-client', id: issued.client.id },
       })
     await setAssetRights(
       0,

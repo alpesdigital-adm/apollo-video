@@ -300,7 +300,7 @@ test('T-FR-081 imports, aligns and reviews grouped recordings through PostgreSQL
             allowedUses: [],
           },
         },
-        actor: authenticatedActor,
+        actor: { type: 'api-client', id: issued.client.id },
       })
     }
 
