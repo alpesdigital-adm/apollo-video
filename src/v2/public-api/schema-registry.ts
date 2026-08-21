@@ -7010,6 +7010,45 @@ const searchableProjectSchema = {
   },
 }
 
+/**
+ * FR-175 — one persisted sidecar. Every field is either the immutable identity
+ * of the file or the lineage that proves which rendered alignment produced it.
+ */
+const subtitleSidecarSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'id', 'projectId', 'projectVersionId', 'variantId', 'outputKind', 'outputArtifactId',
+    'outputManifestId', 'outputSha256', 'format', 'locale', 'artifactId', 'manifestId',
+    'artifactRef', 'sha256', 'byteSize', 'encoding', 'cueCount', 'lineageHash',
+    'renderElementMapHash', 'renderInputHash', 'editPlanSnapshotId', 'createdAt',
+  ],
+  properties: {
+    id: idSchema,
+    projectId: idSchema,
+    projectVersionId: idSchema,
+    variantId: { type: 'string', minLength: 1, maxLength: 128 },
+    outputKind: { type: 'string', enum: ['proxy', 'final'] },
+    outputArtifactId: idSchema,
+    outputManifestId: idSchema,
+    outputSha256: sha256Schema,
+    format: { type: 'string', enum: ['srt', 'vtt'] },
+    locale: { type: 'string', minLength: 2, maxLength: 32 },
+    artifactId: idSchema,
+    manifestId: idSchema,
+    /** Opaque reference; the bytes are reached only through a download grant. */
+    artifactRef: { type: 'string', pattern: '^artifact:[A-Za-z0-9._-]{3,128}$' },
+    sha256: sha256Schema,
+    byteSize: { type: 'integer', minimum: 1 },
+    encoding: { const: 'utf-8-bom' },
+    cueCount: { type: 'integer', minimum: 1 },
+    lineageHash: sha256Schema,
+    renderElementMapHash: sha256Schema,
+    renderInputHash: sha256Schema,
+    editPlanSnapshotId: idSchema,
+    createdAt: dateTimeSchema,
+  },
+} as const
+
 const renderElementSchema = {
   type: 'object', additionalProperties: false,
   required: ['elementId', 'type', 'clipId', 'sceneId', 'sourceId', 'frame', 'bounds', 'zIndex', 'opacity', 'priority'],
@@ -15471,6 +15510,57 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         chooserRequired: { type: 'boolean' },
         candidates: { type: 'array', maxItems: 32, items: renderElementSchema },
       },
+    }),
+  ),
+  defineSchema('export-subtitle-sidecar-request', 1, 'Subtitle sidecar export request',
+    {
+      type: 'object', additionalProperties: false, required: ['variantId', 'format'],
+      properties: {
+        variantId: { type: 'string', minLength: 1, maxLength: 128 },
+        format: { type: 'string', enum: ['srt', 'vtt'] },
+        locale: { type: 'string', minLength: 2, maxLength: 32 },
+        projectVersionId: { type: 'string', minLength: 3, maxLength: 128 },
+      },
+    },
+  ),
+  defineSchema('subtitle-sidecar-exported', 1, 'Subtitle sidecar derived from the rendered alignment',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['sidecar', 'projectVersion', 'alignment', 'replayed'],
+      properties: {
+        sidecar: subtitleSidecarSchema,
+        projectVersion: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'current'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            current: { type: 'boolean' },
+          },
+        },
+        alignment: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'renderElementMapHash', 'renderInputHash', 'outputArtifactId', 'outputSha256',
+            'cueCount', 'firstCueStartMs', 'lastCueEndMs',
+          ],
+          properties: {
+            renderElementMapHash: sha256Schema,
+            renderInputHash: sha256Schema,
+            outputArtifactId: idSchema,
+            outputSha256: sha256Schema,
+            cueCount: { type: 'integer', minimum: 1 },
+            firstCueStartMs: { type: 'integer', minimum: 0 },
+            lastCueEndMs: { type: 'integer', minimum: 1 },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('subtitle-sidecar-list', 1, 'Subtitle sidecars already derived for a project',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['sidecars'],
+      properties: { sidecars: { type: 'array', maxItems: 100, items: subtitleSidecarSchema } },
     }),
   ),
   defineSchema('project-workspace', 1, 'Project editing workspace response',

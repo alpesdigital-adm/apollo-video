@@ -108,6 +108,7 @@ import type { ProjectQueryRepository } from '../application/ports/project-query-
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
+import type { SubtitleSidecarRepository } from '../application/ports/subtitle-sidecar-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
 import type { NarrativeSafetyRepository } from '../application/ports/narrative-safety-repository.ts'
 import type { ManualEditRepository } from '../application/ports/manual-edit-repository.ts'
@@ -245,6 +246,8 @@ import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-rep
 import { PrismaReviewPatchRepository } from './prisma/review-patch-repository.ts'
 import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-repository.ts'
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
+import { PrismaSubtitleSidecarRepository } from './prisma/subtitle-sidecar-repository.ts'
+import { TemporaryFileSubtitleSidecarStaging } from './media/subtitle-sidecar-staging.ts'
 import { PrismaProjectMediaRepository } from './prisma/project-media-repository.ts'
 import { PrismaEditorialCommandRepository } from './prisma/editorial-command-repository.ts'
 import { PrismaNarrativeSafetyRepository } from './prisma/narrative-safety-repository.ts'
@@ -1628,6 +1631,23 @@ export function createReviewPatchBatchRepository() {
 
 export function createRenderElementMapRepository(): RenderElementMapRepository {
   return new PrismaRenderElementMapRepository(resolveV2Client())
+}
+
+export function createSubtitleSidecarRepository(): SubtitleSidecarRepository {
+  return new PrismaSubtitleSidecarRepository(resolveV2Client())
+}
+
+/** FR-175 — the sidecar export wired to the real storage, artifacts and staging. */
+export function createSubtitleSidecarExportDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return {
+    sidecars: createSubtitleSidecarRepository(),
+    artifacts: createMediaArtifactQueryRepository(),
+    persistence: createMediaArtifactPersistenceRepository(environment),
+    storage: createVerifiedMediaStorage(environment),
+    staging: new TemporaryFileSubtitleSidecarStaging(),
+  }
 }
 
 export function createEditorialCommandRepository(): EditorialCommandRepository {

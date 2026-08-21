@@ -36,6 +36,32 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const projectVersionId = 'project-version-example-5'
+/** FR-175 — a sidecar exported from the alignment of the rendered proxy. */
+const subtitleSidecarExample = {
+  id: 'subtitle-sidecar-example-1',
+  projectId,
+  projectVersionId,
+  variantId: '9:16',
+  outputKind: 'proxy',
+  outputArtifactId: artifactId,
+  outputManifestId: 'manifest-example-1',
+  outputSha256: 'e'.repeat(64),
+  format: 'srt',
+  locale: 'pt-BR',
+  artifactId: 'artifact-subtitle-sidecar-example-1',
+  manifestId: 'manifest-subtitle-sidecar-example-1',
+  artifactRef: 'artifact:artifact-subtitle-sidecar-example-1',
+  sha256: 'a'.repeat(64),
+  byteSize: 142,
+  encoding: 'utf-8-bom',
+  cueCount: 2,
+  lineageHash: 'c'.repeat(64),
+  renderElementMapHash: 'f'.repeat(64),
+  renderInputHash: 'b'.repeat(64),
+  editPlanSnapshotId: 'snapshot-example-1',
+  createdAt,
+}
 const canonicalProjectBriefExample = {
   schemaVersion: 1,
   objective: 'discovery',
@@ -7156,6 +7182,31 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/export-subtitle-sidecar-request/v1': [
+      { variantId: '9:16', format: 'srt', locale: 'pt-BR' },
+    ],
+    'apollo://schemas/subtitle-sidecar-exported/v1': [
+      {
+        data: {
+          sidecar: subtitleSidecarExample,
+          projectVersion: { id: projectVersionId, sequence: 5, current: true },
+          alignment: {
+            renderElementMapHash: 'f'.repeat(64),
+            renderInputHash: 'b'.repeat(64),
+            outputArtifactId: artifactId,
+            outputSha256: 'e'.repeat(64),
+            cueCount: 2,
+            firstCueStartMs: 0,
+            lastCueEndMs: 2500,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/subtitle-sidecar-list/v1': [
+      { data: { sidecars: [subtitleSidecarExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-workspace/v1': [
       {
