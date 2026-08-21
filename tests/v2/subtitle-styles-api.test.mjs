@@ -26,6 +26,6 @@ test('T-FR-170 capability and public schema examples remain in parity', () => {
   for (const id of ['apollo.subtitle-styles.list', 'apollo.subtitle-styles.preview']) {
     assert.ok(FOUNDATION_CAPABILITIES.some((capability) => capability.id === id))
   }
-  assert.equal(publicSchemaExamples(getPublicSchema('apollo://schemas/subtitle-style-registry/v1')).length, 1)
+  assert.equal(publicSchemaExamples(getPublicSchema('apollo://schemas/subtitle-style-registry/v2')).length, 1)
   assert.equal(publicSchemaExamples(getPublicSchema('apollo://schemas/subtitle-css-preview/v1')).length, 1)
 })

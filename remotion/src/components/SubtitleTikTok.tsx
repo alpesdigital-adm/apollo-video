@@ -10,6 +10,9 @@ import { SubtitleEntry, ColorPalette, SubtitleWord, SubtitleStyle } from '../lib
 import {
   resolveSubtitleRenderMetrics,
   subtitleFontStackCss,
+  subtitleTextShadowCss,
+  subtitleTextTransform,
+  SUBTITLE_LINE_HEIGHT,
   type SubtitleMvpFormat,
   type SubtitleStylePreset,
 } from '../../../src/v2/domain/subtitle-style-tokens';
@@ -51,9 +54,10 @@ interface SubtitlePresetSpec {
   pop: boolean;
   strokePx: number;
   strokeColor: string;
-  dropShadow: boolean;
-  uppercase: boolean;
-  lowercase: boolean;
+  // Cast shadow resolved from the preset's own `shadow` token (FR-172). `undefined` = the preset
+  // declares no shadow; nothing is inferred from the container shape any more.
+  textShadow: string | undefined;
+  textTransform: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
   fontSize: number;
   fontWeight: number;
   maxWidth: number;
@@ -208,7 +212,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
   // the original path untouched.
   {
     const spec: SubtitlePresetSpec = {
-      chunkSize: registeredPreset.lineBreaking.chunkWords,
+      chunkSize: registeredPreset.grouping.maxWordsPerGroup,
       container: registeredPreset.background.shape,
       activeColor: registeredPreset.highlight.mode === 'none' ? registeredPreset.highlight.inactiveColor : registeredPreset.highlight.color,
       pastColor: registeredPreset.highlight.inactiveColor,
@@ -218,9 +222,8 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
       // scales with the rendered font so proxy and delivery renders read identically.
       strokePx: metrics.strokePx,
       strokeColor: registeredPreset.stroke.color,
-      dropShadow: registeredPreset.background.shape === 'none',
-      uppercase: registeredPreset.typography.uppercase,
-      lowercase: false,
+      textShadow: subtitleTextShadowCss(registeredPreset.shadow),
+      textTransform: subtitleTextTransform(registeredPreset.casing),
       fontSize: metrics.fontPx,
       fontWeight: registeredPreset.typography.weight,
       maxWidth: metrics.limits.maxWidth,
@@ -248,7 +251,7 @@ export const SubtitleTikTok: React.FC<SubtitleTikTokProps> = ({
       gap: '0 0.28em',
       textAlign: 'center',
       fontFamily: spec.fontFamily,
-      lineHeight: 1.1,
+      lineHeight: SUBTITLE_LINE_HEIGHT,
     };
     if (spec.container === 'box') {
       containerStyle.background = `rgba(0,0,0,${registeredPreset.background.opacity})`;
@@ -588,17 +591,15 @@ const PresetWordSpan: React.FC<PresetWordSpanProps> = ({
     transform: `scale(${scale})`,
     transformOrigin: 'center bottom',
   };
-  if (spec.uppercase) style.textTransform = 'uppercase';
-  if (spec.lowercase) style.textTransform = 'lowercase';
+  if (spec.textTransform !== 'none') style.textTransform = spec.textTransform;
   if (spec.strokePx > 0) {
     style.WebkitTextStroke = `${spec.strokePx.toFixed(2)}px ${spec.strokeColor}`;
     style.paintOrder = 'stroke fill';
-    style.textShadow = '0 3px 10px rgba(0,0,0,0.55)';
-  } else if (spec.dropShadow) {
-    style.textShadow = '0 4px 16px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.85)';
-  } else if (spec.container === 'none') {
-    style.textShadow = '0 4px 14px rgba(0,0,0,0.85)';
   }
+  // Shadow comes from the token, not from a container/stroke inference. The three canonical
+  // outlined presets declare the exact treatment the renderer used to hardcode; the two container
+  // presets declare `enabled:false`, which is the branch they already took.
+  if (spec.textShadow !== undefined) style.textShadow = spec.textShadow;
 
   return <span style={style}>{word}</span>;
 };

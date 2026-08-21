@@ -7,7 +7,7 @@ import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
 import { validateRenderReframePlan } from '../domain/render-reframe-plan.ts'
-import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
+import { requireSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../domain/subtitle-system.ts'
 import type { MediaArtifactPersistenceRepository } from './ports/media-artifact-repository.ts'
 import type { ArtifactSourceMaterializer, VerifiedMediaStorage } from './ports/media-ingest.ts'
 import {
@@ -161,13 +161,23 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
       const durationFrames = source.editPlan.durationFrames
       const subtitleResolution = source.subtitleResolution
-      if (subtitleResolution) {
-        // A resolution persisted against another registry revision (or a tampered preset hash) can
-        // never reach the renderer: the subtitle geometry it implies would not be the one drawn.
-        if (
-          subtitleResolution.registryHash !== SUBTITLE_STYLE_REGISTRY.registryHash ||
-          (subtitleResolution.enabled && subtitleResolution.presetHash !== subtitlePresetHash(subtitleResolution.presetId))
-        ) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle resolution drifted from the subtitle style registry')
+      if (subtitleResolution?.enabled) {
+        // Fail closed on coherence between the identity the resolution carries and the tokens it
+        // carries. When the resolution names the *current* registry, the tokens must still be the
+        // ones the registry holds; when it names an older one, the content-addressed snapshot is
+        // the authority and the render reproduces what it was compiled to draw (FR-172).
+        if (!subtitleResolution.presetSnapshot) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Enabled subtitle resolution carries no materialized preset snapshot')
+        }
+        const snapshot = requireSubtitlePresetSnapshot(subtitleResolution.presetSnapshot)
+        if (snapshot.presetId !== subtitleResolution.presetId || snapshot.presetHash !== subtitleResolution.presetHash ||
+            snapshot.registryHash !== subtitleResolution.registryHash) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle preset snapshot does not match its resolution')
+        }
+        if (subtitleResolution.registryHash === SUBTITLE_STYLE_REGISTRY.registryHash &&
+            subtitleResolution.presetHash !== subtitlePresetHash(subtitleResolution.presetId)) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Persisted subtitle resolution drifted from the subtitle style registry')
+        }
       }
       const placementElements: RenderPlacementRequestV1[] = ctaOverlays.map((overlay, index) => ({
         id: `cta-${index}-${overlay.id ?? index}`.slice(0, 96),
@@ -254,7 +264,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,

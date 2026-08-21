@@ -33,7 +33,7 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
-import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
+import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
@@ -462,7 +462,7 @@ function sequentialClock(start) {
 
 const subtitleResolutionFor = (presetId) => presetId === null
   ? Object.freeze({ presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
-  : Object.freeze({ presetId, presetHash: subtitlePresetHash(presetId), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true })
+  : Object.freeze({ presetId, presetHash: subtitlePresetHash(presetId), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true, presetSnapshot: materializeSubtitlePresetSnapshot(presetId) })
 
 // --------------------------------------------------------------------------
 // The render half: real enqueue service, real worker, real FFmpeg.

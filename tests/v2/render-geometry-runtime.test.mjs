@@ -320,7 +320,7 @@ const CUES = Object.freeze([
 
 test('T-FR-171 the render input subtitle section carries and re-checks the registry hash', () => {
   const enabled = materializeRenderInputSubtitles({ configuration: subtitleConfiguration('manual'), variantId: '9:16', transcriptHash: TRANSCRIPT_HASH, cues: CUES })
-  assert.equal(enabled.schemaVersion, 'render-input-subtitles/v2')
+  assert.equal(enabled.schemaVersion, 'render-input-subtitles/v3')
   assert.equal(enabled.registryHash, SUBTITLE_STYLE_REGISTRY.registryHash)
   assert.equal(enabled.cues.length, 2)
   assert.doesNotThrow(() => requireRenderInputSubtitleRegistry(enabled))

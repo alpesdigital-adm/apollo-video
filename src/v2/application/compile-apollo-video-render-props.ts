@@ -542,7 +542,11 @@ export function compileApolloVideoRenderProps(
       'props.subtitleStyle contradicts the persisted subtitle resolution',
     )
     compiled.subtitleStyle = resolvedSubtitles.presetId! as SubtitleStyle
-    compiled.subtitlePreset = readSubtitlePreset(resolvedSubtitles.presetId!)
+    // Reproducibility (FR-172): the renderer receives the tokens the resolution was materialized
+    // with — the content-addressed snapshot the section carries — never a fresh lookup in a
+    // registry that may have been revised since. `requireRenderInputSubtitleRegistry` above already
+    // re-derived that snapshot's content address and re-ran the full preset validator on it.
+    compiled.subtitlePreset = resolvedSubtitles.presetSnapshot!.tokens
     assertDomain(
       compiled.subtitlePreset.presetHash === resolvedSubtitles.presetHash,
       'INVALID_RENDER_INPUT',

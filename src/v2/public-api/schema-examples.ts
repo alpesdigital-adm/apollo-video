@@ -19,6 +19,7 @@ import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
 import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
+import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -5228,7 +5229,8 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       subtitlePresetId: 'kinetic',
     }],
     'apollo://schemas/responsive-placement-result/v2': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY],
+    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY_V1],
+    'apollo://schemas/subtitle-style-registry/v2': [SUBTITLE_STYLE_REGISTRY],
     'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
     'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
