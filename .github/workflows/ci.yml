@@ -158,7 +158,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -252,6 +252,44 @@ jobs:
             test "$(docker inspect --format '{{.State.Status}}' "$container_id")" = running
             test "$(docker inspect --format '{{.RestartCount}}' "$container_id")" = 0
           done
+
+      - name: Run cross-asset semantic search E2E on a dedicated database
+        env:
+          APOLLO_HYBRID_SEARCH_E2E: "1"
+          APOLLO_API_ENVIRONMENT: sandbox
+          APOLLO_SEMANTIC_EMBEDDING_PROVIDER: openai
+          OPENAI_API_KEY: ci-not-a-real-openai-credential-0
+          APOLLO_E2E_HYBRID_SEARCH_DATABASE: apollo_v2_e2e_hybrid_search
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          orphans="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          printf 'preflight e2e backends=%s\n' "$orphans"
+          test "$orphans" = 0
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "create database \"$APOLLO_E2E_HYBRID_SEARCH_DATABASE\" owner \"$POSTGRES_USER\""
+          export V2_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:$POSTGRES_TUNNEL_PORT/$APOLLO_E2E_HYBRID_SEARCH_DATABASE?schema=public&application_name=$APOLLO_E2E_HYBRID_SEARCH_APP_NAME&connection_limit=5&pool_timeout=10&connect_timeout=10"
+          npm run db:v2:migrate:deploy
+          npm run build
+          npm run test:e2e:hybrid-search
+
+      - name: Verify zero orphan E2E backends after semantic search E2E
+        if: always()
+        env:
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_E2E_HYBRID_SEARCH_APP_NAME'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$backends"
+            if test "$backends" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-%'"
+          exit 1
 
       - name: Stop isolated infrastructure
         if: always()

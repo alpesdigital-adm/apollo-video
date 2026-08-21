@@ -1,11 +1,78 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import net from 'node:net'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
+
+const BASE_ACTIVE_DOCUMENTS = 4
+const CORPUS_TIERS = [10, 100, 1000]
+const CORPUS_NEEDLES = 4
+const CORPUS_INTENTIONS = [
+  'proof',
+  'testimonial',
+  'reference',
+  'workspace-reuse',
+  'lead-generation',
+]
+const CORPUS_ATMOSPHERES = [
+  'confiante',
+  'emocional',
+  'analitico',
+  'urgente',
+  'sereno',
+]
+const CORPUS_WORDS = [
+  'faturamento',
+  'retencao',
+  'audiencia',
+  'conversao',
+  'recorrencia',
+  'atendimento',
+  'logistica',
+  'treinamento',
+  'operacao',
+  'margem',
+]
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length)
+  let cursor = 0
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (cursor < items.length) {
+        const current = cursor
+        cursor += 1
+        results[current] = await worker(items[current], current)
+      }
+    },
+  )
+  await Promise.all(runners)
+  return results
+}
+
+async function readCorpusSnapshot(client, workspaceId) {
+  const rows = await client.$queryRawUnsafe(
+    `SELECT "identityKey", "documentHash", "embeddingInputHash"
+       FROM "semantic_search_documents"
+      WHERE "workspaceId" = $1 AND "active" = true
+      ORDER BY "identityKey"`,
+    workspaceId,
+  )
+  const digest = createHash('sha256')
+  for (const row of rows) {
+    digest.update(
+      `${row.identityKey}|${row.documentHash}|${row.embeddingInputHash}\n`,
+    )
+  }
+  return Object.freeze({
+    size: rows.length,
+    digest: digest.digest('hex'),
+  })
+}
 
 async function getFreePort() {
   return new Promise((resolve, reject) => {
@@ -44,7 +111,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
   skip:
     process.env.APOLLO_HYBRID_SEARCH_E2E !== '1' &&
     'set APOLLO_HYBRID_SEARCH_E2E=1 and use an isolated V2 database',
-  timeout: 180_000,
+  timeout: 900_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -272,6 +339,94 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         },
       })
     }
+
+    const foreignWorkspaceId = `hybrid-e2e-foreign-ws-${suffix}`
+    const foreignProjectId = `hybrid-e2e-foreign-project-${suffix}`
+    const foreignArtifact = {
+      id: `hybrid-foreign-image-${suffix}`,
+      sha256: 'e'.repeat(64),
+    }
+    await client.v2Workspace.create({
+      data: {
+        id: foreignWorkspaceId,
+        slug: foreignWorkspaceId,
+        name: 'Hybrid search foreign workspace',
+        status: 'active',
+        createdAt,
+        updatedAt: createdAt,
+      },
+    })
+    const foreignIssued = await createApiClientService({
+      repository: new PrismaApiClientRepository(client),
+      credentialCrypto: nodeApiCredentialCrypto,
+      clock: () => createdAt,
+    })({
+      id: `hybrid-e2e-foreign-client-${suffix}`,
+      workspaceId: foreignWorkspaceId,
+      name: 'Hybrid search foreign workspace',
+      environment: 'sandbox',
+      scopes: ['projects:read', 'projects:write', 'clients:admin'],
+    })
+    await client.v2Project.create({
+      data: {
+        id: foreignProjectId,
+        workspaceId: foreignWorkspaceId,
+        name: 'Foreign workspace retrieval fixture',
+        status: 'draft',
+        objective: 'lead-generation',
+        format: '9:16',
+        locale: 'pt-BR',
+        createdByType: 'api-client',
+        createdById: foreignIssued.client.id,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    })
+    await client.v2MediaArtifact.create({
+      data: {
+        id: foreignArtifact.id,
+        workspaceId: foreignWorkspaceId,
+        artifactKey:
+          `workspaces/${foreignWorkspaceId}/sources/${foreignArtifact.id}.png`,
+        sha256: foreignArtifact.sha256,
+        byteSize: BigInt(250_000),
+        mediaType: 'image',
+        container: 'png',
+        status: 'available',
+        createdAt,
+      },
+    })
+    await client.v2ProjectMediaAsset.create({
+      data: {
+        id: randomUUID(),
+        workspaceId: foreignWorkspaceId,
+        projectId: foreignProjectId,
+        artifactId: foreignArtifact.id,
+        role: 'source-master',
+        originalFileName: 'foreign.png',
+        createdAt,
+      },
+    })
+    await setAssetRightsService({
+      repository: rightsRepository,
+      clock: () => createdAt,
+      createId: () => `hybrid-rights-foreign-${suffix}`,
+    })({
+      workspaceId: foreignWorkspaceId,
+      artifactId: foreignArtifact.id,
+      baseRevision: assetRightsRevision(foreignArtifact.id, 0),
+      draft: {
+        status: 'approved',
+        allowedUses: ['rendering', 'editorial-reuse'],
+        prohibitedUses: [],
+        allowedLocales: ['pt-BR'],
+        consent: { status: 'not-required', allowedUses: [] },
+      },
+      actor: {
+        type: 'api-client',
+        id: foreignIssued.client.id,
+      },
+    })
 
     const artifactCountBefore =
       await client.v2MediaArtifact.count({
@@ -527,6 +682,56 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       JSON.stringify(crossPayload),
     )
 
+    const foreignCatalogResponse = await fetch(
+      `${baseUrl}/v1/projects/${foreignProjectId}` +
+        '/semantic-search/documents',
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${foreignIssued.token}`,
+          'content-type': 'application/json',
+          'idempotency-key': `hybrid-foreign-${suffix}`,
+        },
+        body: JSON.stringify({
+          source: {
+            type: 'artifact',
+            id: foreignArtifact.id,
+          },
+          expectedSourceHash: foreignArtifact.sha256,
+          indexVersion: 'semantic-search-index/v1',
+          observations: {
+            ocrText: 'Receita recorrente cresceu no projeto vizinho',
+            description:
+              'Gráfico autorizado de receita recorrente cross-project.',
+            intentions: ['proof', 'workspace-reuse'],
+            personIds: ['person-cross-project'],
+            metadata: {
+              atmosphere: 'confiante',
+              campaign: 'cross-project',
+            },
+            producer,
+          },
+        }),
+      },
+    )
+    const foreignCatalogPayload = await foreignCatalogResponse.json()
+    assert.equal(
+      foreignCatalogResponse.status,
+      201,
+      JSON.stringify(foreignCatalogPayload),
+    )
+    assert.equal(
+      await client.v2SemanticSearchDocument.count({
+        where: {
+          workspaceId: foreignWorkspaceId,
+          active: true,
+          identityKey: `artifact:${foreignArtifact.id}`,
+        },
+      }),
+      1,
+      'foreign workspace candidate must exist and be active',
+    )
+
     const reindexResponse = await fetch(catalogEndpoint, {
       method: 'POST',
       headers: {
@@ -702,6 +907,38 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
           result.document.identityKey !==
           `artifact:${artifacts.blocked.id}`,
       ),
+    )
+    assert.ok(
+      workspaceCrossPayload.data.results.every(
+        (result) =>
+          result.document.identityKey !==
+          `artifact:${foreignArtifact.id}`,
+      ),
+      'workspace scope must never surface another workspace',
+    )
+    assert.ok(
+      workspaceCrossPayload.data.results.every(
+        (result) =>
+          result.document.projectId === projectId ||
+          result.document.projectId === crossProjectId,
+      ),
+      'workspace scope must stay inside the anchor workspace projects',
+    )
+    const foreignQueryResponse = await fetch(
+      `${baseUrl}/v1/projects/${foreignProjectId}/semantic-search/query`,
+      {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ...crossQuery, scope: 'workspace' }),
+      },
+    )
+    assert.equal(
+      foreignQueryResponse.status,
+      404,
+      'anchor project of another workspace must not authorize the query',
     )
 
     const eligibleCrossIdentities =
@@ -1190,6 +1427,515 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         'RIGHTS_USE_NOT_ALLOWED',
       ),
     )
+
+    const corpusArtifactId = (index) =>
+      `hybrid-corpus-${String(index).padStart(4, '0')}-${suffix}`
+    const corpusSha256 = (index) =>
+      createHash('sha256')
+        .update(`hybrid-corpus:${suffix}:${index}`)
+        .digest('hex')
+    const corpusCampaign = (index) =>
+      `corpus-${String(index).padStart(4, '0')}`
+    const corpusNeedleToken = (index) =>
+      `apolloneedle${String(index).padStart(4, '0')}`
+    const corpusObservations = (index) => {
+      const needle = index < CORPUS_NEEDLES
+      const first = CORPUS_WORDS[index % CORPUS_WORDS.length]
+      const second =
+        CORPUS_WORDS[(index * 7 + 3) % CORPUS_WORDS.length]
+      return {
+        ocrText: needle
+          ? `${corpusNeedleToken(index)} indicador de ${first}`
+          : `Indicador de ${first} e ${second} no periodo`,
+        description: needle
+          ? `Painel exclusivo ${corpusNeedleToken(index)} de ${first}.`
+          : `Painel de ${first} combinado com ${second} da campanha.`,
+        intentions: [
+          CORPUS_INTENTIONS[index % CORPUS_INTENTIONS.length],
+        ],
+        personIds: [`person-corpus-${index % 12}`],
+        metadata: {
+          atmosphere:
+            CORPUS_ATMOSPHERES[index % CORPUS_ATMOSPHERES.length],
+          campaign: corpusCampaign(index),
+        },
+        producer,
+      }
+    }
+
+    async function provisionCorpusArtifacts(indexes) {
+      await client.v2MediaArtifact.createMany({
+        data: indexes.map((index) => ({
+          id: corpusArtifactId(index),
+          workspaceId,
+          artifactKey:
+            `workspaces/${workspaceId}/sources/` +
+            `${corpusArtifactId(index)}.png`,
+          sha256: corpusSha256(index),
+          byteSize: BigInt(120_000),
+          mediaType: 'image',
+          container: 'png',
+          status: 'available',
+          createdAt,
+        })),
+      })
+      await client.v2ProjectMediaAsset.createMany({
+        data: indexes.map((index) => ({
+          id: `hybrid-corpus-asset-${index}-${suffix}`,
+          workspaceId,
+          projectId,
+          artifactId: corpusArtifactId(index),
+          role: 'source-master',
+          originalFileName: `corpus-${index}.png`,
+          createdAt,
+        })),
+      })
+      await mapWithConcurrency(indexes, 4, async (index) => {
+        await setAssetRightsService({
+          repository: rightsRepository,
+          clock: () => createdAt,
+          createId: () => `hybrid-corpus-rights-${index}-${suffix}`,
+        })({
+          workspaceId,
+          artifactId: corpusArtifactId(index),
+          baseRevision: assetRightsRevision(corpusArtifactId(index), 0),
+          draft: {
+            status: 'approved',
+            allowedUses: ['rendering', 'editorial-reuse'],
+            prohibitedUses: [],
+            allowedLocales: ['pt-BR'],
+            consent: { status: 'not-required', allowedUses: [] },
+          },
+          actor: {
+            type: 'api-client',
+            id: issued.client.id,
+          },
+        })
+      })
+    }
+
+    async function catalogCorpusDocument(index, observations) {
+      const response = await fetch(catalogEndpoint, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': `hybrid-corpus-${index}-${suffix}`,
+        },
+        body: JSON.stringify({
+          source: { type: 'artifact', id: corpusArtifactId(index) },
+          expectedSourceHash: corpusSha256(index),
+          indexVersion: 'semantic-search-index/v1',
+          observations: observations ?? corpusObservations(index),
+        }),
+      })
+      if (response.status !== 201) {
+        return `${index}:${response.status}:${await response.text()}`
+      }
+      await response.json()
+      return null
+    }
+
+    async function seedCorpusUpTo(target, from) {
+      const indexes = []
+      for (let index = from; index < target; index += 1) {
+        indexes.push(index)
+      }
+      await provisionCorpusArtifacts(indexes)
+      const failures = (
+        await mapWithConcurrency(
+          indexes,
+          4,
+          (index) => catalogCorpusDocument(index),
+        )
+      ).filter((entry) => entry !== null)
+      assert.deepEqual(
+        failures.slice(0, 3),
+        [],
+        'deterministic corpus seeding must catalog every document',
+      )
+      return target
+    }
+
+    const corpusCases = [
+      ...Array.from({ length: CORPUS_NEEDLES }, (_, needle) => ({
+        id: `corpus-needle-${needle}`,
+        query: {
+          text: corpusNeedleToken(needle),
+          intention:
+            CORPUS_INTENTIONS[needle % CORPUS_INTENTIONS.length],
+          atmosphere:
+            CORPUS_ATMOSPHERES[needle % CORPUS_ATMOSPHERES.length],
+          personIds: [`person-corpus-${needle % 12}`],
+          visual: corpusNeedleToken(needle),
+          rightsUse: 'editorial-reuse',
+          filters: {
+            kinds: ['image'],
+            locale: 'pt-BR',
+            metadata: { campaign: corpusCampaign(needle) },
+            rights: 'approved',
+          },
+          includeBlocked: false,
+        },
+        relevantIdentityKeys: [
+          `artifact:${corpusArtifactId(needle)}`,
+        ],
+      })),
+      {
+        id: 'corpus-rights-blocked-negative',
+        query: {
+          text: 'material bloqueado reutilizacao editorial',
+          rightsUse: 'editorial-reuse',
+          filters: { rights: 'approved' },
+          includeBlocked: false,
+        },
+        relevantIdentityKeys: [
+          `artifact:${artifacts.blocked.id}`,
+        ],
+      },
+    ]
+
+    let seededCorpus = 0
+    const tierDigests = []
+    const tierLatencies = []
+    for (const tier of CORPUS_TIERS) {
+      seededCorpus = await seedCorpusUpTo(tier, seededCorpus)
+      const before = await readCorpusSnapshot(client, workspaceId)
+      assert.equal(
+        before.size,
+        BASE_ACTIVE_DOCUMENTS + tier,
+        `tier ${tier} must be fully materialized in PostgreSQL`,
+      )
+      const tierResponse = await fetch(scaleEvaluationEndpoint, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key': `hybrid-corpus-scale-${tier}-${suffix}`,
+        },
+        body: JSON.stringify({
+          scope: 'workspace',
+          k: 1,
+          cases: corpusCases,
+        }),
+      })
+      const tierPayload = await tierResponse.json()
+      assert.equal(
+        tierResponse.status,
+        201,
+        JSON.stringify(tierPayload),
+      )
+      const tierReport = tierPayload.data.evaluation
+      assert.equal(
+        tierReport.schemaVersion,
+        'retrieval-scale-evaluation/v1',
+      )
+      assert.equal(tierReport.scope, 'workspace')
+      assert.equal(tierReport.k, 1)
+      assert.equal(
+        tierReport.librarySize,
+        BASE_ACTIVE_DOCUMENTS + tier,
+        `librarySize must be measured against PostgreSQL at tier ${tier}`,
+      )
+      assert.equal(tierReport.cases.length, corpusCases.length)
+      for (let needle = 0; needle < CORPUS_NEEDLES; needle += 1) {
+        const item = tierReport.cases[needle]
+        assert.equal(item.id, `corpus-needle-${needle}`)
+        assert.deepEqual(
+          item.rankedIdentityKeys,
+          [`artifact:${corpusArtifactId(needle)}`],
+          `tier ${tier} needle ${needle} must isolate a single document`,
+        )
+        assert.equal(item.metrics.precisionAtK, 1)
+        assert.equal(item.metrics.recallAtK, 1)
+        assert.equal(item.metrics.ndcgAtK, 1)
+        assert.equal(item.metrics.reciprocalRank, 1)
+        assert.equal(item.semanticState, 'ready')
+      }
+      const negativeCase = tierReport.cases[CORPUS_NEEDLES]
+      assert.equal(negativeCase.id, 'corpus-rights-blocked-negative')
+      assert.equal(
+        negativeCase.rankedIdentityKeys.includes(
+          `artifact:${artifacts.blocked.id}`,
+        ),
+        false,
+        'a rights-blocked document must never be ranked',
+      )
+      assert.equal(negativeCase.metrics.precisionAtK, 0)
+      assert.equal(negativeCase.metrics.recallAtK, 0)
+      assert.equal(negativeCase.metrics.ndcgAtK, 0)
+      assert.equal(negativeCase.metrics.reciprocalRank, 0)
+      for (const metric of [
+        'precisionAtK',
+        'recallAtK',
+        'ndcgAtK',
+        'reciprocalRank',
+      ]) {
+        assert.ok(
+          Math.abs(tierReport.aggregateQuality[metric] - 0.8) < 1e-9,
+          `tier ${tier} aggregate ${metric} must stay at 4/5`,
+        )
+      }
+      const latency = tierReport.aggregateLatency
+      assert.equal(latency.sampleCount, corpusCases.length)
+      assert.ok(Number.isInteger(latency.minMs) && latency.minMs >= 0)
+      assert.ok(latency.minMs <= latency.p50Ms)
+      assert.ok(latency.p50Ms <= latency.p95Ms)
+      assert.ok(latency.p95Ms <= latency.maxMs)
+      assert.ok(Number.isInteger(latency.meanMs))
+      tierLatencies.push({ tier, ...latency })
+
+      const rankingResponse = await fetch(queryEndpoint, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: corpusNeedleToken(0),
+          scope: 'workspace',
+          rightsUse: 'editorial-reuse',
+          includeBlocked: false,
+          limit: 20,
+          explain: true,
+        }),
+      })
+      const rankingPayload = await rankingResponse.json()
+      assert.equal(
+        rankingResponse.status,
+        200,
+        JSON.stringify(rankingPayload),
+      )
+      assert.ok(
+        rankingPayload.data.results.length >= 1,
+        `unfiltered needle query returned nothing at tier ${tier}`,
+      )
+      assert.equal(
+        rankingPayload.data.results[0].document.identityKey,
+        `artifact:${corpusArtifactId(0)}`,
+        `unfiltered ranking must keep the needle first at tier ${tier}`,
+      )
+
+      const after = await readCorpusSnapshot(client, workspaceId)
+      assert.equal(
+        after.digest,
+        before.digest,
+        `corpus must stay immutable across tier ${tier} measurement`,
+      )
+      assert.equal(after.size, before.size)
+      tierDigests.push(after.digest)
+    }
+    assert.equal(
+      new Set(tierDigests).size,
+      CORPUS_TIERS.length,
+      'the corpus digest must change when the library grows',
+    )
+    assert.equal(
+      await client.v2SemanticSearchDocument.count({
+        where: { workspaceId, active: true },
+      }),
+      BASE_ACTIVE_DOCUMENTS + CORPUS_TIERS[CORPUS_TIERS.length - 1],
+    )
+    assert.equal(
+      await client.v2RetrievalScaleEvaluation.count({
+        where: { workspaceId, projectId },
+      }),
+      1 + CORPUS_TIERS.length,
+    )
+
+    const spareBase = CORPUS_TIERS[CORPUS_TIERS.length - 1]
+    const spareIndexes = Array.from(
+      { length: 6 },
+      (_, offset) => spareBase + offset,
+    )
+    await provisionCorpusArtifacts(spareIndexes)
+
+    const driftCases = Array.from({ length: 40 }, (_, position) => ({
+      ...corpusCases[position % CORPUS_NEEDLES],
+      id: `corpus-drift-${position}`,
+    }))
+    let driftStatus = 0
+    let driftCode = ''
+    for (
+      let attempt = 0;
+      attempt < 3 && driftStatus !== 409;
+      attempt += 1
+    ) {
+      const driftIndex = spareIndexes[attempt]
+      const driftInFlight = (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        return catalogCorpusDocument(driftIndex)
+      })()
+      const driftResponse = await fetch(scaleEvaluationEndpoint, {
+        method: 'POST',
+        headers: {
+          authorization,
+          'content-type': 'application/json',
+          'idempotency-key':
+            `hybrid-corpus-drift-${attempt}-${suffix}`,
+        },
+        body: JSON.stringify({
+          scope: 'workspace',
+          k: 1,
+          cases: driftCases,
+        }),
+      })
+      const driftPayload = await driftResponse.json()
+      assert.equal(await driftInFlight, null)
+      driftStatus = driftResponse.status
+      driftCode = driftPayload.error?.code ?? ''
+    }
+    assert.equal(
+      driftStatus,
+      409,
+      'a corpus that drifts mid-measurement must fail closed',
+    )
+    assert.equal(driftCode, 'VERSION_CONFLICT')
+
+    const staleCampaign = `stale-set-${suffix}`
+    const staleObservations = (index) => ({
+      ocrText: `Conjunto instavel ${staleCampaign} item ${index}`,
+      description: `Documento do conjunto instavel ${staleCampaign}.`,
+      intentions: ['reference'],
+      personIds: ['person-stale-set'],
+      metadata: { atmosphere: 'sereno', campaign: staleCampaign },
+      producer,
+    })
+    const staleFirstIndex = spareIndexes[3]
+    const staleSecondIndex = spareIndexes[4]
+    assert.equal(
+      await catalogCorpusDocument(
+        staleFirstIndex,
+        staleObservations(staleFirstIndex),
+      ),
+      null,
+    )
+    const staleQuery = {
+      text: 'conjunto instavel',
+      scope: 'workspace',
+      rightsUse: 'editorial-reuse',
+      filters: {
+        kinds: ['image'],
+        metadata: { campaign: staleCampaign },
+        rights: 'approved',
+      },
+      includeBlocked: false,
+      limit: 20,
+      explain: true,
+    }
+    const staleSetResponse = await fetch(queryEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(staleQuery),
+    })
+    const staleSetPayload = await staleSetResponse.json()
+    assert.equal(
+      staleSetResponse.status,
+      200,
+      JSON.stringify(staleSetPayload),
+    )
+    assert.equal(staleSetPayload.data.results.length, 1)
+    const staleResultSetHash = staleSetPayload.data.resultSetHash
+    const staleQueryHash = staleSetPayload.data.queryHash
+    assert.equal(
+      await catalogCorpusDocument(
+        staleSecondIndex,
+        staleObservations(staleSecondIndex),
+      ),
+      null,
+    )
+    const staleReuseResponse = await fetch(reuseRunEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `hybrid-stale-set-${suffix}`,
+      },
+      body: JSON.stringify({
+        query: staleQuery,
+        expectedQueryHash: staleQueryHash,
+        expectedResultSetHash: staleResultSetHash,
+        reusedIdentityKeys: [
+          `artifact:${corpusArtifactId(staleFirstIndex)}`,
+        ],
+        directorRejections: [],
+      }),
+    })
+    const staleReusePayload = await staleReuseResponse.json()
+    assert.equal(
+      staleReuseResponse.status,
+      409,
+      JSON.stringify(staleReusePayload),
+    )
+    assert.equal(staleReusePayload.error.code, 'VERSION_CONFLICT')
+
+    const auditQueryResponse = await fetch(queryEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(staleQuery),
+    })
+    const auditQueryPayload = await auditQueryResponse.json()
+    assert.equal(auditQueryResponse.status, 200)
+    assert.equal(auditQueryPayload.data.results.length, 2)
+    const auditReuseResponse = await fetch(reuseRunEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization,
+        'content-type': 'application/json',
+        'idempotency-key': `hybrid-audit-set-${suffix}`,
+      },
+      body: JSON.stringify({
+        query: staleQuery,
+        expectedQueryHash: auditQueryPayload.data.queryHash,
+        expectedResultSetHash: auditQueryPayload.data.resultSetHash,
+        reusedIdentityKeys: [
+          `artifact:${corpusArtifactId(staleFirstIndex)}`,
+        ],
+        directorRejections: [
+          {
+            identityKey: `artifact:${corpusArtifactId(staleSecondIndex)}`,
+            reason: 'not-needed',
+          },
+        ],
+      }),
+    })
+    const auditReusePayload = await auditReuseResponse.json()
+    assert.equal(
+      auditReuseResponse.status,
+      201,
+      JSON.stringify(auditReusePayload),
+    )
+    const auditedRun = auditReusePayload.data.run
+    const auditedKeys = auditedRun.candidateAudit.map(
+      (candidate) => candidate.identityKey,
+    )
+    assert.equal(
+      new Set(auditedKeys).size,
+      auditedKeys.length,
+      'candidate audit must not repeat a candidate',
+    )
+    for (const result of auditQueryPayload.data.results) {
+      assert.ok(
+        auditedKeys.includes(result.document.identityKey),
+        `every returned candidate must be audited: ${result.document.identityKey}`,
+      )
+    }
+    for (const candidate of auditedRun.candidateAudit) {
+      const reused = auditedRun.reusedIdentityKeys.includes(
+        candidate.identityKey,
+      )
+      assert.equal(
+        reused,
+        candidate.rejectionReasons.length === 0,
+        `candidate ${candidate.identityKey} must be reused or rejected with a reason`,
+      )
+    }
   } catch (error) {
     if (serverLogs) {
       process.stderr.write(`\n--- Next server log ---\n${serverLogs}\n`)
@@ -1205,4 +1951,60 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     }
     await client.$disconnect()
   }
+})
+
+test('T-FR-136 UI, Director and agents share a single semantic search application service', async () => {
+  const { readdir, readFile } = await import('node:fs/promises')
+  const roots = ['src', 'scripts']
+  const files = []
+  async function walk(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = `${directory}/${entry.name}`
+      if (entry.isDirectory()) {
+        await walk(path)
+        continue
+      }
+      if (/\.(?:ts|tsx|mjs)$/.test(entry.name)) files.push(path)
+    }
+  }
+  for (const root of roots) await walk(root)
+
+  const applicationConsumers = []
+  const repositoryConsumers = []
+  for (const path of files) {
+    const source = await readFile(path, 'utf8')
+    if (source.includes('application/hybrid-search')) {
+      applicationConsumers.push(path)
+    }
+    if (
+      source.includes('createSemanticSearchRepository') ||
+      source.includes('PrismaSemanticSearchRepository')
+    ) {
+      repositoryConsumers.push(path)
+    }
+  }
+
+  const publicRoutes = [
+    'src/app/v1/director-tools/route.ts',
+    'src/app/v1/projects/[projectId]/semantic-search/documents/route.ts',
+    'src/app/v1/projects/[projectId]/semantic-search/evaluations/route.ts',
+    'src/app/v1/projects/[projectId]/semantic-search/query/route.ts',
+    'src/app/v1/projects/[projectId]/semantic-search/reuse-runs/route.ts',
+    'src/app/v1/projects/[projectId]/semantic-search/scale-evaluations/route.ts',
+  ]
+  assert.deepEqual(
+    applicationConsumers.sort(),
+    [...publicRoutes].sort(),
+    'only the public /v1 semantic-search routes and the Director tool route may compose the hybrid search application services',
+  )
+  const allowedRepositoryConsumers = [
+    ...publicRoutes,
+    'src/v2/infrastructure/prisma/semantic-search-repository.ts',
+    'src/v2/infrastructure/repository-factory.ts',
+  ]
+  assert.deepEqual(
+    repositoryConsumers.sort(),
+    [...allowedRepositoryConsumers].sort(),
+    'no parallel path may reach the semantic search repository',
+  )
 })
