@@ -1307,32 +1307,75 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
        ORDER BY "identityKey", "createdAt"`,
       workspaceId,
     )
-    assert.equal(vectors.length, 4)
+    const vectorSummary = JSON.stringify(
+      vectors.map((row) => ({
+        identityKey: row.identityKey,
+        active: row.active,
+        dimensions: Number(row.dimensions),
+        hasVector: row.has_vector,
+        hasFullText: row.has_full_text,
+      })),
+    )
+    assert.equal(
+      vectors.length,
+      5,
+      `four identities plus the superseded proof revision: ${vectorSummary}`,
+    )
+    assert.equal(
+      vectors.filter((row) => row.active === true).length,
+      BASE_ACTIVE_DOCUMENTS,
+      `exactly one active revision per identity: ${vectorSummary}`,
+    )
     assert.ok(
       vectors.every(
         (row) =>
-          row.dimensions === 256 &&
+          Number(row.dimensions) === 256 &&
           row.has_vector === true &&
           row.has_full_text === true,
       ),
+      `every persisted revision must stay indexed: ${vectorSummary}`,
     )
     const sandboxRows = await client.v2SandboxProviderExecution.findMany({
       where: { workspaceId, clientId: issued.client.id },
       orderBy: { createdAt: 'desc' },
     })
-    assert.ok(sandboxRows.length >= 10)
-    assert.ok(sandboxRows.every((row) =>
-      row.environment === 'sandbox' &&
-      row.provider === 'apollo-sandbox-fake' &&
-      row.operation === 'semantic-embedding' &&
-      row.externalCalls === 0 && row.costMinorUnits > 0))
+    assert.ok(
+      sandboxRows.length >= 10,
+      `sandbox executions recorded: ${sandboxRows.length}`,
+    )
+    assert.ok(
+      sandboxRows.every((row) =>
+        row.environment === 'sandbox' &&
+        row.provider === 'apollo-sandbox-fake' &&
+        row.operation === 'semantic-embedding' &&
+        row.externalCalls === 0 && row.costMinorUnits > 0),
+      `sandbox executions must never call outside: ${JSON.stringify(
+        sandboxRows.slice(0, 3).map((row) => ({
+          environment: row.environment,
+          provider: row.provider,
+          operation: row.operation,
+          externalCalls: row.externalCalls,
+          costMinorUnits: row.costMinorUnits,
+        })),
+      )}`,
+    )
     const sandboxAuditResponse = await fetch(
       `${baseUrl}/v1/governance/sandbox-executions?limit=5`,
       { headers: { authorization } },
     )
     const sandboxAuditPayload = await sandboxAuditResponse.json()
-    assert.equal(sandboxAuditResponse.status, 200)
-    assert.equal(sandboxAuditPayload.data.entries.length, 5)
+    assert.equal(
+      sandboxAuditResponse.status,
+      200,
+      JSON.stringify(sandboxAuditPayload),
+    )
+    assert.equal(
+      sandboxAuditPayload.data.entries.length,
+      5,
+      `governance page must honour limit=5: ${JSON.stringify(
+        sandboxAuditPayload.data,
+      ).slice(0, 400)}`,
+    )
     assert.ok(sandboxAuditPayload.data.entries.every((entry) =>
       entry.externalCalls === 0 && entry.input === undefined))
     assert.ok(sandboxAuditPayload.data.nextCursor)
@@ -1744,6 +1787,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         where: { workspaceId, projectId },
       }),
       1 + CORPUS_TIERS.length,
+      'one baseline plus one persisted report per corpus tier',
     )
 
     const spareBase = CORPUS_TIERS[CORPUS_TIERS.length - 1]
@@ -1793,7 +1837,11 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       409,
       'a corpus that drifts mid-measurement must fail closed',
     )
-    assert.equal(driftCode, 'VERSION_CONFLICT')
+    assert.equal(
+      driftCode,
+      'VERSION_CONFLICT',
+      `drift must be reported as a version conflict, got ${driftCode}`,
+    )
 
     const staleCampaign = `stale-set-${suffix}`
     const staleObservations = (index) => ({
@@ -1840,7 +1888,15 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       200,
       JSON.stringify(staleSetPayload),
     )
-    assert.equal(staleSetPayload.data.results.length, 1)
+    assert.equal(
+      staleSetPayload.data.results.length,
+      1,
+      `stale fixture must start with one candidate: ${JSON.stringify(
+        staleSetPayload.data.results.map(
+          (result) => result.document.identityKey,
+        ),
+      )}`,
+    )
     const staleResultSetHash = staleSetPayload.data.resultSetHash
     const staleQueryHash = staleSetPayload.data.queryHash
     assert.equal(
@@ -1884,8 +1940,20 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       body: JSON.stringify(staleQuery),
     })
     const auditQueryPayload = await auditQueryResponse.json()
-    assert.equal(auditQueryResponse.status, 200)
-    assert.equal(auditQueryPayload.data.results.length, 2)
+    assert.equal(
+      auditQueryResponse.status,
+      200,
+      JSON.stringify(auditQueryPayload),
+    )
+    assert.equal(
+      auditQueryPayload.data.results.length,
+      2,
+      `audit fixture must expose both candidates: ${JSON.stringify(
+        auditQueryPayload.data.results.map(
+          (result) => result.document.identityKey,
+        ),
+      )}`,
+    )
     const auditReuseResponse = await fetch(reuseRunEndpoint, {
       method: 'POST',
       headers: {
