@@ -326,9 +326,14 @@ function runFor(kind) {
         : ['evidence-adjacent-proof-integrity'],
   }
   const currentRights = {
-    id: evidence.rightsSnapshotId,
+    id: kind === 'rights-snapshot-stale'
+      ? 'rights-proof-integrity-superseded'
+      : evidence.rightsSnapshotId,
     rightsStatus: 'approved',
     consentStatus: 'approved',
+    ...(kind === 'rights-expired'
+      ? { rightsExpiresAt: '2026-07-29T13:59:59.000Z' }
+      : {}),
     ...(kind === 'consent-expired'
       ? { consentExpiresAt: '2026-07-29T13:59:59.000Z' }
       : {}),
@@ -359,7 +364,7 @@ test('T-FR-131 policy eval controls critical false positives and false negatives
     policyEval.schemaVersion,
     'proof-integrity-policy-eval/v1',
   )
-  assert.equal(policyEval.cases.length, 14)
+  assert.equal(policyEval.cases.length, 16)
   for (const policyCase of policyEval.cases) {
     const run = runFor(policyCase.kind)
     const evaluation = run.evaluations[0]
@@ -385,6 +390,47 @@ test('T-FR-131 policy eval controls critical false positives and false negatives
       evaluation.issue?.fabricationSuggested ?? false,
       false,
     )
+  }
+})
+
+test('T-FR-131 blocks stale and expired rights snapshots by dimension', () => {
+  const approvedRights = runFor('canonical-match').evaluations[0]
+    .comparisons.find((entry) => entry.dimension === 'rights')
+  assert.equal(approvedRights.outcome, 'match')
+  assert.equal(approvedRights.reasonCode, undefined)
+
+  const stale = runFor('rights-snapshot-stale').evaluations[0]
+  const staleRights = stale.comparisons.find((entry) =>
+    entry.dimension === 'rights')
+  assert.equal(stale.outcome, 'blocked')
+  assert.equal(stale.allowedForAssembly, false)
+  assert.equal(staleRights.outcome, 'mismatch')
+  assert.equal(staleRights.reasonCode, 'RIGHTS_SNAPSHOT_STALE')
+  assert.ok(stale.issue.actions.includes('renew-rights-or-consent'))
+  assert.equal(stale.issue.fabricationSuggested, false)
+
+  const expired = runFor('rights-expired').evaluations[0]
+  const expiredRights = expired.comparisons.find((entry) =>
+    entry.dimension === 'rights')
+  assert.equal(expired.outcome, 'blocked')
+  assert.equal(expired.allowedForAssembly, false)
+  assert.equal(expiredRights.outcome, 'expired')
+  assert.equal(expiredRights.reasonCode, 'RIGHTS_EXPIRED')
+  assert.equal(
+    expired.issue.reasonCodes.includes('RIGHTS_NOT_APPROVED'),
+    false,
+    'an expired right must not be reported as a merely unapproved right',
+  )
+  assert.ok(expired.issue.actions.includes('renew-rights-or-consent'))
+
+  for (const kind of ['rights-snapshot-stale', 'rights-expired']) {
+    const run = runFor(kind)
+    assert.equal(
+      hydrateProofIntegrityRun(JSON.parse(stableSerialize(run))).runHash,
+      run.runHash,
+    )
+    assert.equal(run.summary.readyForAssembly, false)
+    assert.equal(run.summary.fabricationSuggestionCount, 0)
   }
 })
 
