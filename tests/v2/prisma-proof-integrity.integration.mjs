@@ -1083,7 +1083,12 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       JSON.stringify(contextBlocked.payload),
     )
     const blockedContext = contextBlocked.payload.data.run.evaluations[0]
-    assert.equal(blockedContext.outcome, 'blocked')
+    assert.equal(
+      blockedContext.outcome,
+      'blocked',
+      'an amputated context range must block assembly; comparisons: ' +
+        JSON.stringify(blockedContext.comparisons),
+    )
     assert.equal(blockedContext.allowedForAssembly, false)
     assert.equal(
       blockedContext.comparisons.find((entry) =>
@@ -1255,10 +1260,14 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       1,
       `proof-integrity-e2e-rights-2-${suffix}`,
       {
+        // the licence is renewed with one more locale: same approval, new
+        // content, therefore a new snapshot identity. An identical draft
+        // would keep the same snapshotHash and reuse the very same snapshot
+        // row, which would never make the catalogued evidence stale.
         status: 'approved',
         allowedUses: ['rendering', 'editorial-reuse'],
         prohibitedUses: [],
-        allowedLocales: ['pt-BR'],
+        allowedLocales: ['pt-BR', 'en-US'],
         consent: {
           status: 'approved',
           allowedUses: ['rendering', 'editorial-reuse'],
@@ -1276,7 +1285,15 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       JSON.stringify(staleRights.payload),
     )
     const staleEvaluation = staleRights.payload.data.run.evaluations[0]
-    assert.equal(staleEvaluation.outcome, 'blocked')
+    assert.equal(
+      staleEvaluation.outcome,
+      'blocked',
+      'a superseded rights snapshot must block assembly; evidence snapshot ' +
+        `versus comparisons: ${JSON.stringify({
+          evidenceRightsSnapshotId: evidence.rightsSnapshotId,
+          comparisons: staleEvaluation.comparisons,
+        })}`,
+    )
     assert.equal(staleEvaluation.allowedForAssembly, false)
     const staleComparison = staleEvaluation.comparisons.find((entry) =>
       entry.dimension === 'rights')
@@ -1449,6 +1466,8 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       assert.equal(row.fabricationSuggestionCount, 0)
     }
   } catch (error) {
+    // let the server flush the log line of the request that just failed
+    await new Promise((resolve) => setTimeout(resolve, 500))
     if (serverLogs) {
       error.message += `\nNext logs:\n${serverLogs.slice(-8_000)}`
     }
