@@ -382,7 +382,110 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
       },
       async cleanup() {},
     }
-    const createRuntime = (client, interruptChunks = false) => {
+    const stageOutputTypes = {
+      probe: 'media-artifact-manifest',
+      transcript: 'media-transcript',
+      diarization: 'speaker-diarization-run',
+      chunks: 'hierarchical-processing-run',
+      moments: 'long-form-index-run',
+    }
+    const stageConcurrencies = {
+      probe: 1,
+      transcript: 1,
+      diarization: 1,
+      chunks: 2,
+      moments: 2,
+    }
+    const stageFingerprints = (workflow) =>
+      Object.fromEntries(workflow.stages.map((stage) => [
+        stage.stage,
+        {
+          inputHash: stage.inputHash,
+          idempotencyKey: stage.idempotencyKey,
+          outputHash: stage.outputHash,
+          outputReferenceId: stage.outputReference?.id,
+          stageHash: stage.stageHash,
+        },
+      ]))
+    const assertPublishedStages = (workflow, label) => {
+      for (const stage of workflow.stages) {
+        assert.match(
+          stage.inputHash,
+          /^[a-f0-9]{64}$/,
+          `${label}/${stage.stage} input hash`,
+        )
+        assert.match(
+          stage.stageHash,
+          /^[a-f0-9]{64}$/,
+          `${label}/${stage.stage} stage hash`,
+        )
+        assert.equal(
+          stage.idempotencyKey,
+          `${workflow.id}:${stage.stage}:${stage.inputHash.slice(0, 32)}`,
+          `${label}/${stage.stage} idempotency key`,
+        )
+        assert.equal(
+          stage.concurrency,
+          stageConcurrencies[stage.stage],
+          `${label}/${stage.stage} concurrency`,
+        )
+        assert.ok(
+          stage.concurrency <= workflow.budget.maximumConcurrency,
+          `${label}/${stage.stage} concurrency exceeds the budget`,
+        )
+        assert.ok(
+          stage.budget.estimatedCostMinorUnits <=
+            stage.budget.maximumCostMinorUnits,
+          `${label}/${stage.stage} stage budget`,
+        )
+        if (stage.status === 'succeeded') {
+          assert.match(
+            stage.outputHash ?? '',
+            /^[a-f0-9]{64}$/,
+            `${label}/${stage.stage} output hash`,
+          )
+          assert.equal(
+            stage.outputReference?.type,
+            stageOutputTypes[stage.stage],
+            `${label}/${stage.stage} output tier`,
+          )
+          assert.ok(
+            (stage.outputReference?.id ?? '').length > 0,
+            `${label}/${stage.stage} output reference`,
+          )
+          assert.ok(
+            stage.resultCount >= 1,
+            `${label}/${stage.stage} result count`,
+          )
+        } else {
+          assert.equal(
+            stage.outputHash,
+            undefined,
+            `${label}/${stage.stage} published an output before succeeding`,
+          )
+          assert.equal(
+            stage.outputReference,
+            undefined,
+            `${label}/${stage.stage} published a reference before succeeding`,
+          )
+          assert.equal(
+            stage.searchable,
+            false,
+            `${label}/${stage.stage} is searchable before succeeding`,
+          )
+        }
+      }
+      assert.equal(
+        new Set(workflow.stages.map((stage) => stage.idempotencyKey)).size,
+        workflow.stages.length,
+        `${label} reused an idempotency key across tiers`,
+      )
+    }
+    const createRuntime = (
+      client,
+      interruptChunks = false,
+      inspectFirstStage,
+    ) => {
       const workflows =
         new PrismaLongFormIndexWorkflowRepository(client)
       const speaker =
@@ -548,11 +651,16 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
         moments: derived,
       })
       let interrupted = false
+      let inspected = false
       const worker = runNextLongFormIndexOperationService({
         operations: new PrismaPublicOperationRepository(client),
         workflows,
         processor: {
           async process(input) {
+            if (inspectFirstStage && !inspected) {
+              inspected = true
+              await inspectFirstStage(input)
+            }
             if (
               interruptChunks &&
               !interrupted &&
@@ -615,8 +723,108 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
         { stage: 'moments', status: 'pending', searchable: false },
       ],
     )
+    assertPublishedStages(partial.data.workflow, 'partial')
+    assert.deepEqual(
+      partial.data.workflow.stages
+        .filter((stage) => stage.status === 'succeeded')
+        .map((stage) => ({
+          stage: stage.stage,
+          searchable: stage.searchable,
+          outputType: stage.outputReference.type,
+        })),
+      [
+        {
+          stage: 'probe',
+          searchable: false,
+          outputType: 'media-artifact-manifest',
+        },
+        {
+          stage: 'transcript',
+          searchable: true,
+          outputType: 'media-transcript',
+        },
+        {
+          stage: 'diarization',
+          searchable: false,
+          outputType: 'speaker-diarization-run',
+        },
+      ],
+    )
+    const partialFingerprints = stageFingerprints(partial.data.workflow)
+    assert.equal(
+      partialFingerprints.probe.outputReferenceId,
+      manifestId,
+    )
     assert.equal(
       await prisma.v2MediaTranscript.count({ where: { workspaceId } }),
+      1,
+    )
+    const publishedTranscript =
+      await prisma.v2MediaTranscript.findFirstOrThrow({
+        where: { workspaceId },
+        select: { id: true },
+      })
+    assert.equal(
+      partialFingerprints.transcript.outputReferenceId,
+      publishedTranscript.id,
+    )
+    const publishedDiarizationRun =
+      await prisma.v2SpeakerDiarizationRun.findFirstOrThrow({
+        where: { workspaceId, projectId, workflowId },
+        select: { id: true },
+      })
+    assert.equal(
+      partialFingerprints.diarization.outputReferenceId,
+      publishedDiarizationRun.id,
+    )
+    const replayedCreation = await route.POST(
+      new NextRequest(
+        `http://localhost/v1/projects/${projectId}/long-form-index-workflows`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${issued.token}`,
+            'content-type': 'application/json',
+            'idempotency-key': `long-form-workflow-e2e-${suffix}`,
+          },
+          body: JSON.stringify({
+            sourceArtifactId: artifactId,
+            expectedArtifactSha256: artifactSha256,
+            sourceManifestId: manifestId,
+            expectedManifestHash: manifest.manifestHash,
+            policyVersion: 'long-form-index-workflow-policy/v1',
+            versions,
+            stageBudgets,
+            budget: {
+              currency: 'USD',
+              maximumCostMinorUnits: 300,
+              maximumElapsedMs: 300_000,
+              maximumConcurrency: 2,
+            },
+          }),
+        },
+      ),
+      { params: Promise.resolve({ projectId }) },
+    )
+    const replayedCreated = await replayedCreation.json()
+    assert.equal(
+      replayedCreation.status,
+      200,
+      JSON.stringify(replayedCreated),
+    )
+    assert.equal(replayedCreated.data.replayed, true)
+    assert.equal(replayedCreated.data.workflow.id, workflowId)
+    assert.equal(replayedCreated.data.operation.id, operationId)
+    assert.equal(
+      await prisma.v2LongFormIndexWorkflow.count({
+        where: { workspaceId, projectId },
+      }),
+      1,
+    )
+    assert.equal(
+      await prisma.v2PublicOperation.count({
+        where: { workspaceId, type: 'long-form-index' },
+      }),
       1,
     )
     assert.equal(
@@ -679,11 +887,83 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
 
     await prisma.$disconnect()
     prisma = new PrismaClient()
-    const restartedRuntime = createRuntime(prisma)
+    const fencing = {
+      rivalClaims: 0,
+      rejectedRivalWrites: 0,
+      rejectedStaleAttemptWrites: 0,
+    }
+    const rivalOwner = `worker-rival-${suffix}`
+    const inspectFencing = async (input) => {
+      const rivalOperations = new PrismaPublicOperationRepository(prisma)
+      const rivalAt = new Date()
+      const rivalClaim = await rivalOperations.claimNext({
+        leaseOwner: rivalOwner,
+        now: rivalAt.toISOString(),
+        leaseUntil: new Date(
+          rivalAt.getTime() + 30_000,
+        ).toISOString(),
+        workspaceId,
+        type: 'long-form-index',
+      })
+      assert.equal(
+        rivalClaim,
+        null,
+        'a second simultaneous claim must be rejected while the lease holds',
+      )
+      fencing.rivalClaims += 1
+      const rivalWorkflows =
+        new PrismaLongFormIndexWorkflowRepository(prisma)
+      const rivalWrite = await rivalWorkflows.replaceWithLease({
+        workspaceId,
+        projectId,
+        workflowId,
+        operationId: input.lease.operationId,
+        expectedRunHash: input.workflow.runHash,
+        nextWorkflow: input.workflow,
+        leaseOwner: rivalOwner,
+        operationAttempt: input.lease.attempt,
+        now: new Date().toISOString(),
+      })
+      assert.equal(
+        rivalWrite,
+        null,
+        'a stage write from a non-owner must be fenced out',
+      )
+      fencing.rejectedRivalWrites += 1
+      const staleAttemptWrite = await rivalWorkflows.replaceWithLease({
+        workspaceId,
+        projectId,
+        workflowId,
+        operationId: input.lease.operationId,
+        expectedRunHash: input.workflow.runHash,
+        nextWorkflow: input.workflow,
+        leaseOwner: input.lease.owner,
+        operationAttempt: input.lease.attempt + 1,
+        now: new Date().toISOString(),
+      })
+      assert.equal(
+        staleAttemptWrite,
+        null,
+        'a stage write with a stale attempt must be fenced out',
+      )
+      fencing.rejectedStaleAttemptWrites += 1
+    }
+    const restartedRuntime = createRuntime(prisma, false, inspectFencing)
     const outcome = await restartedRuntime.worker(
       `worker-after-restart-${suffix}`,
     )
     assert.equal(outcome?.status, 'succeeded')
+    assert.deepEqual(fencing, {
+      rivalClaims: 1,
+      rejectedRivalWrites: 1,
+      rejectedStaleAttemptWrites: 1,
+    })
+    assert.equal(
+      await prisma.v2PublicOperation.count({
+        where: { workspaceId, leaseOwner: rivalOwner },
+      }),
+      0,
+    )
     assert.equal(
       await restartedRuntime.worker(
         `worker-after-restart-${suffix}`,
@@ -745,6 +1025,74 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     )
     assert.equal(transcriptCalls, 1)
     assert.equal(diarizationCalls, 1)
+    assertPublishedStages(stored.workflow, 'succeeded')
+    const succeededFingerprints = stageFingerprints(stored.workflow)
+    for (const stage of ['probe', 'transcript', 'diarization']) {
+      assert.deepEqual(
+        succeededFingerprints[stage],
+        partialFingerprints[stage],
+        `${stage} was recomputed instead of resumed`,
+      )
+    }
+    const finalResponse = await readRoute.GET(
+      new NextRequest(
+        `http://localhost/v1/projects/${projectId}/long-form-index-workflows/${workflowId}`,
+        {
+          headers: {
+            authorization: `Bearer ${issued.token}`,
+            'x-request-id': `long-form-final-${suffix}`,
+          },
+        },
+      ),
+      { params: Promise.resolve({ projectId, workflowId }) },
+    )
+    const final = await finalResponse.json()
+    assert.equal(finalResponse.status, 200, JSON.stringify(final))
+    assertPublishedStages(final.data.workflow, 'published')
+    assert.deepEqual(
+      final.data.workflow.stages.map((stage) => ({
+        stage: stage.stage,
+        status: stage.status,
+        searchable: stage.searchable,
+        outputType: stage.outputReference?.type,
+      })),
+      [
+        {
+          stage: 'probe',
+          status: 'succeeded',
+          searchable: false,
+          outputType: 'media-artifact-manifest',
+        },
+        {
+          stage: 'transcript',
+          status: 'succeeded',
+          searchable: true,
+          outputType: 'media-transcript',
+        },
+        {
+          stage: 'diarization',
+          status: 'succeeded',
+          searchable: false,
+          outputType: 'speaker-diarization-run',
+        },
+        {
+          stage: 'chunks',
+          status: 'succeeded',
+          searchable: true,
+          outputType: 'hierarchical-processing-run',
+        },
+        {
+          stage: 'moments',
+          status: 'succeeded',
+          searchable: true,
+          outputType: 'long-form-index-run',
+        },
+      ],
+    )
+    assert.deepEqual(
+      stageFingerprints(final.data.workflow),
+      succeededFingerprints,
+    )
     assert.equal(
       await prisma.v2MediaTranscript.count({ where: { workspaceId } }),
       1,
@@ -758,6 +1106,24 @@ test('T-FR-133/T-FR-134 resumes a two-hour master and extracts one API-first two
     assert.equal(
       await prisma.v2LongFormIndexRun.count({ where: { workspaceId } }),
       1,
+    )
+    const [publishedChunkRun, publishedIndexRun] = await Promise.all([
+      prisma.v2HierarchicalProcessingRun.findFirstOrThrow({
+        where: { workspaceId },
+        select: { id: true },
+      }),
+      prisma.v2LongFormIndexRun.findFirstOrThrow({
+        where: { workspaceId },
+        select: { id: true },
+      }),
+    ])
+    assert.equal(
+      succeededFingerprints.chunks.outputReferenceId,
+      publishedChunkRun.id,
+    )
+    assert.equal(
+      succeededFingerprints.moments.outputReferenceId,
+      publishedIndexRun.id,
     )
     assert.equal(
       await prisma.v2HierarchicalProcessingChunk.count({
