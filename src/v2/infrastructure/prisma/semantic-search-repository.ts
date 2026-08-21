@@ -1150,7 +1150,11 @@ implements SemanticSearchRepository {
   }) {
     const row = await this.client.v2SemanticSearchDocument.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null
@@ -1517,7 +1521,11 @@ implements SemanticSearchRepository {
   }) {
     const row = await this.client.v2RetrievalEvaluation.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null
@@ -1647,7 +1655,11 @@ implements SemanticSearchRepository {
   }) {
     const row = await this.client.v2RetrievalScaleEvaluation.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null
@@ -1792,7 +1804,11 @@ implements SemanticSearchRepository {
   }) {
     const row = await this.client.v2SemanticReuseRun.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null

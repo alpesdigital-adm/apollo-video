@@ -433,7 +433,11 @@ implements SpeechSegmentCatalogRepository {
   }) {
     const row = await this.client.v2SpeechSegmentCatalogRun.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
       include: { segments: true },
     })

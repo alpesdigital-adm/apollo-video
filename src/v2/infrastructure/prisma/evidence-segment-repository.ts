@@ -415,7 +415,11 @@ implements EvidenceSegmentRepository {
   }) {
     const row = await this.client.v2EvidenceSegment.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null
