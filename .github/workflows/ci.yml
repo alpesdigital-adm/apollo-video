@@ -158,7 +158,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -194,6 +194,24 @@ jobs:
 
       - name: Migrate clean Compose PostgreSQL
         run: npm run db:v2:migrate:deploy
+
+      - name: Create the isolated proof integrity E2E database
+        run: |
+          exists="$(docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select 1 from pg_database where datname = 'apollo_video_v2_e2e'")"
+          test "$exists" = 1 || docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_video_v2_e2e
+
+      - name: Migrate the isolated proof integrity E2E database
+        run: npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run proof integrity gate E2E against /v1 and PostgreSQL
+        run: npm run test:e2e:proof-integrity
+        env:
+          APOLLO_PROOF_INTEGRITY_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: production
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-integrity-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-vertical-smoke.integration.mjs

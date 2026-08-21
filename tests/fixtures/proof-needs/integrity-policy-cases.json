@@ -44,6 +44,18 @@
       "expectedReasons": ["AUDIENCE_MISMATCH"]
     },
     {
+      "id": "rights-snapshot-stale",
+      "kind": "rights-snapshot-stale",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["RIGHTS_SNAPSHOT_STALE", "RIGHTS_NOT_APPROVED"]
+    },
+    {
+      "id": "rights-expired",
+      "kind": "rights-expired",
+      "expectedOutcome": "blocked",
+      "expectedReasons": ["RIGHTS_EXPIRED"]
+    },
+    {
       "id": "consent-expired",
       "kind": "consent-expired",
       "expectedOutcome": "blocked",
