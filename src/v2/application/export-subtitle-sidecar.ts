@@ -35,6 +35,12 @@ export const DEFAULT_SUBTITLE_SIDECAR_LOCALE = 'pt-BR'
 const SIDECAR_ARTIFACT_PREFIX = 'subtitles'
 const SIDECAR_TOOL_ID = 'apollo-subtitle-sidecar'
 
+/** Recipe that must have produced the rendered artifact of each output kind. */
+const RENDER_RECIPE_ID = Object.freeze({
+  proxy: 'editorial-proxy',
+  final: 'editorial-final',
+} as const)
+
 /**
  * Writes the encoded bytes somewhere the content-addressed storage can promote
  * from. It exists because `promoteDerived` only accepts a file path: the sidecar
@@ -98,8 +104,22 @@ async function assertAlignmentMatchesArtifact(
     'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',
     'The rendered output manifest was not found',
   )
+  // The manifest must be the render manifest of the output kind the alignment
+  // names. A proxy manifest is written by the proxy render worker and a final
+  // manifest by the final export worker, so a sidecar can never be derived from
+  // an artifact that some other recipe produced.
   assertDomain(
-    manifest!.renderInput?.inputHash === alignment.renderInputHash,
+    manifest!.recipe.id === RENDER_RECIPE_ID[alignment.outputKind],
+    'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
+    'The rendered output manifest was not produced by the render of this output kind',
+  )
+  // A reconstructable manifest additionally carries the protected RenderInput.
+  // When it does, it must be the RenderInput of this render operation. Proxy
+  // renders are not reconstructable and carry none: requiring one there would
+  // make the sidecar unreachable for every proxy the worker ever produced.
+  assertDomain(
+    manifest!.renderInput === undefined ||
+      manifest!.renderInput.inputHash === alignment.renderInputHash,
     'SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH',
     'The rendered output manifest does not carry the RenderInput of its render operation',
   )
