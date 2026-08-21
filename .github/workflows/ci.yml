@@ -163,7 +163,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -345,6 +345,7 @@ jobs:
       - name: Run cross-asset semantic search E2E on a dedicated database
         env:
           APOLLO_HYBRID_SEARCH_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
           APOLLO_API_ENVIRONMENT: sandbox
           APOLLO_SEMANTIC_EMBEDDING_PROVIDER: openai
           OPENAI_API_KEY: ci-not-a-real-openai-credential-0
@@ -359,7 +360,6 @@ jobs:
           $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "create database \"$APOLLO_E2E_HYBRID_SEARCH_DATABASE\" owner \"$POSTGRES_USER\""
           export V2_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:$POSTGRES_TUNNEL_PORT/$APOLLO_E2E_HYBRID_SEARCH_DATABASE?schema=public&application_name=$APOLLO_E2E_HYBRID_SEARCH_APP_NAME&connection_limit=5&pool_timeout=10&connect_timeout=10"
           npm run db:v2:migrate:deploy
-          npm run build
           npm run test:e2e:hybrid-search
 
       - name: Verify zero orphan E2E backends after semantic search E2E

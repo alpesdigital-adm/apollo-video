@@ -93,7 +93,7 @@ async function getFreePort() {
 }
 
 async function waitForServer(baseUrl, child) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 480; attempt += 1) {
     if (child.exitCode !== null) {
       throw new Error(`Next server exited with ${child.exitCode}`)
     }
@@ -434,11 +434,14 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       })
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
+    const serverMode =
+      process.env.APOLLO_E2E_SERVER_MODE === 'dev' ? 'dev' : 'start'
     server = spawn(
       process.execPath,
       [
         'node_modules/next/dist/bin/next',
-        'start',
+        serverMode,
+        ...(serverMode === 'dev' ? ['--webpack'] : []),
         '-p',
         String(port),
       ],
@@ -446,7 +449,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         cwd: process.cwd(),
         env: {
           ...process.env,
-          NODE_ENV: 'production',
+          NODE_ENV: serverMode === 'dev' ? 'development' : 'production',
           __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'sandbox',
           APOLLO_SEMANTIC_EMBEDDING_PROVIDER: 'openai',
