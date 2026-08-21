@@ -1113,57 +1113,64 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
       0,
     )
 
-    const driftedGraph = await post(
-      graphEndpoint,
-      `proof-integrity-e2e-drift-graph-${suffix}`,
-      graphBodyFor(contextsFor({
-        offerId: 'offer-outro',
-        audienceTags: ['enterprise'],
-        claims: [
-          { key: 'resultado', value: 'A receita dobrou em uma semana' },
-          { key: 'integrity.person', value: 'Cliente não catalogado' },
-          { key: 'integrity.period', value: '2019' },
-        ],
-        personaId: 'persona-enterprise',
-      })),
+    // A second authorized testimonial that proves another claim, for another
+    // product, person, period and audience. The recipe stays the exact one, so
+    // every drift must be caught by the gate, never by the search.
+    const driftedClaim = 'A receita dobrou em uma semana com o método'
+    const driftedEvidenceCreated = await post(
+      `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
+      `proof-integrity-e2e-drift-evidence-${suffix}`,
+      {
+        sourceSpeechSegmentId: speechSegment.id,
+        expectedSpeechSegmentHash: speechSegment.segmentHash,
+        category: 'testimonial',
+        claim: { value: driftedClaim, confidence: 0.99 },
+        context: {
+          value: 'Depoimento de outro cliente sobre outro produto.',
+          confidence: 0.99,
+        },
+        qualifiers: [{ value: 'period:2019', confidence: 0.99 }],
+        subject: { value: 'Cliente não catalogado', confidence: 0.99 },
+        attribution: { value: 'Outro depoente', confidence: 0.99 },
+        compatibleOfferIds: ['offer-outro'],
+        compatibleAudienceTags: ['enterprise'],
+        compatibleObjections: [],
+        credibilityScore: 0.9,
+        specificityScore: 0.9,
+        authenticityScore: 0.9,
+        contextRangeMs: [0, Math.ceil(words.at(-1).end * 1_000)],
+        frameRefs: ['proof-integrity-e2e-drift-frame'],
+        adjacentEvidenceIds: [],
+        requiresContext: false,
+        producer: {
+          provider: 'apollo',
+          model: 'proof-integrity-e2e',
+          version: '1.0.0',
+          confidence: 0.99,
+        },
+      },
     )
     assert.equal(
-      driftedGraph.response.status,
+      driftedEvidenceCreated.response.status,
       201,
-      JSON.stringify(driftedGraph.payload),
+      JSON.stringify(driftedEvidenceCreated.payload),
     )
-    assert.equal(driftedGraph.payload.data.graph.summary.blockedCount, 0)
-    const driftedRecipe = await post(
-      recipeEndpoint,
-      `proof-integrity-e2e-drift-recipe-${suffix}`,
-      recipeBodyFor(driftedGraph.payload.data.graph),
-    )
-    assert.equal(
-      driftedRecipe.response.status,
-      201,
-      JSON.stringify(driftedRecipe.payload),
-    )
-    const drifted = driftedRecipe.payload.data.recipe
-    const driftedBlock = drifted.storyPlan.blocks.find((block) =>
-      block.role === 'argument')
+    const driftedEvidence = driftedEvidenceCreated.payload.data.evidence
+    assert.notEqual(driftedEvidence.id, evidence.id)
     const driftedNeed = await post(
       proofNeedEndpoint,
       `proof-integrity-e2e-drift-need-${suffix}`,
       {
         batchId,
-        targetRecipeId: drifted.id,
-        expectedTargetRecipeHash: drifted.runHash,
+        targetRecipeId: recipe.id,
+        expectedTargetRecipeHash: recipe.runHash,
         policyVersion: 'proof-need-policy/v1',
         declarations: [{
-          storyBlockId: driftedBlock.id,
-          claimId: driftedBlock.content.claimIds.find((entry) =>
-            entry === 'resultado'),
-          claimText: lines.proof,
+          storyBlockId: argumentBlock.id,
+          claimId,
+          claimText: driftedClaim,
           claimKind: 'outcome',
-          // the operator still asks for proof of the authorized offer; the
-          // drift lives in the recipe node, which declares another product,
-          // and must be caught by the integrity gate, not by the search
-          offerId: 'offer-apollo',
+          offerId: 'offer-outro',
         }],
       },
     )
@@ -1177,10 +1184,14 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     assert.equal(
       driftedItem.resolution,
       'selected-evidence',
-      'the drifted recipe must still select the same authorized evidence; ' +
-        `search state: ${JSON.stringify(driftedItem.search)}`,
+      'the drifted proof must be selectable on its own claim; search state: ' +
+        JSON.stringify(driftedItem.search),
     )
-    assert.equal(driftedItem.selectedEvidence.id, evidence.id)
+    assert.equal(
+      driftedItem.selectedEvidence.id,
+      driftedEvidence.id,
+      'the drifted declaration must select the drifted evidence',
+    )
     const driftedIntegrity = await post(
       integrityEndpoint,
       `proof-integrity-e2e-drift-${suffix}`,
@@ -1190,7 +1201,8 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
         policyVersion: 'proof-integrity-policy/v1',
         uses: [{
           proofNeedItemId: driftedItem.id,
-          includedContextRangeMs: contextRange,
+          includedContextRangeMs:
+            driftedItem.selectedEvidence.contextRangeMs,
           includedAdjacentEvidenceIds: [],
         }],
       },
@@ -1202,8 +1214,21 @@ test('T-FR-131 evaluates the eight integrity dimensions against the exact Varian
     )
     const driftedEvaluation =
       driftedIntegrity.payload.data.run.evaluations[0]
-    assert.equal(driftedEvaluation.outcome, 'blocked')
+    assert.equal(
+      driftedEvaluation.outcome,
+      'blocked',
+      'the gate must reject proof of another claim, product, person, ' +
+        'period and audience; recipe context and comparisons: ' +
+        JSON.stringify({
+          recipeContext: driftedEvaluation.recipeContext,
+          comparisons: driftedEvaluation.comparisons,
+        }),
+    )
     assert.equal(driftedEvaluation.allowedForAssembly, false)
+    assert.equal(
+      driftedEvaluation.selectedEvidenceId,
+      driftedEvidence.id,
+    )
     for (const [dimension, reasonCode] of [
       ['claim', 'CLAIM_MISMATCH'],
       ['product', 'PRODUCT_MISMATCH'],
