@@ -19,7 +19,7 @@ import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/pri
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { SUBTITLE_ANCHOR_PERCEPTION_FIXTURES, subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
-import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
+import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -672,6 +672,7 @@ test('T-FR-173 project proxy worker decides the subtitle anchor from persisted p
           subtitleResolution: Object.freeze({
             presetId: 'kinetic', presetHash: subtitlePresetHash('kinetic'),
             registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true,
+            presetSnapshot: materializeSubtitlePresetSnapshot('kinetic'),
           }),
         })
       },

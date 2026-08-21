@@ -775,7 +775,11 @@ class SubtitleConfigurationRepository {
 
 /** The subtitle resolution a repository derives from a persisted configuration. */
 const resolutionOf = (configuration) => Object.freeze(configuration.resolved.enabled
-  ? { presetId: configuration.resolved.presetId, presetHash: configuration.resolved.presetHash, registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true }
+  ? {
+      presetId: configuration.resolved.presetId, presetHash: configuration.resolved.presetHash,
+      registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true,
+      presetSnapshot: materializeSubtitlePresetSnapshot(configuration.resolved.presetId),
+    }
   : { presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
 
 // ---------------------------------------------------------------------------

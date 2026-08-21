@@ -787,6 +787,11 @@ function assertWorkerContract(rendered, expected) {
     placementPlanHash: placementPlan.placementPlanHash,
     reframePlanHash: null,
     subtitleRegistryHash: null,
+    // F1.035: no subtitle resolution on this source, so no preset was resolved either.
+    subtitlePresetId: null,
+    subtitlePresetVersion: null,
+    subtitlePresetHash: null,
+    subtitlePresetSnapshotHash: null,
     // F1.036: no subtitle resolution on this source, so no anchor was decided and no perception was
     // consulted. Both identities are still recorded, because "nothing was consulted" is evidence.
     subtitleAnchorPlanHash: null,
