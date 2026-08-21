@@ -2003,7 +2003,7 @@
       "exposure": "public",
       "endpoint": "GET /v1/subtitle-styles",
       "inputSchemaRef": null,
-      "outputSchemaRef": "apollo://schemas/subtitle-style-registry/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-style-registry/v2",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

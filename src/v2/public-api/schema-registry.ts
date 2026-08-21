@@ -300,7 +300,12 @@ const subtitlePresetIdSchema = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill'
 const subtitleMvpFormatSchema = { enum: ['9:16', '16:9'] } as const
 const subtitleColorSchema = { type: 'string', pattern: '^#[0-9A-F]{6}$' } as const
 const subtitleFormatLimitsSchema = { type: 'object', additionalProperties: false, required: ['referenceHeight', 'fontPx', 'maxWidth', 'bottom'], properties: { referenceHeight: { type: 'integer', minimum: 240, maximum: 4320 }, fontPx: { type: 'number' }, maxWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, bottom: { type: 'number', minimum: 0, maximum: .5 } } } as const
-const subtitleStylePresetSchema = {
+/**
+ * The v1 preset shape, still published. F1.035 extracted `typography.uppercase` into the `casing`
+ * token and `lineBreaking.chunkWords` into `grouping.maxWordsPerGroup`; the v1 document keeps
+ * carrying both under their original names, derived from the live tokens by the contract module.
+ */
+const subtitleStylePresetSchemaV1 = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'version', 'typography', 'lineBreaking', 'highlight', 'background', 'stroke', 'animation', 'margins', 'responsive', 'presetHash'],
   properties: {
@@ -318,7 +323,32 @@ const subtitleStylePresetSchema = {
     presetHash: sha256Schema,
   },
 } as const
-const subtitleStyleRegistrySchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v1' }, registryVersion: { const: 1 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchema, 'karaoke-box': subtitleStylePresetSchema, 'karaoke-pill': subtitleStylePresetSchema, 'caps-stroke': subtitleStylePresetSchema, 'clean-color': subtitleStylePresetSchema } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
+const subtitleSafeAreaSchema = { type: 'object', additionalProperties: false, required: ['top', 'bottom', 'horizontal'], properties: { top: { type: 'number', minimum: 0, maximum: .25 }, bottom: { type: 'number', minimum: 0, maximum: .25 }, horizontal: { type: 'number', minimum: 0, maximum: .25 } } } as const
+const subtitlePlacementFormatSchema = { type: 'object', additionalProperties: false, required: ['anchor', 'safeArea'], properties: { anchor: { enum: ['top', 'upper-third', 'center', 'lower-third', 'bottom'] }, safeArea: subtitleSafeAreaSchema } } as const
+const subtitleStylePresetSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'presetVersion', 'typography', 'casing', 'lineBreaking', 'grouping', 'highlight', 'background', 'stroke', 'shadow', 'animation', 'placement', 'margins', 'responsive', 'presetHash'],
+  properties: {
+    schemaVersion: { const: 'subtitle-style-preset/v2' }, id: subtitlePresetIdSchema, presetVersion: { const: 1 },
+    typography: { type: 'object', additionalProperties: false, required: ['fontFamily', 'fallback', 'licensed', 'licenseSpdx', 'licenseUrl', 'glyphCoverage', 'weight'], properties: {
+      fontFamily: { type: 'string', minLength: 1, maxLength: 128 }, fallback: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 128 } }, licensed: { const: true }, licenseSpdx: { const: 'OFL-1.1' }, licenseUrl: { type: 'string', minLength: 1, maxLength: 256 }, glyphCoverage: { const: 'latin-ext' }, weight: { type: 'integer', minimum: 100, maximum: 900 },
+    } },
+    casing: { enum: ['none', 'uppercase', 'lowercase', 'title'] },
+    lineBreaking: { type: 'object', additionalProperties: false, required: ['maxLines', 'maxCharacters'], properties: { maxLines: { type: 'integer', minimum: 1, maximum: 3 }, maxCharacters: { type: 'integer', minimum: 8, maximum: 48 } } },
+    grouping: { type: 'object', additionalProperties: false, required: ['maxWordsPerGroup', 'minOnScreenMs', 'maxOnScreenMs', 'gapMergeMs'], properties: { maxWordsPerGroup: { type: 'integer', minimum: 1, maximum: 8 }, minOnScreenMs: { type: 'integer', minimum: 200, maximum: 8000 }, maxOnScreenMs: { type: 'integer', minimum: 200, maximum: 8000 }, gapMergeMs: { type: 'integer', minimum: 0, maximum: 8000 } } },
+    highlight: { type: 'object', additionalProperties: false, required: ['mode', 'color', 'inactiveColor'], properties: { mode: { enum: ['word', 'phrase', 'none'] }, color: subtitleColorSchema, inactiveColor: subtitleColorSchema } },
+    background: { type: 'object', additionalProperties: false, required: ['shape', 'color', 'opacity', 'radius', 'paddingXEm', 'paddingYEm'], properties: { shape: { enum: ['none', 'box', 'pill'] }, color: subtitleColorSchema, opacity: { type: 'number', minimum: 0, maximum: 1 }, radius: { type: 'number', minimum: 0 }, paddingXEm: { type: 'number', minimum: 0, maximum: 2 }, paddingYEm: { type: 'number', minimum: 0, maximum: 2 } } },
+    stroke: { type: 'object', additionalProperties: false, required: ['widthEm', 'color'], properties: { widthEm: { type: 'number', minimum: 0, maximum: .3 }, color: subtitleColorSchema } },
+    shadow: { type: 'object', additionalProperties: false, required: ['enabled', 'offsetXPx', 'offsetYPx', 'blurPx', 'color', 'opacity'], properties: { enabled: { type: 'boolean' }, offsetXPx: { type: 'number', minimum: -32, maximum: 32 }, offsetYPx: { type: 'number', minimum: -32, maximum: 32 }, blurPx: { type: 'number', minimum: 0, maximum: 64 }, color: subtitleColorSchema, opacity: { type: 'number', minimum: 0, maximum: 1 } } },
+    animation: { type: 'object', additionalProperties: false, required: ['kind', 'version', 'durationMs', 'reducedMotion'], properties: { kind: { enum: ['scale', 'karaoke', 'fade'] }, version: { const: 1 }, durationMs: { type: 'integer', minimum: 0, maximum: 1000 }, reducedMotion: { enum: ['fade', 'none'] } } },
+    placement: { type: 'object', additionalProperties: false, required: ['formats'], properties: { formats: { type: 'object', additionalProperties: false, required: ['9:16', '16:9'], properties: { '9:16': subtitlePlacementFormatSchema, '16:9': subtitlePlacementFormatSchema } } } },
+    margins: { type: 'object', additionalProperties: false, required: ['horizontal', 'vertical'], properties: { horizontal: { type: 'number', minimum: 0, maximum: .5 }, vertical: { type: 'number', minimum: 0, maximum: .5 } } },
+    responsive: { type: 'object', additionalProperties: false, required: ['minFontPx', 'maxFontPx', 'formats'], properties: { minFontPx: { type: 'number', minimum: 20 }, maxFontPx: { type: 'number', maximum: 120 }, formats: { type: 'object', additionalProperties: false, required: ['9:16', '16:9'], properties: { '9:16': subtitleFormatLimitsSchema, '16:9': subtitleFormatLimitsSchema } } } },
+    presetHash: sha256Schema,
+  },
+} as const
+const subtitleStyleRegistrySchemaV1 = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v1' }, registryVersion: { const: 1 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchemaV1, 'karaoke-box': subtitleStylePresetSchemaV1, 'karaoke-pill': subtitleStylePresetSchemaV1, 'caps-stroke': subtitleStylePresetSchemaV1, 'clean-color': subtitleStylePresetSchemaV1 } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
+const subtitleStyleRegistrySchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v2' }, registryVersion: { const: 2 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchema, 'karaoke-box': subtitleStylePresetSchema, 'karaoke-pill': subtitleStylePresetSchema, 'caps-stroke': subtitleStylePresetSchema, 'clean-color': subtitleStylePresetSchema } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
 const subtitleCssPreviewRequestSchema = { type: 'object', additionalProperties: false, required: ['presetId', 'text', 'format', 'background'], properties: { presetId: subtitlePresetIdSchema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] } } } as const
 const subtitleCssPreviewSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'renderKind', 'presetId', 'presetHash', 'registryHash', 'text', 'format', 'background', 'css', 'previewHash'], properties: { schemaVersion: { const: 'subtitle-css-preview/v1' }, renderKind: { const: 'instant-css-preview' }, presetId: subtitlePresetIdSchema, presetHash: sha256Schema, registryHash: sha256Schema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] }, css: { type: 'string', minLength: 1, maxLength: 10000 }, previewHash: sha256Schema } } as const
 const projectBriefSchemaV9 = {
@@ -13024,7 +13054,8 @@ const directorDecisionEntrySchema = {
 } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
-  defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchema),
+  defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
+  defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
   defineSchema('subtitle-css-preview-request', 1, 'Instant subtitle CSS preview request', subtitleCssPreviewRequestSchema),
   defineSchema('subtitle-css-preview', 1, 'Content-addressed instant subtitle CSS preview', subtitleCssPreviewSchema),
   defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),

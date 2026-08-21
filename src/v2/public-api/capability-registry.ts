@@ -860,11 +860,13 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.subtitle-styles.list',
-    version: '1.0.0',
+    // 1.1.0: the response evolved additively to subtitle-style-registry/v2, which carries the
+    // casing, grouping, shadow and placement tokens. The v1 document stays published.
+    version: '1.1.0',
     title: 'List subtitle style presets',
-    description: 'Returns the content-addressed five-preset subtitle registry with licensed typography, latin-ext fallback, animation and responsive MVP limits.',
+    description: 'Returns the content-addressed five-preset subtitle registry with licensed typography, latin-ext fallback, casing, grouping cadence, shadow, placement safe areas, animation and responsive MVP limits.',
     exposure: 'public', operationKind: 'query', authMode: 'none', requiredScopes: [],
-    outputSchemaRef: 'apollo://schemas/subtitle-style-registry/v1',
+    outputSchemaRef: 'apollo://schemas/subtitle-style-registry/v2',
     endpoint: { method: 'GET', path: '/v1/subtitle-styles' },
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
