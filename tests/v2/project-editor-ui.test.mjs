@@ -188,6 +188,21 @@ test('T-FR-134 project editor searches moments and creates an evidence-bound con
     /\/long-form-moments\?\$\{search\.toString\(\)\}/,
   )
   assert.match(projectEditorSource, /\/contiguous-extractions/)
+  // T-FR-134: the page reaches contiguous extraction exclusively through /v1.
+  // Any moment-search or extraction request served by another surface would
+  // bypass the public contract the worker and the agent also answer to.
+  const contiguousRoutes = projectEditorSource
+    .split('\n')
+    .filter((line) =>
+      /long-form-moments|contiguous-extractions/.test(line))
+  assert.equal(contiguousRoutes.length, 2)
+  for (const line of contiguousRoutes) {
+    assert.match(
+      line,
+      /`\/v1\/projects\/\$\{encodeURIComponent\(projectId\)\}\//,
+      `contiguous UI route must be a /v1 route: ${line.trim()}`,
+    )
+  }
   for (const testId of [
     'contiguous-extraction-panel',
     'contiguous-topic-search',
