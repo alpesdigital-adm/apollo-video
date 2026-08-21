@@ -5450,6 +5450,24 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.subtitle-segment-overrides.read', version: '1.0.0', title: 'Read subtitle segment overrides',
+    description: 'Reads the content-addressed subtitle exceptions of one output variant: every head override with its segment, half-open frame range, overridden dimensions and protection flag, or one segment when segmentId is given.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/subtitle-segment-override-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/subtitle-segment-overrides' }, toolName: 'apollo.projects.subtitle-segment-overrides.read',
+    queryParameters: [
+      { name: 'variantId', required: true, description: 'Output variant whose subtitle exceptions are read; each variant carries its own heads.', schema: { type: 'string', minLength: 3, maxLength: 128 } },
+      { name: 'segmentId', required: false, description: 'Subtitle segment to read; omitted, the whole head list of the variant is returned.', schema: { type: 'string', minLength: 3, maxLength: 128 } },
+    ],
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.subtitle-segment-overrides.apply', version: '1.0.0', title: 'Apply a subtitle segment override',
+    description: 'Creates a segment-scoped EditCommand and immutable ProjectVersion that moves position, style, text or visibility for ONE subtitle segment of ONE variant, or resets it to the level it carried before; invalidation is limited to the half-open range of that segment.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/subtitle-segment-override-apply-request/v1', outputSchemaRef: 'apollo://schemas/subtitle-segment-override-applied/v1', endpoint: { method: 'POST', path: '/v1/projects/{projectId}/subtitle-segment-overrides' }, toolName: 'apollo.projects.subtitle-segment-overrides.apply',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.policy-overrides.read', version: '1.0.0', title: 'Read project policy overrides',
     description: 'Reads all ten allowlisted brand and guardrail values from the current immutable Policy Snapshot, including each resolved origin.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],

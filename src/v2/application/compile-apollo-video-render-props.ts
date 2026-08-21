@@ -8,8 +8,14 @@ import {
   type RenderInputSubtitleSection,
 } from '../domain/render-input-subtitles.ts'
 import {
+  requirePersistedSubtitleSegmentOverride,
+  type SubtitleSegmentOverride,
+  type SubtitleSegmentOverrideKind,
+} from '../domain/subtitle-segment-override.ts'
+import {
   readSubtitlePreset,
   resolveSubtitleMvpFormat,
+  type SubtitleAnchor,
   type SubtitleMvpFormat,
   type SubtitleStylePreset,
 } from '../domain/subtitle-system.ts'
@@ -385,6 +391,96 @@ function compileSubtitle(
   })
 }
 
+/**
+ * The composition draws a cue at the top or at the bottom band. F1.036 solves five
+ * bands, so an exception that pins one of them is mapped here, once, explicitly:
+ * everything above the middle reads as "get off the lower third" and becomes `top`;
+ * everything from the middle down keeps the default footer placement. The mapping is
+ * lossy on purpose and is stated in one place instead of being guessed per call site.
+ */
+const COMPILED_ANCHOR_BY_BAND: Readonly<Record<SubtitleAnchor, 'top' | 'bottom'>> = Object.freeze({
+  top: 'top',
+  'upper-third': 'top',
+  center: 'bottom',
+  'lower-third': 'bottom',
+  bottom: 'bottom',
+})
+
+export interface CompiledSubtitleSegmentOverrides {
+  subtitles: readonly CompiledSubtitle[]
+  applied: readonly Readonly<{ overrideId: string; segmentId: string; kinds: readonly SubtitleSegmentOverrideKind[] }>[]
+  /**
+   * Dimensions that were persisted and invalidated correctly but that the
+   * apollo-video v1 composition cannot draw per segment yet. Reported, never
+   * silently dropped.
+   */
+  unrenderedKinds: readonly SubtitleSegmentOverrideKind[]
+}
+
+/**
+ * Applies persisted F1.037 exceptions to the cues this variant compiled.
+ *
+ * At props level a cue has no id — its identity is the exact half-open frame range
+ * the EditPlan gave it, which is precisely what the override pins. So the match is
+ * `startFrame`/`endFrame` equality, and the two divergence cases stay explicit:
+ *
+ * - an override authored for another variant is a no-op here, never widened;
+ * - an override whose range no longer matches a compiled cue is a no-op here rather
+ *   than a guess about which frames the operator meant.
+ *
+ * Every document is re-derived through its own constructor first, so a tampered
+ * override cannot reach a frame.
+ */
+export function applyCompiledSubtitleSegmentOverrides(
+  subtitles: readonly CompiledSubtitle[],
+  overrides: readonly Readonly<SubtitleSegmentOverride>[],
+  variantId: string,
+  fps: number,
+): Readonly<CompiledSubtitleSegmentOverrides> {
+  const draft = subtitles.map((subtitle) => ({ ...subtitle }))
+  const hidden = new Set<number>()
+  const applied: { overrideId: string; segmentId: string; kinds: readonly SubtitleSegmentOverrideKind[] }[] = []
+  const unrendered = new Set<SubtitleSegmentOverrideKind>()
+  for (const stored of overrides) {
+    const subtitleOverride = requirePersistedSubtitleSegmentOverride(stored)
+    if (subtitleOverride.variantId !== variantId) continue
+    if (subtitleOverride.dimensions.length === 0) continue
+    const index = draft.findIndex(
+      (subtitle) =>
+        subtitle.startFrame === subtitleOverride.range.startFrame &&
+        subtitle.endFrame === subtitleOverride.range.endFrame,
+    )
+    if (index === -1) continue
+    const target = draft[index]!
+    for (const dimension of subtitleOverride.dimensions) {
+      if (dimension.kind === 'text') target.text = dimension.text
+      else if (dimension.kind === 'position') target.anchor = COMPILED_ANCHOR_BY_BAND[dimension.anchor]
+      else if (dimension.kind === 'visibility') {
+        if (dimension.visible) hidden.delete(index)
+        else hidden.add(index)
+      } else unrendered.add(dimension.kind)
+    }
+    applied.push({
+      overrideId: subtitleOverride.id,
+      segmentId: subtitleOverride.segmentId,
+      kinds: Object.freeze(subtitleOverride.dimensions.map((dimension) => dimension.kind)),
+    })
+  }
+  return Object.freeze({
+    subtitles: Object.freeze(
+      draft
+        .filter((_, index) => !hidden.has(index))
+        .map((subtitle) => Object.freeze({
+          ...subtitle,
+          startTime: subtitle.startFrame / fps,
+          endTime: subtitle.endFrame / fps,
+        })),
+    ),
+    applied: Object.freeze(applied.map((entry) => Object.freeze(entry))),
+    unrenderedKinds: Object.freeze([...unrendered].toSorted()),
+  })
+}
+
 export function compileApolloVideoRenderProps(
   input: MaterializedRenderInputV1,
   loadedRenderData?: Readonly<LoadedApolloVideoRenderData>,
@@ -395,6 +491,12 @@ export function compileApolloVideoRenderProps(
    * reaching the renderer.
    */
   subtitleSection?: Readonly<RenderInputSubtitleSection<unknown>>,
+  /**
+   * Persisted per-segment exceptions (F1.037) for this exact variant. The renderer
+   * never resolves an exception; it receives the cues these documents already
+   * produced.
+   */
+  subtitleSegmentOverrides?: readonly Readonly<SubtitleSegmentOverride>[],
 ): ApolloVideoRenderPropsV1 {
   assertDomain(
     input.composition.id === 'apollo-video' &&
@@ -470,10 +572,21 @@ export function compileApolloVideoRenderProps(
   }
   // `none` suppresses the rendered cues and nothing else: the transcript identity travelled with
   // the section and every other prop is compiled exactly as it would have been.
+  const baseSubtitles = resolvedSubtitles && !resolvedSubtitles.enabled
+    ? []
+    : props.subtitles.map((subtitle, index) => compileSubtitle(subtitle, index, input))
+  // The exceptions are applied on the cues of THIS variant only. When subtitles are
+  // disabled there is no cue to except, so the exception list is inert by
+  // construction rather than by a special case.
   const subtitles = Object.freeze(
-    resolvedSubtitles && !resolvedSubtitles.enabled
-      ? []
-      : props.subtitles.map((subtitle, index) => compileSubtitle(subtitle, index, input)),
+    subtitleSegmentOverrides && subtitleSegmentOverrides.length > 0
+      ? applyCompiledSubtitleSegmentOverrides(
+          baseSubtitles,
+          subtitleSegmentOverrides,
+          input.output.aspectRatio,
+          input.output.fps,
+        ).subtitles
+      : baseSubtitles,
   )
   const compiled: ApolloVideoRenderPropsV1 = {
     scenes,

@@ -320,6 +320,9 @@ const coverage = Object.freeze({
   'apollo.projects.subtitle-configuration.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus the per-variant configuration head the command claims to replace',
   },
+  'apollo.projects.subtitle-segment-overrides.apply': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, the compiled segment range of the target variant and the per-segment override head the command claims to replace',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
   },
@@ -583,7 +586,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,
-    'base-version-bound-action': 7,
+    'base-version-bound-action': 8,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
