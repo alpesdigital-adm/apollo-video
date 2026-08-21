@@ -19,19 +19,21 @@ import {
   compileApolloVideoRenderProps,
 } from '../../src/v2/application/compile-apollo-video-render-props.ts'
 import {
-  compileProofModeRenderScene,
-} from '../../src/v2/application/compile-proof-mode-render-scene.ts'
+  compileProofModeRenderInput,
+} from '../../src/v2/application/compile-proof-mode-render-input.ts'
+import {
+  renderAuthorizedInputService,
+} from '../../src/v2/application/render-authorized-input.ts'
+import {
+  runNextPublicOperationService,
+} from '../../src/v2/application/run-public-operation-worker.ts'
 import {
   createProofModeRun,
   PROOF_MODES,
 } from '../../src/v2/domain/proof-mode.ts'
 import {
   OUTPUT_ASPECT_RATIOS,
-  OUTPUT_PRESETS,
 } from '../../src/v2/domain/output-spec.ts'
-import {
-  createRenderInputSpec,
-} from '../../src/v2/domain/render-input.ts'
 import {
   calculateFileSha256,
 } from '../../src/v2/infrastructure/media/local-artifact-manifest.ts'
@@ -51,14 +53,31 @@ const ffmpegPath = path.join(
   'ffmpeg-static',
   `ffmpeg${executableSuffix}`,
 )
+const ffprobePath = path.join(
+  process.cwd(),
+  'node_modules',
+  'ffprobe-static',
+  'bin',
+  process.platform,
+  process.arch,
+  `ffprobe${executableSuffix}`,
+)
 const hash = (character) => character.repeat(64)
+const RENDERER_IDENTITY = Object.freeze({
+  id: 'remotion',
+  version: '4.0.489',
+  digest: hash('8'),
+})
+const PROJECT_VERSION_ID = 'project-version-proof-goldens'
+const SUBTITLE_TEXT =
+  'Esta legenda deve ficar oculta durante a prova'
 
 async function runProcess(
   executable,
   args,
   options = {},
 ) {
-  await new Promise((resolveProcess, rejectProcess) => {
+  return await new Promise((resolveProcess, rejectProcess) => {
     const child = spawn(executable, args, {
       cwd: options.cwd ?? process.cwd(),
       windowsHide: true,
@@ -73,7 +92,7 @@ async function runProcess(
       settled = true
       clearTimeout(timeout)
       if (error) rejectProcess(error)
-      else resolveProcess()
+      else resolveProcess(stdout)
     }
     const timeout = setTimeout(() => {
       child.kill('SIGKILL')
@@ -110,9 +129,9 @@ async function createMedia(directory) {
   await runProcess(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi',
-    '-i', 'color=c=0x204A74:s=640x360:r=30:d=6',
+    '-i', 'color=c=0x204A74:s=640x360:r=30:d=8',
     '-f', 'lavfi',
-    '-i', 'sine=frequency=330:sample_rate=48000:duration=6',
+    '-i', 'sine=frequency=330:sample_rate=48000:duration=8',
     '-vf', 'drawbox=x=220:y=70:w=200:h=220:color=0xE3B38B:t=fill',
     '-map', '0:v', '-map', '1:a',
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
@@ -122,7 +141,7 @@ async function createMedia(directory) {
   await runProcess(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi',
-    '-i', 'testsrc2=s=640x360:r=30:d=6',
+    '-i', 'testsrc2=s=640x360:r=30:d=8',
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
     evidenceVideoPath,
   ])
@@ -302,90 +321,50 @@ function createModeRun(mode) {
   })
 }
 
+/**
+ * Compiles the plan through the production compiler and materializes only the
+ * asset URIs, exactly like the authorized materializer does for the worker.
+ */
 function renderInputFor(plan, media) {
-  const output = OUTPUT_PRESETS[plan.format]
   const evidence = plan.sourceMediaType === 'image'
     ? media.evidenceImage
     : media.evidenceVideo
-  const durationInFrames = plan.timing.targetDurationFrames
-  const scene = compileProofModeRenderScene({
+  const spec = compileProofModeRenderInput({
     plan,
-    evidenceAssetId: 'proof-evidence',
-    fps: output.fps,
-    timelineDurationFrames: durationInFrames,
+    projectVersionId: PROJECT_VERSION_ID,
+    renderer: RENDERER_IDENTITY,
+    presenter: {
+      artifactId: media.presenter.artifactId,
+      artifactKey: media.presenter.artifactKey,
+      kind: 'video',
+      sha256: media.presenter.sha256,
+      byteSize: media.presenter.byteSize,
+    },
+    evidence: {
+      artifactId: evidence.artifactId,
+      artifactKey: evidence.artifactKey,
+      kind: evidence.kind,
+      sha256: evidence.sha256,
+      byteSize: evidence.byteSize,
+    },
+    subtitles: [{
+      text: SUBTITLE_TEXT,
+      fromFrame: 0,
+      toFrame:
+        plan.timing.timelineEntryFrame +
+        plan.timing.targetDurationFrames,
+      anchor: 'bottom',
+    }],
   })
-  const spec = createRenderInputSpec({
-    schemaVersion: 'render-input/v1',
-    renderer: {
-      id: 'remotion',
-      version: '4.0.489',
-      digest: hash('8'),
-    },
-    composition: {
-      id: 'apollo-video',
-      version: 'v1',
-      propsSchemaRef: 'apollo://render-props/apollo-video/v1',
-    },
-    plan: {
-      id: plan.id,
-      versionId: 'project-version-proof-goldens',
-      hash: plan.planHash,
-    },
-    output: {
-      ...output,
-      id: `proof-${plan.format.replace(':', 'x')}-${plan.mode}`,
-      durationInFrames,
-    },
-    assets: [
-      {
-        id: 'primary-video',
-        artifactId: media.presenter.artifactId,
-        artifactKey: media.presenter.artifactKey,
-        kind: 'video',
-        role: 'presenter',
-        ordinal: 0,
-        sha256: media.presenter.sha256,
-        byteSize: media.presenter.byteSize,
-      },
-      {
-        id: 'proof-evidence',
-        artifactId: evidence.artifactId,
-        artifactKey: evidence.artifactKey,
-        kind: evidence.kind,
-        role: 'proof-evidence',
-        ordinal: 1,
-        sha256: evidence.sha256,
-        byteSize: evidence.byteSize,
-      },
-    ],
-    props: {
-      primaryVideoAssetId: 'primary-video',
-      scenes: [scene],
-      subtitles: [{
-        text: 'Esta legenda deve ficar oculta durante a prova',
-        fromFrame: 0,
-        toFrame: durationInFrames,
-        anchor: 'bottom',
-      }],
-      palette: {
-        primary: '#FFB800',
-        secondary: '#20202A',
-        accent: '#FFB800',
-        text: '#FFFFFF',
-        background: '#050508',
-      },
-      stylePreset: 'creator-clean',
-      subtitleStyle: 'kinetic',
-      gradePreset: 'natural',
-    },
-  })
+  const uriById = new Map([
+    ['primary-video', media.presenter.uri],
+    ['proof-evidence', evidence.uri],
+  ])
   return Object.freeze({
     ...spec,
-    assets: Object.freeze(spec.assets.map((asset) => ({
+    assets: Object.freeze(spec.assets.map((asset) => Object.freeze({
       ...asset,
-      uri: asset.id === 'primary-video'
-        ? media.presenter.uri
-        : evidence.uri,
+      uri: uriById.get(asset.id),
     }))),
   })
 }
@@ -411,6 +390,272 @@ async function renderStill(input, outputPath) {
       timeoutMs: 180_000,
     },
   )
+}
+
+/**
+ * Runs one proof render through the real durable artifact-render operation:
+ * claim, lease, heartbeat, rendering/verifying/persisting phases, checkpoint
+ * and success are all produced by the production worker service.
+ */
+async function renderThroughDurableOperation({
+  input,
+  outputRoot,
+  outputKey,
+  stageId,
+}) {
+  const authorizationId = `authorization-${stageId}`
+  const artifactId = `artifact-output-${stageId}`
+  const manifestId = `manifest-output-${stageId}`
+  const receipt = Object.freeze({
+    schemaVersion: 'materialized-render-input-receipt/v1',
+    authorizationId,
+    artifactId,
+    manifestId,
+    inputHash: input.inputHash,
+    revalidationHash: hash('e'),
+    assetCount: input.assets.length,
+    revalidatedAt: '2026-07-29T18:00:00.000Z',
+    validUntil: '2026-07-29T19:00:00.000Z',
+  })
+  let materializations = 0
+  const render = renderAuthorizedInputService({
+    materialize: async () => {
+      materializations += 1
+      return Object.freeze({
+        receipt,
+        getRenderInput: () => input,
+        toJSON: () => receipt,
+      })
+    },
+    renderer: new RemotionRenderInputRenderer({
+      projectRoot: process.cwd(),
+      outputRoot,
+      timeoutMs: 8 * 60_000,
+      createId: () => `proof-stage-${stageId}`,
+    }),
+    outputKeyFor: () => outputKey,
+  })
+  const phases = []
+  const heartbeats = []
+  let checkpoint
+  let claimed = false
+  let succeeded = false
+  const operation = {
+    id: `operation-${authorizationId}`,
+    workspaceId: 'workspace-proof-goldens',
+    clientId: 'client-proof-goldens',
+    type: 'artifact-render',
+    status: 'queued',
+    phase: 'materializing',
+    attempt: 1,
+    maxAttempts: 1,
+    target: { type: 'media-artifact', id: artifactId, manifestId },
+  }
+  const worker = runNextPublicOperationService({
+    operations: {
+      async claimNext(request) {
+        if (claimed || request.type !== 'artifact-render') return null
+        claimed = true
+        return {
+          operation,
+          context: {
+            kind: 'artifact-render',
+            authorizationId,
+            inputHash: input.inputHash,
+          },
+          lease: {
+            owner: request.leaseOwner,
+            attempt: 1,
+            heartbeatAt: request.now,
+            expiresAt: request.leaseUntil,
+          },
+        }
+      },
+      async heartbeat(request) {
+        heartbeats.push(request.leaseUntil)
+        return true
+      },
+      async advancePhase(request) {
+        phases.push(request.phase)
+        return true
+      },
+      async succeed() {
+        succeeded = true
+        operation.status = 'succeeded'
+        return { operation }
+      },
+      async failOrRetry() {
+        operation.status = 'failed'
+        return { operation }
+      },
+    },
+    checkpoints: {
+      async findByOperationId() { return checkpoint ?? null },
+      async record(value) {
+        checkpoint = value
+        return { checkpoint: value, replayed: false }
+      },
+    },
+    render,
+    leaseDurationMs: 30_000,
+    heartbeatIntervalMs: 5_000,
+  })
+  const outcome = await worker(`worker-${stageId}`)
+  assert.deepEqual(outcome, {
+    operationId: operation.id,
+    status: 'succeeded',
+  })
+  assert.equal(succeeded, true)
+  assert.deepEqual(
+    phases,
+    ['rendering', 'verifying', 'persisting'],
+    'the proof render must traverse the durable operation phases',
+  )
+  assert.ok(
+    heartbeats.length >= 2,
+    'the worker must renew its lease around verification and persistence',
+  )
+  assert.ok(
+    materializations >= 2,
+    'the render input must be revalidated before the output is promoted',
+  )
+  assert.ok(checkpoint, 'the operation must persist a render checkpoint')
+  assert.equal(checkpoint.outputKey, outputKey)
+  assert.equal(checkpoint.output.inputHash, input.inputHash)
+  return { checkpoint, phases, heartbeats }
+}
+
+async function extractFrame(videoPath, frameIndex, outputPath) {
+  await runProcess(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-i', videoPath,
+    '-vf', `select=eq(n\\,${frameIndex})`,
+    '-vsync', '0', '-frames:v', '1',
+    outputPath,
+  ])
+}
+
+async function countFrames(videoPath) {
+  const stdout = await runProcess(ffprobePath, [
+    '-v', 'error', '-count_frames',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=nb_read_frames',
+    '-of', 'json', videoPath,
+  ])
+  return Number(JSON.parse(stdout).streams[0].nb_read_frames)
+}
+
+function channelValue(value) {
+  const scaled = value / 255
+  return scaled <= .03928
+    ? scaled / 12.92
+    : ((scaled + .055) / 1.055) ** 2.4
+}
+
+function relativeLuminance(red, green, blue) {
+  return .2126 * channelValue(red) +
+    .7152 * channelValue(green) +
+    .0722 * channelValue(blue)
+}
+
+function contrastRatio(first, second) {
+  const brighter = Math.max(first, second)
+  const darker = Math.min(first, second)
+  return (brighter + .05) / (darker + .05)
+}
+
+async function readRegion(framePath, rect) {
+  const left = Math.max(0, Math.round(rect.x))
+  const top = Math.max(0, Math.round(rect.y))
+  const width = Math.max(1, Math.round(rect.width))
+  const height = Math.max(1, Math.round(rect.height))
+  const { data, info } = await sharp(framePath)
+    .extract({ left, top, width, height })
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  const pixels = []
+  for (let index = 0; index < data.length; index += info.channels) {
+    pixels.push([data[index], data[index + 1], data[index + 2]])
+  }
+  return { pixels, width: info.width, height: info.height }
+}
+
+/**
+ * Measures identification legibility inside one text band: the contrast
+ * between the rendered glyphs and the band behind them, plus the vertical
+ * extent the glyphs actually occupy in pixels.
+ */
+async function measureTextBand(framePath, rect, options = {}) {
+  const inset = options.insetLeft ?? 0
+  const region = await readRegion(framePath, {
+    x: rect.x + inset,
+    y: rect.y,
+    width: Math.max(1, rect.width - inset),
+    height: rect.height,
+  })
+  const luminances = region.pixels.map(([red, green, blue]) =>
+    relativeLuminance(red, green, blue))
+  const sorted = [...luminances].toSorted((left, right) => left - right)
+  const percentile = (fraction) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]
+  const brightRows = new Set()
+  let brightPixels = 0
+  for (let index = 0; index < region.pixels.length; index += 1) {
+    const [red, green, blue] = region.pixels[index]
+    if (red >= 200 && green >= 200 && blue >= 200) {
+      brightPixels += 1
+      brightRows.add(Math.floor(index / region.width))
+    }
+  }
+  const rows = [...brightRows].toSorted((left, right) => left - right)
+  return {
+    contrast: contrastRatio(percentile(.995), percentile(.10)),
+    brightPixels,
+    glyphHeightPixels: rows.length === 0
+      ? 0
+      : rows[rows.length - 1] - rows[0] + 1,
+    meanLuminance:
+      luminances.reduce((total, value) => total + value, 0) /
+        luminances.length,
+  }
+}
+
+async function meanColor(framePath, rect) {
+  const region = await readRegion(framePath, rect)
+  const totals = region.pixels.reduce(
+    (accumulator, [red, green, blue]) => [
+      accumulator[0] + red,
+      accumulator[1] + green,
+      accumulator[2] + blue,
+    ],
+    [0, 0, 0],
+  )
+  return totals.map((value) => value / region.pixels.length)
+}
+
+async function accentPixelCount(framePath, rect) {
+  const region = await readRegion(framePath, rect)
+  return region.pixels.filter(([red, green, blue]) =>
+    red >= 190 && green >= 120 && green <= 215 && blue <= 110).length
+}
+
+function colorDistance(first, second) {
+  return Math.hypot(
+    first[0] - second[0],
+    first[1] - second[1],
+    first[2] - second[2],
+  )
+}
+
+function centeredProbe(rect, fraction = .2) {
+  const width = Math.max(4, Math.round(rect.width * fraction))
+  const height = Math.max(4, Math.round(rect.height * fraction))
+  return {
+    x: rect.x + (rect.width - width) / 2,
+    y: rect.y + (rect.height - height) / 2,
+    width,
+    height,
+  }
 }
 
 async function createContactSheet(entries, outputPath) {
@@ -463,8 +708,8 @@ async function createContactSheet(entries, outputPath) {
 }
 
 test(
-  'T-FR-132 renders and inspects 15 visual goldens plus three real MP4 modes',
-  { skip: !enabled, timeout: 20 * 60_000 },
+  'T-FR-132 renders fifteen visual goldens and three worker-produced proof MP4s',
+  { skip: !enabled, timeout: 30 * 60_000 },
   async (context) => {
     const requestedRoot =
       process.env.APOLLO_PROOF_MODE_VISUAL_E2E_OUTPUT?.trim()
@@ -485,13 +730,16 @@ test(
       createModeRun(mode),
     ]))
     const stills = []
+    const renderInputHashes = new Set()
     for (const mode of PROOF_MODES) {
       const run = runs.get(mode)
       for (const format of OUTPUT_ASPECT_RATIOS) {
         const plan = run.plans.find((candidate) =>
           candidate.format === format)
         assert.ok(plan)
+        assert.equal(plan.mode, mode)
         const input = renderInputFor(plan, media)
+        renderInputHashes.add(input.inputHash)
         const outputPath = path.join(
           directory,
           `${format.replace(':', 'x')}-${mode}.png`,
@@ -508,10 +756,66 @@ test(
             channel.max - channel.min >= 80),
           `${format}/${mode} lacks visual contrast`,
         )
-        stills.push({ format, mode, path: outputPath })
+        const credit = await measureTextBand(
+          outputPath,
+          plan.layout.creditRegion,
+          { insetLeft: 14 },
+        )
+        assert.ok(
+          credit.contrast >= plan.legibility.minimumContrast,
+          `${format}/${mode} attribution contrast ${credit.contrast.toFixed(2)} is below ${plan.legibility.minimumContrast}`,
+        )
+        assert.ok(
+          credit.glyphHeightPixels >=
+            Math.round(plan.legibility.minimumFontPixels * .7),
+          `${format}/${mode} attribution glyphs measured ${credit.glyphHeightPixels}px, below the legible minimum`,
+        )
+        const qualifiers = await measureTextBand(
+          outputPath,
+          plan.layout.qualifierRegion,
+        )
+        assert.ok(
+          qualifiers.contrast >= plan.legibility.minimumContrast,
+          `${format}/${mode} qualifier contrast ${qualifiers.contrast.toFixed(2)} is below ${plan.legibility.minimumContrast}`,
+        )
+        assert.ok(
+          qualifiers.brightPixels > 0,
+          `${format}/${mode} qualifiers were not drawn`,
+        )
+        const accent = await accentPixelCount(outputPath, {
+          x: plan.layout.creditRegion.x,
+          y: plan.layout.creditRegion.y,
+          width: 8,
+          height: plan.layout.creditRegion.height,
+        })
+        assert.ok(
+          accent > 0,
+          `${format}/${mode} lost the attribution identification marker`,
+        )
+        stills.push({
+          format,
+          mode,
+          path: outputPath,
+          planHash: plan.planHash,
+          layoutHash: plan.layout.layoutHash,
+          attribution: plan.presentation.visual.attribution,
+          creditContrast: Number(credit.contrast.toFixed(2)),
+          creditGlyphHeightPixels: credit.glyphHeightPixels,
+          qualifierContrast: Number(qualifiers.contrast.toFixed(2)),
+        })
       }
     }
     assert.equal(stills.length, 15)
+    assert.equal(
+      renderInputHashes.size,
+      15,
+      'the fifteen format/mode combinations must stay distinct render inputs',
+    )
+    assert.equal(
+      new Set(stills.map((still) => still.layoutHash)).size,
+      15,
+      'no proof mode may alias another layout',
+    )
     const contactSheetPath = path.join(
       directory,
       'proof-mode-contact-sheet.png',
@@ -519,14 +823,9 @@ test(
     await createContactSheet(stills, contactSheetPath)
 
     const outputRoot = path.join(directory, 'mp4')
+    const framesRoot = path.join(directory, 'frames')
     await mkdir(outputRoot, { recursive: true })
-    let stageSequence = 0
-    const renderer = new RemotionRenderInputRenderer({
-      projectRoot: process.cwd(),
-      outputRoot,
-      timeoutMs: 8 * 60_000,
-      createId: () => `proof-stage-${++stageSequence}`,
-    })
+    await mkdir(framesRoot, { recursive: true })
     const representatives = [
       ['cutaway', '9:16'],
       ['split-screen', '16:9'],
@@ -536,29 +835,199 @@ test(
     for (const [mode, format] of representatives) {
       const plan = runs.get(mode).plans.find((candidate) =>
         candidate.format === format)
+      assert.ok(plan)
       const input = renderInputFor(plan, media)
-      const outputKey =
-        `${format.replace(':', 'x')}-${mode}.mp4`
-      const staged = await renderer.stage(input, { outputKey })
-      const receipt = await staged.commit()
+      const stageId = `${format.replace(':', 'x')}-${mode}`
+      const outputKey = `${stageId}.mp4`
+      const durable = await renderThroughDurableOperation({
+        input,
+        outputRoot,
+        outputKey,
+        stageId,
+      })
       const outputPath = path.join(outputRoot, outputKey)
       const probe = await probeVideo(outputPath)
       assert.deepEqual(
         [probe.width, probe.height],
         [plan.layout.canvas.width, plan.layout.canvas.height],
       )
-      assert.equal(receipt.inputHash, input.inputHash)
+      assert.equal(
+        (await stat(outputPath)).size,
+        durable.checkpoint.output.byteSize,
+        'the checkpoint must describe the promoted file',
+      )
+      const frames = await countFrames(outputPath)
+      assert.equal(
+        frames,
+        input.output.durationInFrames,
+        `${stageId} rendered ${frames} frames instead of the planned window`,
+      )
+      const lastFrame = frames - 1
+      const midFrame = Math.floor(frames / 2)
+      const framePaths = {}
+      for (const [label, index] of [
+        ['entry', 0],
+        ['mid', midFrame],
+        ['exit', lastFrame],
+      ]) {
+        framePaths[label] = path.join(
+          framesRoot,
+          `${stageId}-${label}.png`,
+        )
+        await extractFrame(outputPath, index, framePaths[label])
+      }
+
+      const entryAccent = await accentPixelCount(framePaths.entry, {
+        x: plan.layout.creditRegion.x,
+        y: plan.layout.creditRegion.y,
+        width: 8,
+        height: plan.layout.creditRegion.height,
+      })
+      const midAccent = await accentPixelCount(framePaths.mid, {
+        x: plan.layout.creditRegion.x,
+        y: plan.layout.creditRegion.y,
+        width: 8,
+        height: plan.layout.creditRegion.height,
+      })
+      const exitAccent = await accentPixelCount(framePaths.exit, {
+        x: plan.layout.creditRegion.x,
+        y: plan.layout.creditRegion.y,
+        width: 8,
+        height: plan.layout.creditRegion.height,
+      })
+      assert.equal(
+        plan.timing.entryTransition.kind,
+        'crossfade',
+        `${stageId} measured rhythm must fade the proof in`,
+      )
+      assert.ok(
+        plan.timing.entryTransition.durationFrames >= 4,
+        `${stageId} entry transition is too short to read`,
+      )
+      assert.ok(
+        entryAccent < midAccent,
+        `${stageId} entry frame already shows the finished proof (${entryAccent} vs ${midAccent} accent pixels)`,
+      )
+      assert.equal(
+        plan.timing.exitTransition.kind,
+        'cut',
+        `${stageId} exit transition changed`,
+      )
+      assert.ok(
+        exitAccent > 0 && exitAccent >= Math.round(midAccent * .8),
+        `${stageId} exit frame lost the attribution (${exitAccent} vs ${midAccent})`,
+      )
+
+      const credit = await measureTextBand(
+        framePaths.mid,
+        plan.layout.creditRegion,
+        { insetLeft: 14 },
+      )
+      const qualifiers = await measureTextBand(
+        framePaths.mid,
+        plan.layout.qualifierRegion,
+      )
+      assert.ok(
+        credit.contrast >= plan.legibility.minimumContrast,
+        `${stageId} attribution contrast ${credit.contrast.toFixed(2)} below ${plan.legibility.minimumContrast}`,
+      )
+      assert.ok(
+        credit.glyphHeightPixels >=
+          Math.round(plan.legibility.minimumFontPixels * .7),
+        `${stageId} attribution glyphs measured ${credit.glyphHeightPixels}px`,
+      )
+      assert.ok(
+        qualifiers.contrast >= plan.legibility.minimumContrast,
+        `${stageId} qualifier contrast ${qualifiers.contrast.toFixed(2)} below ${plan.legibility.minimumContrast}`,
+      )
+      assert.ok(
+        qualifiers.brightPixels > 0,
+        `${stageId} qualifiers were not drawn`,
+      )
+
+      const evidenceColor = await meanColor(
+        framePaths.mid,
+        centeredProbe(plan.layout.evidenceRegion),
+      )
+      let modeSignal
+      if (mode === 'cutaway') {
+        assert.equal(plan.layout.presenterRegion, undefined)
+        const entryEvidence = await meanColor(
+          framePaths.entry,
+          centeredProbe(plan.layout.evidenceRegion),
+        )
+        modeSignal = colorDistance(evidenceColor, entryEvidence)
+        assert.ok(
+          modeSignal >= 24,
+          `${stageId} cutaway never replaced the presenter (distance ${modeSignal.toFixed(1)})`,
+        )
+      } else if (mode === 'split-screen') {
+        assert.ok(plan.layout.presenterRegion)
+        const presenterColor = await meanColor(
+          framePaths.mid,
+          centeredProbe(plan.layout.presenterRegion),
+        )
+        modeSignal = colorDistance(evidenceColor, presenterColor)
+        assert.ok(
+          modeSignal >= 24,
+          `${stageId} split screen shows the same source twice (distance ${modeSignal.toFixed(1)})`,
+        )
+      } else {
+        assert.equal(plan.layout.presenterRegion, undefined)
+        const cornerColor = await meanColor(framePaths.mid, {
+          x: 4,
+          y: 4,
+          width: Math.round(plan.layout.canvas.width * .06),
+          height: Math.round(plan.layout.canvas.height * .06),
+        })
+        const cornerLuminance = relativeLuminance(...cornerColor)
+        const cardLuminance = relativeLuminance(...evidenceColor)
+        modeSignal = cardLuminance / Math.max(cornerLuminance, 1e-6)
+        assert.ok(
+          cornerLuminance <= .1,
+          `${stageId} proof card did not dim the background (luminance ${cornerLuminance.toFixed(3)})`,
+        )
+        assert.ok(
+          modeSignal >= 3,
+          `${stageId} proof card does not stand out from its background (ratio ${modeSignal.toFixed(1)})`,
+        )
+      }
+
       videos.push({
         mode,
         format,
         path: outputPath,
-        sha256: receipt.outputSha256,
+        outputKey,
+        sha256: durable.checkpoint.output.outputSha256,
+        byteSize: durable.checkpoint.output.byteSize,
+        inputHash: input.inputHash,
+        planHash: plan.planHash,
+        frames,
+        phases: durable.phases,
+        heartbeats: durable.heartbeats.length,
+        attribution: plan.presentation.visual.attribution,
+        qualifiers: plan.presentation.visual.qualifiers,
+        entryAccentPixels: entryAccent,
+        midAccentPixels: midAccent,
+        exitAccentPixels: exitAccent,
+        creditContrast: Number(credit.contrast.toFixed(2)),
+        creditGlyphHeightPixels: credit.glyphHeightPixels,
+        qualifierContrast: Number(qualifiers.contrast.toFixed(2)),
+        modeSignal: Number(modeSignal.toFixed(2)),
+        framePaths,
       })
     }
+    assert.equal(videos.length, 3)
+    assert.equal(
+      new Set(videos.map((video) => video.sha256)).size,
+      3,
+      'the three proof modes must produce three different videos',
+    )
     await writeFile(
       path.join(directory, 'manifest.json'),
       `${JSON.stringify({
-        schemaVersion: 'proof-mode-visual-evidence/v1',
+        schemaVersion: 'proof-mode-visual-evidence/v2',
+        renderedThrough: 'public-operation-worker/artifact-render',
         stills,
         videos,
         contactSheetPath,

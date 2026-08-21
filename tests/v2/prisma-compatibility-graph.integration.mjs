@@ -1910,6 +1910,121 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal(proofModeList.status, 200)
     assert.equal((await proofModeList.json()).data.runs.length, 1)
 
+    const divergentHash = (value) =>
+      `${value.slice(0, 63)}${value.endsWith('0') ? '1' : '0'}`
+    const proofModeRunsBeforeRejections =
+      await client.v2ProofModeRun.count({
+        where: { workspaceId, projectId },
+      })
+    const staleOverrideResponse = await fetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `proof-mode-stale-override-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...proofModeBody,
+        overrides: [{
+          proofNeedItemId: approvedIntegrity.proofNeedItemId,
+          format: '9:16',
+          mode: 'cutaway',
+          expectedEvaluationHash: divergentHash(
+            approvedIntegrity.evaluationHash,
+          ),
+        }],
+      }),
+    })
+    const staleOverridePayload = await staleOverrideResponse.json()
+    assert.equal(
+      staleOverrideResponse.status,
+      409,
+      JSON.stringify(staleOverridePayload),
+    )
+    const staleIntegrityResponse = await fetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `proof-mode-stale-integrity-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...proofModeBody,
+        expectedProofIntegrityRunHash: divergentHash(
+          selectedIntegrityRun.runHash,
+        ),
+      }),
+    })
+    const staleIntegrityPayload = await staleIntegrityResponse.json()
+    assert.equal(
+      staleIntegrityResponse.status,
+      409,
+      JSON.stringify(staleIntegrityPayload),
+    )
+    assert.equal(
+      await client.v2ProofModeRun.count({
+        where: { workspaceId, projectId },
+      }),
+      proofModeRunsBeforeRejections,
+      'a stale ProofMode request must not persist a run',
+    )
+
+    const storedPlan = await client.v2ProofModePlan.findFirst({
+      where: { workspaceId, projectId, runId: proofModeRun.id },
+      orderBy: { sequence: 'asc' },
+    })
+    assert.ok(storedPlan, 'the ProofMode run must persist its plans')
+    const tamperedPlan = JSON.parse(storedPlan.planJson)
+    assert.notEqual(
+      tamperedPlan.presentation.visual.attribution,
+      'Crédito removido',
+    )
+    tamperedPlan.presentation.visual.attribution = 'Crédito removido'
+    await client.v2ProofModePlan.updateMany({
+      where: { id: storedPlan.id, workspaceId, projectId },
+      data: { planJson: JSON.stringify(tamperedPlan) },
+    })
+    const tamperedRead = await fetch(
+      `${proofModeEndpoint}/${proofModeRun.id}`,
+      { headers },
+    )
+    const tamperedPayload = await tamperedRead.json()
+    assert.equal(
+      tamperedRead.status,
+      409,
+      `a tampered ProofMode plan must fail closed: ${JSON.stringify(tamperedPayload)}`,
+    )
+    const tamperedList = await fetch(
+      `${proofModeEndpoint}?limit=10`,
+      { headers },
+    )
+    assert.equal(
+      tamperedList.status,
+      409,
+      'listing must not serve a tampered ProofMode run either',
+    )
+    await client.v2ProofModePlan.updateMany({
+      where: { id: storedPlan.id, workspaceId, projectId },
+      data: { planJson: storedPlan.planJson },
+    })
+    const restoredRead = await fetch(
+      `${proofModeEndpoint}/${proofModeRun.id}`,
+      { headers },
+    )
+    const restoredPayload = await restoredRead.json()
+    assert.equal(
+      restoredRead.status,
+      200,
+      `restoring the stored plan must restore the read: ${JSON.stringify(restoredPayload)}`,
+    )
+    assert.equal(
+      restoredPayload.data.run.runHash,
+      proofModeRun.runHash,
+    )
+    assert.equal(
+      restoredPayload.data.run.plans.find((plan) =>
+        plan.id === storedPlan.id).presentation.visual.attribution,
+      JSON.parse(storedPlan.planJson).presentation.visual.attribution,
+    )
+
     const contextRange =
       selectedProof.selectedEvidence.contextRangeMs
     const blockedContextResponse = await fetch(
