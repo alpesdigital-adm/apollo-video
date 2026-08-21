@@ -6211,6 +6211,77 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.subtitle-segment-overrides.apply": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/subtitle-segment-override-apply-request/v1",
+      "outputSchemaRef": "apollo://schemas/subtitle-segment-override-applied/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/subtitle-segment-overrides"
+      },
+      "toolName": "apollo.projects.subtitle-segment-overrides.apply",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.subtitle-segment-overrides.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/subtitle-segment-override-response/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/subtitle-segment-overrides"
+      },
+      "toolName": "apollo.projects.subtitle-segment-overrides.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "variantId",
+          "required": true,
+          "description": "Output variant whose subtitle exceptions are read; each variant carries its own heads.",
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        {
+          "name": "segmentId",
+          "required": false,
+          "description": "Subtitle segment to read; omitted, the whole head list of the variant is returned.",
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.timeline.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -167805,6 +167876,1233 @@
         "previewHash": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/subtitle-segment-override-applied/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "command",
+            "version",
+            "subtitleOverride",
+            "resolution",
+            "impact",
+            "replayed"
+          ],
+          "properties": {
+            "command": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "version": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "subtitleOverride": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "resolution": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "overrideId",
+                "overrideHash",
+                "variantId",
+                "segmentId",
+                "range",
+                "action",
+                "previousOverrideId",
+                "dimensions",
+                "inherited",
+                "protected",
+                "createdAt"
+              ],
+              "properties": {
+                "overrideId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "overrideHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "variantId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "segmentId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "range": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startFrame",
+                    "endFrame"
+                  ],
+                  "properties": {
+                    "startFrame": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "endFrame": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "action": {
+                  "enum": [
+                    "set",
+                    "reset"
+                  ]
+                },
+                "previousOverrideId": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  ]
+                },
+                "dimensions": {
+                  "type": "array",
+                  "minItems": 0,
+                  "maxItems": 4,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "anchor"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "position"
+                          },
+                          "anchor": {
+                            "enum": [
+                              "top",
+                              "upper-third",
+                              "center",
+                              "lower-third",
+                              "bottom"
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "presetId",
+                          "presetVersion",
+                          "presetHash"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "style"
+                          },
+                          "presetId": {
+                            "enum": [
+                              "kinetic",
+                              "karaoke-box",
+                              "karaoke-pill",
+                              "caps-stroke",
+                              "clean-color"
+                            ]
+                          },
+                          "presetVersion": {
+                            "const": 1
+                          },
+                          "presetHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "text"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind",
+                          "visible"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "visibility"
+                          },
+                          "visible": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "inherited": {
+                  "type": "boolean"
+                },
+                "protected": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "impact": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "commandId",
+                "commandType",
+                "baseVersionId",
+                "resultVersionId",
+                "changeKinds",
+                "dependencyTypes",
+                "affectedRanges",
+                "affectedVariantIds",
+                "affectedArtifacts",
+                "minimalRenders",
+                "renderSemanticsChanged",
+                "impactHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "command-impact/v1"
+                },
+                "commandId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "commandType": {
+                  "const": "apply-subtitle-segment-override"
+                },
+                "baseVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "resultVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "changeKinds": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "dependencyTypes": {
+                  "type": "array",
+                  "maxItems": 6,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "content",
+                      "timing",
+                      "visual",
+                      "audio",
+                      "policy",
+                      "rights"
+                    ]
+                  }
+                },
+                "affectedRanges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "startFrame",
+                      "endFrame"
+                    ],
+                    "properties": {
+                      "startFrame": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endFrame": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                },
+                "affectedVariantIds": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "minItems": 1
+                },
+                "affectedArtifacts": {
+                  "type": "array",
+                  "maxItems": 1000,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "artifactId",
+                      "kind",
+                      "sourceVersionId",
+                      "variantId"
+                    ],
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "kind": {
+                        "enum": [
+                          "proxy",
+                          "final"
+                        ]
+                      },
+                      "sourceVersionId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "minimalRenders": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "variantId",
+                      "ranges"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "proxy"
+                      },
+                      "variantId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "ranges": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 1000,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "startFrame",
+                            "endFrame"
+                          ],
+                          "properties": {
+                            "startFrame": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "endFrame": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "minItems": 1
+                },
+                "renderSemanticsChanged": {
+                  "const": true
+                },
+                "impactHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/subtitle-segment-override-apply-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "variantId",
+        "segmentId"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "segmentId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "action": {
+          "enum": [
+            "set",
+            "reset"
+          ]
+        },
+        "dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "anchor"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "position"
+                  },
+                  "anchor": {
+                    "enum": [
+                      "top",
+                      "upper-third",
+                      "center",
+                      "lower-third",
+                      "bottom"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "presetId",
+                  "presetVersion",
+                  "presetHash"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "style"
+                  },
+                  "presetId": {
+                    "enum": [
+                      "kinetic",
+                      "karaoke-box",
+                      "karaoke-pill",
+                      "caps-stroke",
+                      "clean-color"
+                    ]
+                  },
+                  "presetVersion": {
+                    "const": 1
+                  },
+                  "presetHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "text"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "text"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "visible"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "visibility"
+                  },
+                  "visible": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "protected": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "reset"
+            },
+            "dimensions": false,
+            "protected": false
+          },
+          "required": [
+            "action"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "set"
+            }
+          },
+          "required": [
+            "dimensions"
+          ]
+        }
+      ]
+    },
+    "apollo://schemas/subtitle-segment-override-impact/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "commandId",
+        "commandType",
+        "baseVersionId",
+        "resultVersionId",
+        "changeKinds",
+        "dependencyTypes",
+        "affectedRanges",
+        "affectedVariantIds",
+        "affectedArtifacts",
+        "minimalRenders",
+        "renderSemanticsChanged",
+        "impactHash"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "command-impact/v1"
+        },
+        "commandId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "commandType": {
+          "const": "apply-subtitle-segment-override"
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "resultVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "changeKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "content",
+              "timing",
+              "visual",
+              "audio",
+              "policy",
+              "rights"
+            ]
+          }
+        },
+        "affectedRanges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "startFrame",
+              "endFrame"
+            ],
+            "properties": {
+              "startFrame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endFrame": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "affectedVariantIds": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          },
+          "minItems": 1
+        },
+        "affectedArtifacts": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifactId",
+              "kind",
+              "sourceVersionId",
+              "variantId"
+            ],
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "kind": {
+                "enum": [
+                  "proxy",
+                  "final"
+                ]
+              },
+              "sourceVersionId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            }
+          }
+        },
+        "minimalRenders": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "variantId",
+              "ranges"
+            ],
+            "properties": {
+              "kind": {
+                "const": "proxy"
+              },
+              "variantId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "ranges": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startFrame",
+                    "endFrame"
+                  ],
+                  "properties": {
+                    "startFrame": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "endFrame": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "minItems": 1
+        },
+        "renderSemanticsChanged": {
+          "const": true
+        },
+        "impactHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/subtitle-segment-override-response/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "command",
+                    "version",
+                    "subtitleOverride",
+                    "resolution",
+                    "impact",
+                    "replayed"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "version": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "subtitleOverride": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "resolution": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "overrideId",
+                        "overrideHash",
+                        "variantId",
+                        "segmentId",
+                        "range",
+                        "action",
+                        "previousOverrideId",
+                        "dimensions",
+                        "inherited",
+                        "protected",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "overrideId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "overrideHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "variantId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "segmentId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "range": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "startFrame",
+                            "endFrame"
+                          ],
+                          "properties": {
+                            "startFrame": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "endFrame": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          }
+                        },
+                        "action": {
+                          "enum": [
+                            "set",
+                            "reset"
+                          ]
+                        },
+                        "previousOverrideId": {
+                          "anyOf": [
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          ]
+                        },
+                        "dimensions": {
+                          "type": "array",
+                          "minItems": 0,
+                          "maxItems": 4,
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "anchor"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "position"
+                                  },
+                                  "anchor": {
+                                    "enum": [
+                                      "top",
+                                      "upper-third",
+                                      "center",
+                                      "lower-third",
+                                      "bottom"
+                                    ]
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "presetId",
+                                  "presetVersion",
+                                  "presetHash"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "style"
+                                  },
+                                  "presetId": {
+                                    "enum": [
+                                      "kinetic",
+                                      "karaoke-box",
+                                      "karaoke-pill",
+                                      "caps-stroke",
+                                      "clean-color"
+                                    ]
+                                  },
+                                  "presetVersion": {
+                                    "const": 1
+                                  },
+                                  "presetHash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "text"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "text"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "kind",
+                                  "visible"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "const": "visibility"
+                                  },
+                                  "visible": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "inherited": {
+                          "type": "boolean"
+                        },
+                        "protected": {
+                          "type": "boolean"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "impact": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "commandId",
+                        "commandType",
+                        "baseVersionId",
+                        "resultVersionId",
+                        "changeKinds",
+                        "dependencyTypes",
+                        "affectedRanges",
+                        "affectedVariantIds",
+                        "affectedArtifacts",
+                        "minimalRenders",
+                        "renderSemanticsChanged",
+                        "impactHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "command-impact/v1"
+                        },
+                        "commandId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "commandType": {
+                          "const": "apply-subtitle-segment-override"
+                        },
+                        "baseVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "resultVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "changeKinds": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 16,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "dependencyTypes": {
+                          "type": "array",
+                          "maxItems": 6,
+                          "uniqueItems": true,
+                          "items": {
+                            "enum": [
+                              "content",
+                              "timing",
+                              "visual",
+                              "audio",
+                              "policy",
+                              "rights"
+                            ]
+                          }
+                        },
+                        "affectedRanges": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "startFrame",
+                              "endFrame"
+                            ],
+                            "properties": {
+                              "startFrame": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "endFrame": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            }
+                          }
+                        },
+                        "affectedVariantIds": {
+                          "type": "array",
+                          "maxItems": 1,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "minItems": 1
+                        },
+                        "affectedArtifacts": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "artifactId",
+                              "kind",
+                              "sourceVersionId",
+                              "variantId"
+                            ],
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "kind": {
+                                "enum": [
+                                  "proxy",
+                                  "final"
+                                ]
+                              },
+                              "sourceVersionId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            }
+                          }
+                        },
+                        "minimalRenders": {
+                          "type": "array",
+                          "maxItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind",
+                              "variantId",
+                              "ranges"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "proxy"
+                              },
+                              "variantId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "ranges": {
+                                "type": "array",
+                                "minItems": 1,
+                                "maxItems": 1000,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "startFrame",
+                                    "endFrame"
+                                  ],
+                                  "properties": {
+                                    "startFrame": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "endFrame": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "minItems": 1
+                        },
+                        "renderSemanticsChanged": {
+                          "const": true
+                        },
+                        "impactHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

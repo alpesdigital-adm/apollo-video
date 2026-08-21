@@ -129,6 +129,22 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
       + 'target variant only; :185 affectedArtifacts and affectedVariantIds are filtered to '
       + 'impact.variantId, and :188 renderDeferredUntilTimeline is true while durationFrames is 0',
   }),
+  'apply-subtitle-segment-override': Object.freeze({
+    // Genuinely partial-range, unlike `set-project-subtitle-mode`: a segment
+    // exception moves one cue inside one variant, so the honest invalidation is the
+    // half-open range of that cue — not the whole compiled timeline. The impact says
+    // exactly that and the parser refuses any document that says more.
+    renderPolicy: 'partial-range',
+    impactSchema: 'command-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: null,
+    evidence: 'command-impact.ts:512 createSubtitleSegmentOverrideCommandImpact derives affectedRanges '
+      + 'from canonicalCommandImpactRanges([range]) clamped to durationFrames and repeats that single '
+      + 'range in minimalRenders for the target variant only; :573 affectedVariantIds is the literal '
+      + '[variantId] and affectedArtifacts is filtered to it; :770 parseCommandImpact refuses a stored '
+      + 'document with more than one variant, range or minimal render',
+  }),
   'replace-source-transcript': Object.freeze({
     renderPolicy: 'deferred',
     impactSchema: 'source-transcript-replacement-impact/v1',

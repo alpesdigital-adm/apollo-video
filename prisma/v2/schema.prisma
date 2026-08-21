@@ -122,6 +122,8 @@ model V2Workspace {
   projectLutSelectionHeads               V2ProjectLutSelectionHead[]
   projectSubtitleConfigurations          V2ProjectSubtitleConfiguration[]
   projectSubtitleConfigurationHeads      V2ProjectSubtitleConfigurationHead[]
+  subtitleSegmentOverrides               V2SubtitleSegmentOverride[]
+  subtitleSegmentOverrideHeads           V2SubtitleSegmentOverrideHead[]
   semanticReuseRuns                      V2SemanticReuseRun[]
   hierarchicalProcessingRuns             V2HierarchicalProcessingRun[]
   hierarchicalProcessingChunks           V2HierarchicalProcessingChunk[]
@@ -627,6 +629,8 @@ model V2Project {
   lutSelectionHead                       V2ProjectLutSelectionHead?
   subtitleConfigurations                 V2ProjectSubtitleConfiguration[]
   subtitleConfigurationHeads             V2ProjectSubtitleConfigurationHead[]
+  subtitleSegmentOverrides               V2SubtitleSegmentOverride[]
+  subtitleSegmentOverrideHeads           V2SubtitleSegmentOverrideHead[]
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
@@ -819,6 +823,8 @@ model V2ProjectVersion {
   lutSelectionAsResult          V2ProjectLutSelection?          @relation("ProjectLutSelectionResult")
   subtitleConfigurationsAsBase  V2ProjectSubtitleConfiguration[] @relation("ProjectSubtitleConfigurationBase")
   subtitleConfigurationAsResult V2ProjectSubtitleConfiguration?  @relation("ProjectSubtitleConfigurationResult")
+  subtitleSegmentOverridesAsBase  V2SubtitleSegmentOverride[] @relation("SubtitleSegmentOverrideBase")
+  subtitleSegmentOverrideAsResult V2SubtitleSegmentOverride?  @relation("SubtitleSegmentOverrideResult")
   creationCommand               V2ProjectCreationCommand?
   artifactInvalidationsAsBase   V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult V2CommandArtifactInvalidation[] @relation("ArtifactInvalidationResultVersion")
@@ -863,6 +869,7 @@ model V2EditCommand {
   directorRun           V2DirectorRun?                  @relation("DirectorRunCommand")
   lutSelection          V2ProjectLutSelection?
   subtitleConfiguration V2ProjectSubtitleConfiguration?
+  subtitleSegmentOverride V2SubtitleSegmentOverride?
   artifactInvalidations V2CommandArtifactInvalidation[]
   proxyReuseOperations  V2ProjectProxyRenderOperation[] @relation("ProjectProxyReuseCommand")
 
@@ -2101,6 +2108,63 @@ model V2ProjectSubtitleConfiguration {
   @@unique([previousConfigurationId, workspaceId])
   @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)])
   @@map("project_subtitle_configurations")
+}
+
+model V2SubtitleSegmentOverrideHead {
+  workspaceId String   @db.VarChar(128)
+  projectId   String   @db.VarChar(128)
+  variantId   String   @db.VarChar(128)
+  segmentId   String   @db.VarChar(128)
+  overrideId  String   @db.VarChar(128)
+  updatedAt   DateTime @db.Timestamptz(3)
+
+  workspace          V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project            V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  subtitleOverride   V2SubtitleSegmentOverride @relation(fields: [overrideId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([projectId, workspaceId, variantId, segmentId])
+  @@unique([overrideId, workspaceId])
+  @@map("subtitle_segment_override_heads")
+}
+
+model V2SubtitleSegmentOverride {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  projectId          String   @db.VarChar(128)
+  commandId          String   @db.VarChar(128)
+  baseVersionId      String   @db.VarChar(128)
+  resultVersionId    String   @db.VarChar(128)
+  variantId          String   @db.VarChar(128)
+  segmentId          String   @db.VarChar(128)
+  startFrame         Int
+  endFrame           Int
+  action             String   @db.VarChar(16)
+  /// Sorted comma-separated overridden dimensions; empty means the segment went back to inherited.
+  dimensionKinds     String   @db.VarChar(128)
+  isProtected        Boolean
+  previousOverrideId String?  @db.VarChar(128)
+  overrideJson       String   @db.Text
+  overrideHash       String   @db.Char(64)
+  impactJson         String   @db.Text
+  impactHash         String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project          V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  command          V2EditCommand               @relation(fields: [commandId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  baseVersion      V2ProjectVersion            @relation("SubtitleSegmentOverrideBase", fields: [baseVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  resultVersion    V2ProjectVersion            @relation("SubtitleSegmentOverrideResult", fields: [resultVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  previousOverride V2SubtitleSegmentOverride?  @relation("SubtitleSegmentOverrideChain", fields: [previousOverrideId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  replacedBy       V2SubtitleSegmentOverride[] @relation("SubtitleSegmentOverrideChain")
+  currentForSegments V2SubtitleSegmentOverrideHead[]
+
+  @@unique([id, workspaceId])
+  @@unique([commandId, workspaceId])
+  @@unique([resultVersionId, workspaceId])
+  @@unique([previousOverrideId, workspaceId])
+  @@index([workspaceId, projectId, variantId, segmentId, createdAt(sort: Desc)])
+  @@index([workspaceId, projectId, baseVersionId])
+  @@map("subtitle_segment_overrides")
 }
 
 model V2MediaArtifactLineage {

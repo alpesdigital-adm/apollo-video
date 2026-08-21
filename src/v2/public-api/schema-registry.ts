@@ -8,6 +8,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
@@ -5985,6 +5986,71 @@ const commandImpactSchema = {
     },
     renderSemanticsChanged: { type: 'boolean' },
     impactHash: sha256Schema,
+  },
+}
+
+/** F1.037 — the closed union of overridable dimensions, at most one entry per kind. */
+const subtitleSegmentOverrideDimensionsSchemaV1 = {
+  type: 'array', minItems: 1, maxItems: 4,
+  items: {
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'anchor'],
+        properties: { kind: { const: 'position' }, anchor: { enum: [...SUBTITLE_SEGMENT_OVERRIDE_ANCHORS] } },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'presetId', 'presetVersion', 'presetHash'],
+        properties: {
+          kind: { const: 'style' }, presetId: { enum: Object.keys(SUBTITLE_PRESETS) },
+          presetVersion: { const: 1 }, presetHash: sha256Schema,
+        },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'text'],
+        properties: { kind: { const: 'text' }, text: { type: 'string', minLength: 1, maxLength: 200 } },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'visible'],
+        properties: { kind: { const: 'visibility' }, visible: { type: 'boolean' } },
+      },
+    ],
+  },
+}
+
+const subtitleSegmentOverrideResolutionSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['overrideId', 'overrideHash', 'variantId', 'segmentId', 'range', 'action', 'previousOverrideId', 'dimensions', 'inherited', 'protected', 'createdAt'],
+  properties: {
+    overrideId: idSchema, overrideHash: sha256Schema, variantId: idSchema, segmentId: idSchema,
+    range: {
+      type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    action: { enum: ['set', 'reset'] },
+    previousOverrideId: { anyOf: [{ type: 'null' }, idSchema] },
+    // A reset back to the inherited resolution publishes an empty list, never a
+    // deleted document: the exception is gone but the history is not.
+    dimensions: { ...subtitleSegmentOverrideDimensionsSchemaV1, minItems: 0 },
+    inherited: { type: 'boolean' },
+    protected: { type: 'boolean' },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+}
+
+/**
+ * The impact of a segment exception is a `command-impact/v1` document pinned to
+ * exactly one variant, one half-open range and one minimal render — the published
+ * schema says the same thing the domain parser enforces.
+ */
+const subtitleSegmentOverrideImpactSchemaV1 = {
+  ...commandImpactSchema,
+  properties: {
+    ...commandImpactSchema.properties,
+    commandType: { const: 'apply-subtitle-segment-override' },
+    affectedRanges: { ...commandImpactSchema.properties.affectedRanges, minItems: 1, maxItems: 1 },
+    affectedVariantIds: { ...commandImpactSchema.properties.affectedVariantIds, minItems: 1, maxItems: 1 },
+    minimalRenders: { ...commandImpactSchema.properties.minimalRenders, minItems: 1, maxItems: 1 },
+    renderSemanticsChanged: { const: true },
   },
 }
 const reviewPatchCommandImpactSchema = {
@@ -21386,6 +21452,43 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         }],
       },
+    },
+  })),
+  defineSchema('subtitle-segment-override-apply-request', 1, 'Move position, style, text or visibility for ONE subtitle segment of ONE variant, or reset it to the previous level', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId', 'segmentId'], properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, variantId: idSchema, segmentId: idSchema,
+      action: { enum: ['set', 'reset'] },
+      dimensions: subtitleSegmentOverrideDimensionsSchemaV1,
+      protected: { type: 'boolean' },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    // The frame range is never sent: it is read from the compiled segment, so a
+    // caller cannot claim frames the EditPlan does not give that segment.
+    oneOf: [
+      { properties: { action: { const: 'reset' }, dimensions: false, protected: false }, required: ['action'] },
+      { properties: { action: { const: 'set' } }, required: ['dimensions'] },
+    ],
+  }),
+  defineSchema('subtitle-segment-override-impact', 1, 'Segment-scoped subtitle override impact limited to one variant and one half-open range', subtitleSegmentOverrideImpactSchemaV1),
+  defineSchema('subtitle-segment-override-applied', 1, 'Applied content-addressed subtitle segment override and immutable result version', successSchema({
+    type: 'object', additionalProperties: false, required: ['command', 'version', 'subtitleOverride', 'resolution', 'impact', 'replayed'], properties: {
+      command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },
+      subtitleOverride: { type: 'object', additionalProperties: true },
+      resolution: subtitleSegmentOverrideResolutionSchemaV1, impact: subtitleSegmentOverrideImpactSchemaV1, replayed: { type: 'boolean' },
+    },
+  })),
+  defineSchema('subtitle-segment-override-response', 1, 'Current subtitle exceptions of one variant: the head list, or one segment head', successSchema({
+    type: 'object', additionalProperties: false, properties: {
+      result: {
+        anyOf: [{ type: 'null' }, {
+          type: 'object', additionalProperties: false, required: ['command', 'version', 'subtitleOverride', 'resolution', 'impact', 'replayed'], properties: {
+            command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },
+            subtitleOverride: { type: 'object', additionalProperties: true },
+            resolution: subtitleSegmentOverrideResolutionSchemaV1, impact: subtitleSegmentOverrideImpactSchemaV1, replayed: { type: 'boolean' },
+          },
+        }],
+      },
+      overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: true } },
     },
   })),
   defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({

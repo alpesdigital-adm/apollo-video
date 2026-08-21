@@ -63,6 +63,7 @@ import type { StoryPlanRepository } from '../application/ports/story-plan-reposi
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
 import type { ProjectSubtitleConfigurationRepository } from '../application/ports/project-subtitle-configuration-repository.ts'
+import type { SubtitleSegmentOverrideRepository } from '../application/ports/subtitle-segment-override-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
 import type { ContiguousEvidenceRepository } from '../application/ports/contiguous-evidence-repository.ts'
 import type { ContiguousEvaluationRepository } from '../application/ports/contiguous-evaluation-provider.ts'
@@ -177,6 +178,7 @@ import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
 import { PrismaProjectSubtitleConfigurationRepository } from './prisma/project-subtitle-configuration-repository.ts'
+import { PrismaSubtitleSegmentOverrideRepository } from './prisma/subtitle-segment-override-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
 import { PrismaContiguousEvidenceRepository } from './prisma/contiguous-evidence-repository.ts'
 import { PrismaContiguousEvaluationRepository } from './prisma/contiguous-evaluation-repository.ts'
@@ -428,6 +430,10 @@ export function createProjectLutSelectionRepository(): ProjectLutSelectionReposi
 
 export function createProjectSubtitleConfigurationRepository(): ProjectSubtitleConfigurationRepository {
   return new PrismaProjectSubtitleConfigurationRepository(resolveV2Client())
+}
+
+export function createSubtitleSegmentOverrideRepository(): SubtitleSegmentOverrideRepository {
+  return new PrismaSubtitleSegmentOverrideRepository(resolveV2Client())
 }
 
 export function createProjectPolicyOverridesRepository(): ProjectPolicyOverridesRepository {

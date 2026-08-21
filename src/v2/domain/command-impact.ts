@@ -26,7 +26,11 @@ export interface CommandImpactRange {
 export interface CommandImpactV1 {
   schemaVersion: 'command-impact/v1'
   commandId: string
-  commandType: 'manual-edit' | 'apply-review-patch' | 'apply-review-patch-batch'
+  commandType:
+    | 'manual-edit'
+    | 'apply-review-patch'
+    | 'apply-review-patch-batch'
+    | 'apply-subtitle-segment-override'
   baseVersionId: string
   resultVersionId: string
   changeKinds: readonly string[]
@@ -495,6 +499,87 @@ export function createReviewPatchCommandImpact(input: {
   return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
 }
 
+/**
+ * F1.037 / FR-174 — impact of one subtitle exception scoped to a single segment.
+ *
+ * This is genuinely partial-range: the invalidated region is the half-open range of
+ * the overridden segment, clamped to the compiled timeline, and never frame 0 to the
+ * end unless the segment itself spans the whole timeline. It is also genuinely
+ * variant-scoped: `affectedVariantIds`, `affectedArtifacts` and `minimalRenders`
+ * only ever mention the target variant, so a 9:16 exception cannot invalidate the
+ * 16:9 export.
+ */
+export function createSubtitleSegmentOverrideCommandImpact(input: {
+  commandId: string
+  baseVersionId: string
+  resultVersionId: string
+  variantId: string
+  segmentId: string
+  range: Readonly<CommandImpactRange>
+  /** Overridden dimensions; `[]` means the segment went back to the inherited resolution. */
+  dimensionKinds: readonly string[]
+  durationFrames: number
+  outputReferences: readonly Readonly<CommandImpactOutputReference>[]
+}): Readonly<CommandImpactV1> {
+  for (const [field, value] of Object.entries({
+    commandId: input.commandId,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    variantId: input.variantId,
+    segmentId: input.segmentId,
+  })) assertDomain(validId(value), 'INVALID_ARGUMENT', `${field} is invalid`)
+  assertDomain(
+    Number.isSafeInteger(input.durationFrames) && input.durationFrames > 0,
+    'INVALID_ARGUMENT',
+    'Subtitle segment override impact requires a compiled timeline',
+  )
+  assertDomain(
+    Number.isSafeInteger(input.range.startFrame) && Number.isSafeInteger(input.range.endFrame) &&
+      input.range.startFrame >= 0 && input.range.endFrame > input.range.startFrame &&
+      input.range.endFrame <= input.durationFrames,
+    'INVALID_ARGUMENT',
+    'Subtitle segment override range must sit inside the compiled timeline',
+  )
+  const kinds = [...new Set(input.dimensionKinds)].toSorted()
+  assertDomain(
+    kinds.length <= 4 && kinds.every((kind) => typeof kind === 'string' && /^[a-z-]{3,32}$/.test(kind)),
+    'INVALID_ARGUMENT',
+    'Subtitle segment override impact dimensions are invalid',
+  )
+  const affectedRanges = canonicalCommandImpactRanges([input.range])
+  // Text is the only dimension that changes what the video says; the other three
+  // move how an unchanged line is drawn.
+  const dependencyTypes: CommandImpactDependency[] = kinds.includes('text')
+    ? ['content', 'visual']
+    : ['visual']
+  const affectedArtifacts = normalizeCommandImpactOutputReferences(
+    input.outputReferences.filter((output) => output.variantId === input.variantId),
+  )
+  const body = {
+    schemaVersion: 'command-impact/v1' as const,
+    commandId: input.commandId,
+    commandType: 'apply-subtitle-segment-override' as const,
+    baseVersionId: input.baseVersionId,
+    resultVersionId: input.resultVersionId,
+    // The segment travels in the classification so an operator reading the impact
+    // sees which exception moved, not only that "a subtitle changed".
+    changeKinds: Object.freeze(
+      kinds.length > 0
+        ? kinds.map((kind) => `subtitle-segment:${kind}`)
+        : ['subtitle-segment:inherit'],
+    ),
+    dependencyTypes: Object.freeze(dependencyTypes),
+    affectedRanges,
+    affectedVariantIds: Object.freeze([input.variantId]),
+    affectedArtifacts,
+    minimalRenders: Object.freeze([
+      Object.freeze({ kind: 'proxy' as const, variantId: input.variantId, ranges: affectedRanges }),
+    ]),
+    renderSemanticsChanged: true,
+  }
+  return Object.freeze({ ...body, impactHash: calculateCanonicalHash(body) })
+}
+
 export function createCommandArtifactInvalidations(input: {
   impact: Readonly<CommandImpactV1>
   createdAt: string
@@ -599,7 +684,8 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
   const impact = stored as unknown as CommandImpactV1
   assertDomain(
     impact.schemaVersion === 'command-impact/v1' &&
-      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch'].includes(impact.commandType) &&
+      ['manual-edit', 'apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override']
+        .includes(impact.commandType) &&
       validId(impact.commandId) &&
       validId(impact.baseVersionId) &&
       validId(impact.resultVersionId) &&
@@ -679,6 +765,24 @@ export function parseCommandImpact(value: unknown): Readonly<CommandImpactV1> {
         calculateCanonicalHash(renderVariants) === calculateCanonicalHash([...impact.affectedVariantIds].toSorted()),
       'PERSISTENCE_CONFLICT',
       'Stored review patch impact is inconsistent',
+    )
+  }
+  if (impact.commandType === 'apply-subtitle-segment-override') {
+    // A subtitle exception is scoped to exactly one variant and one contiguous
+    // half-open range. Anything wider stored under this type is a defect, not a
+    // conservative invalidation: it would let one segment invalidate a whole export.
+    assertDomain(
+      impact.renderSemanticsChanged === true &&
+        impact.affectedVariantIds.length === 1 &&
+        impact.affectedRanges.length === 1 &&
+        impact.minimalRenders.length === 1 &&
+        impact.minimalRenders[0]!.variantId === impact.affectedVariantIds[0] &&
+        impact.affectedArtifacts.every((artifact) => artifact.variantId === impact.affectedVariantIds[0]) &&
+        impact.changeKinds.every((kind) => kind.startsWith('subtitle-segment:')) &&
+        impact.dependencyTypes.length > 0 &&
+        impact.dependencyTypes.every((dependency) => dependency === 'visual' || dependency === 'content'),
+      'PERSISTENCE_CONFLICT',
+      'Stored subtitle segment override impact is inconsistent',
     )
   }
   const { impactHash, ...body } = impact
