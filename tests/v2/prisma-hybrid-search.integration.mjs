@@ -64,6 +64,45 @@ function deterministicUuid(seed) {
   ].join('-')
 }
 
+/**
+ * Legitimate client behaviour against the real governance limiter: `/v1`
+ * denies authenticated bursts with 429 `GOVERNANCE_LIMIT_EXCEEDED` once
+ * `evaluateGovernanceAnomalies` sees more than `requestMinimum` requests in
+ * its 60 s signal window. Seeding a 1.000-document corpus is a long, honest
+ * burst, so the harness waits the limiter out instead of relaxing it. Denied
+ * admissions are persisted and keep counting inside the window, so the
+ * backoff is real waiting.
+ */
+const RATE_LIMIT_BACKOFF_MS = Object.freeze([
+  3_000, 8_000, 15_000, 30_000, 45_000, 60_000,
+])
+
+async function apiFetch(input, init) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await globalThis.fetch(input, init)
+    if (response.status !== 429) return response
+    const payload = await response.clone().json().catch(() => null)
+    assert.equal(
+      payload?.error?.code,
+      'GOVERNANCE_LIMIT_EXCEEDED',
+      `unexpected 429 payload: ${JSON.stringify(payload)}`,
+    )
+    assert.equal(payload?.error?.category, 'quota')
+    assert.equal(payload?.error?.retryable, true)
+    if (attempt >= RATE_LIMIT_BACKOFF_MS.length) {
+      throw new Error(
+        `governance limiter did not clear after ${attempt} retries: ` +
+          JSON.stringify(payload),
+      )
+    }
+    const retryAfter = Number(response.headers.get('retry-after'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(60_000, Math.ceil(retryAfter) * 1_000)
+      : RATE_LIMIT_BACKOFF_MS[attempt]
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
+}
+
 async function mapWithConcurrency(items, limit, worker) {
   const results = new Array(items.length)
   let cursor = 0
@@ -125,7 +164,7 @@ async function waitForServer(baseUrl, child) {
       throw new Error(`Next server exited with ${child.exitCode}`)
     }
     try {
-      if ((await fetch(`${baseUrl}/v1/health`)).ok) return
+      if ((await globalThis.fetch(`${baseUrl}/v1/health`)).ok) return
     } catch {
       // Server is still starting.
     }
@@ -138,7 +177,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
   skip:
     process.env.APOLLO_HYBRID_SEARCH_E2E !== '1' &&
     'set APOLLO_HYBRID_SEARCH_E2E=1 and use an isolated V2 database',
-  timeout: 900_000,
+  timeout: 1_500_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -533,7 +572,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       },
     }
     const proofKey = `hybrid-proof-${suffix}`
-    const proofResponse = await fetch(catalogEndpoint, {
+    const proofResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -557,7 +596,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     assert.equal('requestFingerprint' in firstProof, false)
     assert.equal('idempotencyKey' in firstProof, false)
 
-    const replayResponse = await fetch(catalogEndpoint, {
+    const replayResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -574,7 +613,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       firstProof.id,
     )
 
-    const mismatchResponse = await fetch(catalogEndpoint, {
+    const mismatchResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -591,7 +630,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     })
     assert.equal(mismatchResponse.status, 409)
 
-    const staleResponse = await fetch(catalogEndpoint, {
+    const staleResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -629,7 +668,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     const testimonialKey = `hybrid-testimonial-${suffix}`
     const concurrent = await Promise.all(
       [0, 1].map(() =>
-        fetch(catalogEndpoint, {
+        apiFetch(catalogEndpoint, {
           method: 'POST',
           headers: {
             authorization,
@@ -666,7 +705,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         producer,
       },
     }
-    const blockedResponse = await fetch(catalogEndpoint, {
+    const blockedResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -677,7 +716,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     })
     assert.equal(blockedResponse.status, 201)
 
-    const crossResponse = await fetch(crossCatalogEndpoint, {
+    const crossResponse = await apiFetch(crossCatalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -712,7 +751,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       JSON.stringify(crossPayload),
     )
 
-    const foreignCatalogResponse = await fetch(
+    const foreignCatalogResponse = await apiFetch(
       `${baseUrl}/v1/projects/${foreignProjectId}` +
         '/semantic-search/documents',
       {
@@ -762,7 +801,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       'foreign workspace candidate must exist and be active',
     )
 
-    const reindexResponse = await fetch(catalogEndpoint, {
+    const reindexResponse = await apiFetch(catalogEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -824,7 +863,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       limit: 20,
       explain: true,
     }
-    const searchResponse = await fetch(queryEndpoint, {
+    const searchResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -877,7 +916,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       limit: 20,
       explain: true,
     }
-    const projectOnlyCrossResponse = await fetch(queryEndpoint, {
+    const projectOnlyCrossResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -894,7 +933,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     )
     assert.equal(projectOnlyCrossPayload.data.results.length, 0)
 
-    const workspaceCrossResponse = await fetch(queryEndpoint, {
+    const workspaceCrossResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -954,7 +993,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       ),
       'workspace scope must stay inside the anchor workspace projects',
     )
-    const foreignQueryResponse = await fetch(
+    const foreignQueryResponse = await apiFetch(
       `${baseUrl}/v1/projects/${foreignProjectId}/semantic-search/query`,
       {
         method: 'POST',
@@ -993,7 +1032,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         })),
     }
     const reuseKey = `hybrid-reuse-${suffix}`
-    const reuseResponse = await fetch(reuseRunEndpoint, {
+    const reuseResponse = await apiFetch(reuseRunEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1029,7 +1068,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       }),
       1,
     )
-    const reuseReplay = await fetch(reuseRunEndpoint, {
+    const reuseReplay = await apiFetch(reuseRunEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1054,7 +1093,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       limit: 20,
       explain: true,
     }
-    const blockedSearchResponse = await fetch(queryEndpoint, {
+    const blockedSearchResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1086,7 +1125,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       ),
     )
 
-    const hiddenBlockedResponse = await fetch(queryEndpoint, {
+    const hiddenBlockedResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1148,7 +1187,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       ],
     }
     const evaluationKey = `hybrid-evaluation-${suffix}`
-    const evaluationResponse = await fetch(evaluationEndpoint, {
+    const evaluationResponse = await apiFetch(evaluationEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1178,7 +1217,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     assert.equal('requestFingerprint' in evaluation, false)
     assert.equal('idempotencyKey' in evaluation, false)
 
-    const evaluationReplay = await fetch(evaluationEndpoint, {
+    const evaluationReplay = await apiFetch(evaluationEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1196,7 +1235,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       evaluation.id,
     )
 
-    const evaluationMismatch = await fetch(evaluationEndpoint, {
+    const evaluationMismatch = await apiFetch(evaluationEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1229,7 +1268,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       ],
     }
     const scaleEvaluationKey = `hybrid-scale-${suffix}`
-    const scaleEvaluationResponse = await fetch(
+    const scaleEvaluationResponse = await apiFetch(
       scaleEvaluationEndpoint,
       {
         method: 'POST',
@@ -1273,7 +1312,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       scaleEvaluation.cases.every((item) =>
         Number.isInteger(item.latencyMs) && item.latencyMs >= 0),
     )
-    const scaleReplayResponse = await fetch(
+    const scaleReplayResponse = await apiFetch(
       scaleEvaluationEndpoint,
       {
         method: 'POST',
@@ -1293,7 +1332,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       scaleEvaluation.id,
     )
 
-    const unsupportedQuery = await fetch(queryEndpoint, {
+    const unsupportedQuery = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1306,19 +1345,19 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     })
     assert.equal(unsupportedQuery.status, 422)
     assert.equal(
-      (await fetch(queryEndpoint, { method: 'POST' })).status,
+      (await apiFetch(queryEndpoint, { method: 'POST' })).status,
       401,
     )
     assert.equal(
-      (await fetch(catalogEndpoint, { method: 'POST' })).status,
+      (await apiFetch(catalogEndpoint, { method: 'POST' })).status,
       401,
     )
     assert.equal(
-      (await fetch(evaluationEndpoint, { method: 'POST' })).status,
+      (await apiFetch(evaluationEndpoint, { method: 'POST' })).status,
       401,
     )
     assert.equal(
-      (await fetch(scaleEvaluationEndpoint, { method: 'POST' })).status,
+      (await apiFetch(scaleEvaluationEndpoint, { method: 'POST' })).status,
       401,
     )
 
@@ -1386,7 +1425,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         })),
       )}`,
     )
-    const sandboxAuditResponse = await fetch(
+    const sandboxAuditResponse = await apiFetch(
       `${baseUrl}/v1/governance/sandbox-executions?limit=5`,
       { headers: { authorization } },
     )
@@ -1462,7 +1501,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         id: issued.client.id,
       },
     })
-    const staleRightsResponse = await fetch(queryEndpoint, {
+    const staleRightsResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1590,7 +1629,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     }
 
     async function catalogCorpusDocument(index, observations) {
-      const response = await fetch(catalogEndpoint, {
+      const response = await apiFetch(catalogEndpoint, {
         method: 'POST',
         headers: {
           authorization,
@@ -1681,7 +1720,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         BASE_ACTIVE_DOCUMENTS + tier,
         `tier ${tier} must be fully materialized in PostgreSQL`,
       )
-      const tierResponse = await fetch(scaleEvaluationEndpoint, {
+      const tierResponse = await apiFetch(scaleEvaluationEndpoint, {
         method: 'POST',
         headers: {
           authorization,
@@ -1760,7 +1799,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       assert.ok(Number.isInteger(latency.meanMs))
       tierLatencies.push({ tier, ...latency })
 
-      const rankingResponse = await fetch(queryEndpoint, {
+      const rankingResponse = await apiFetch(queryEndpoint, {
         method: 'POST',
         headers: {
           authorization,
@@ -1842,7 +1881,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         await new Promise((resolve) => setTimeout(resolve, 150))
         return catalogCorpusDocument(driftIndex)
       })()
-      const driftResponse = await fetch(scaleEvaluationEndpoint, {
+      const driftResponse = await apiFetch(scaleEvaluationEndpoint, {
         method: 'POST',
         headers: {
           authorization,
@@ -1903,7 +1942,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       limit: 20,
       explain: true,
     }
-    const staleSetResponse = await fetch(queryEndpoint, {
+    const staleSetResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1935,7 +1974,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       ),
       null,
     )
-    const staleReuseResponse = await fetch(reuseRunEndpoint, {
+    const staleReuseResponse = await apiFetch(reuseRunEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1960,7 +1999,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     )
     assert.equal(staleReusePayload.error.code, 'VERSION_CONFLICT')
 
-    const auditQueryResponse = await fetch(queryEndpoint, {
+    const auditQueryResponse = await apiFetch(queryEndpoint, {
       method: 'POST',
       headers: {
         authorization,
@@ -1983,7 +2022,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         ),
       )}`,
     )
-    const auditReuseResponse = await fetch(reuseRunEndpoint, {
+    const auditReuseResponse = await apiFetch(reuseRunEndpoint, {
       method: 'POST',
       headers: {
         authorization,

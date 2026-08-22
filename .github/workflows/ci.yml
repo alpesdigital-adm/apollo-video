@@ -342,9 +342,21 @@ jobs:
             test "$(docker inspect --format '{{.RestartCount}}' "$container_id")" = 0
           done
 
+      # Same knob and same reasoning as the ProofMode step above: the harness
+      # already backs off and waits out a legitimate 429
+      # (GOVERNANCE_LIMIT_EXCEEDED). APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM
+      # declares the size of this one supervised burst — seeding a 1.000
+      # document corpus plus its queries and evaluations is ~1.045 authenticated
+      # /v1 calls at ~630 requests per minute — so the request-rate anomaly does
+      # not read a scripted E2E as an attack and spend the job in backoff. It is
+      # an env knob that already exists (governanceAnomalyPolicyFromEnvironment);
+      # no product default changes, and every other governance control (rate
+      # limit, concurrency, quota, spend and error-rate anomaly) stays at its
+      # production value for this run.
       - name: Run cross-asset semantic search E2E on a dedicated database
         env:
           APOLLO_HYBRID_SEARCH_E2E: "1"
+          APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: "5000"
           APOLLO_E2E_SERVER_MODE: dev
           APOLLO_API_ENVIRONMENT: sandbox
           APOLLO_SEMANTIC_EMBEDDING_PROVIDER: openai
