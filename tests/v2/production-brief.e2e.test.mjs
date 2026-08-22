@@ -47,3 +47,27 @@ test('briefing preserves paragraphs, normalizes accents and parses only canonica
     (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
   )
 })
+
+test('published V2 brief snapshots without additive coverage hydrate canonically', () => {
+  const current = createProductionBrief({
+    ownerText: 'Público: gestoras. Oferta: treinamento. Tom: direto.',
+  })
+  const persistedBeforeCoverage = JSON.parse(JSON.stringify(current))
+  delete persistedBeforeCoverage.summary.coverage
+
+  assert.deepEqual(parseProductionBrief(persistedBeforeCoverage), current)
+  assert.throws(
+    () => parseProductionBrief({
+      ...persistedBeforeCoverage,
+      assumptions: ['tone-not-specified'],
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.throws(
+    () => parseProductionBrief({
+      ...persistedBeforeCoverage,
+      summary: { ...persistedBeforeCoverage.summary, coverage: null },
+    }),
+    (error) => error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT',
+  )
+})
