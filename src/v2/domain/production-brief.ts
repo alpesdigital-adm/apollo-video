@@ -98,6 +98,7 @@ export function parseProductionBrief(value: unknown): Readonly<ProductionBrief> 
   const ingestedContext = record.ingestedContext as Record<string, unknown> | undefined
   const summary = record.summary as Record<string, unknown> | undefined
   const coverage = summary?.coverage as Record<string, unknown> | undefined
+  const hasPersistedCoverage = coverage !== undefined
   assertDomain(
     Object.keys(record).every((key) => [
       'schemaVersion', 'ownerInput', 'ingestedContext', 'summary',
@@ -116,11 +117,13 @@ export function parseProductionBrief(value: unknown): Readonly<ProductionBrief> 
         ingestedContext.trust === 'untrusted-media-derived'
       )) &&
       typeof summary === 'object' && summary !== null &&
-      Object.keys(summary).length === 3 &&
+      Object.keys(summary).length === (hasPersistedCoverage ? 3 : 2) &&
       typeof summary.text === 'string' && typeof summary.supplied === 'boolean' &&
-      typeof coverage === 'object' && coverage !== null &&
-      Object.keys(coverage).length === 3 &&
-      ['audience', 'offer', 'tone'].every((field) => typeof coverage[field] === 'boolean') &&
+      (!hasPersistedCoverage || (
+        typeof coverage === 'object' && coverage !== null &&
+        Object.keys(coverage).length === 3 &&
+        ['audience', 'offer', 'tone'].every((field) => typeof coverage[field] === 'boolean')
+      )) &&
       Array.isArray(record.assumptions) &&
       record.assumptions.every((item) =>
         typeof item === 'string' &&
@@ -142,7 +145,13 @@ export function parseProductionBrief(value: unknown): Readonly<ProductionBrief> 
     throw error
   }
   assertDomain(
-    canonicalBriefValue(parsed) === canonicalBriefValue(record),
+    canonicalBriefValue(hasPersistedCoverage ? parsed : {
+      ...parsed,
+      summary: {
+        text: parsed.summary.text,
+        supplied: parsed.summary.supplied,
+      },
+    }) === canonicalBriefValue(record),
     'PERSISTENCE_CONFLICT',
     'Stored production brief is not canonical',
   )
