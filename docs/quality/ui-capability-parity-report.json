@@ -1,9 +1,9 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 98,
-    "capabilities": 88,
-    "endpoints": 88,
+    "uiActions": 105,
+    "capabilities": 94,
+    "endpoints": 94,
     "registeredCapabilities": 246,
     "operableCapabilities": 246,
     "publicContractCapabilities": 246,
@@ -1881,7 +1881,7 @@
       ]
     },
     {
-      "uiAction": "src/components/WorkspaceCapabilityHub.tsx:66",
+      "uiAction": "src/components/WorkspaceCapabilityHub.tsx:69",
       "capabilityId": "apollo.capabilities.list",
       "capabilityVersion": "3.0.0",
       "endpoint": "GET /v1/capabilities",
@@ -1891,6 +1891,141 @@
         "authenticateUiSessionService",
         "governanceAnomalyPolicyFromEnvironment",
         "governanceDefaultLimitsFromEnvironment"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:111",
+      "capabilityId": "apollo.sessions.read",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "GET /v1/session",
+      "applicationServices": [
+        "authenticateUiSessionService",
+        "listSelectableWorkspacesService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:116",
+      "capabilityId": "apollo.workspace-luts.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/luts",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listWorkspaceLutsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:117",
+      "capabilityId": "apollo.workspace-luts.default.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/lut-default",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readWorkspaceLutDefaultService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:173",
+      "capabilityId": "apollo.workspace-luts.import",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/luts",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "importWorkspaceLutService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:195",
+      "capabilityId": "apollo.workspace-luts.lifecycle.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/luts/{lutId}/status",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readWorkspaceLutService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:196",
+      "capabilityId": "apollo.workspace-luts.lifecycle.set",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/luts/{lutId}/status",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope",
+        "setWorkspaceLutStatusService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/WorkspaceLutLibrary.tsx:207",
+      "capabilityId": "apollo.workspace-luts.default.set",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/lut-default",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope",
+        "setWorkspaceLutDefaultService"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",

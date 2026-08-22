@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 
 import type { AppShellDestinationId } from '@/v2/domain/app-shell'
 import AppShellNavigation from './AppShellNavigation'
 import LogoutButton from './LogoutButton'
 import WebhookControlRoom from './WebhookControlRoom'
+
+const WorkspaceLutLibrary = dynamic(() => import('./WorkspaceLutLibrary'))
 
 interface Capability {
   id: string
@@ -98,7 +101,8 @@ export default function WorkspaceCapabilityHub({ section }: Readonly<{
           {state === 'loading' ? <p className="mt-10 text-sm text-[#777168]" role="status">Consultando capability registry…</p> : null}
           {state === 'error' ? <div className="mt-10 border border-[#a44d4d]/30 bg-[#a44d4d]/10 p-4 text-sm text-[#d58c8c]" role="alert">{message}</div> : null}
           {state === 'ready' && visible.length === 0 ? <div className="mt-10 border border-white/[0.08] bg-white/[0.02] p-6 text-sm leading-6 text-[#817c73]" data-testid="capability-empty-state">{hub.empty}</div> : null}
-          {visible.length > 0 ? <div className="mt-10 grid gap-3 lg:grid-cols-2" data-testid="capability-list">{visible.map((capability) => <article className="border border-white/[0.08] bg-white/[0.02] p-5" key={capability.id}><p className="text-xs font-semibold text-[#ddd7cc]">{capability.title}</p><p className="mt-2 text-xs leading-5 text-[#777168]">{capability.description}</p>{capability.endpoint ? <p className="mt-4 font-mono text-[10px] text-[#b18b35]">{capability.endpoint.method} {capability.endpoint.path}</p> : null}</article>)}</div> : null}
+          {visible.length > 0 && section !== 'brand' ? <div className="mt-10 grid gap-3 lg:grid-cols-2" data-testid="capability-list">{visible.map((capability) => <article className="border border-white/[0.08] bg-white/[0.02] p-5" key={capability.id}><p className="text-xs font-semibold text-[#ddd7cc]">{capability.title}</p><p className="mt-2 text-xs leading-5 text-[#777168]">{capability.description}</p>{capability.endpoint ? <p className="mt-4 font-mono text-[10px] text-[#b18b35]">{capability.endpoint.method} {capability.endpoint.path}</p> : null}</article>)}</div> : null}
+          {section === 'brand' ? <WorkspaceLutLibrary /> : null}
           {section === 'settings' ? <WebhookControlRoom /> : null}
         </section>
       </div>
