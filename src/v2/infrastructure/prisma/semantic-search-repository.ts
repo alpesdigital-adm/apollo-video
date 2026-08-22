@@ -1457,16 +1457,31 @@ implements SemanticSearchRepository {
         take: query.candidateLimit,
       }),
     ])
-    const byId = new Map<string, SearchRow>()
-    for (const row of [...scored, ...recent] as SearchRow[]) {
-      byId.set(row.id, row)
-    }
     const fullTextScores = new Map(
       fullTextRows.map((row) => [row.id, row.score]),
     )
     const vectorScores = new Map(
       vectorRows.map((row) => [row.id, row.score]),
     )
+    // Full-text and vector retrieval each return up to `candidateLimit` rows,
+    // so their union can be twice that and the window below has to drop some.
+    // `scored` is read with `id IN (...)`, whose row order is undefined, so
+    // slicing it as it arrives discards candidates by storage order instead of
+    // by relevance: past `candidateLimit` documents the best-scoring match can
+    // vanish from the result set entirely. Rank the retrieved candidates by
+    // their best channel score — ties broken by id — before the window closes,
+    // and keep the recency fill behind them.
+    const bestScore = (id: string) => Math.max(
+      fullTextScores.get(id) ?? 0,
+      vectorScores.get(id) ?? 0,
+    )
+    const rankedScored = ([...scored] as SearchRow[]).sort((left, right) =>
+      bestScore(right.id) - bestScore(left.id) ||
+      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+    const byId = new Map<string, SearchRow>()
+    for (const row of [...rankedScored, ...recent] as SearchRow[]) {
+      byId.set(row.id, row)
+    }
     const candidates = [...byId.values()]
       .slice(0, query.candidateLimit)
       .map((row) => ({

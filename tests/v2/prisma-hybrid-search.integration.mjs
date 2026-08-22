@@ -1911,10 +1911,18 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       `drift must be reported as a version conflict, got ${driftCode}`,
     )
 
+    // Retrieval fetches `candidateLimit` rows ordered by score BEFORE any
+    // structured filter is applied, so a fixture phrased in ordinary corpus
+    // vocabulary loses its own documents to trigram similarity once the
+    // library holds a thousand of them. Anchor this fixture on a rare token
+    // the corpus never uses — the same recipe the corpus needles already
+    // proved at 1.000 documents — and keep the campaign filter as the exact
+    // isolation on top of it.
+    const staleToken = 'apollostaleset'
     const staleCampaign = `stale-set-${suffix}`
     const staleObservations = (index) => ({
-      ocrText: `Conjunto instavel ${staleCampaign} item ${index}`,
-      description: `Documento do conjunto instavel ${staleCampaign}.`,
+      ocrText: `${staleToken} conjunto instavel item ${index}`,
+      description: `${staleToken} documento do conjunto instavel.`,
       intentions: ['reference'],
       personIds: ['person-stale-set'],
       metadata: { atmosphere: 'sereno', campaign: staleCampaign },
@@ -1930,7 +1938,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       null,
     )
     const staleQuery = {
-      text: 'conjunto instavel',
+      text: staleToken,
       scope: 'workspace',
       rightsUse: 'editorial-reuse',
       filters: {
@@ -1956,6 +1964,42 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       200,
       JSON.stringify(staleSetPayload),
     )
+    // A candidate can be absent for two very different reasons: retrieval
+    // never returned it, or a structured filter rejected it. Probe the
+    // unfiltered query so the failure message says which one happened
+    // instead of only reporting an empty list.
+    const stalePresence = staleSetPayload.data.results.length === 1
+      ? 'present'
+      : await (async () => {
+        const probe = await apiFetch(queryEndpoint, {
+          method: 'POST',
+          headers: {
+            authorization,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: staleToken,
+            scope: 'workspace',
+            rightsUse: 'editorial-reuse',
+            includeBlocked: true,
+            limit: 20,
+            explain: true,
+          }),
+        })
+        const payload = await probe.json()
+        const target = payload.data?.results?.find(
+          (result) =>
+            result.document.identityKey ===
+            `artifact:${corpusArtifactId(staleFirstIndex)}`,
+        )
+        return JSON.stringify({
+          unfilteredTop: payload.data?.results
+            ?.slice(0, 5)
+            .map((result) => result.document.identityKey),
+          targetRetrieved: Boolean(target),
+          targetBlockedReasons: target?.blockedReasons ?? null,
+        })
+      })()
     assert.equal(
       staleSetPayload.data.results.length,
       1,
@@ -1963,7 +2007,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         staleSetPayload.data.results.map(
           (result) => result.document.identityKey,
         ),
-      )}`,
+      )} unfiltered probe: ${stalePresence}`,
     )
     const staleResultSetHash = staleSetPayload.data.resultSetHash
     const staleQueryHash = staleSetPayload.data.queryHash
