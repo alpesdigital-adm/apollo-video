@@ -8,6 +8,15 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const BASE_ACTIVE_DOCUMENTS = 4
+// Every corpus write — asset rights and document catalog alike — commits in a
+// SERIALIZABLE transaction that scans small tables, so concurrent seeders
+// serialize against each other and exhaust the adapters' internal retries
+// (observed as PERSISTENCE_CONFLICT from PrismaAssetRightsRepository.setCurrent
+// while four seeders provisioned four *distinct* artifacts). The corpus is a
+// fixture, not the behaviour under measurement: seed it in a single ordered
+// stream so the library is byte-for-byte reproducible and no run depends on
+// how PostgreSQL resolves a self-inflicted read/write dependency cycle.
+const CORPUS_SEED_CONCURRENCY = 1
 const CORPUS_TIERS = [10, 100, 1000]
 const CORPUS_NEEDLES = 4
 const CORPUS_INTENTIONS = [
@@ -1556,7 +1565,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
           createdAt,
         })),
       })
-      await mapWithConcurrency(indexes, 4, async (index) => {
+      await mapWithConcurrency(indexes, CORPUS_SEED_CONCURRENCY, async (index) => {
         await setAssetRightsService({
           repository: rightsRepository,
           clock: () => createdAt,
@@ -1611,7 +1620,7 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
       const failures = (
         await mapWithConcurrency(
           indexes,
-          4,
+          CORPUS_SEED_CONCURRENCY,
           (index) => catalogCorpusDocument(index),
         )
       ).filter((entry) => entry !== null)
