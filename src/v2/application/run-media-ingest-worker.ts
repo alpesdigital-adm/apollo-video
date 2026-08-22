@@ -247,11 +247,11 @@ export function runNextMediaIngestOperationService(dependencies: {
         extension: 'mp4', prefix: 'editing-proxies',
       })
       const proxyArtifactId = `artifact-${workspaceNamespace}-${proxyStored.sha256}`
-      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editing-proxy/1.0.0').digest('hex')
+      const toolDigest = createHash('sha256').update('apollo-v2-ffmpeg-editing-proxy/1.1.0').digest('hex')
       const proxyManifest = createMediaArtifactManifestV2({
         artifactKey: proxyStored.key, artifactSha256: proxyStored.sha256, byteSize: proxyStored.byteSize,
         mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editing-proxy', version: '1.0.0', parameters: { maxWidth: 1280, videoCodec: 'h264', audioCodec: 'aac' } },
+        recipe: { id: 'editing-proxy', version: '1.1.0', parameters: { maxWidth: 1280, maxHeight: 1280, videoCodec: 'h264', audioCodec: 'aac' } },
         sources: [{
           artifactKey: sourceManifest.artifact.artifactKey, sha256: sourceManifest.artifact.sha256, role: 'source-master',
           execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
