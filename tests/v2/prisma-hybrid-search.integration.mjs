@@ -202,6 +202,8 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     await import('../../src/v2/application/create-api-client.ts')
   const { setAssetRightsService } =
     await import('../../src/v2/application/set-asset-rights.ts')
+  const { SEMANTIC_DIRECTOR_REJECTION_REASONS } =
+    await import('../../src/v2/application/hybrid-search.ts')
   const { PrismaApiClientRepository } =
     await import(
       '../../src/v2/infrastructure/prisma/api-client-repository.ts'
@@ -2098,9 +2100,15 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
     const auditedKeys = auditedRun.candidateAudit.map(
       (candidate) => candidate.identityKey,
     )
+    // A candidate is a document revision, so uniqueness is keyed on
+    // documentId; workspace scope may legitimately audit two documents that
+    // share an identityKey (recorded with DUPLICATE_IDENTITY).
+    const auditedDocumentIds = auditedRun.candidateAudit.map(
+      (candidate) => candidate.documentId,
+    )
     assert.equal(
-      new Set(auditedKeys).size,
-      auditedKeys.length,
+      new Set(auditedDocumentIds).size,
+      auditedDocumentIds.length,
       'candidate audit must not repeat a candidate',
     )
     for (const result of auditQueryPayload.data.results) {
@@ -2109,16 +2117,71 @@ test('T-FR-048/T-FR-136 catalogs, searches cross-project with structured Directo
         `every returned candidate must be audited: ${result.document.identityKey}`,
       )
     }
+    // The audit carries two independent axes and conflating them hides both.
+    // `rejectionReasons`/`disposition` record why retrieval did or did not
+    // hand a candidate to the Director (rank, rights, duplicate identity, no
+    // signal); `reusedIdentityKeys`/`directorRejections` record the Director's
+    // editorial verdict on the candidates that were handed over. Completeness
+    // means: every candidate is accounted for on the axis that applies to it,
+    // and nothing falls between them.
+    const rejectedByDirector = new Map(
+      auditedRun.directorRejections.map(
+        (item) => [item.identityKey, item.reason],
+      ),
+    )
+    let returnedInAudit = 0
     for (const candidate of auditedRun.candidateAudit) {
+      const returned = candidate.rejectionReasons.length === 0
+      assert.equal(
+        candidate.disposition,
+        returned ? 'returned' : 'rejected',
+        `candidate ${candidate.identityKey} disposition must follow its reasons: ${JSON.stringify(candidate)}`,
+      )
       const reused = auditedRun.reusedIdentityKeys.includes(
         candidate.identityKey,
       )
-      assert.equal(
-        reused,
-        candidate.rejectionReasons.length === 0,
-        `candidate ${candidate.identityKey} must be reused or rejected with a reason`,
-      )
+      const rejected = rejectedByDirector.has(candidate.identityKey)
+      if (returned) {
+        returnedInAudit += 1
+        assert.equal(
+          reused !== rejected,
+          true,
+          `returned candidate ${candidate.identityKey} must be reused xor editorially rejected: ${JSON.stringify(
+            { reused, rejected },
+          )}`,
+        )
+        if (rejected) {
+          assert.ok(
+            SEMANTIC_DIRECTOR_REJECTION_REASONS.includes(
+              rejectedByDirector.get(candidate.identityKey),
+            ),
+            `editorial rejection of ${candidate.identityKey} must carry an enumerated reason: ${rejectedByDirector.get(candidate.identityKey)}`,
+          )
+        }
+      } else {
+        assert.equal(
+          reused || rejected,
+          false,
+          `candidate ${candidate.identityKey} was never returned, so the Director cannot have decided on it`,
+        )
+      }
     }
+    assert.equal(
+      returnedInAudit,
+      auditedRun.returnedIdentityKeys.length,
+      'every returned identity must appear once in the candidate audit',
+    )
+    assert.equal(
+      auditedRun.returnedIdentityKeys.length,
+      auditedRun.reusedIdentityKeys.length +
+        auditedRun.directorRejections.length,
+      'reuse and rejection must partition the returned candidates',
+    )
+    assert.equal(
+      auditedRun.candidateCount,
+      auditedRun.candidateAudit.length,
+      'candidateCount must match the persisted audit',
+    )
   } catch (error) {
     if (serverLogs) {
       process.stderr.write(`\n--- Next server log ---\n${serverLogs}\n`)
