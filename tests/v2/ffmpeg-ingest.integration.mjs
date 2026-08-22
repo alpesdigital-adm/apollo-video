@@ -66,7 +66,7 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
   const sourcePath = join(root, 'master.mp4')
   await execFileAsync(ffmpegPath, [
     '-hide_banner', '-loglevel', 'error', '-y',
-    '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=1.2',
+    '-f', 'lavfi', '-i', 'testsrc2=size=1080x1920:rate=25:duration=1.2',
     '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=48000:duration=1.2',
     '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
     '-colorspace', 'bt709', '-color_trc', 'bt709',
@@ -77,8 +77,8 @@ test('V2 FFmpeg ingest creates an inspectable proxy and speech derivative from a
   const processor = new FfmpegIngestProcessor({ workRoot: join(root, 'work'), ffmpegPath })
   const result = await processor.normalize({ sourcePath, operationId: 'operation-real-ingest-1' })
 
-  assert.equal(result.probe.width, 640)
-  assert.equal(result.probe.height, 360)
+  assert.equal(result.probe.width, 720)
+  assert.equal(result.probe.height, 1280)
   assert.ok(result.probe.duration >= 1 && result.probe.duration <= 2)
   assert.equal(result.probe.codec, 'h264')
   assert.deepEqual(result.probe.color, {

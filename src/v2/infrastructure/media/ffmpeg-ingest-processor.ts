@@ -60,7 +60,7 @@ export class FfmpegIngestProcessor implements MediaIngestProcessor {
     await this.run([
       '-hide_banner', '-loglevel', 'error', '-y', '-i', input.sourcePath,
       '-map', '0:v:0', '-map', '0:a:0?',
-      '-vf', 'scale=w=min(1280\\,iw):h=-2:flags=lanczos',
+      '-vf', 'scale=w=1280:h=1280:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos',
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-movflags', '+faststart', proxyPath,
     ], input.signal)

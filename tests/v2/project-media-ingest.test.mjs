@@ -126,6 +126,29 @@ test('local V2 storage streams multipart bytes, verifies checksum, promotes a ma
   await assert.rejects(() => storage.verifiedSourcePath(upload, receipts), /missing|ENOENT/)
 })
 
+test('local artifact checksum verification is shared across HTTP range storage instances', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-v2-content-cache-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'proxy.mp4')
+  const bytes = Buffer.from('immutable-preview-bytes')
+  const expectedSha256 = createHash('sha256').update(bytes).digest('hex')
+  await writeFile(path, bytes)
+  let calculations = 0
+  const calculateSha256 = async () => {
+    calculations += 1
+    return expectedSha256
+  }
+  const input = {
+    artifactKey: 'proxy.mp4', expectedByteSize: BigInt(bytes.length),
+    expectedSha256, range: { start: 0, end: 3 },
+  }
+  const first = await new LocalArtifactContentStorage(root, { calculateSha256 }).open(input)
+  assert.equal((await new Response(first.body).arrayBuffer()).byteLength, 4)
+  const second = await new LocalArtifactContentStorage(root, { calculateSha256 }).open(input)
+  assert.equal((await new Response(second.body).arrayBuffer()).byteLength, 4)
+  assert.equal(calculations, 1)
+})
+
 test('artifact content rejects invalid or cross-workspace byte access', async () => {
   const service = readArtifactContentService({
     artifacts: { async findById() { return null } },

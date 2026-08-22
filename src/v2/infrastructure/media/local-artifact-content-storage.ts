@@ -7,16 +7,34 @@ import type { ArtifactContentStorage } from '../../application/ports/artifact-co
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 
+type VerifiedLocalArtifact = Readonly<{
+  byteSize: number
+  modifiedAtMs: number
+  changedAtMs: number
+  sha256: string
+}>
+
+const MAX_VERIFIED_LOCAL_ARTIFACTS = 2_048
+const verifiedLocalArtifacts = new Map<string, VerifiedLocalArtifact>()
+
+function cacheVerifiedLocalArtifact(path: string, value: VerifiedLocalArtifact): void {
+  verifiedLocalArtifacts.delete(path)
+  verifiedLocalArtifacts.set(path, value)
+  if (verifiedLocalArtifacts.size > MAX_VERIFIED_LOCAL_ARTIFACTS) {
+    const oldest = verifiedLocalArtifacts.keys().next().value
+    if (oldest) verifiedLocalArtifacts.delete(oldest)
+  }
+}
+
 export class LocalArtifactContentStorage implements ArtifactContentStorage {
   private readonly root: string
-  private readonly verified = new Map<string, Readonly<{
-    byteSize: number
-    modifiedAtMs: number
-    sha256: string
-  }>>()
+  private readonly calculateSha256: typeof calculateFileSha256
 
-  constructor(root: string) {
+  constructor(root: string, options: {
+    calculateSha256?: typeof calculateFileSha256
+  } = {}) {
     this.root = normalize(resolve(root.trim()))
+    this.calculateSha256 = options.calculateSha256 ?? calculateFileSha256
     if (!root.trim() || !isAbsolute(this.root)) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Local artifact storage root must be absolute')
   }
 
@@ -30,18 +48,21 @@ export class LocalArtifactContentStorage implements ArtifactContentStorage {
     if (!/^[a-f0-9]{64}$/.test(input.expectedSha256)) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Stored media artifact checksum is invalid')
     }
-    const cached = this.verified.get(path)
+    const cached = verifiedLocalArtifacts.get(path)
     if (
       !cached || cached.byteSize !== metadata.size ||
-      cached.modifiedAtMs !== metadata.mtimeMs || cached.sha256 !== input.expectedSha256
+      cached.modifiedAtMs !== metadata.mtimeMs ||
+      cached.changedAtMs !== metadata.ctimeMs ||
+      cached.sha256 !== input.expectedSha256
     ) {
-      if (await calculateFileSha256(path) !== input.expectedSha256) {
-        this.verified.delete(path)
+      if (await this.calculateSha256(path) !== input.expectedSha256) {
+        verifiedLocalArtifacts.delete(path)
         throw new DomainError('PERSISTENCE_CONFLICT', 'Local media artifact failed immutable identity verification')
       }
-      this.verified.set(path, Object.freeze({
+      cacheVerifiedLocalArtifact(path, Object.freeze({
         byteSize: metadata.size,
         modifiedAtMs: metadata.mtimeMs,
+        changedAtMs: metadata.ctimeMs,
         sha256: input.expectedSha256,
       }))
     }
