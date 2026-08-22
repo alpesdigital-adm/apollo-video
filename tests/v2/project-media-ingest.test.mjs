@@ -415,6 +415,18 @@ test('completed ingest persists immutable source and proxy color probes atomical
   }
   await repository.persistCompletedIngest(input)
   await repository.persistCompletedIngest(input)
+  const reobservedAt = '2026-07-18T18:05:00.000Z'
+  await repository.persistCompletedIngest({
+    ...input,
+    sourceColorProbe: createMediaColorProbe({
+      ...sourceColorProbe,
+      createdAt: reobservedAt,
+    }),
+    proxyColorProbe: createMediaColorProbe({
+      ...proxyColorProbe,
+      createdAt: reobservedAt,
+    }),
+  })
   assert.equal(colorRows.size, 2)
   assert.equal(snapshotRows.size, 1)
   assert.equal(versionRows.size, 1)
@@ -424,6 +436,8 @@ test('completed ingest persists immutable source and proxy color probes atomical
     detection.metadata,
   )
   assert.equal(colorRows.get(proxyArtifactId).state, 'ready')
+  assert.equal(colorRows.get(sourceArtifactId).createdAt.toISOString(), createdAt)
+  assert.equal(colorRows.get(proxyArtifactId).createdAt.toISOString(), createdAt)
 
   const conflictingSourceProbe = createMediaColorProbe({
     ...sourceColorProbe,

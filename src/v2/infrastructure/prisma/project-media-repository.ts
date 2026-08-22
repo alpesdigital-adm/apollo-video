@@ -54,6 +54,11 @@ function storedColorProbeMatches(
   expected: ReturnType<typeof colorProbeData>,
 ) {
   return Object.entries(expected).every(([key, value]) => {
+    // A content-addressed artifact + manifest can be observed again by a later
+    // ingest operation. The evidence and producer must still match exactly,
+    // while the observation timestamp (and the hash that includes it) belongs
+    // to the first persisted observation.
+    if (key === 'createdAt' || key === 'probeHash') return true
     const actual = (stored as Record<string, unknown>)[key]
     return value instanceof Date && actual instanceof Date
       ? value.getTime() === actual.getTime()
