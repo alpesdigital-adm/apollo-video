@@ -1291,11 +1291,29 @@ test('T-WAVE10 one journey: versioned preset, perception anchor, scoped protecte
     assert.equal(landscapeAfter, landscapeBefore,
       `the sibling variant must be pixel-identical at ${OVERRIDE_SEGMENT_ID}: ${landscapeBefore} vs ${landscapeAfter}`)
     // Ranges outside the exception are untouched in the target variant too.
+    // Prove the materialized cue first: decoded H.264 pixels after the changed
+    // GOP can differ slightly across FFmpeg encoders even when the later cue is
+    // identical.
     for (const cueId of ['subtitle-cue-1', 'subtitle-cue-3']) {
-      const before = ink(basePortrait, OVERRIDE_VARIANT, cueId)
-      const after = ink(overriddenPortrait, OVERRIDE_VARIANT, cueId)
+      const baseCue = basePortrait.renderInput.subtitleCues.find((cue) => cue.id === cueId)
+      const overriddenCue = overriddenPortrait.renderInput.subtitleCues.find((cue) => cue.id === cueId)
+      assert.deepEqual(overriddenCue, baseCue, `${cueId} materialization must remain byte-identical`)
+      const beforeFrame = frameAt(basePortrait.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT)
+      const afterFrame = frameAt(overriddenPortrait.stored.path, CUE_SAMPLE_SECONDS[cueId], OVERRIDE_VARIANT)
+      const before = glyphTotal(beforeFrame, OVERRIDE_VARIANT)
+      const after = glyphTotal(afterFrame, OVERRIDE_VARIANT)
+      const beforeRows = glyphRows(beforeFrame, OVERRIDE_VARIANT)
+      const afterRows = glyphRows(afterFrame, OVERRIDE_VARIANT)
       console.log(`R3 glyph pixels at ${cueId} (outside the exception range): 9:16 ${before} -> ${after}`)
-      assert.equal(after, before, `${cueId} lies outside [70,100) and must not move a pixel`)
+      assert.deepEqual(
+        [afterRows.at(0)?.y, afterRows.at(-1)?.y],
+        [beforeRows.at(0)?.y, beforeRows.at(-1)?.y],
+        `${cueId} lies outside [70,100) and must keep the same glyph bounds`,
+      )
+      assert.ok(
+        Math.abs(after - before) <= Math.max(2, Math.ceil(before * 0.01)),
+        `${cueId} decoded ink drift must stay within the lossy-codec tolerance: ${before} vs ${after}`,
+      )
     }
     // And the whole sibling render is identical: same element map and the very
     // same MP4 bytes, so the exception left no trace at all in 16:9.
