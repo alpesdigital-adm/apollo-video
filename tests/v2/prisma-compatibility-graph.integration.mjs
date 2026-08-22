@@ -31,7 +31,7 @@ async function waitForServer(baseUrl, server) {
       throw new Error(`Next server exited with ${server.exitCode}`)
     }
     try {
-      if ((await fetch(`${baseUrl}/v1/health`)).ok) return
+      if ((await globalThis.fetch(`${baseUrl}/v1/health`)).ok) return
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
@@ -46,6 +46,49 @@ async function stopServer(server) {
     new Promise((resolve) => setTimeout(resolve, 5_000)),
   ])
   if (server.exitCode === null) server.kill('SIGKILL')
+}
+
+/**
+ * Legitimate client behaviour against the real governance limiter.
+ *
+ * `/v1` admits every authenticated request through
+ * `admitGovernedCapabilityService`, which denies with 429
+ * `GOVERNANCE_LIMIT_EXCEEDED` when `evaluateGovernanceAnomalies` observes a
+ * request burst above `requestMinimum` inside the 60 s signal window. A
+ * supervised E2E is exactly such a burst, so the harness behaves like a real
+ * SDK: it asserts the 429 contract, waits, and retries. The limiter is never
+ * disabled or relaxed in the product.
+ *
+ * Denied admissions are persisted and still count inside the signal window, so
+ * the backoff has to be real waiting instead of an immediate retry.
+ */
+const RATE_LIMIT_BACKOFF_MS = Object.freeze([
+  3_000, 8_000, 15_000, 30_000, 45_000, 60_000,
+])
+
+async function apiFetch(input, init) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await globalThis.fetch(input, init)
+    if (response.status !== 429) return response
+    const payload = await response.clone().json().catch(() => null)
+    assert.equal(
+      payload?.error?.code,
+      'GOVERNANCE_LIMIT_EXCEEDED',
+      `unexpected 429 payload: ${JSON.stringify(payload)}`,
+    )
+    assert.equal(payload?.error?.category, 'quota')
+    assert.equal(payload?.error?.retryable, true)
+    if (attempt >= RATE_LIMIT_BACKOFF_MS.length) {
+      throw new Error(
+        `governance limiter did not clear after ${attempt} retries: ${JSON.stringify(payload)}`,
+      )
+    }
+    const retryAfter = Number(response.headers.get('retry-after'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(60_000, Math.ceil(retryAfter) * 1_000)
+      : RATE_LIMIT_BACKOFF_MS[attempt]
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
 }
 
 function fixtureSuffix() {
@@ -133,7 +176,9 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
-  timeout: 240_000,
+  // 66 authenticated /v1 calls; `apiFetch` may spend whole 60 s governance
+  // signal windows waiting out a legitimate 429 before retrying.
+  timeout: 600_000,
 }, async () => {
   assertSafeE2eDatabaseUrl(process.env.V2_DATABASE_URL)
 
@@ -160,6 +205,8 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     createProductionBatch,
     deriveBatchStatus,
   } = await import('../../src/v2/domain/production-batch.ts')
+  const { productionBatchItemOperationId } =
+    await import('../../src/v2/domain/batch-item-result.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
   const { createExternalAuditContext, materializeActorAuditContext } =
@@ -338,6 +385,11 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     await client.v2ProductionBatchItem.createMany({
       data: batch.items.map((item, sequence) => ({
         id: item.id,
+        operationId: productionBatchItemOperationId({
+          workspaceId,
+          batchId,
+          itemId: item.id,
+        }),
         workspaceId,
         batchId,
         sequence,
@@ -476,7 +528,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: ['rendering', 'editorial-reuse'],
         },
       },
-      actor: authenticatedActor,
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const validatedArtifactSha256 = '9'.repeat(64)
     const validatedArtifactKey =
@@ -598,7 +650,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           allowedUses: [],
         },
       },
-      actor: authenticatedActor,
+      actor: { type: 'api-client', id: issued.client.id },
     })
     const alignment = createScriptAlignmentRun({
       id: alignmentId,
@@ -704,7 +756,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         ...entry.alternatives,
       ]).map((candidate) => [candidate.id, candidate])).values(),
     ]
-    const libraryResponse = await fetch(libraryEndpoint, {
+    const libraryResponse = await apiFetch(libraryEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -783,7 +835,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
 
     const endpoint =
       `${baseUrl}/v1/batches/${batchId}/compatibility-graphs`
-    assert.equal((await fetch(endpoint)).status, 401)
+    assert.equal((await apiFetch(endpoint)).status, 401)
     const createBody = {
       takeLibraryId: library.id,
       expectedTakeLibraryRunHash: library.runHash,
@@ -792,7 +844,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       reviewThreshold: 40,
     }
     const createKey = `compatibility-create-${suffix}`
-    const createResponse = await fetch(endpoint, {
+    const createResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -832,7 +884,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       ],
     )
 
-    const replayResponse = await fetch(endpoint, {
+    const replayResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -842,7 +894,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(replayResponse.status, 200)
     assert.equal((await replayResponse.json()).data.replayed, true)
-    const recalculationResponse = await fetch(endpoint, {
+    const recalculationResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -899,7 +951,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       visual: .5,
       experiment: .4,
     }))
-    const recipeGraphResponse = await fetch(endpoint, {
+    const recipeGraphResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -951,7 +1003,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
 
     const recipeEndpoint =
       `${baseUrl}/v1/batches/${batchId}/variant-recipes`
-    assert.equal((await fetch(recipeEndpoint)).status, 401)
+    assert.equal((await apiFetch(recipeEndpoint)).status, 401)
     const fullRecipeBody = {
       compatibilityGraphId: recipeGraph.id,
       expectedCompatibilityGraphRunHash: recipeGraph.runHash,
@@ -986,7 +1038,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       },
     }
     const fullRecipeKey = `variant-recipe-full-${suffix}`
-    const fullRecipeResponse = await fetch(recipeEndpoint, {
+    const fullRecipeResponse = await apiFetch(recipeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1029,7 +1081,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       fullRecipe.scores.averageEdgeScore,
     )
 
-    const speechResponse = await fetch(
+    const speechResponse = await apiFetch(
       `${baseUrl}/v1/projects/${projectId}/speech-segments`,
       {
         method: 'POST',
@@ -1074,7 +1126,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       speechPayload.data.run.segments[0]
     assert.ok(validatedSpeechSegment)
 
-    const validatedResponse = await fetch(
+    const validatedResponse = await apiFetch(
       `${baseUrl}/v1/projects/${projectId}/validated-segments`,
       {
         method: 'POST',
@@ -1146,7 +1198,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     }
     const preservedKey =
       `validation-envelope-preserved-${suffix}`
-    const preservedResponse = await fetch(validationEndpoint, {
+    const preservedResponse = await apiFetch(validationEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1208,7 +1260,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
             segment.usage === 'cold-open').id,
         ),
     )
-    const preservedReplay = await fetch(validationEndpoint, {
+    const preservedReplay = await apiFetch(validationEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1219,7 +1271,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal(preservedReplay.status, 200)
     assert.equal((await preservedReplay.json()).data.replayed, true)
 
-    const approvalResponse = await fetch(validationEndpoint, {
+    const approvalResponse = await apiFetch(validationEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1250,7 +1302,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     )
     const approvalKey =
       `validation-envelope-decide-${suffix}`
-    const decidedResponse = await fetch(
+    const decidedResponse = await apiFetch(
       `${validationEndpoint}/${pending.plan.id}/approval`,
       {
         method: 'POST',
@@ -1280,7 +1332,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       decidedPayload.data.reuse.currentDecision.lostAspects,
       ['opening'],
     )
-    const decisionReplay = await fetch(
+    const decisionReplay = await apiFetch(
       `${validationEndpoint}/${pending.plan.id}/approval`,
       {
         method: 'POST',
@@ -1298,7 +1350,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     )
     assert.equal(decisionReplay.status, 200)
     assert.equal((await decisionReplay.json()).data.replayed, true)
-    const reuseRead = await fetch(
+    const reuseRead = await apiFetch(
       `${validationEndpoint}/${pending.plan.id}`,
       { headers },
     )
@@ -1307,7 +1359,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await reuseRead.json()).data.reuse.decisions.length,
       2,
     )
-    const reuseList = await fetch(
+    const reuseList = await apiFetch(
       `${validationEndpoint}?batchId=${batchId}&limit=10`,
       { headers },
     )
@@ -1337,7 +1389,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       await client.v2MediaArtifact.count({
         where: { workspaceId },
       })
-    const proofSpeechResponse = await fetch(
+    const proofSpeechResponse = await apiFetch(
       `${baseUrl}/v1/projects/${projectId}/speech-segments`,
       {
         method: 'POST',
@@ -1380,7 +1432,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     const proofSpeech = proofSpeechPayload.data.run.segments[0]
     assert.ok(proofSpeech)
 
-    const evidenceResponse = await fetch(
+    const evidenceResponse = await apiFetch(
       `${baseUrl}/v1/projects/${projectId}/evidence-segments`,
       {
         method: 'POST',
@@ -1473,7 +1525,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       }],
     }
     const selectedProofKey = `proof-need-selected-${suffix}`
-    const selectedProofResponse = await fetch(proofEndpoint, {
+    const selectedProofResponse = await apiFetch(proofEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1521,7 +1573,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       proofEvidence.id,
     )
 
-    const selectedProofReplay = await fetch(proofEndpoint, {
+    const selectedProofReplay = await apiFetch(proofEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1534,7 +1586,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await selectedProofReplay.json()).data.replayed,
       true,
     )
-    const selectedProofMismatch = await fetch(proofEndpoint, {
+    const selectedProofMismatch = await apiFetch(proofEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1550,7 +1602,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(selectedProofMismatch.status, 409)
 
-    const unavailableProofResponse = await fetch(proofEndpoint, {
+    const unavailableProofResponse = await apiFetch(proofEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1585,7 +1637,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal('selectedEvidence' in unavailableProof, false)
     assert.equal(unavailableProof.genericCardGenerated, false)
 
-    const noProofResponse = await fetch(proofEndpoint, {
+    const noProofResponse = await apiFetch(proofEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1613,7 +1665,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal(noProof.resolution, 'no-proof-needed')
     assert.equal(noProof.genericCardGenerated, false)
 
-    const proofRead = await fetch(
+    const proofRead = await apiFetch(
       `${proofEndpoint}/${selectedProofRun.id}`,
       { headers },
     )
@@ -1622,7 +1674,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await proofRead.json()).data.run.runHash,
       selectedProofRun.runHash,
     )
-    const proofList = await fetch(
+    const proofList = await apiFetch(
       `${proofEndpoint}?resolution=proof-unavailable&limit=10`,
       { headers },
     )
@@ -1665,7 +1717,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     const proofIntegrityEndpoint =
       `${baseUrl}/v1/projects/${projectId}/proof-integrity-runs`
     assert.equal(
-      (await fetch(proofIntegrityEndpoint)).status,
+      (await apiFetch(proofIntegrityEndpoint)).status,
       401,
     )
     const selectedIntegrityBody = {
@@ -1681,7 +1733,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     }
     const selectedIntegrityKey =
       `proof-integrity-selected-${suffix}`
-    const selectedIntegrityResponse = await fetch(
+    const selectedIntegrityResponse = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -1748,7 +1800,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       0,
     )
 
-    const selectedIntegrityReplay = await fetch(
+    const selectedIntegrityReplay = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -1764,7 +1816,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await selectedIntegrityReplay.json()).data.replayed,
       true,
     )
-    const selectedIntegrityMismatch = await fetch(
+    const selectedIntegrityMismatch = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -1782,7 +1834,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
 
     const proofModeEndpoint =
       `${baseUrl}/v1/projects/${projectId}/proof-mode-runs`
-    assert.equal((await fetch(proofModeEndpoint)).status, 401)
+    assert.equal((await apiFetch(proofModeEndpoint)).status, 401)
     const proofModeBody = {
       proofIntegrityRunId: selectedIntegrityRun.id,
       expectedProofIntegrityRunHash: selectedIntegrityRun.runHash,
@@ -1792,7 +1844,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       overrides: [],
     }
     const proofModeKey = `proof-mode-selected-${suffix}`
-    const proofModeResponse = await fetch(proofModeEndpoint, {
+    const proofModeResponse = await apiFetch(proofModeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1830,7 +1882,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       ['16:9', '9:16'],
     )
 
-    const proofModeReplay = await fetch(proofModeEndpoint, {
+    const proofModeReplay = await apiFetch(proofModeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1840,7 +1892,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(proofModeReplay.status, 200)
     assert.equal((await proofModeReplay.json()).data.replayed, true)
-    const proofModeMismatch = await fetch(proofModeEndpoint, {
+    const proofModeMismatch = await apiFetch(proofModeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -1853,7 +1905,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(proofModeMismatch.status, 409)
 
-    const manualProofModeResponse = await fetch(
+    const manualProofModeResponse = await apiFetch(
       proofModeEndpoint,
       {
         method: 'POST',
@@ -1894,7 +1946,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         plan.format === '9:16').selection,
       'manual-override',
     )
-    const proofModeRead = await fetch(
+    const proofModeRead = await apiFetch(
       `${proofModeEndpoint}/${proofModeRun.id}`,
       { headers },
     )
@@ -1903,16 +1955,131 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await proofModeRead.json()).data.run.runHash,
       proofModeRun.runHash,
     )
-    const proofModeList = await fetch(
+    const proofModeList = await apiFetch(
       `${proofModeEndpoint}?mode=cutaway&format=9%3A16&manualOverride=true&limit=10`,
       { headers },
     )
     assert.equal(proofModeList.status, 200)
     assert.equal((await proofModeList.json()).data.runs.length, 1)
 
+    const divergentHash = (value) =>
+      `${value.slice(0, 63)}${value.endsWith('0') ? '1' : '0'}`
+    const proofModeRunsBeforeRejections =
+      await client.v2ProofModeRun.count({
+        where: { workspaceId, projectId },
+      })
+    const staleOverrideResponse = await apiFetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `proof-mode-stale-override-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...proofModeBody,
+        overrides: [{
+          proofNeedItemId: approvedIntegrity.proofNeedItemId,
+          format: '9:16',
+          mode: 'cutaway',
+          expectedEvaluationHash: divergentHash(
+            approvedIntegrity.evaluationHash,
+          ),
+        }],
+      }),
+    })
+    const staleOverridePayload = await staleOverrideResponse.json()
+    assert.equal(
+      staleOverrideResponse.status,
+      409,
+      JSON.stringify(staleOverridePayload),
+    )
+    const staleIntegrityResponse = await apiFetch(proofModeEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `proof-mode-stale-integrity-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...proofModeBody,
+        expectedProofIntegrityRunHash: divergentHash(
+          selectedIntegrityRun.runHash,
+        ),
+      }),
+    })
+    const staleIntegrityPayload = await staleIntegrityResponse.json()
+    assert.equal(
+      staleIntegrityResponse.status,
+      409,
+      JSON.stringify(staleIntegrityPayload),
+    )
+    assert.equal(
+      await client.v2ProofModeRun.count({
+        where: { workspaceId, projectId },
+      }),
+      proofModeRunsBeforeRejections,
+      'a stale ProofMode request must not persist a run',
+    )
+
+    const storedPlan = await client.v2ProofModePlan.findFirst({
+      where: { workspaceId, projectId, runId: proofModeRun.id },
+      orderBy: { sequence: 'asc' },
+    })
+    assert.ok(storedPlan, 'the ProofMode run must persist its plans')
+    const tamperedPlan = JSON.parse(storedPlan.planJson)
+    assert.notEqual(
+      tamperedPlan.presentation.visual.attribution,
+      'Crédito removido',
+    )
+    tamperedPlan.presentation.visual.attribution = 'Crédito removido'
+    await client.v2ProofModePlan.updateMany({
+      where: { id: storedPlan.id, workspaceId, projectId },
+      data: { planJson: JSON.stringify(tamperedPlan) },
+    })
+    const tamperedRead = await apiFetch(
+      `${proofModeEndpoint}/${proofModeRun.id}`,
+      { headers },
+    )
+    const tamperedPayload = await tamperedRead.json()
+    assert.equal(
+      tamperedRead.status,
+      409,
+      `a tampered ProofMode plan must fail closed: ${JSON.stringify(tamperedPayload)}`,
+    )
+    const tamperedList = await apiFetch(
+      `${proofModeEndpoint}?limit=10`,
+      { headers },
+    )
+    assert.equal(
+      tamperedList.status,
+      409,
+      'listing must not serve a tampered ProofMode run either',
+    )
+    await client.v2ProofModePlan.updateMany({
+      where: { id: storedPlan.id, workspaceId, projectId },
+      data: { planJson: storedPlan.planJson },
+    })
+    const restoredRead = await apiFetch(
+      `${proofModeEndpoint}/${proofModeRun.id}`,
+      { headers },
+    )
+    const restoredPayload = await restoredRead.json()
+    assert.equal(
+      restoredRead.status,
+      200,
+      `restoring the stored plan must restore the read: ${JSON.stringify(restoredPayload)}`,
+    )
+    assert.equal(
+      restoredPayload.data.run.runHash,
+      proofModeRun.runHash,
+    )
+    assert.equal(
+      restoredPayload.data.run.plans.find((plan) =>
+        plan.id === storedPlan.id).presentation.visual.attribution,
+      JSON.parse(storedPlan.planJson).presentation.visual.attribution,
+    )
+
     const contextRange =
       selectedProof.selectedEvidence.contextRangeMs
-    const blockedContextResponse = await fetch(
+    const blockedContextResponse = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -1957,7 +2124,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       false,
     )
 
-    const unavailableIntegrityResponse = await fetch(
+    const unavailableIntegrityResponse = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -1992,7 +2159,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       ['PROOF_UNAVAILABLE'],
     )
 
-    const noProofIntegrityResponse = await fetch(
+    const noProofIntegrityResponse = await apiFetch(
       proofIntegrityEndpoint,
       {
         method: 'POST',
@@ -2026,7 +2193,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       true,
     )
 
-    const integrityRead = await fetch(
+    const integrityRead = await apiFetch(
       `${proofIntegrityEndpoint}/${selectedIntegrityRun.id}`,
       { headers },
     )
@@ -2035,7 +2202,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await integrityRead.json()).data.run.runHash,
       selectedIntegrityRun.runHash,
     )
-    const integrityList = await fetch(
+    const integrityList = await apiFetch(
       `${proofIntegrityEndpoint}?outcome=blocked&readyForAssembly=false&limit=10`,
       { headers },
     )
@@ -2109,7 +2276,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       'ProofNeed, ProofIntegrity and ProofMode planning must remain virtual and never materialize media',
     )
 
-    const fullReplayResponse = await fetch(recipeEndpoint, {
+    const fullReplayResponse = await apiFetch(recipeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2119,7 +2286,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(fullReplayResponse.status, 200)
     assert.equal((await fullReplayResponse.json()).data.replayed, true)
-    const fullMismatchResponse = await fetch(recipeEndpoint, {
+    const fullMismatchResponse = await apiFetch(recipeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2131,7 +2298,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       }),
     })
     assert.equal(fullMismatchResponse.status, 409)
-    const staleRecipeResponse = await fetch(recipeEndpoint, {
+    const staleRecipeResponse = await apiFetch(recipeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2144,7 +2311,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(staleRecipeResponse.status, 409)
 
-    const shortRecipeResponse = await fetch(recipeEndpoint, {
+    const shortRecipeResponse = await apiFetch(recipeEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2179,7 +2346,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.ok(shortRecipe.assumptions.some((assumption) =>
       assumption.code === 'PROOF_OMITTED_BY_POLICY'))
 
-    const recipeReadResponse = await fetch(
+    const recipeReadResponse = await apiFetch(
       `${recipeEndpoint}/${fullRecipe.id}`,
       { headers },
     )
@@ -2188,7 +2355,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await recipeReadResponse.json()).data.recipe.runHash,
       fullRecipe.runHash,
     )
-    const recipeListResponse = await fetch(
+    const recipeListResponse = await apiFetch(
       `${recipeEndpoint}?compatibilityGraphId=${recipeGraph.id}&limit=1`,
       { headers },
     )
@@ -2200,7 +2367,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
 
     const portfolioEndpoint =
       `${baseUrl}/v1/batches/${batchId}/variant-portfolio-preflights`
-    assert.equal((await fetch(portfolioEndpoint)).status, 401)
+    assert.equal((await apiFetch(portfolioEndpoint)).status, 401)
     const portfolioBody = {
       compatibilityGraphId: recipeGraph.id,
       expectedCompatibilityGraphRunHash: recipeGraph.runHash,
@@ -2208,7 +2375,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       requireProof: false,
     }
     const portfolioKey = `variant-portfolio-${suffix}`
-    const portfolioResponse = await fetch(portfolioEndpoint, {
+    const portfolioResponse = await apiFetch(portfolioEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2237,7 +2404,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal(portfolio.estimates.estimatedCostMinorUnits, 0)
     assert.equal(portfolio.coverage.complete, true)
 
-    const portfolioReplayResponse = await fetch(portfolioEndpoint, {
+    const portfolioReplayResponse = await apiFetch(portfolioEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2254,7 +2421,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       portfolioPayload.data.confirmationToken,
     )
 
-    const portfolioMismatchResponse = await fetch(
+    const portfolioMismatchResponse = await apiFetch(
       portfolioEndpoint,
       {
         method: 'POST',
@@ -2270,7 +2437,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     )
     assert.equal(portfolioMismatchResponse.status, 409)
 
-    const confirmedPortfolioResponse = await fetch(
+    const confirmedPortfolioResponse = await apiFetch(
       portfolioEndpoint,
       {
         method: 'POST',
@@ -2300,7 +2467,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     assert.equal(confirmedPortfolio.productMaterialized, false)
     assert.equal(confirmedPortfolio.estimates.jobsCreated, 0)
 
-    const stalePortfolioTokenResponse = await fetch(
+    const stalePortfolioTokenResponse = await apiFetch(
       portfolioEndpoint,
       {
         method: 'POST',
@@ -2318,7 +2485,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     )
     assert.equal(stalePortfolioTokenResponse.status, 409)
 
-    const portfolioReadResponse = await fetch(
+    const portfolioReadResponse = await apiFetch(
       `${portfolioEndpoint}/${confirmedPortfolio.id}`,
       { headers },
     )
@@ -2327,7 +2494,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       (await portfolioReadResponse.json()).data.preflight.runHash,
       confirmedPortfolio.runHash,
     )
-    const portfolioListResponse = await fetch(
+    const portfolioListResponse = await apiFetch(
       `${portfolioEndpoint}?compatibilityGraphId=${recipeGraph.id}&limit=1`,
       { headers },
     )
@@ -2337,7 +2504,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       confirmedPortfolio.id,
     )
 
-    const mismatchResponse = await fetch(endpoint, {
+    const mismatchResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2349,7 +2516,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       }),
     })
     assert.equal(mismatchResponse.status, 409)
-    const staleResponse = await fetch(endpoint, {
+    const staleResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -2362,19 +2529,19 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
     assert.equal(staleResponse.status, 409)
 
-    const readResponse = await fetch(`${endpoint}/${graph.id}`, {
+    const readResponse = await apiFetch(`${endpoint}/${graph.id}`, {
       headers,
     })
     assert.equal(readResponse.status, 200)
     assert.equal((await readResponse.json()).data.graph.runHash, graph.runHash)
-    const listResponse = await fetch(`${endpoint}?limit=1`, { headers })
+    const listResponse = await apiFetch(`${endpoint}?limit=1`, { headers })
     assert.equal(listResponse.status, 200)
     assert.equal(
       (await listResponse.json()).data.graphs[0].id,
       recipeGraph.id,
     )
 
-    const capabilitiesResponse = await fetch(
+    const capabilitiesResponse = await apiFetch(
       `${baseUrl}/v1/capabilities`,
       { headers },
     )

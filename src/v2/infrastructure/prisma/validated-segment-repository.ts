@@ -483,7 +483,11 @@ implements ValidatedSegmentRepository {
   }) {
     const row = await this.client.v2ValidatedSegment.findUnique({
       where: {
-        workspaceId_projectId_idempotencyKey: input,
+        workspaceId_projectId_idempotencyKey: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          idempotencyKey: input.idempotencyKey,
+        },
       },
     })
     if (!row) return null

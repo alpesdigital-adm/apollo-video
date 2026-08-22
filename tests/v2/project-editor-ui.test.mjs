@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
+import {
+  PROOF_INTEGRITY_DIMENSIONS,
+} from '../../src/v2/domain/proof-integrity.ts'
+
 const projectEditorSource = readFileSync(
   new URL('../../src/app/projects/[id]/page.tsx', import.meta.url),
   'utf8',
@@ -184,6 +188,21 @@ test('T-FR-134 project editor searches moments and creates an evidence-bound con
     /\/long-form-moments\?\$\{search\.toString\(\)\}/,
   )
   assert.match(projectEditorSource, /\/contiguous-extractions/)
+  // T-FR-134: the page reaches contiguous extraction exclusively through /v1.
+  // Any moment-search or extraction request served by another surface would
+  // bypass the public contract the worker and the agent also answer to.
+  const contiguousRoutes = projectEditorSource
+    .split('\n')
+    .filter((line) =>
+      /long-form-moments|contiguous-extractions/.test(line))
+  assert.equal(contiguousRoutes.length, 2)
+  for (const line of contiguousRoutes) {
+    assert.match(
+      line,
+      /`\/v1\/projects\/\$\{encodeURIComponent\(projectId\)\}\//,
+      `contiguous UI route must be a /v1 route: ${line.trim()}`,
+    )
+  }
   for (const testId of [
     'contiguous-extraction-panel',
     'contiguous-topic-search',
@@ -431,6 +450,66 @@ test('T-FR-131 project editor exposes API-backed proof integrity without fabrica
   )
   assert.match(projectEditorSource, /Tela \+ fala/)
   assert.match(projectEditorSource, /fabricação sugerida: nunca/)
+})
+
+test('T-FR-131 project editor explains the verdict of every integrity dimension', () => {
+  const labels = projectEditorSource.slice(
+    projectEditorSource.indexOf(
+      'const PROOF_INTEGRITY_DIMENSION_LABELS',
+    ),
+    projectEditorSource.indexOf(
+      'const PROOF_INTEGRITY_ACTION_LABELS',
+    ),
+  )
+  assert.ok(labels.length > 0)
+  for (const dimension of PROOF_INTEGRITY_DIMENSIONS) {
+    assert.match(
+      labels,
+      new RegExp(`\\n  ${dimension}: '[^']+',`),
+      `the panel must label the ${dimension} dimension`,
+    )
+  }
+  assert.match(
+    labels,
+    /satisfies Record<ProofIntegrityDimension, string>/,
+  )
+  for (const verdict of ['confere', 'diverge', 'expirada', 'ausente']) {
+    assert.match(
+      projectEditorSource,
+      new RegExp(`'${verdict}'`),
+      `the panel must state the ${verdict} verdict`,
+    )
+  }
+  assert.match(
+    projectEditorSource,
+    /result\.expected\.join\(', '\) \|\| '—'\} → \$\{result\.actual\.join\(', '\) \|\| '—'\}/,
+  )
+  assert.match(
+    projectEditorSource,
+    /aria-label=\{`\$\{PROOF_INTEGRITY_DIMENSION_LABELS\[dimension\]\}: \$\{comparison\}`\}/,
+  )
+  assert.match(
+    projectEditorSource,
+    /data-testid="proof-integrity-readiness"/,
+  )
+  assert.match(projectEditorSource, /liberada para montagem/)
+  assert.match(projectEditorSource, /montagem bloqueada/)
+  for (const action of [
+    'add-structured-recipe-context',
+    'select-compatible-existing-evidence',
+    'restore-required-evidence-context',
+    'renew-rights-or-consent',
+  ]) {
+    assert.match(
+      projectEditorSource,
+      new RegExp(`'${action}':`),
+      `the panel must translate the ${action} action`,
+    )
+  }
+  assert.doesNotMatch(
+    projectEditorSource,
+    /gerar prova|fabricar evid/i,
+  )
 })
 
 test('T-FR-132 project editor previews proof modes and applies scoped overrides through v1', () => {

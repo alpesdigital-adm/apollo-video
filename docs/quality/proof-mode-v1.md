@@ -148,9 +148,147 @@ inalterada de artifacts. Ele não foi reexecutado após esta alteração porque 
 VPS está explicitamente interditada durante o incidente operacional; isso não
 é contado como evidência concluída.
 
+## Esteira durável de render (correção do caminho de produção)
+
+Até esta revisão, os três MP4s de prova eram produzidos chamando
+`RemotionRenderInputRenderer.stage()` diretamente dentro do teste. Isso provava
+o renderer, não o produto: nenhuma operação durável era criada, nenhum lease era
+renovado e nenhum checkpoint era persistido.
+
+A esteira durável real que renderiza composições Remotion em produção é:
+
+1. `runNextPublicOperationService`
+   (`src/v2/application/run-public-operation-worker.ts:60`) — reivindica a
+   operação `artifact-render` com `claimNext`, mantém o lease com `heartbeat`,
+   avança as fases `rendering → verifying → persisting` com `advancePhase`,
+   grava o checkpoint em `ArtifactRenderCheckpointRepository` e conclui com
+   `succeed`/`failOrRetry` e backoff exponencial;
+2. `renderAuthorizedInputService`
+   (`src/v2/application/render-authorized-input.ts:28`) — materializa o
+   `RenderInput` autorizado, revalida `inputHash`/`revalidationHash` antes da
+   promoção e descarta o staging em caso de falha;
+3. `RemotionRenderInputRenderer`
+   (`src/v2/infrastructure/remotion-render-input-renderer.ts:269`) — renderiza
+   e promove o MP4.
+
+A fábrica de produção monta exatamente essa cadeia em
+`createPublicOperationWorker` /`createAuthorizedRenderExecutor`
+(`src/v2/infrastructure/repository-factory.ts:1293` e seguintes). Nenhuma
+operação nova foi inventada: cenas de prova são cenas do `RenderInput` da
+composição `apollo-video`, que é o que essa operação já renderiza.
+
+O elo que faltava era a compilação. Ele passou a existir como módulo de
+aplicação, não como código de teste:
+
+- `src/v2/application/compile-proof-mode-render-input.ts` —
+  `compileProofModeRenderInput` recebe um `ProofModePlan` aprovado e devolve o
+  `RenderInputSpecV1` portável (presenter no ordinal 0, evidência no ordinal 1,
+  cena `proof-presentation` compilada por `compileProofModeRenderScene`,
+  duração mínima igual a `timelineEntryFrame + targetDurationFrames`). Ele
+  recusa evidência cujo `kind` divirja de `sourceMediaType` e recusa
+  `split-screen`/`proof-card` sem presenter em vídeo.
+
+Com isso o golden visual deixou de chamar o adapter: cada MP4 é produzido por
+`compileProofModeRenderInput → runNextPublicOperationService →
+renderAuthorizedInputService → RemotionRenderInputRenderer`, e o teste afirma as
+fases exatas, a renovação de lease, a revalidação dupla do input e o checkpoint
+cujo `byteSize` bate com o arquivo promovido.
+
+## O que os goldens medem agora
+
+Antes só se verificava dimensão e um delta de contraste global por canal. As
+verificações passaram a ser medidas em pixels, para os 15 stills e para os 3
+MP4s:
+
+- contraste de identificação: razão de contraste WCAG entre o percentil 99,5 e o
+  percentil 10 de luminância dentro de `creditRegion` e de `qualifierRegion`,
+  exigida `>= plan.legibility.minimumContrast` (4,5);
+- altura real dos glifos: extensão vertical, em pixels, das linhas que contêm
+  pixels quase brancos dentro da faixa de attribution, exigida
+  `>= 0,7 × minimumFontPixels`;
+- marcador de identificação: presença de pixels do acento na borda esquerda de
+  `creditRegion`;
+- quadro de entrada e de saída: o quadro 0 precisa ter menos acento que o quadro
+  do meio (o `entryTransition` é `crossfade`) e o último quadro precisa manter
+  pelo menos 80% do acento do meio (o `exitTransition` é `cut`);
+- contagem de quadros igual a `output.durationInFrames`;
+- separação de modos: cutaway precisa trocar o presenter pela evidência
+  (distância de cor >= 24), split-screen precisa mostrar duas fontes distintas
+  na mesma imagem (distância de cor >= 24) e proof-card precisa escurecer o
+  fundo (luminância relativa <= 0,1) mantendo o cartão pelo menos 3× mais claro;
+- matriz: os 15 `inputHash` e os 15 `layoutHash` precisam ser distintos, o que
+  impede que dois modos virem alias um do outro.
+
+### Medições do run local (2026-08-21, Windows 11, 2 execuções verdes)
+
+Stills (15/15):
+
+- contraste de attribution entre 20,10 e 20,27 (mínimo exigido 4,5);
+- contraste de qualifiers entre 16,53 e 16,94;
+- altura medida dos glifos de attribution entre 31 px e 52 px;
+- 15 `layoutHash` distintos e 15 `inputHash` distintos.
+
+MP4s, todos com fases `rendering → verifying → persisting` e checkpoint cujo
+`byteSize` bate com o arquivo:
+
+| modo | formato | quadros | bytes | sha256 (prefixo) | acento entrada/meio/saída | contraste attribution | glifo | sinal do modo |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cutaway | 9:16 | 75 | 524.580 | `f6ee87d8af723e02` | 0 / 938 / 939 | 20,13 | 52 px | distância de cor 126,15 |
+| split-screen | 16:9 | 135 | 1.309.065 | `687f2da4d8d9e51b` | 0 / 526 / 526 | 20,03 | 33 px | distância de cor 107,10 |
+| proof-card | 1:1 | 120 | 235.213 | `b63f80b48aa288d5` | 0 / 515 / 515 | 20,05 | 31 px | cartão 68,14× o fundo |
+
+O acento zero no quadro de entrada e mantido no quadro final é a prova direta do
+`crossfade` de entrada e do `cut` de saída definidos por `ProofModeTiming`.
+Attribution e qualifiers renderizados conferem byte a byte com
+`presentation.visual` do plano.
+
+Duração do golden completo: ~166 s por execução (n=2, ambas verdes). O bundle do
+Remotion precisa existir antes (`npm run remotion:build`); sem ele o teste falha
+com `RENDER_WORKER_FAILED`.
+
+## Cobertura de runtime sem renderer
+
+`tests/v2/proof-mode-render-runtime.test.mjs` roda na suíte padrão (sem ffmpeg,
+sem Remotion) e cobre: distinção estrutural dos 15 pares formato×modo, compilação
+dos 15 `RenderInput`, vínculo do override manual a evaluation/modo/formato/faixa/
+hash com rejeição de hash divergente, e a travessia de uma cena de prova pela
+operação durável com fases, lease e checkpoint.
+
+## E2E de API/PostgreSQL
+
+O cenário T-FR-132 do E2E real
+(`tests/v2/prisma-compatibility-graph.integration.mjs`) ganhou duas provas que
+faltavam, ambas contra a API `/v1` e o PostgreSQL reais:
+
+- **stale**: `POST /v1/projects/{id}/proof-mode-runs` com
+  `overrides[].expectedEvaluationHash` divergente responde 409, e o mesmo ocorre
+  com `expectedProofIntegrityRunHash` divergente; a contagem de
+  `v2ProofModeRun` permanece inalterada;
+- **tamper**: alterar `presentation.visual.attribution` dentro do `planJson`
+  persistido faz o `GET` do run e a listagem responderem 409
+  (`PERSISTENCE_CONFLICT`); restaurar a linha devolve 200 com o `runHash`
+  original, provando que a rejeição veio do conteúdo adulterado.
+
+Scripts: `npm run test:integration:proof-mode-goldens` (unidade + runtime +
+goldens visuais sob `APOLLO_PROOF_MODE_VISUAL_E2E=1`) e
+`npm run test:e2e:proof-modes`, que executa o arquivo de E2E real acima sob
+`APOLLO_COMPATIBILITY_GRAPH_E2E=1` — ele cobre outros FRs no mesmo arquivo
+porque é lá que a cadeia ProofNeed → ProofIntegrity → ProofMode é semeada; não
+foi duplicado um segundo semeador.
+
+No CI, os goldens rodam no job de qualidade logo após o bundle do Remotion, e o
+E2E de API/PostgreSQL roda no job `local-infrastructure` contra um banco
+`apollo_v2_e2e` provisionado no Compose, com `application_name`
+`apollo-video-e2e-ci-proof-modes`, `connection_limit=5` e verificação de zero
+backends órfãos em `pg_stat_activity` ao final.
+
 ## Pendências de aceite
 
 1. executar o E2E PostgreSQL em ambiente descartável local ou VPS formalmente
-   liberada e saudável;
-2. implantar e auditar produção;
-3. somente então marcar as cinco caixas do F2.021.
+   liberada e saudável. Os passos de CI existem (`local-infrastructure`), mas a
+   máquina de desenvolvimento usada nesta revisão não tem Docker nem `psql`;
+   nenhuma execução verde do E2E de API/PostgreSQL foi observada aqui, apenas os
+   testes de unidade, runtime e os goldens visuais;
+2. observar o job `local-infrastructure` verde com os novos passos;
+3. implantar e auditar produção;
+4. somente então marcar as cinco caixas do F2.021.

@@ -123,6 +123,11 @@ jobs:
       - name: Run authorized Remotion smoke render
         run: npm run test:integration:render
 
+      - name: Run proof mode goldens and worker-produced proof MP4s
+        run: npm run test:integration:proof-mode-goldens
+        env:
+          APOLLO_PROOF_MODE_VISUAL_E2E: "1"
+
       - name: Build production application
         run: npm run build
 
@@ -158,7 +163,7 @@ jobs:
   local-infrastructure:
     name: Isolated Compose infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 50
     env:
       COMPOSE_PROJECT_NAME: apollo-f0-${{ github.run_id }}
       POSTGRES_DB: apollo_v2
@@ -194,6 +199,90 @@ jobs:
 
       - name: Migrate clean Compose PostgreSQL
         run: npm run db:v2:migrate:deploy
+
+      - name: Create the isolated proof integrity E2E database
+        run: |
+          exists="$(docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select 1 from pg_database where datname = 'apollo_video_v2_e2e'")"
+          test "$exists" = 1 || docker compose -f infra/postgres/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_video_v2_e2e
+
+      - name: Migrate the isolated proof integrity E2E database
+        run: npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run proof integrity gate E2E against /v1 and PostgreSQL
+        run: npm run test:e2e:proof-integrity
+        env:
+          APOLLO_PROOF_INTEGRITY_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: production
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-integrity-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Provision the isolated ProofMode E2E database
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      # The harness already backs off and retries a legitimate 429
+      # (GOVERNANCE_LIMIT_EXCEEDED). APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM
+      # additionally declares the size of this one supervised burst — 66
+      # authenticated /v1 calls — so the request-rate anomaly does not read a
+      # scripted E2E as an attack and cost the job minutes of backoff. It is an
+      # env knob that already exists (governanceAnomalyPolicyFromEnvironment);
+      # no product default changes, and every other governance control
+      # (rate limit, concurrency, quota, spend and error-rate anomaly) stays at
+      # its production value for this run.
+      - name: Run ProofMode API and PostgreSQL E2E with tamper and stale rejection
+        run: npm run test:e2e:proof-modes
+        env:
+          APOLLO_COMPATIBILITY_GRAPH_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: "200"
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e?schema=public&application_name=apollo-video-e2e-ci-proof-modes&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify no orphan ProofMode E2E backends remain
+        if: always()
+        run: |
+          orphans="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-ci-proof-modes'")"
+          test "$orphans" = 0
+
+      - name: Resume long-form indexing on a disposable Compose database
+        env:
+          APOLLO_LONG_FORM_WORKFLOW_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_long_form?schema=public&application_name=apollo-video-e2e-long-form-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          GROQ_API_KEY: ci-not-a-real-groq-credential-000
+          GROQ_TRANSCRIBE_MODEL: whisper-large-v3
+          GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR: "1"
+          OPENAI_API_KEY: ci-not-a-real-openai-credential-0
+          OPENAI_DIARIZATION_MODEL: gpt-4o-transcribe-diarize
+          OPENAI_DIARIZATION_COST_MINOR_UNITS_PER_HOUR: "1"
+          APOLLO_PROTECTED_PAYLOAD_KEY_ID: ci-protected-payload
+          APOLLO_PROTECTED_PAYLOAD_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        run: |
+          set -euo pipefail
+          administer() {
+            docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$1"
+          }
+          preflight="$(administer "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          printf 'preflight e2e backends: %s\n' "$preflight"
+          test "$preflight" = 0
+          administer "create database apollo_v2_e2e_long_form"
+          npm run db:v2:migrate:deploy
+          npm run test:e2e:long-form-index-workflow
+          orphans=1
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            orphans="$(administer "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-long-form-ci%'")"
+            if test "$orphans" = 0; then break; fi
+            sleep 1
+          done
+          printf 'postflight e2e backends: %s\n' "$orphans"
+          test "$orphans" = 0
 
       - name: Reconstruct proxy from PostgreSQL and versioned MinIO only
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/prisma-vertical-smoke.integration.mjs
@@ -252,6 +341,56 @@ jobs:
             test "$(docker inspect --format '{{.State.Status}}' "$container_id")" = running
             test "$(docker inspect --format '{{.RestartCount}}' "$container_id")" = 0
           done
+
+      # Same knob and same reasoning as the ProofMode step above: the harness
+      # already backs off and waits out a legitimate 429
+      # (GOVERNANCE_LIMIT_EXCEEDED). APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM
+      # declares the size of this one supervised burst — seeding a 1.000
+      # document corpus plus its queries and evaluations is ~1.045 authenticated
+      # /v1 calls at ~630 requests per minute — so the request-rate anomaly does
+      # not read a scripted E2E as an attack and spend the job in backoff. It is
+      # an env knob that already exists (governanceAnomalyPolicyFromEnvironment);
+      # no product default changes, and every other governance control (rate
+      # limit, concurrency, quota, spend and error-rate anomaly) stays at its
+      # production value for this run.
+      - name: Run cross-asset semantic search E2E on a dedicated database
+        env:
+          APOLLO_HYBRID_SEARCH_E2E: "1"
+          APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM: "5000"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: sandbox
+          APOLLO_SEMANTIC_EMBEDDING_PROVIDER: openai
+          OPENAI_API_KEY: ci-not-a-real-openai-credential-0
+          APOLLO_E2E_HYBRID_SEARCH_DATABASE: apollo_v2_e2e_hybrid_search
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          orphans="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          printf 'preflight e2e backends=%s\n' "$orphans"
+          test "$orphans" = 0
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "create database \"$APOLLO_E2E_HYBRID_SEARCH_DATABASE\" owner \"$POSTGRES_USER\""
+          export V2_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:$POSTGRES_TUNNEL_PORT/$APOLLO_E2E_HYBRID_SEARCH_DATABASE?schema=public&application_name=$APOLLO_E2E_HYBRID_SEARCH_APP_NAME&connection_limit=5&pool_timeout=10&connect_timeout=10"
+          npm run db:v2:migrate:deploy
+          npm run test:e2e:hybrid-search
+
+      - name: Verify zero orphan E2E backends after semantic search E2E
+        if: always()
+        env:
+          APOLLO_E2E_HYBRID_SEARCH_APP_NAME: apollo-video-e2e-hybrid-search-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_E2E_HYBRID_SEARCH_APP_NAME'")"
+            printf 'postflight attempt=%s backends=%s\n' "$attempt" "$backends"
+            if test "$backends" = 0; then
+              exit 0
+            fi
+            sleep 3
+          done
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state, query_start from pg_stat_activity where application_name like 'apollo-video-e2e-%'"
+          exit 1
 
       - name: Stop isolated infrastructure
         if: always()

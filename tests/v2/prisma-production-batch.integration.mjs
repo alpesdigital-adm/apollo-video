@@ -246,7 +246,7 @@ test('T-FR-080 / T-FR-086 / T-FR-087 persists production batches, signed edits a
             allowedUses: [],
           },
         },
-        actor: authenticatedActor,
+        actor: { type: 'api-client', id: issued.client.id },
       })
     }
 

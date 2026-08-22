@@ -31,11 +31,48 @@ async function waitForServer(baseUrl, server) {
       throw new Error(`Next server exited with ${server.exitCode}`)
     }
     try {
-      if ((await fetch(`${baseUrl}/v1/health`)).ok) return
+      if ((await globalThis.fetch(`${baseUrl}/v1/health`)).ok) return
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error('Timed out waiting for Next server')
+}
+
+/**
+ * Legitimate client behaviour against the real governance limiter: `/v1`
+ * denies authenticated bursts with 429 `GOVERNANCE_LIMIT_EXCEEDED` once
+ * `evaluateGovernanceAnomalies` sees more than `requestMinimum` requests in
+ * its 60 s signal window. The harness asserts that contract and waits it out
+ * instead of relaxing the limiter. Denied admissions are persisted and keep
+ * counting inside the window, so the backoff is real waiting.
+ */
+const RATE_LIMIT_BACKOFF_MS = Object.freeze([
+  3_000, 8_000, 15_000, 30_000, 45_000, 60_000,
+])
+
+async function apiFetch(input, init) {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await globalThis.fetch(input, init)
+    if (response.status !== 429) return response
+    const payload = await response.clone().json().catch(() => null)
+    assert.equal(
+      payload?.error?.code,
+      'GOVERNANCE_LIMIT_EXCEEDED',
+      `unexpected 429 payload: ${JSON.stringify(payload)}`,
+    )
+    assert.equal(payload?.error?.category, 'quota')
+    assert.equal(payload?.error?.retryable, true)
+    if (attempt >= RATE_LIMIT_BACKOFF_MS.length) {
+      throw new Error(
+        `governance limiter did not clear after ${attempt} retries: ${JSON.stringify(payload)}`,
+      )
+    }
+    const retryAfter = Number(response.headers.get('retry-after'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(60_000, Math.ceil(retryAfter) * 1_000)
+      : RATE_LIMIT_BACKOFF_MS[attempt]
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
+  }
 }
 
 async function stopServer(server) {
@@ -105,6 +142,8 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     createProductionBatch,
     deriveBatchStatus,
   } = await import('../../src/v2/domain/production-batch.ts')
+  const { productionBatchItemOperationId } =
+    await import('../../src/v2/domain/batch-item-result.ts')
   const { createApiClientService } =
     await import('../../src/v2/application/create-api-client.ts')
   const { createApiAccessAuditContext } =
@@ -301,6 +340,11 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     await client.v2ProductionBatchItem.createMany({
       data: productionBatch.items.map((item, sequence) => ({
         id: item.id,
+        operationId: productionBatchItemOperationId({
+          workspaceId,
+          batchId,
+          itemId: item.id,
+        }),
         workspaceId,
         batchId,
         sequence,
@@ -458,7 +502,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     }
     const endpoint =
       `${baseUrl}/v1/batches/${batchId}/take-libraries`
-    const unauthenticated = await fetch(endpoint)
+    const unauthenticated = await apiFetch(endpoint)
     assert.equal(unauthenticated.status, 401)
 
     const candidates = [
@@ -510,7 +554,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       evaluations,
     }
     const createKey = `take-library-create-${suffix}`
-    const createResponse = await fetch(endpoint, {
+    const createResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -555,7 +599,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       sourceRangeMs: take.sourceRangeMs,
     }))
 
-    const replayResponse = await fetch(endpoint, {
+    const replayResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -566,7 +610,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     assert.equal(replayResponse.status, 200)
     assert.equal((await replayResponse.json()).data.replayed, true)
 
-    const mismatchResponse = await fetch(endpoint, {
+    const mismatchResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -578,7 +622,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       }),
     })
     assert.equal(mismatchResponse.status, 409)
-    const staleAlignmentResponse = await fetch(endpoint, {
+    const staleAlignmentResponse = await apiFetch(endpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -591,14 +635,14 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     })
     assert.equal(staleAlignmentResponse.status, 409)
 
-    const listResponse = await fetch(`${endpoint}?limit=20`, {
+    const listResponse = await apiFetch(`${endpoint}?limit=20`, {
       headers: { authorization },
     })
     const listPayload = await listResponse.json()
     assert.equal(listResponse.status, 200)
     assert.equal(listPayload.data.libraries.length, 1)
     assert.equal(listPayload.data.libraries[0].id, library.id)
-    const readResponse = await fetch(
+    const readResponse = await apiFetch(
       `${endpoint}/${library.id}`,
       { headers: { authorization } },
     )
@@ -632,7 +676,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     const selectionEndpoint =
       `${endpoint}/${library.id}/selections`
     const selectionKey = `take-selection-${suffix}`
-    const selectionResponse = await fetch(selectionEndpoint, {
+    const selectionResponse = await apiFetch(selectionEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -669,7 +713,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       immutableSources,
     )
 
-    const selectionReplay = await fetch(selectionEndpoint, {
+    const selectionReplay = await apiFetch(selectionEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -680,7 +724,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     assert.equal(selectionReplay.status, 200)
     assert.equal((await selectionReplay.json()).data.replayed, true)
 
-    const staleSelection = await fetch(selectionEndpoint, {
+    const staleSelection = await apiFetch(selectionEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -689,7 +733,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
       body: JSON.stringify(selectionBody),
     })
     assert.equal(staleSelection.status, 409)
-    const unacknowledgedReplacement = await fetch(selectionEndpoint, {
+    const unacknowledgedReplacement = await apiFetch(selectionEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
@@ -704,7 +748,7 @@ test('T-FR-082 persists, exposes, selects and protects source-preserving takes t
     })
     assert.equal(unacknowledgedReplacement.status, 428)
 
-    const replacementResponse = await fetch(selectionEndpoint, {
+    const replacementResponse = await apiFetch(selectionEndpoint, {
       method: 'POST',
       headers: {
         ...headers,
