@@ -27,10 +27,33 @@ export const OFL_LICENSE_URL = 'https://openfontlicense.org/open-font-license-of
  */
 export type SubtitleFormatLimits = Readonly<{ referenceHeight: number; fontPx: number; maxWidth: number; bottom: number }>
 
+/**
+ * Casing is a token of its own, not a boolean hidden inside typography (FR-172). The union is
+ * closed so an unknown casing fails validation instead of silently rendering untransformed text.
+ */
+export const SUBTITLE_CASINGS = Object.freeze(['none', 'uppercase', 'lowercase', 'title'] as const)
+export type SubtitleCasing = (typeof SUBTITLE_CASINGS)[number]
+
+/** Vertical band the block is anchored to. Same vocabulary the perception anchor (FR-173) speaks. */
+export const SUBTITLE_STYLE_ANCHORS = Object.freeze(['top', 'upper-third', 'center', 'lower-third', 'bottom'] as const)
+export type SubtitleStyleAnchor = (typeof SUBTITLE_STYLE_ANCHORS)[number]
+
+/** Canvas fractions the block may never cross. Authored per format — a 16:9 frame has different UI chrome. */
+export type SubtitleSafeArea = Readonly<{ top: number; bottom: number; horizontal: number }>
+export type SubtitlePlacementFormat = Readonly<{ anchor: SubtitleStyleAnchor; safeArea: SubtitleSafeArea }>
+
+/**
+ * The block is laid out as `maxLines` lines at this line-height. It is the same 1.1 the Remotion
+ * container and the CSS preview use, so the height the validator bounds against the safe area is
+ * the height that is actually painted — not an independent guess.
+ */
+export const SUBTITLE_LINE_HEIGHT = 1.1
+
 export interface SubtitleStylePreset {
-  schemaVersion: 'subtitle-style-preset/v1'
+  schemaVersion: 'subtitle-style-preset/v2'
   id: SubtitlePresetId
-  version: 1
+  /** Immutable content version of *this* preset. The shape around it evolved to v2; the five canonical presets are still their first authored revision. */
+  presetVersion: 1
   typography: Readonly<{
     fontFamily: string
     fallback: readonly string[]
@@ -39,9 +62,15 @@ export interface SubtitleStylePreset {
     licenseUrl: string
     glyphCoverage: 'latin-ext'
     weight: number
-    uppercase: boolean
   }>
-  lineBreaking: Readonly<{ maxLines: number; maxCharacters: number; chunkWords: number }>
+  casing: SubtitleCasing
+  lineBreaking: Readonly<{ maxLines: number; maxCharacters: number }>
+  /**
+   * How words become on-screen groups and for how long each group may hold. `maxWordsPerGroup` is
+   * what the renderer chunks by (it replaced the old `lineBreaking.chunkWords`); the cadence bounds
+   * are enforced against the real cues when the subtitle section is materialized.
+   */
+  grouping: Readonly<{ maxWordsPerGroup: number; minOnScreenMs: number; maxOnScreenMs: number; gapMergeMs: number }>
   highlight: Readonly<{ mode: 'word' | 'phrase' | 'none'; color: string; inactiveColor: string }>
   background: Readonly<{ shape: 'none' | 'box' | 'pill'; color: string; opacity: number; radius: number; paddingXEm: number; paddingYEm: number }>
   /**
@@ -49,7 +78,14 @@ export interface SubtitleStylePreset {
    * rendered font size, so the outline holds its proportion at proxy and delivery resolutions.
    */
   stroke: Readonly<{ widthEm: number; color: string }>
+  /**
+   * Cast shadow behind the glyphs. Authored in absolute pixels because that is what the renderer
+   * has always painted: a blur that scaled with the font would read as a different treatment at
+   * proxy and delivery resolutions.
+   */
+  shadow: Readonly<{ enabled: boolean; offsetXPx: number; offsetYPx: number; blurPx: number; color: string; opacity: number }>
   animation: Readonly<{ kind: 'scale' | 'karaoke' | 'fade'; version: 1; durationMs: number; reducedMotion: 'fade' | 'none' }>
+  placement: Readonly<{ formats: Readonly<Record<SubtitleMvpFormat, SubtitlePlacementFormat>> }>
   margins: Readonly<{ horizontal: number; vertical: number }>
   responsive: Readonly<{
     minFontPx: number
@@ -57,6 +93,18 @@ export interface SubtitleStylePreset {
     formats: Readonly<Record<SubtitleMvpFormat, SubtitleFormatLimits>>
   }>
   presetHash: string
+}
+
+/** CSS `text-transform` for a casing token. Single source for the preview and the Remotion renderer. */
+export function subtitleTextTransform(casing: SubtitleCasing): 'none' | 'uppercase' | 'lowercase' | 'capitalize' {
+  return casing === 'title' ? 'capitalize' : casing
+}
+
+/** CSS `text-shadow` for a shadow token, or `undefined` when the preset declares none. */
+export function subtitleTextShadowCss(shadow: Readonly<SubtitleStylePreset['shadow']>): string | undefined {
+  if (!shadow.enabled) return undefined
+  const channels = [1, 3, 5].map((index) => parseInt(shadow.color.slice(index, index + 2), 16))
+  return `${shadow.offsetXPx}px ${shadow.offsetYPx}px ${shadow.blurPx}px rgba(${channels[0]},${channels[1]},${channels[2]},${shadow.opacity})`
 }
 
 /**
@@ -98,6 +146,11 @@ export type SubtitleRenderMetrics = Readonly<{
   maxWidthPercent: number
   strokePx: number
   limits: SubtitleFormatLimits
+  /** Placement actually resolved for this format — never inferred from the canvas. */
+  anchor: SubtitleStyleAnchor
+  safeArea: SubtitleSafeArea
+  /** Painted height of the block at `maxLines`, the quantity bounded against the safe area. */
+  blockPx: number
 }>
 
 /**
@@ -122,13 +175,42 @@ export function resolveSubtitleRenderMetrics(
   if (!Number.isFinite(canvasHeight) || canvasHeight <= 0) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle canvas height is invalid')
   }
+  const placement = style.placement?.formats?.[format]
+  if (!placement) throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset has no placement for the requested format')
   const fontPx = Math.max(1, Math.round(limits.fontPx * (canvasHeight / limits.referenceHeight)))
+  const blockPx = Math.round(fontPx * SUBTITLE_LINE_HEIGHT * style.lineBreaking.maxLines)
+  const bottomPx = resolveSubtitleBottomPx(placement.anchor, limits.bottom, canvasHeight, blockPx)
+  // Fail-closed bounds: the resolved band must sit inside the safe area authored for THIS format.
+  // A landscape preset that would push the block under a platform UI bar stops the render here
+  // instead of producing an unreadable frame.
+  if (bottomPx < Math.floor(canvasHeight * placement.safeArea.bottom) ||
+      bottomPx + blockPx > Math.ceil(canvasHeight * (1 - placement.safeArea.top))) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle placement leaves the safe area for this format')
+  }
   return Object.freeze({
     format,
     fontPx,
-    bottomPx: Math.round(canvasHeight * limits.bottom),
+    bottomPx,
     maxWidthPercent: limits.maxWidth * 100,
     strokePx: style.stroke.widthEm > 0 ? Math.max(MIN_RASTERIZED_STROKE_PX, style.stroke.widthEm * fontPx) : 0,
     limits,
+    anchor: placement.anchor,
+    safeArea: placement.safeArea,
+    blockPx,
   })
+}
+
+/**
+ * Distance from the bottom edge for each anchor. `bottom` and `top` use the authored per-format
+ * offset (measured from their own edge); the three band anchors are fixed fractions of the canvas
+ * so "center" means the same thing in 9:16 and 16:9.
+ */
+export function resolveSubtitleBottomPx(anchor: SubtitleStyleAnchor, offset: number, canvasHeight: number, blockPx: number): number {
+  switch (anchor) {
+    case 'bottom': return Math.round(canvasHeight * offset)
+    case 'lower-third': return Math.round(canvasHeight / 4 - blockPx / 2)
+    case 'center': return Math.round(canvasHeight / 2 - blockPx / 2)
+    case 'upper-third': return Math.round(canvasHeight * 3 / 4 - blockPx / 2)
+    case 'top': return Math.round(canvasHeight * (1 - offset)) - blockPx
+  }
 }

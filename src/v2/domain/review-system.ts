@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { DomainError, assertDomain } from './errors.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
 
 export interface PreviewSession {
   projectVersionId: string
@@ -263,6 +264,13 @@ export function buildRenderElementMap(input: {
   subtitleCues?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
   ctaOverlays?: readonly Readonly<{ id: string; startFrame: number; endFrame: number; text: string }>[]
   composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
+  /**
+   * F1.036 decision that governs where each cue was actually drawn. When present it *is* the
+   * geometry: the map reports the band the renderer used, so the format critic reads the same
+   * rectangle the pixels occupy instead of a second, independent guess. Suppressed cues produce no
+   * element, because no cue was drawn.
+   */
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
 }): Readonly<RenderElementMap> {
   assertDomain(
     Number.isFinite(input.fps) && input.fps > 0 &&
@@ -332,6 +340,34 @@ export function buildRenderElementMap(input: {
   for (const cue of input.subtitleCues ?? []) {
     const clip = input.clips.find((item) => cue.startFrame < item.timelineOutFrame && cue.endFrame > item.timelineInFrame)
     if (!clip) continue
+    const decision = input.subtitleAnchorPlan
+      ? subtitleAnchorDecisionFor(input.subtitleAnchorPlan, cue.id)
+      : null
+    if (decision?.suppressed) continue
+    if (decision?.bounds) {
+      const band = decision.bounds
+      const decidedWidth = Math.max(1, Math.min(input.canvas.width, Math.round(band.width * input.canvas.width)))
+      const decidedHeight = Math.max(1, Math.min(input.canvas.height, Math.round(band.height * input.canvas.height)))
+      const decidedBounds = Object.freeze({
+        x: Math.max(0, Math.min(input.canvas.width - decidedWidth, Math.round(band.x * input.canvas.width))),
+        y: Math.max(0, Math.min(input.canvas.height - decidedHeight, Math.round(band.y * input.canvas.height))),
+        width: decidedWidth,
+        height: decidedHeight,
+      })
+      elements.push(...elementFrames(cue.startFrame, cue.endFrame, (frame) => ({
+        elementId: `subtitle:${cue.id}`,
+        type: 'subtitle',
+        clipId: clip.id,
+        sceneId: `scene:${clip.id}`,
+        sourceId: clip.sourceArtifactId,
+        frame,
+        bounds: decidedBounds,
+        zIndex: 20,
+        opacity: 1,
+        priority: 300,
+      })))
+      continue
+    }
     const fontSize = Math.max(
       32,
       Math.min(

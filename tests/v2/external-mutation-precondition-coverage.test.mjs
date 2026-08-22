@@ -239,6 +239,9 @@ const coverage = Object.freeze({
   'apollo.projects.annotations.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the current ProjectVersion, proxy artifact and proxy hash',
   },
+  'apollo.projects.subtitle-sidecars.export': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the sidecar lineage hash and the exact file checksum, so a reused key with another derivation is rejected',
+  },
   'apollo.projects.review-patches.propose': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the annotation and its immutable base ProjectVersion',
   },
@@ -319,6 +322,9 @@ const coverage = Object.freeze({
   },
   'apollo.projects.subtitle-configuration.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus the per-variant configuration head the command claims to replace',
+  },
+  'apollo.projects.subtitle-segment-overrides.apply': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, the compiled segment range of the target variant and the per-segment override head the command claims to replace',
   },
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
@@ -578,12 +584,12 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 54,
+    'idempotent-create': 55,
     'natural-idempotent-create': 3,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,
-    'base-version-bound-action': 7,
+    'base-version-bound-action': 8,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,

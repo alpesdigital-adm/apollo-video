@@ -2,8 +2,14 @@ import { calculateCanonicalHash } from './canonical-hash.ts'
 import { DomainError } from './errors.ts'
 import {
   OFL_LICENSE_URL,
+  resolveSubtitleRenderMetrics,
+  SUBTITLE_CASINGS,
   SUBTITLE_FORMAT_BY_ASPECT_RATIO,
+  SUBTITLE_LINE_HEIGHT,
+  SUBTITLE_STYLE_ANCHORS,
   subtitleFontStackCss,
+  subtitleTextShadowCss,
+  subtitleTextTransform,
   type SubtitleMvpFormat,
   type SubtitlePresetId,
   type SubtitleStylePreset,
@@ -11,39 +17,70 @@ import {
 
 export {
   OFL_LICENSE_URL,
+  resolveSubtitleBottomPx,
   resolveSubtitleMvpFormat,
   resolveSubtitleRenderMetrics,
+  SUBTITLE_CASINGS,
   SUBTITLE_FORMAT_BY_ASPECT_RATIO,
+  SUBTITLE_LINE_HEIGHT,
   SUBTITLE_PRESET_IDS,
+  SUBTITLE_STYLE_ANCHORS,
   subtitleFontStack,
   subtitleFontStackCss,
+  subtitleTextShadowCss,
+  subtitleTextTransform,
 } from './subtitle-style-tokens.ts'
 export type {
+  SubtitleCasing,
   SubtitleFormatLimits,
   SubtitleMvpFormat,
+  SubtitlePlacementFormat,
   SubtitlePresetId,
   SubtitleRenderMetrics,
+  SubtitleSafeArea,
+  SubtitleStyleAnchor,
   SubtitleStylePreset,
 } from './subtitle-style-tokens.ts'
 
-type PresetOverrides = Partial<Omit<SubtitleStylePreset, 'schemaVersion' | 'id' | 'version' | 'presetHash'>>
+type PresetOverrides = Partial<Omit<SubtitleStylePreset, 'schemaVersion' | 'id' | 'presetVersion' | 'presetHash'>>
+
+/**
+ * Safe area authored per MVP format. Portrait reserves more of the bottom edge (platform action
+ * bars) and of the top (status bar + creator chrome) than landscape does.
+ */
+const SAFE_AREA_BY_FORMAT: Readonly<Record<SubtitleMvpFormat, Readonly<{ top: number; bottom: number; horizontal: number }>>> = Object.freeze({
+  '9:16': Object.freeze({ top: .10, bottom: .06, horizontal: .05 }),
+  '16:9': Object.freeze({ top: .08, bottom: .05, horizontal: .04 }),
+})
 
 function createSubtitlePreset(id: SubtitlePresetId, values: PresetOverrides): Readonly<SubtitleStylePreset> {
   const body = {
-    schemaVersion: 'subtitle-style-preset/v1' as const,
+    schemaVersion: 'subtitle-style-preset/v2' as const,
     id,
-    version: 1 as const,
+    presetVersion: 1 as const,
     typography: Object.freeze({
       fontFamily: 'Inter', fallback: Object.freeze(['Noto Sans', 'Arial', 'sans-serif']),
       licensed: true as const, licenseSpdx: 'OFL-1.1' as const, licenseUrl: OFL_LICENSE_URL,
       glyphCoverage: 'latin-ext' as const,
-      weight: 800, uppercase: false, ...values.typography,
+      weight: 800, ...values.typography,
     }),
-    lineBreaking: Object.freeze({ maxLines: 2, maxCharacters: 34, chunkWords: 3, ...values.lineBreaking }),
+    casing: values.casing ?? ('none' as const),
+    lineBreaking: Object.freeze({ maxLines: 2, maxCharacters: 34, ...values.lineBreaking }),
+    grouping: Object.freeze({ maxWordsPerGroup: 3, minOnScreenMs: 400, maxOnScreenMs: 5_000, gapMergeMs: 120, ...values.grouping }),
     highlight: Object.freeze({ mode: 'word' as const, color: '#F7C948', inactiveColor: '#FFFFFF', ...values.highlight }),
     background: Object.freeze({ shape: 'none' as const, color: '#000000', opacity: 0, radius: 0, paddingXEm: 0, paddingYEm: 0, ...values.background }),
     stroke: Object.freeze({ widthEm: .1, color: '#000000', ...values.stroke }),
+    // Default cast shadow = exactly the treatment the Remotion renderer has always painted behind
+    // an outlined glyph (0 3px 10px rgba(0,0,0,.55)); container presets declare `enabled:false`,
+    // which is the same "no text-shadow" branch they already took.
+    shadow: Object.freeze({ enabled: true, offsetXPx: 0, offsetYPx: 3, blurPx: 10, color: '#000000', opacity: .55, ...values.shadow }),
     animation: Object.freeze({ kind: 'fade' as const, version: 1 as const, durationMs: 160, reducedMotion: 'fade' as const, ...values.animation }),
+    placement: Object.freeze({
+      formats: Object.freeze({
+        '9:16': Object.freeze({ anchor: 'bottom' as const, safeArea: SAFE_AREA_BY_FORMAT['9:16'], ...values.placement?.formats?.['9:16'] }),
+        '16:9': Object.freeze({ anchor: 'bottom' as const, safeArea: SAFE_AREA_BY_FORMAT['16:9'], ...values.placement?.formats?.['16:9'] }),
+      }),
+    }),
     margins: Object.freeze({ horizontal: .08, vertical: .1, ...values.margins }),
     responsive: Object.freeze({
       minFontPx: 28,
@@ -60,7 +97,8 @@ function createSubtitlePreset(id: SubtitlePresetId, values: PresetOverrides): Re
 
 export const SUBTITLE_PRESETS = Object.freeze({
   kinetic: createSubtitlePreset('kinetic', {
-    lineBreaking: { maxLines: 2, maxCharacters: 30, chunkWords: 2 },
+    lineBreaking: { maxLines: 2, maxCharacters: 30 },
+    grouping: { maxWordsPerGroup: 2, minOnScreenMs: 400, maxOnScreenMs: 5_000, gapMergeMs: 120 },
     animation: { kind: 'scale', version: 1, durationMs: 140, reducedMotion: 'fade' },
     responsive: { minFontPx: 30, maxFontPx: 78, formats: {
       '9:16': { referenceHeight: 1920, fontPx: 62, maxWidth: .86, bottom: .12 },
@@ -70,6 +108,9 @@ export const SUBTITLE_PRESETS = Object.freeze({
   'karaoke-box': createSubtitlePreset('karaoke-box', {
     background: { shape: 'box', color: '#000000', opacity: .84, radius: 10, paddingXEm: .38, paddingYEm: .18 },
     stroke: { widthEm: 0, color: '#000000' },
+    // The opaque container already separates the glyphs from the frame; a cast shadow behind it
+    // would only smear the box edge, and the renderer never painted one for a container preset.
+    shadow: { enabled: false, offsetXPx: 0, offsetYPx: 0, blurPx: 0, color: '#000000', opacity: 0 },
     animation: { kind: 'karaoke', version: 1, durationMs: 120, reducedMotion: 'none' },
     responsive: { minFontPx: 28, maxFontPx: 70, formats: {
       '9:16': { referenceHeight: 1920, fontPx: 54, maxWidth: .82, bottom: .11 },
@@ -79,7 +120,9 @@ export const SUBTITLE_PRESETS = Object.freeze({
   'karaoke-pill': createSubtitlePreset('karaoke-pill', {
     background: { shape: 'pill', color: '#18181B', opacity: .92, radius: 999, paddingXEm: .62, paddingYEm: .26 },
     stroke: { widthEm: 0, color: '#000000' },
-    lineBreaking: { maxLines: 1, maxCharacters: 26, chunkWords: 5 },
+    shadow: { enabled: false, offsetXPx: 0, offsetYPx: 0, blurPx: 0, color: '#000000', opacity: 0 },
+    lineBreaking: { maxLines: 1, maxCharacters: 26 },
+    grouping: { maxWordsPerGroup: 5, minOnScreenMs: 500, maxOnScreenMs: 5_000, gapMergeMs: 120 },
     animation: { kind: 'karaoke', version: 1, durationMs: 120, reducedMotion: 'none' },
     responsive: { minFontPx: 26, maxFontPx: 66, formats: {
       '9:16': { referenceHeight: 1920, fontPx: 50, maxWidth: .78, bottom: .13 },
@@ -89,8 +132,9 @@ export const SUBTITLE_PRESETS = Object.freeze({
   'caps-stroke': createSubtitlePreset('caps-stroke', {
     typography: {
       fontFamily: 'Archivo Black', fallback: Object.freeze(['Inter', 'Noto Sans', 'Arial Black', 'sans-serif']),
-      licensed: true, licenseSpdx: 'OFL-1.1', licenseUrl: OFL_LICENSE_URL, glyphCoverage: 'latin-ext', weight: 900, uppercase: true,
+      licensed: true, licenseSpdx: 'OFL-1.1', licenseUrl: OFL_LICENSE_URL, glyphCoverage: 'latin-ext', weight: 900,
     },
+    casing: 'uppercase',
     highlight: { mode: 'none', color: '#FFFFFF', inactiveColor: '#FFFFFF' },
     stroke: { widthEm: .12, color: '#000000' },
     animation: { kind: 'scale', version: 1, durationMs: 120, reducedMotion: 'fade' },
@@ -100,7 +144,8 @@ export const SUBTITLE_PRESETS = Object.freeze({
     } },
   }),
   'clean-color': createSubtitlePreset('clean-color', {
-    lineBreaking: { maxLines: 2, maxCharacters: 38, chunkWords: 4 },
+    lineBreaking: { maxLines: 2, maxCharacters: 38 },
+    grouping: { maxWordsPerGroup: 4, minOnScreenMs: 600, maxOnScreenMs: 5_000, gapMergeMs: 160 },
     highlight: { mode: 'phrase', color: '#67E8F9', inactiveColor: '#FFFFFF' },
     animation: { kind: 'fade', version: 1, durationMs: 180, reducedMotion: 'fade' },
     responsive: { minFontPx: 28, maxFontPx: 74, formats: {
@@ -111,8 +156,8 @@ export const SUBTITLE_PRESETS = Object.freeze({
 } satisfies Record<SubtitlePresetId, Readonly<SubtitleStylePreset>>)
 
 const SUBTITLE_REGISTRY_BODY = Object.freeze({
-  schemaVersion: 'subtitle-style-registry/v1' as const,
-  registryVersion: 1 as const,
+  schemaVersion: 'subtitle-style-registry/v2' as const,
+  registryVersion: 2 as const,
   presets: SUBTITLE_PRESETS,
   formatByAspectRatio: SUBTITLE_FORMAT_BY_ASPECT_RATIO,
 })
@@ -123,6 +168,11 @@ export const SUBTITLE_STYLE_REGISTRY = Object.freeze({
 })
 
 const HEX = /^#[0-9A-F]{6}$/
+/**
+ * Character cells a word occupies at minimum, separator included. Used to reject a grouping budget
+ * that could not fit inside the authored `maxLines × maxCharacters` block even in the best case.
+ */
+const MIN_CHARACTERS_PER_WORD = 4
 const luminance = (hex: string) => {
   const values = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255)
     .map((value) => value <= .03928 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
@@ -130,14 +180,39 @@ const luminance = (hex: string) => {
 }
 
 export function validateSubtitlePreset(value: SubtitleStylePreset): Readonly<SubtitleStylePreset> {
-  if (value.schemaVersion !== 'subtitle-style-preset/v1' || value.version !== 1 || !value.typography.licensed || value.typography.licenseSpdx !== 'OFL-1.1' || value.typography.licenseUrl !== OFL_LICENSE_URL || value.typography.glyphCoverage !== 'latin-ext' || value.typography.fallback.length < 1) {
+  if (value.schemaVersion !== 'subtitle-style-preset/v2' || value.presetVersion !== 1 || !value.typography.licensed || value.typography.licenseSpdx !== 'OFL-1.1' || value.typography.licenseUrl !== OFL_LICENSE_URL || value.typography.glyphCoverage !== 'latin-ext' || value.typography.fallback.length < 1) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle font must be OFL-1.1 licensed with fallback and latin-ext coverage')
   }
   if (value.animation.version !== 1) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle animation must declare its immutable version')
   }
-  if (value.lineBreaking.maxLines < 1 || value.lineBreaking.maxLines > 3 || value.lineBreaking.maxCharacters < 8 || value.lineBreaking.maxCharacters > 48 || value.lineBreaking.chunkWords < 1 || value.lineBreaking.chunkWords > 8) {
+  if (!SUBTITLE_CASINGS.includes(value.casing)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle casing is not a registered token')
+  }
+  if (value.lineBreaking.maxLines < 1 || value.lineBreaking.maxLines > 3 || value.lineBreaking.maxCharacters < 8 || value.lineBreaking.maxCharacters > 48) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle line limits are invalid')
+  }
+  const grouping = value.grouping
+  if (!Number.isInteger(grouping.maxWordsPerGroup) || grouping.maxWordsPerGroup < 1 || grouping.maxWordsPerGroup > 8) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle line limits are invalid')
+  }
+  // Cadence: a group that can never satisfy its own bounds is rejected before any cue is measured.
+  if (!Number.isInteger(grouping.minOnScreenMs) || !Number.isInteger(grouping.maxOnScreenMs) || !Number.isInteger(grouping.gapMergeMs) ||
+      grouping.minOnScreenMs < 200 || grouping.maxOnScreenMs > 8_000 || grouping.minOnScreenMs >= grouping.maxOnScreenMs ||
+      grouping.gapMergeMs < 0 || grouping.gapMergeMs >= grouping.minOnScreenMs) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle grouping cadence is invalid')
+  }
+  // A group may hold at most maxLines × maxCharacters glyphs; a word budget that cannot fit in the
+  // authored block would silently overflow the safe area at render time.
+  if (grouping.maxWordsPerGroup * MIN_CHARACTERS_PER_WORD > value.lineBreaking.maxLines * value.lineBreaking.maxCharacters) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle grouping cannot fit the authored line budget')
+  }
+  const shadow = value.shadow
+  if (!HEX.test(shadow.color) || shadow.opacity < 0 || shadow.opacity > 1 || shadow.blurPx < 0 || shadow.blurPx > 64 ||
+      Math.abs(shadow.offsetXPx) > 32 || Math.abs(shadow.offsetYPx) > 32 ||
+      (!shadow.enabled && (shadow.opacity > 0 || shadow.blurPx > 0 || shadow.offsetXPx !== 0 || shadow.offsetYPx !== 0)) ||
+      (shadow.enabled && (shadow.opacity <= 0 || (shadow.blurPx === 0 && shadow.offsetXPx === 0 && shadow.offsetYPx === 0)))) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle shadow tokens disagree with the declared state')
   }
   if (value.responsive.minFontPx < 20 || value.responsive.maxFontPx > 120 || value.responsive.minFontPx > value.responsive.maxFontPx || Object.values(value.responsive.formats).some((format) => format.fontPx < value.responsive.minFontPx || format.fontPx > value.responsive.maxFontPx || format.maxWidth <= 0 || format.maxWidth > 1 || format.bottom < 0 || format.bottom > .5 || !Number.isInteger(format.referenceHeight) || format.referenceHeight < 240 || format.referenceHeight > 4320)) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle responsive limits are invalid')
@@ -149,6 +224,38 @@ export function validateSubtitlePreset(value: SubtitleStylePreset): Readonly<Sub
   if (!portrait || !landscape || portrait.referenceHeight === landscape.referenceHeight ||
       (portrait.fontPx === landscape.fontPx && portrait.maxWidth === landscape.maxWidth && portrait.bottom === landscape.bottom)) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset must author distinct 9:16 and 16:9 limits')
+  }
+  // Placement + safe area, per format. Bounds are checked against the block the preset actually
+  // paints (maxLines at the shared line-height) at the format's own reference height, so a preset
+  // that would push text under a platform UI bar — or off the canvas — never enters the registry.
+  for (const format of ['9:16', '16:9'] as const) {
+    const placement = value.placement?.formats?.[format]
+    const limits = value.responsive.formats[format]
+    if (!placement || !SUBTITLE_STYLE_ANCHORS.includes(placement.anchor)) {
+      throw new DomainError('INVALID_ARGUMENT', 'Subtitle placement anchor is not registered for this format')
+    }
+    const safe = placement.safeArea
+    if (![safe.top, safe.bottom, safe.horizontal].every((fraction) => Number.isFinite(fraction) && fraction >= 0 && fraction <= .25) ||
+        safe.top + safe.bottom >= 1) {
+      throw new DomainError('INVALID_ARGUMENT', 'Subtitle safe area is invalid')
+    }
+    if (limits.maxWidth > 1 - 2 * safe.horizontal || value.margins.horizontal < safe.horizontal) {
+      throw new DomainError('INVALID_ARGUMENT', 'Subtitle block is wider than the safe area for this format')
+    }
+    // resolveSubtitleRenderMetrics is the single geometry source and throws when the resolved band
+    // leaves the safe area — running it here makes registration fail closed on the same rule the
+    // renderer enforces, instead of on a second copy of the arithmetic.
+    resolveSubtitleRenderMetrics(value, format, limits.referenceHeight)
+  }
+  // Incompatible token combinations. An opaque container plus an outline double-paints the glyph
+  // edge and reads as a smeared box in motion; the registry refuses the pair instead of leaving
+  // the renderer to arbitrate. A karaoke animation without per-word highlight has nothing to
+  // animate, and a `title`/`lowercase` casing on a preset whose highlight is off is a no-op token.
+  if (value.background.shape !== 'none' && value.background.opacity >= .5 && value.stroke.widthEm > 0) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset cannot combine an opaque container with a stroke')
+  }
+  if (value.animation.kind === 'karaoke' && value.highlight.mode === 'none') {
+    throw new DomainError('INVALID_ARGUMENT', 'Karaoke animation requires a highlight mode')
   }
   if (!HEX.test(value.highlight.color) || !HEX.test(value.highlight.inactiveColor) || !HEX.test(value.background.color) || value.background.opacity < 0 || value.background.opacity > 1) {
     throw new DomainError('INVALID_ARGUMENT', 'Subtitle colors are invalid')
@@ -178,6 +285,81 @@ export function validateSubtitlePreset(value: SubtitleStylePreset): Readonly<Sub
   return Object.freeze(value)
 }
 
+/**
+ * Content-addressed snapshot of a resolved preset. A render input carries this — not a preset id
+ * to be looked up later — so a render materialized today keeps rendering with the tokens it was
+ * materialized from even after the registry evolves and every preset hash changes.
+ *
+ * `presetHash` is the registry's own content address of the tokens; `snapshotHash` additionally
+ * binds the registry revision the snapshot was taken from, so replay can tell "same tokens, older
+ * registry" apart from "tokens tampered with".
+ */
+export interface SubtitlePresetSnapshot {
+  schemaVersion: 'subtitle-preset-snapshot/v1'
+  presetId: SubtitlePresetId
+  presetVersion: 1
+  presetHash: string
+  registryHash: string
+  tokens: Readonly<SubtitleStylePreset>
+  snapshotHash: string
+}
+
+export function materializeSubtitlePresetSnapshot(presetId: SubtitlePresetId): Readonly<SubtitlePresetSnapshot> {
+  const tokens = readSubtitlePreset(presetId)
+  const body = {
+    schemaVersion: 'subtitle-preset-snapshot/v1' as const,
+    presetId,
+    presetVersion: 1 as const,
+    presetHash: tokens.presetHash,
+    registryHash: SUBTITLE_STYLE_REGISTRY.registryHash,
+    tokens,
+  }
+  return Object.freeze({ ...body, snapshotHash: calculateCanonicalHash(body) })
+}
+
+/**
+ * Fail-closed re-validation of a snapshot that arrived from persistence or a queue. It never
+ * consults the live registry for the tokens: it re-derives the snapshot's own content address and
+ * re-runs the full preset validator on the materialized tokens. A snapshot whose registry no
+ * longer exists still passes — that is the point — but one whose tokens were edited does not.
+ */
+export function requireSubtitlePresetSnapshot(snapshot: Readonly<SubtitlePresetSnapshot>): Readonly<SubtitlePresetSnapshot> {
+  if (snapshot?.schemaVersion !== 'subtitle-preset-snapshot/v1' || snapshot.presetVersion !== 1) {
+    throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset snapshot schema is unsupported')
+  }
+  const tokens = validateSubtitlePreset(snapshot.tokens as SubtitleStylePreset)
+  if (tokens.id !== snapshot.presetId || tokens.presetHash !== snapshot.presetHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle preset snapshot identity does not match its tokens')
+  }
+  const { snapshotHash, ...body } = snapshot
+  if (snapshotHash !== calculateCanonicalHash({ ...body, tokens })) {
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Subtitle preset snapshot hash is invalid')
+  }
+  return snapshot
+}
+
+export type SubtitleCadenceCue = Readonly<{ startMs: number; endMs: number }>
+
+/**
+ * Cadence gate over the cues a preset will actually draw. The tokens declare how long a group may
+ * hold and how close two groups may sit; this is where that declaration meets real data, at
+ * materialization time, before a frame is rendered.
+ */
+export function assertSubtitleCadence(style: Readonly<SubtitleStylePreset>, cues: readonly SubtitleCadenceCue[]): void {
+  const { minOnScreenMs, maxOnScreenMs, gapMergeMs } = style.grouping
+  for (let index = 0; index < cues.length; index += 1) {
+    const cue = cues[index]
+    const duration = cue.endMs - cue.startMs
+    if (duration < minOnScreenMs || duration > maxOnScreenMs) {
+      throw new DomainError('INVALID_ARGUMENT', 'Subtitle cue duration is outside the preset cadence')
+    }
+    const previous = index > 0 ? cues[index - 1] : null
+    if (previous && cue.startMs - previous.endMs < gapMergeMs && cue.startMs !== previous.endMs) {
+      throw new DomainError('INVALID_ARGUMENT', 'Subtitle cues are closer than the preset gap-merge threshold')
+    }
+  }
+}
+
 export function readSubtitlePreset(presetId: SubtitlePresetId): Readonly<SubtitleStylePreset> {
   const presetValue = SUBTITLE_STYLE_REGISTRY.presets[presetId]
   if (!presetValue) throw new DomainError('INVALID_ARGUMENT', 'Subtitle preset is not registered')
@@ -201,7 +383,9 @@ export function quickSubtitlePreview(presetId: SubtitlePresetId, input: { text: 
   const stroke = style.stroke.widthEm > 0
     ? `-webkit-text-stroke:${style.stroke.widthEm}em ${style.stroke.color};paint-order:stroke fill;`
     : ''
-  const css = `${selector}{box-sizing:border-box;display:inline-flex;align-items:baseline;justify-content:center;max-width:${format.maxWidth * 100}%;padding:${style.background.paddingYEm}em ${style.background.paddingXEm}em;border-radius:${style.background.radius}px;background:${rgba(style.background.color, style.background.opacity)};color:${style.highlight.inactiveColor};font-family:${fontFamilies};font-size:clamp(${style.responsive.minFontPx}px,${format.fontPx}px,${style.responsive.maxFontPx}px);font-weight:${style.typography.weight};line-height:1.1;text-align:center;text-transform:${style.typography.uppercase ? 'uppercase' : 'none'};overflow:hidden;${stroke}animation:apollo-subtitle-${presetId} ${style.animation.durationMs}ms ease-out both}@keyframes apollo-subtitle-${presetId}{from{opacity:0;transform:${style.animation.kind === 'scale' ? 'scale(.88)' : 'translateY(4px)'}}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){${selector}{animation:${style.animation.reducedMotion === 'none' ? 'none' : `apollo-subtitle-${presetId} ${style.animation.durationMs}ms linear both`}}}`
+  const metrics = resolveSubtitleRenderMetrics(style, input.format, format.referenceHeight)
+  const textShadow = subtitleTextShadowCss(style.shadow)
+  const css = `${selector}{box-sizing:border-box;position:absolute;left:50%;transform:translateX(-50%);bottom:${(metrics.bottomPx / format.referenceHeight * 100).toFixed(4)}%;display:inline-flex;align-items:baseline;justify-content:center;max-width:${format.maxWidth * 100}%;padding:${style.background.paddingYEm}em ${style.background.paddingXEm}em;border-radius:${style.background.radius}px;background:${rgba(style.background.color, style.background.opacity)};color:${style.highlight.inactiveColor};font-family:${fontFamilies};font-size:clamp(${style.responsive.minFontPx}px,${format.fontPx}px,${style.responsive.maxFontPx}px);font-weight:${style.typography.weight};line-height:${SUBTITLE_LINE_HEIGHT};text-align:center;text-transform:${subtitleTextTransform(style.casing)};overflow:hidden;${textShadow ? `text-shadow:${textShadow};` : ''}${stroke}animation:apollo-subtitle-${presetId} ${style.animation.durationMs}ms ease-out both}@keyframes apollo-subtitle-${presetId}{from{opacity:0;transform:${style.animation.kind === 'scale' ? 'scale(.88)' : 'translateY(4px)'}}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){${selector}{animation:${style.animation.reducedMotion === 'none' ? 'none' : `apollo-subtitle-${presetId} ${style.animation.durationMs}ms linear both`}}}`
   const body = Object.freeze({
     schemaVersion: 'subtitle-css-preview/v1' as const,
     renderKind: 'instant-css-preview' as const,
@@ -307,11 +491,14 @@ export function materializeSubtitleRenderPolicy<T>(config: Readonly<SubtitleConf
   if (!config.resolved.enabled) return Object.freeze({ cues: Object.freeze([]), presetId: null, presetHash: null, transcriptHash: config.transcriptHash })
   return Object.freeze({ cues: Object.freeze([...cues]), presetId: config.resolved.presetId, presetHash: config.resolved.presetHash, transcriptHash: config.transcriptHash })
 }
-export interface OccupiedRegion { id:string;kind:'face'|'ocr'|'cta'|'logo'|'insert';box:readonly[number,number,number,number] }
+/**
+ * The five bands a cue may occupy. The *decision* lives in `subtitle-anchor-plan.ts`, which reads
+ * the content-addressed perception timeline and the solved cta/logo placements. There is no
+ * hardcoded anchor rectangle here any more: the previous `chooseSubtitleAnchor`/`OccupiedRegion`
+ * pair accepted caller-authored boxes and was never reachable from the renderer, so it was removed
+ * rather than kept as a second answer.
+ */
 export type SubtitleAnchor='top'|'upper-third'|'center'|'lower-third'|'bottom'
-const anchorBoxes:Record<SubtitleAnchor,readonly[number,number,number,number]>={top:[.1,.06,.8,.16],'upper-third':[.1,.22,.8,.16],center:[.1,.42,.8,.16],'lower-third':[.1,.64,.8,.16],bottom:[.1,.8,.8,.14]}
-const overlaps=(a:readonly number[],b:readonly number[])=>a[0]<b[0]+b[2]&&a[0]+a[2]>b[0]&&a[1]<b[1]+b[3]&&a[1]+a[3]>b[1]
-export function chooseSubtitleAnchor(input:{occupied:readonly OccupiedRegion[];previous?:SubtitleAnchor;safeArea:{top:number;bottom:number}}){const candidates=(Object.keys(anchorBoxes) as SubtitleAnchor[]).filter((anchor)=>{const box=anchorBoxes[anchor];return box[1]>=input.safeArea.top&&box[1]+box[3]<=1-input.safeArea.bottom&&!input.occupied.some((region)=>overlaps(box,region.box))});if(input.previous&&candidates.includes(input.previous))return Object.freeze({anchor:input.previous,stable:true,issue:null});const anchor=candidates[0]??null;return Object.freeze({anchor,stable:false,issue:anchor?null:'NO_SAFE_SUBTITLE_REGION'})}
 export interface SubtitleSegmentOverride { id:string;segmentId:string;variantId:string;rangeMs:readonly[number,number];position?:SubtitleAnchor;styleId?:SubtitlePresetId;text?:string;visibility?:'visible'|'hidden';protected:boolean }
 export function applySubtitleOverride(input:{base:Readonly<Record<string,unknown>>;override:SubtitleSegmentOverride;variantId:string;rangeMs:readonly[number,number]}){if(input.override.variantId!==input.variantId)return Object.freeze({value:input.base,invalidatedRanges:Object.freeze([]),applied:false});const overlap=input.rangeMs[0]<input.override.rangeMs[1]&&input.rangeMs[1]>input.override.rangeMs[0];if(!overlap)return Object.freeze({value:input.base,invalidatedRanges:Object.freeze([]),applied:false});return Object.freeze({value:Object.freeze({...input.base,...input.override}),invalidatedRanges:Object.freeze([input.override.rangeMs]),applied:true,protected:input.override.protected})}
 export function resetSubtitleOverride(override:SubtitleSegmentOverride, inherited:Readonly<Record<string,unknown>>){return Object.freeze({value:inherited,removedOverrideId:override.id,invalidatedRanges:Object.freeze([override.rangeMs])})}
@@ -319,4 +506,3 @@ export interface RenderedCue {startMs:number;endMs:number;text:string}
 const stamp=(ms:number,srt:boolean)=>{const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),x=ms%1000;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}${srt?',':'.'}${String(x).padStart(3,'0')}`}
 export function exportSubtitleSidecar(cues:readonly RenderedCue[],format:'srt'|'vtt'){for(let i=0;i<cues.length;i++){if(cues[i].endMs<=cues[i].startMs||(i&&cues[i].startMs<cues[i-1].endMs))throw new DomainError('INVALID_ARGUMENT','Subtitle cues must be positive, monotonic and non-overlapping')}const normalized=cues.map((cue)=>({...cue,text:cue.text.normalize('NFC').replace(/\r?\n/g,'\n').trim()}));const body=normalized.map((cue,index)=>`${format==='srt'?`${index+1}\n`:''}${stamp(cue.startMs,format==='srt')} --> ${stamp(cue.endMs,format==='srt')}\n${cue.text}`).join('\n\n');return `﻿${format==='vtt'?'WEBVTT\n\n':''}${body}\n`}
 export const SUBTITLE_VISUAL_GOLDENS=Object.freeze((Object.keys(SUBTITLE_PRESETS) as SubtitlePresetId[]).flatMap((presetId)=>['9:16','16:9'].flatMap((format)=>['light','dark'].map((background)=>quickSubtitlePreview(presetId,{text:'Ação com clareza',format:format as SubtitleMvpFormat,background:background as 'light'|'dark'})))))
-export const SUBTITLE_ANCHOR_FIXTURES=Object.freeze({lowerFace:[{id:'face',kind:'face',box:[.25,.65,.5,.3]}],fullScreen:[{id:'insert',kind:'insert',box:[0,0,1,1]}],multiple:[{id:'logo',kind:'logo',box:[.05,.05,.2,.1]},{id:'cta',kind:'cta',box:[.1,.75,.8,.2]}]} satisfies Record<string,readonly OccupiedRegion[]>)

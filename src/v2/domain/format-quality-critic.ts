@@ -3,10 +3,14 @@ import { assertDomain } from './errors.ts'
 import { readOutputFormatPreset } from './output-format-registry.ts'
 import { OUTPUT_ASPECT_RATIOS, type NormalizedBounds, type OutputAspectRatio } from './output-spec.ts'
 import type { RenderElementMap } from './review-system.ts'
+import type { SubtitleAnchorPlanV1 } from './subtitle-anchor-plan.ts'
 
 export const FORMAT_QUALITY_CODES = [
   'OUTPUT_CLIPPING', 'OUTPUT_SAFE_AREA', 'SUBJECT_NOT_VISIBLE',
   'SUBTITLE_SUBJECT_COLLISION', 'OUTPUT_DENSITY_EXCESS',
+  // F1.036 / FR-173: the anchor decision reports into the variant's own report, so a cue that had
+  // nowhere safe to go blocks *this* output instead of being discovered by eye on the MP4.
+  'NO_SAFE_SUBTITLE_REGION', 'SUBTITLE_ANCHOR_FALLBACK', 'SUBTITLE_ANCHOR_UNSTABLE',
 ] as const
 export type FormatQualityCode = (typeof FORMAT_QUALITY_CODES)[number]
 
@@ -111,6 +115,12 @@ export function critiqueOutputFormat(input: Readonly<{
   reframePlanHash?: string | null
   subjects?: readonly Readonly<FormatSubjectEvidenceV1>[]
   densityLimit?: number
+  /**
+   * The F1.036 anchor decision that produced these frames. Its localized reason codes are lifted
+   * into this report so the variant verdict already carries them: a suppressed cue is a hard block,
+   * a relaxed band or a forced early move is a warning the reviewer can see next to the pixels.
+   */
+  subtitleAnchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
 }>): Readonly<FormatQualityReportV2> {
   assertDomain(ID.test(input.outputSpecId) && OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_OUTPUT_SPEC', 'Format critic output identity is invalid')
   assertDomain(SHA256.test(input.proxyHash) && input.map.proxyHash === input.proxyHash, 'INVALID_RENDER_INPUT', 'Format critic proxy evidence is inconsistent')
@@ -161,6 +171,20 @@ export function critiqueOutputFormat(input: Readonly<{
     }, 0)
     if (occupied > densityLimit) add({ code: 'OUTPUT_DENSITY_EXCESS', severity: 'warning', message: `Visible overlays occupy ${Math.round(occupied * 100)}% of the ${input.format} canvas.`, evidenceRange: { startFrame: frame, endFrame: frame + 1 }, elementIds: visible.filter((element) => !['background', 'presenter'].includes(element.type)).map((element) => element.elementId), evidenceIds: [`render-map:${input.proxyHash}`] })
   }
+  // The anchor decision is evidence about this render, so it is localized exactly like the pixel
+  // checks above: same frame interval semantics, same element ids, same evidence ids.
+  for (const issue of input.subtitleAnchorPlan?.issues ?? []) {
+    assertDomain(
+      issue.evidenceRange.startFrame >= 0 && issue.evidenceRange.endFrame <= input.map.durationFrames,
+      'INVALID_RENDER_INPUT', 'Subtitle anchor issue is outside the rendered timeline',
+    )
+    add({
+      code: issue.code, severity: issue.severity, message: issue.message,
+      evidenceRange: issue.evidenceRange,
+      elementIds: issue.elementIds,
+      evidenceIds: [...issue.evidenceIds, `subtitle-anchor-plan:${input.subtitleAnchorPlan!.anchorPlanHash}`],
+    })
+  }
   for (const subject of subjects.filter((item) => item.critical)) {
     const presenterFrames = [...byFrame].filter(([frame, elements]) => frame >= subject.startFrame && frame < subject.endFrame && elements.some((element) => element.type === 'presenter' && element.opacity > 0 && overlaps(normalized(element.bounds, input.map.canvas), subject.bounds))).map(([frame]) => frame)
     if (presenterFrames.length === 0) add({ code: 'SUBJECT_NOT_VISIBLE', severity: 'hard', message: `Critical subject ${subject.id} is not visible in ${input.format}.`, evidenceRange: { startFrame: subject.startFrame, endFrame: subject.endFrame }, elementIds: [], evidenceIds: [subject.id] })
@@ -197,7 +221,7 @@ function explain(outputSpecId: string, format: OutputAspectRatio, status: 'passe
   if (status === 'warning') {
     return `${outputSpecId} (${format}) is exportable with ${warnings.length} warning reason code(s): ${warnings.join(', ')}. No hard clipping, subject visibility or subtitle collision issue was found.`
   }
-  return `${outputSpecId} (${format}) passed every format check over ${durationFrames} frames: no clipping, safe area, subject visibility, subtitle collision or density issue was found.`
+  return `${outputSpecId} (${format}) passed every format check over ${durationFrames} frames: no clipping, safe area, subject visibility, subtitle collision, subtitle anchor or density issue was found.`
 }
 
 export function selectExportableVariants(reports: readonly Readonly<FormatQualityReportV2>[]): Readonly<{

@@ -18,6 +18,7 @@ import { createEditCommand } from '../../src/v2/domain/edit-command.ts'
 import {
   createManualCommandImpact,
   createReviewPatchCommandImpact,
+  createSubtitleSegmentOverrideCommandImpact,
   parseCommandImpact,
 } from '../../src/v2/domain/command-impact.ts'
 import {
@@ -236,8 +237,27 @@ function compareActionImpact(action = 'accept') {
   })
 }
 
+/**
+ * F1.037 — the exception covers cue-1 only (frames 15..45 of a 180-frame timeline),
+ * so the fixture itself proves the type can invalidate less than the whole timeline.
+ */
+function subtitleSegmentOverrideImpact() {
+  return createSubtitleSegmentOverrideCommandImpact({
+    commandId: 'edit-command-registry-subtitle-segment',
+    baseVersionId,
+    resultVersionId,
+    variantId: '9:16',
+    segmentId: 'cue-1',
+    range: { startFrame: 15, endFrame: 45 },
+    dimensionKinds: ['position', 'text'],
+    durationFrames,
+    outputReferences: outputs,
+  })
+}
+
 /** Real impact document plus its real parser, per registered Command type. */
 const IMPACT_FIXTURES = {
+  'apply-subtitle-segment-override': { build: () => subtitleSegmentOverrideImpact(), parse: parseCommandImpact },
   'compare-action': { build: () => compareActionImpact(), parse: parseCompareActionImpact },
   'manual-edit': { build: () => manualImpact(), parse: parseCommandImpact },
   'apply-review-patch': { build: () => reviewPatchImpact('apply-review-patch'), parse: parseCommandImpact },
@@ -269,7 +289,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 10)
+  assert.equal(EDIT_COMMAND_TYPES.length, 11)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -353,7 +373,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 10, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 11, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -377,7 +397,7 @@ test('T-F0-027 each impact-bearing type produces a document its declared parser 
 test('T-F0-027 partial-range types narrow renders to the edited region', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('partial-range')],
-    ['apply-review-patch', 'apply-review-patch-batch', 'manual-edit'],
+    ['apply-review-patch', 'apply-review-patch-batch', 'apply-subtitle-segment-override', 'manual-edit'],
   )
   for (const type of editCommandTypesByRenderPolicy('partial-range')) {
     const impact = IMPACT_FIXTURES[type].build()

@@ -8,6 +8,7 @@ import {
   MVP_CORE_EVIDENCE_RESOURCE_TYPES,
 } from '../domain/mvp-core-gate.ts'
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
+import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
@@ -300,7 +301,12 @@ const subtitlePresetIdSchema = { enum: ['kinetic', 'karaoke-box', 'karaoke-pill'
 const subtitleMvpFormatSchema = { enum: ['9:16', '16:9'] } as const
 const subtitleColorSchema = { type: 'string', pattern: '^#[0-9A-F]{6}$' } as const
 const subtitleFormatLimitsSchema = { type: 'object', additionalProperties: false, required: ['referenceHeight', 'fontPx', 'maxWidth', 'bottom'], properties: { referenceHeight: { type: 'integer', minimum: 240, maximum: 4320 }, fontPx: { type: 'number' }, maxWidth: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, bottom: { type: 'number', minimum: 0, maximum: .5 } } } as const
-const subtitleStylePresetSchema = {
+/**
+ * The v1 preset shape, still published. F1.035 extracted `typography.uppercase` into the `casing`
+ * token and `lineBreaking.chunkWords` into `grouping.maxWordsPerGroup`; the v1 document keeps
+ * carrying both under their original names, derived from the live tokens by the contract module.
+ */
+const subtitleStylePresetSchemaV1 = {
   type: 'object', additionalProperties: false,
   required: ['schemaVersion', 'id', 'version', 'typography', 'lineBreaking', 'highlight', 'background', 'stroke', 'animation', 'margins', 'responsive', 'presetHash'],
   properties: {
@@ -318,7 +324,32 @@ const subtitleStylePresetSchema = {
     presetHash: sha256Schema,
   },
 } as const
-const subtitleStyleRegistrySchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v1' }, registryVersion: { const: 1 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchema, 'karaoke-box': subtitleStylePresetSchema, 'karaoke-pill': subtitleStylePresetSchema, 'caps-stroke': subtitleStylePresetSchema, 'clean-color': subtitleStylePresetSchema } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
+const subtitleSafeAreaSchema = { type: 'object', additionalProperties: false, required: ['top', 'bottom', 'horizontal'], properties: { top: { type: 'number', minimum: 0, maximum: .25 }, bottom: { type: 'number', minimum: 0, maximum: .25 }, horizontal: { type: 'number', minimum: 0, maximum: .25 } } } as const
+const subtitlePlacementFormatSchema = { type: 'object', additionalProperties: false, required: ['anchor', 'safeArea'], properties: { anchor: { enum: ['top', 'upper-third', 'center', 'lower-third', 'bottom'] }, safeArea: subtitleSafeAreaSchema } } as const
+const subtitleStylePresetSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'id', 'presetVersion', 'typography', 'casing', 'lineBreaking', 'grouping', 'highlight', 'background', 'stroke', 'shadow', 'animation', 'placement', 'margins', 'responsive', 'presetHash'],
+  properties: {
+    schemaVersion: { const: 'subtitle-style-preset/v2' }, id: subtitlePresetIdSchema, presetVersion: { const: 1 },
+    typography: { type: 'object', additionalProperties: false, required: ['fontFamily', 'fallback', 'licensed', 'licenseSpdx', 'licenseUrl', 'glyphCoverage', 'weight'], properties: {
+      fontFamily: { type: 'string', minLength: 1, maxLength: 128 }, fallback: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 128 } }, licensed: { const: true }, licenseSpdx: { const: 'OFL-1.1' }, licenseUrl: { type: 'string', minLength: 1, maxLength: 256 }, glyphCoverage: { const: 'latin-ext' }, weight: { type: 'integer', minimum: 100, maximum: 900 },
+    } },
+    casing: { enum: ['none', 'uppercase', 'lowercase', 'title'] },
+    lineBreaking: { type: 'object', additionalProperties: false, required: ['maxLines', 'maxCharacters'], properties: { maxLines: { type: 'integer', minimum: 1, maximum: 3 }, maxCharacters: { type: 'integer', minimum: 8, maximum: 48 } } },
+    grouping: { type: 'object', additionalProperties: false, required: ['maxWordsPerGroup', 'minOnScreenMs', 'maxOnScreenMs', 'gapMergeMs'], properties: { maxWordsPerGroup: { type: 'integer', minimum: 1, maximum: 8 }, minOnScreenMs: { type: 'integer', minimum: 200, maximum: 8000 }, maxOnScreenMs: { type: 'integer', minimum: 200, maximum: 8000 }, gapMergeMs: { type: 'integer', minimum: 0, maximum: 8000 } } },
+    highlight: { type: 'object', additionalProperties: false, required: ['mode', 'color', 'inactiveColor'], properties: { mode: { enum: ['word', 'phrase', 'none'] }, color: subtitleColorSchema, inactiveColor: subtitleColorSchema } },
+    background: { type: 'object', additionalProperties: false, required: ['shape', 'color', 'opacity', 'radius', 'paddingXEm', 'paddingYEm'], properties: { shape: { enum: ['none', 'box', 'pill'] }, color: subtitleColorSchema, opacity: { type: 'number', minimum: 0, maximum: 1 }, radius: { type: 'number', minimum: 0 }, paddingXEm: { type: 'number', minimum: 0, maximum: 2 }, paddingYEm: { type: 'number', minimum: 0, maximum: 2 } } },
+    stroke: { type: 'object', additionalProperties: false, required: ['widthEm', 'color'], properties: { widthEm: { type: 'number', minimum: 0, maximum: .3 }, color: subtitleColorSchema } },
+    shadow: { type: 'object', additionalProperties: false, required: ['enabled', 'offsetXPx', 'offsetYPx', 'blurPx', 'color', 'opacity'], properties: { enabled: { type: 'boolean' }, offsetXPx: { type: 'number', minimum: -32, maximum: 32 }, offsetYPx: { type: 'number', minimum: -32, maximum: 32 }, blurPx: { type: 'number', minimum: 0, maximum: 64 }, color: subtitleColorSchema, opacity: { type: 'number', minimum: 0, maximum: 1 } } },
+    animation: { type: 'object', additionalProperties: false, required: ['kind', 'version', 'durationMs', 'reducedMotion'], properties: { kind: { enum: ['scale', 'karaoke', 'fade'] }, version: { const: 1 }, durationMs: { type: 'integer', minimum: 0, maximum: 1000 }, reducedMotion: { enum: ['fade', 'none'] } } },
+    placement: { type: 'object', additionalProperties: false, required: ['formats'], properties: { formats: { type: 'object', additionalProperties: false, required: ['9:16', '16:9'], properties: { '9:16': subtitlePlacementFormatSchema, '16:9': subtitlePlacementFormatSchema } } } },
+    margins: { type: 'object', additionalProperties: false, required: ['horizontal', 'vertical'], properties: { horizontal: { type: 'number', minimum: 0, maximum: .5 }, vertical: { type: 'number', minimum: 0, maximum: .5 } } },
+    responsive: { type: 'object', additionalProperties: false, required: ['minFontPx', 'maxFontPx', 'formats'], properties: { minFontPx: { type: 'number', minimum: 20 }, maxFontPx: { type: 'number', maximum: 120 }, formats: { type: 'object', additionalProperties: false, required: ['9:16', '16:9'], properties: { '9:16': subtitleFormatLimitsSchema, '16:9': subtitleFormatLimitsSchema } } } },
+    presetHash: sha256Schema,
+  },
+} as const
+const subtitleStyleRegistrySchemaV1 = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v1' }, registryVersion: { const: 1 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchemaV1, 'karaoke-box': subtitleStylePresetSchemaV1, 'karaoke-pill': subtitleStylePresetSchemaV1, 'caps-stroke': subtitleStylePresetSchemaV1, 'clean-color': subtitleStylePresetSchemaV1 } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
+const subtitleStyleRegistrySchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'registryVersion', 'presets', 'formatByAspectRatio', 'registryHash'], properties: { schemaVersion: { const: 'subtitle-style-registry/v2' }, registryVersion: { const: 2 }, presets: { type: 'object', additionalProperties: false, required: ['kinetic', 'karaoke-box', 'karaoke-pill', 'caps-stroke', 'clean-color'], properties: { kinetic: subtitleStylePresetSchema, 'karaoke-box': subtitleStylePresetSchema, 'karaoke-pill': subtitleStylePresetSchema, 'caps-stroke': subtitleStylePresetSchema, 'clean-color': subtitleStylePresetSchema } }, formatByAspectRatio: { type: 'object', additionalProperties: false, required: ['9:16', '16:9', '4:5', '1:1', '21:9'], properties: { '9:16': subtitleMvpFormatSchema, '16:9': subtitleMvpFormatSchema, '4:5': subtitleMvpFormatSchema, '1:1': subtitleMvpFormatSchema, '21:9': subtitleMvpFormatSchema } }, registryHash: sha256Schema } } as const
 const subtitleCssPreviewRequestSchema = { type: 'object', additionalProperties: false, required: ['presetId', 'text', 'format', 'background'], properties: { presetId: subtitlePresetIdSchema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] } } } as const
 const subtitleCssPreviewSchema = { type: 'object', additionalProperties: false, required: ['schemaVersion', 'renderKind', 'presetId', 'presetHash', 'registryHash', 'text', 'format', 'background', 'css', 'previewHash'], properties: { schemaVersion: { const: 'subtitle-css-preview/v1' }, renderKind: { const: 'instant-css-preview' }, presetId: subtitlePresetIdSchema, presetHash: sha256Schema, registryHash: sha256Schema, text: { type: 'string', minLength: 1, maxLength: 280 }, format: subtitleMvpFormatSchema, background: { enum: ['light', 'dark'] }, css: { type: 'string', minLength: 1, maxLength: 10000 }, previewHash: sha256Schema } } as const
 const projectBriefSchemaV9 = {
@@ -5987,6 +6018,71 @@ const commandImpactSchema = {
     impactHash: sha256Schema,
   },
 }
+
+/** F1.037 — the closed union of overridable dimensions, at most one entry per kind. */
+const subtitleSegmentOverrideDimensionsSchemaV1 = {
+  type: 'array', minItems: 1, maxItems: 4,
+  items: {
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'anchor'],
+        properties: { kind: { const: 'position' }, anchor: { enum: [...SUBTITLE_SEGMENT_OVERRIDE_ANCHORS] } },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'presetId', 'presetVersion', 'presetHash'],
+        properties: {
+          kind: { const: 'style' }, presetId: { enum: Object.keys(SUBTITLE_PRESETS) },
+          presetVersion: { const: 1 }, presetHash: sha256Schema,
+        },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'text'],
+        properties: { kind: { const: 'text' }, text: { type: 'string', minLength: 1, maxLength: 200 } },
+      },
+      {
+        type: 'object', additionalProperties: false, required: ['kind', 'visible'],
+        properties: { kind: { const: 'visibility' }, visible: { type: 'boolean' } },
+      },
+    ],
+  },
+}
+
+const subtitleSegmentOverrideResolutionSchemaV1 = {
+  type: 'object', additionalProperties: false,
+  required: ['overrideId', 'overrideHash', 'variantId', 'segmentId', 'range', 'action', 'previousOverrideId', 'dimensions', 'inherited', 'protected', 'createdAt'],
+  properties: {
+    overrideId: idSchema, overrideHash: sha256Schema, variantId: idSchema, segmentId: idSchema,
+    range: {
+      type: 'object', additionalProperties: false, required: ['startFrame', 'endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    action: { enum: ['set', 'reset'] },
+    previousOverrideId: { anyOf: [{ type: 'null' }, idSchema] },
+    // A reset back to the inherited resolution publishes an empty list, never a
+    // deleted document: the exception is gone but the history is not.
+    dimensions: { ...subtitleSegmentOverrideDimensionsSchemaV1, minItems: 0 },
+    inherited: { type: 'boolean' },
+    protected: { type: 'boolean' },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+}
+
+/**
+ * The impact of a segment exception is a `command-impact/v1` document pinned to
+ * exactly one variant, one half-open range and one minimal render — the published
+ * schema says the same thing the domain parser enforces.
+ */
+const subtitleSegmentOverrideImpactSchemaV1 = {
+  ...commandImpactSchema,
+  properties: {
+    ...commandImpactSchema.properties,
+    commandType: { const: 'apply-subtitle-segment-override' },
+    affectedRanges: { ...commandImpactSchema.properties.affectedRanges, minItems: 1, maxItems: 1 },
+    affectedVariantIds: { ...commandImpactSchema.properties.affectedVariantIds, minItems: 1, maxItems: 1 },
+    minimalRenders: { ...commandImpactSchema.properties.minimalRenders, minItems: 1, maxItems: 1 },
+    renderSemanticsChanged: { const: true },
+  },
+}
 const reviewPatchCommandImpactSchema = {
   ...commandImpactSchema,
   properties: {
@@ -6913,6 +7009,45 @@ const searchableProjectSchema = {
     ownerId: idSchema,
   },
 }
+
+/**
+ * FR-175 — one persisted sidecar. Every field is either the immutable identity
+ * of the file or the lineage that proves which rendered alignment produced it.
+ */
+const subtitleSidecarSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'id', 'projectId', 'projectVersionId', 'variantId', 'outputKind', 'outputArtifactId',
+    'outputManifestId', 'outputSha256', 'format', 'locale', 'artifactId', 'manifestId',
+    'artifactRef', 'sha256', 'byteSize', 'encoding', 'cueCount', 'lineageHash',
+    'renderElementMapHash', 'renderInputHash', 'editPlanSnapshotId', 'createdAt',
+  ],
+  properties: {
+    id: idSchema,
+    projectId: idSchema,
+    projectVersionId: idSchema,
+    variantId: { type: 'string', minLength: 1, maxLength: 128 },
+    outputKind: { type: 'string', enum: ['proxy', 'final'] },
+    outputArtifactId: idSchema,
+    outputManifestId: idSchema,
+    outputSha256: sha256Schema,
+    format: { type: 'string', enum: ['srt', 'vtt'] },
+    locale: { type: 'string', minLength: 2, maxLength: 32 },
+    artifactId: idSchema,
+    manifestId: idSchema,
+    /** Opaque reference; the bytes are reached only through a download grant. */
+    artifactRef: { type: 'string', pattern: '^artifact:[A-Za-z0-9._-]{3,128}$' },
+    sha256: sha256Schema,
+    byteSize: { type: 'integer', minimum: 1 },
+    encoding: { const: 'utf-8-bom' },
+    cueCount: { type: 'integer', minimum: 1 },
+    lineageHash: sha256Schema,
+    renderElementMapHash: sha256Schema,
+    renderInputHash: sha256Schema,
+    editPlanSnapshotId: idSchema,
+    createdAt: dateTimeSchema,
+  },
+} as const
 
 const renderElementSchema = {
   type: 'object', additionalProperties: false,
@@ -13024,7 +13159,8 @@ const directorDecisionEntrySchema = {
 } as const
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
-  defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchema),
+  defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
+  defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
   defineSchema('subtitle-css-preview-request', 1, 'Instant subtitle CSS preview request', subtitleCssPreviewRequestSchema),
   defineSchema('subtitle-css-preview', 1, 'Content-addressed instant subtitle CSS preview', subtitleCssPreviewSchema),
   defineSchema('output-format-preset', 1, 'Versioned output format preset', outputFormatPresetSchema),
@@ -15374,6 +15510,57 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         chooserRequired: { type: 'boolean' },
         candidates: { type: 'array', maxItems: 32, items: renderElementSchema },
       },
+    }),
+  ),
+  defineSchema('export-subtitle-sidecar-request', 1, 'Subtitle sidecar export request',
+    {
+      type: 'object', additionalProperties: false, required: ['variantId', 'format'],
+      properties: {
+        variantId: { type: 'string', minLength: 1, maxLength: 128 },
+        format: { type: 'string', enum: ['srt', 'vtt'] },
+        locale: { type: 'string', minLength: 2, maxLength: 32 },
+        projectVersionId: { type: 'string', minLength: 3, maxLength: 128 },
+      },
+    },
+  ),
+  defineSchema('subtitle-sidecar-exported', 1, 'Subtitle sidecar derived from the rendered alignment',
+    successSchema({
+      type: 'object', additionalProperties: false,
+      required: ['sidecar', 'projectVersion', 'alignment', 'replayed'],
+      properties: {
+        sidecar: subtitleSidecarSchema,
+        projectVersion: {
+          type: 'object', additionalProperties: false, required: ['id', 'sequence', 'current'],
+          properties: {
+            id: idSchema,
+            sequence: { type: 'integer', minimum: 1 },
+            current: { type: 'boolean' },
+          },
+        },
+        alignment: {
+          type: 'object', additionalProperties: false,
+          required: [
+            'renderElementMapHash', 'renderInputHash', 'outputArtifactId', 'outputSha256',
+            'cueCount', 'firstCueStartMs', 'lastCueEndMs',
+          ],
+          properties: {
+            renderElementMapHash: sha256Schema,
+            renderInputHash: sha256Schema,
+            outputArtifactId: idSchema,
+            outputSha256: sha256Schema,
+            cueCount: { type: 'integer', minimum: 1 },
+            firstCueStartMs: { type: 'integer', minimum: 0 },
+            lastCueEndMs: { type: 'integer', minimum: 1 },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('subtitle-sidecar-list', 1, 'Subtitle sidecars already derived for a project',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['sidecars'],
+      properties: { sidecars: { type: 'array', maxItems: 100, items: subtitleSidecarSchema } },
     }),
   ),
   defineSchema('project-workspace', 1, 'Project editing workspace response',
@@ -21386,6 +21573,43 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
           },
         }],
       },
+    },
+  })),
+  defineSchema('subtitle-segment-override-apply-request', 1, 'Move position, style, text or visibility for ONE subtitle segment of ONE variant, or reset it to the previous level', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId', 'segmentId'], properties: {
+      baseVersionId: idSchema, baseHash: sha256Schema, variantId: idSchema, segmentId: idSchema,
+      action: { enum: ['set', 'reset'] },
+      dimensions: subtitleSegmentOverrideDimensionsSchemaV1,
+      protected: { type: 'boolean' },
+      reason: { type: 'string', minLength: 1, maxLength: 1000 },
+    },
+    // The frame range is never sent: it is read from the compiled segment, so a
+    // caller cannot claim frames the EditPlan does not give that segment.
+    oneOf: [
+      { properties: { action: { const: 'reset' }, dimensions: false, protected: false }, required: ['action'] },
+      { properties: { action: { const: 'set' } }, required: ['dimensions'] },
+    ],
+  }),
+  defineSchema('subtitle-segment-override-impact', 1, 'Segment-scoped subtitle override impact limited to one variant and one half-open range', subtitleSegmentOverrideImpactSchemaV1),
+  defineSchema('subtitle-segment-override-applied', 1, 'Applied content-addressed subtitle segment override and immutable result version', successSchema({
+    type: 'object', additionalProperties: false, required: ['command', 'version', 'subtitleOverride', 'resolution', 'impact', 'replayed'], properties: {
+      command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },
+      subtitleOverride: { type: 'object', additionalProperties: true },
+      resolution: subtitleSegmentOverrideResolutionSchemaV1, impact: subtitleSegmentOverrideImpactSchemaV1, replayed: { type: 'boolean' },
+    },
+  })),
+  defineSchema('subtitle-segment-override-response', 1, 'Current subtitle exceptions of one variant: the head list, or one segment head', successSchema({
+    type: 'object', additionalProperties: false, properties: {
+      result: {
+        anyOf: [{ type: 'null' }, {
+          type: 'object', additionalProperties: false, required: ['command', 'version', 'subtitleOverride', 'resolution', 'impact', 'replayed'], properties: {
+            command: { type: 'object', additionalProperties: true }, version: { type: 'object', additionalProperties: true },
+            subtitleOverride: { type: 'object', additionalProperties: true },
+            resolution: subtitleSegmentOverrideResolutionSchemaV1, impact: subtitleSegmentOverrideImpactSchemaV1, replayed: { type: 'boolean' },
+          },
+        }],
+      },
+      overrides: { type: 'array', maxItems: 1000, items: { type: 'object', additionalProperties: true } },
     },
   })),
   defineSchema('governance-usage-audit-page', 2, 'Redacted governance admission and reservation audit page', successSchema({

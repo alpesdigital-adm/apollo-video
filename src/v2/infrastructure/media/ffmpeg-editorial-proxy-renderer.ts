@@ -13,6 +13,7 @@ import { validateRenderPlacementPlan, type RenderPlacementPlanV1 } from '../../d
 import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
+import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../domain/subtitle-anchor-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
@@ -62,6 +63,13 @@ function buildAssSubtitles(input: {
   fps: number
   cues: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['subtitleCues']>
   ctaOverlays?: NonNullable<Parameters<EditorialProxyRenderer['render']>[0]['ctaOverlays']>
+  /**
+   * F1.036 decision. When present it wins over `cue.anchor`: the Director's anchor is only the
+   * face-safe fallback, while this plan is the one that actually consulted the perception
+   * evidence. Positions come from the decided band, not from a constant written here, so the
+   * pixels and the plan cannot disagree.
+   */
+  anchorPlan?: Readonly<SubtitleAnchorPlanV1> | null
 }): string {
   const fontSize = Math.max(
     32,
@@ -72,14 +80,23 @@ function buildAssSubtitles(input: {
   )
   const marginHorizontal = Math.round(input.width * 0.07)
   const marginVertical = Math.round(input.height * 0.075)
-  const events = input.cues.map((cue) => {
+  const events = input.cues.flatMap((cue) => {
+    const decision = input.anchorPlan ? subtitleAnchorDecisionFor(input.anchorPlan, cue.id) : null
+    // A cue with nowhere safe to go is not drawn. Covering a face is never the cheaper option.
+    if (decision?.suppressed) return []
+    if (decision?.bounds) {
+      // `\an5` centres the box on the point, so the point is the centre of the decided band.
+      const centreX = Math.round((decision.bounds.x + decision.bounds.width / 2) * input.width)
+      const centreY = Math.round((decision.bounds.y + decision.bounds.height / 2) * input.height)
+      return [`Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,{\\an5\\pos(${centreX},${centreY})}${wrapAssText(cue.text)}`]
+    }
     const anchor = cue.anchor ?? 'bottom'
     const override = anchor === 'bottom' ? ''
       : anchor === 'lower-third' ? `{\\an2\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.76)})}`
         : anchor === 'center' ? `{\\an5\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.5)})}`
           : anchor === 'upper-third' ? `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.3)})}`
             : `{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.08)})}`
-    return `Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${override}${wrapAssText(cue.text)}`
+    return [`Dialogue: 0,${assTimestamp(cue.startFrame, input.fps)},${assTimestamp(cue.endFrame, input.fps)},Default,,0,0,0,,${override}${wrapAssText(cue.text)}`]
   })
   const ctaEvents = (input.ctaOverlays ?? []).map((overlay) =>
     `Dialogue: 1,${assTimestamp(overlay.startFrame, input.fps)},${assTimestamp(overlay.endFrame, input.fps)},CTA,,0,0,0,,{\\an8\\pos(${Math.round(input.width / 2)},${Math.round(input.height * 0.1)})}${wrapAssText(overlay.text, 28)}`)
@@ -609,6 +626,21 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         placementPlan.canvas.width !== width || placementPlan.canvas.height !== height ||
         placementPlan.durationFrames !== fullExpectedFrames
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Placement plan does not describe this render canvas')
+      const anchorPlan = placementPlan.subtitleAnchorPlan
+      if (anchorPlan) {
+        // Fail closed: a decision that does not describe *these* cues would silently fall back to
+        // the Director anchor for the cues it forgot, which is exactly the silent face-covering
+        // this feature exists to prevent.
+        if (Math.abs(anchorPlan.fps - outputFps) > 0.01) {
+          throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan was decided at another frame rate')
+        }
+        for (const cue of input.subtitleCues ?? []) {
+          const decision = subtitleAnchorDecisionFor(anchorPlan, cue.id)
+          if (!decision || decision.startFrame !== cue.startFrame || decision.endFrame !== cue.endFrame) {
+            throw new DomainError('INVALID_RENDER_INPUT', 'Subtitle anchor plan does not cover every cue of this render')
+          }
+        }
+      }
       const drawable = placementPlan.placements.filter((placement) => placement.assetArtifactId !== null)
       if (drawable.length && rangeReuse) {
         throw new DomainError('INVALID_RENDER_INPUT', 'Drawable placements cannot be combined with partial range reuse')
@@ -730,6 +762,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
             fps: outputFps,
             cues: composition.subtitleCues ?? [],
             ctaOverlays: composition.ctaOverlays,
+            anchorPlan: input.placementPlan?.subtitleAnchorPlan ?? null,
           }),
           'utf8',
         )
@@ -877,6 +910,9 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       subtitleCues: input.subtitleCues,
       ctaOverlays: input.ctaOverlays,
       composition: input.composition,
+      // Same decision the ASS above drew with, so the map is a description of the pixels rather
+      // than a second opinion about them.
+      subtitleAnchorPlan: input.placementPlan?.subtitleAnchorPlan ?? null,
     })
     return Object.freeze({ outputPath, sha256, byteSize: metadata.size, probe, renderElementMap })
   }

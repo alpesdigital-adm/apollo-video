@@ -8,6 +8,14 @@ import {
   type PlacementIssue,
   type ProtectedPlacementRegion,
 } from './responsive-output.ts'
+import type { PerceptionTimeline } from './perception-timeline.ts'
+import {
+  createSubtitleAnchorPlan,
+  validateSubtitleAnchorPlan,
+  type SubtitleAnchorCueV1,
+  type SubtitleAnchorPlanV1,
+  type SubtitleAnchorPolicyV1,
+} from './subtitle-anchor-plan.ts'
 import { deriveSubtitleRegion, type SubtitleRegionV1 } from './subtitle-region.ts'
 import { SUBTITLE_STYLE_REGISTRY, type SubtitlePresetId } from './subtitle-system.ts'
 
@@ -42,6 +50,12 @@ export interface RenderPlacementPlanV1 {
   canvas: Readonly<{ width: number; height: number }>
   durationFrames: number
   subtitleRegion: Readonly<SubtitleRegionV1> | null
+  /**
+   * F1.036 / FR-173. Per-cue anchor decided from the perception timeline and from the cta/logo
+   * placements below — the only two trustworthy descriptions of what is on screen. `null` when the
+   * render carries no cues (or no subtitles at all), which is itself evidence.
+   */
+  subtitleAnchorPlan: Readonly<SubtitleAnchorPlanV1> | null
   placements: readonly Readonly<RenderPlacementV1>[]
   issues: readonly Readonly<PlacementIssue>[]
   placementPlanHash: string
@@ -98,6 +112,17 @@ export function createRenderPlacementPlan(input: Readonly<{
   subtitlePresetId?: SubtitlePresetId | null
   elements: readonly Readonly<RenderPlacementRequestV1>[]
   protectedRegions?: readonly Readonly<ProtectedPlacementRegion>[]
+  /**
+   * Cues to anchor by perception. The evidence is read here, inside the plan, from the
+   * content-addressed timeline and from the placements this same call solved — a caller cannot
+   * hand in a rectangle and move a subtitle onto a face by omitting the face.
+   */
+  subtitleAnchor?: Readonly<{
+    fps: number
+    cues: readonly Readonly<SubtitleAnchorCueV1>[]
+    perceptionTimeline?: Readonly<PerceptionTimeline>
+    policy?: Partial<SubtitleAnchorPolicyV1>
+  }>
 }>): Readonly<RenderPlacementPlanV1> {
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(input.format), 'INVALID_RENDER_INPUT', 'Placement plan format is not registered')
   const preset = readOutputFormatPreset(input.format)
@@ -157,6 +182,23 @@ export function createRenderPlacementPlan(input: Readonly<{
       timeRange: Object.freeze({ startFrame: 0, endFrame: input.durationFrames }),
     }))
   }
+  const orderedPlacements = Object.freeze(placements.toSorted((left, right) => left.zIndex - right.zIndex))
+  // Decided *after* the solver, so the evidence is the geometry this plan actually reserved for the
+  // CTA and the logo, not the geometry someone hoped for.
+  const subtitleAnchorPlan = subtitleRegion && input.subtitleAnchor && input.subtitleAnchor.cues.length
+    ? createSubtitleAnchorPlan({
+        spec: preset.spec,
+        format: input.format,
+        canvas: input.canvas,
+        fps: input.subtitleAnchor.fps,
+        durationFrames: input.durationFrames,
+        region: subtitleRegion,
+        cues: input.subtitleAnchor.cues,
+        ...(input.subtitleAnchor.perceptionTimeline ? { perceptionTimeline: input.subtitleAnchor.perceptionTimeline } : {}),
+        placements: orderedPlacements,
+        ...(input.subtitleAnchor.policy ? { policy: input.subtitleAnchor.policy } : {}),
+      })
+    : null
   const body = Object.freeze({
     schemaVersion: 'render-placement-plan/v1' as const,
     outputSpecId: preset.spec.id,
@@ -165,7 +207,8 @@ export function createRenderPlacementPlan(input: Readonly<{
     canvas: Object.freeze({ ...input.canvas }),
     durationFrames: input.durationFrames,
     subtitleRegion,
-    placements: Object.freeze(placements.toSorted((left, right) => left.zIndex - right.zIndex)),
+    subtitleAnchorPlan,
+    placements: orderedPlacements,
     issues: Object.freeze([...(solved?.issues ?? [])]),
   })
   const plan = Object.freeze({ ...body, placementPlanHash: calculateCanonicalHash(body) })
@@ -197,6 +240,13 @@ export function validateRenderPlacementPlan(plan: Readonly<RenderPlacementPlanV1
       calculateCanonicalHash(rederived) === calculateCanonicalHash(plan.subtitleRegion),
       'INVALID_RENDER_INPUT', 'Placement plan subtitle region was not derived from this output preset',
     )
+  }
+  if (plan.subtitleAnchorPlan) {
+    assertDomain(plan.subtitleRegion !== null, 'INVALID_RENDER_INPUT', 'A subtitle anchor plan requires the subtitle region it was decided against')
+    validateSubtitleAnchorPlan(plan.subtitleAnchorPlan, {
+      region: plan.subtitleRegion!, safeArea: preset.spec.safeArea, outputSpecId: plan.outputSpecId,
+      format: plan.format, canvas: plan.canvas, durationFrames: plan.durationFrames,
+    })
   }
   const seenIds = new Set<string>()
   const seenZ = new Set<number>()

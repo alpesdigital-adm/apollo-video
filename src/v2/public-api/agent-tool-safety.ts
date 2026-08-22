@@ -299,6 +299,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one variant-scoped EditCommand and immutable ProjectVersion that pins auto, workspace-default, manual or none by versioned preset reference; the transcript, its hash and every evidence record stay byte-identical and no render or provider work starts.',
     },
+    'apollo.projects.subtitle-segment-overrides.apply': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one segment-scoped EditCommand and immutable ProjectVersion that moves position, style, text or visibility for a single subtitle segment of a single variant; the range comes from the compiled segment, the transcript and every other variant stay byte-identical, and no render or provider work starts.',
+    },
     'apollo.projects.policy-overrides.set': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',
@@ -382,6 +386,10 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.annotations.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one version-bound review note without mutating the project or starting a provider job.',
+    },
+    'apollo.projects.subtitle-sidecars.export': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Derives one immutable SRT or VTT file from the cue alignment already persisted for a rendered artifact; it creates no project version, starts no render and replays onto the same artifact when repeated.',
     },
     'apollo.projects.review-patches.propose': {
       impact: 'bounded', confirmation: 'none',

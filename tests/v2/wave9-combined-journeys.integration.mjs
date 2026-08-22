@@ -33,7 +33,7 @@ import {
 } from '../../src/v2/domain/public-operation.ts'
 import { createRenderReframePlan } from '../../src/v2/domain/render-reframe-plan.ts'
 import { createSourceTranscriptArtifactInvalidations } from '../../src/v2/domain/source-transcript-replacement.ts'
-import { SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
+import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
 import { createEvidenceBoundBriefCompiler } from '../../src/v2/infrastructure/brief/evidence-bound-brief-compiler-model.ts'
 import { FfmpegEditorialProxyRenderer } from '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
 import {
@@ -462,7 +462,7 @@ function sequentialClock(start) {
 
 const subtitleResolutionFor = (presetId) => presetId === null
   ? Object.freeze({ presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
-  : Object.freeze({ presetId, presetHash: subtitlePresetHash(presetId), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true })
+  : Object.freeze({ presetId, presetHash: subtitlePresetHash(presetId), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true, presetSnapshot: materializeSubtitlePresetSnapshot(presetId) })
 
 // --------------------------------------------------------------------------
 // The render half: real enqueue service, real worker, real FFmpeg.
@@ -645,6 +645,9 @@ async function renderThroughRealWorker(input) {
         return renderer.cleanup(operationId)
       },
     },
+    // No perception persisted for these journeys: the F1.036 anchor then has nothing to consult and
+    // the cues keep the reserved bottom band.
+    perceptionTimelines: { async findLatest() { return null } },
     renderElementMaps: {
       async persistOrReplay(persist) {
         captured.elementMap = persist.map
@@ -772,7 +775,11 @@ class SubtitleConfigurationRepository {
 
 /** The subtitle resolution a repository derives from a persisted configuration. */
 const resolutionOf = (configuration) => Object.freeze(configuration.resolved.enabled
-  ? { presetId: configuration.resolved.presetId, presetHash: configuration.resolved.presetHash, registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true }
+  ? {
+      presetId: configuration.resolved.presetId, presetHash: configuration.resolved.presetHash,
+      registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: true,
+      presetSnapshot: materializeSubtitlePresetSnapshot(configuration.resolved.presetId),
+    }
   : { presetId: 'clean-color', presetHash: subtitlePresetHash('clean-color'), registryHash: SUBTITLE_STYLE_REGISTRY.registryHash, enabled: false })
 
 // ---------------------------------------------------------------------------
@@ -841,7 +848,7 @@ test('T-WAVE9-E 9:16 and 16:9 share one StoryPlan, own their geometry, and only 
 
     // --- Journey 3: the 9:16 blocker is localized ---------------------------
     const portraitIssues = portrait.review.criticIssues
-    console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange.startFrame, issue.evidenceRange.endFrame]))}`)
+    console.log(`journey 3 9:16 reason codes: ${JSON.stringify(portraitIssues.map((issue) => [issue.code, issue.severity, issue.evidenceRange?.startFrame ?? null, issue.evidenceRange?.endFrame ?? null]))}`)
     console.log(`journey 3 16:9 reason codes: ${JSON.stringify(landscape.review.criticIssues.map((issue) => [issue.code, issue.severity]))}`)
     const collision = portraitIssues.find((issue) => issue.code === 'SUBTITLE_SUBJECT_COLLISION')
     assert.ok(collision, 'the 9:16 subtitle band overlaps subject-lower and must raise a hard reason code')

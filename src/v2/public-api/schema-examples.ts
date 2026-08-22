@@ -5,6 +5,8 @@ import {
   createProjectSubtitleConfiguration,
   createProjectSubtitleConfigurationImpact,
 } from '../domain/project-subtitle-configuration.ts'
+import { createSubtitleSegmentOverrideCommandImpact } from '../domain/command-impact.ts'
+import { createSubtitleSegmentOverride } from '../domain/subtitle-segment-override.ts'
 import { subtitlePresetReference } from '../domain/subtitle-system.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import {
@@ -19,6 +21,7 @@ import { createDirectorToolCatalog } from '../domain/director-tools.ts'
 import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
 import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
+import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 /** Built by the real factory so the published example carries a real impact hash. */
@@ -33,6 +36,32 @@ const workspaceId = 'workspace-example-1'
 const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
+const projectVersionId = 'project-version-example-5'
+/** FR-175 — a sidecar exported from the alignment of the rendered proxy. */
+const subtitleSidecarExample = {
+  id: 'subtitle-sidecar-example-1',
+  projectId,
+  projectVersionId,
+  variantId: '9:16',
+  outputKind: 'proxy',
+  outputArtifactId: artifactId,
+  outputManifestId: 'manifest-example-1',
+  outputSha256: 'e'.repeat(64),
+  format: 'srt',
+  locale: 'pt-BR',
+  artifactId: 'artifact-subtitle-sidecar-example-1',
+  manifestId: 'manifest-subtitle-sidecar-example-1',
+  artifactRef: 'artifact:artifact-subtitle-sidecar-example-1',
+  sha256: 'a'.repeat(64),
+  byteSize: 142,
+  encoding: 'utf-8-bom',
+  cueCount: 2,
+  lineageHash: 'c'.repeat(64),
+  renderElementMapHash: 'f'.repeat(64),
+  renderInputHash: 'b'.repeat(64),
+  editPlanSnapshotId: 'snapshot-example-1',
+  createdAt,
+}
 const canonicalProjectBriefExample = {
   schemaVersion: 1,
   objective: 'discovery',
@@ -5203,6 +5232,83 @@ const projectSubtitleDisabledResultExample = {
 }
 
 /**
+ * F1.037 examples come out of the real factories too, so the published exception and
+ * its impact are documents the declared parsers accept — and the impact stays pinned
+ * to the single segment range instead of the whole timeline.
+ */
+const subtitleSegmentOverrideExample = createSubtitleSegmentOverride({
+  id: 'subtitle-segment-override-example-1',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-subtitle-3', resultVersionId: 'project-version-example-subtitle-4',
+  commandId: 'subtitle-segment-command-example-1',
+  variantId: '9:16', segmentId: 'subtitle-cue-example-hook',
+  range: { startFrame: 90, endFrame: 150 },
+  action: 'set',
+  dimensions: [
+    { kind: 'position', anchor: 'upper-third' },
+    { kind: 'text', text: 'O dono some do negócio em 90 dias.' },
+  ],
+  protected: true,
+  previousOverrideId: null,
+  createdAt,
+})
+const subtitleSegmentOverrideResetExample = createSubtitleSegmentOverride({
+  id: 'subtitle-segment-override-example-2',
+  workspaceId, projectId: 'project-example-1',
+  baseVersionId: 'project-version-example-subtitle-4', resultVersionId: 'project-version-example-subtitle-5',
+  commandId: 'subtitle-segment-command-example-2',
+  variantId: '9:16', segmentId: 'subtitle-cue-example-hook',
+  range: { startFrame: 90, endFrame: 150 },
+  action: 'reset',
+  dimensions: [],
+  protected: false,
+  previousOverrideId: subtitleSegmentOverrideExample.id,
+  createdAt,
+})
+const subtitleSegmentOverrideImpactExample = createSubtitleSegmentOverrideCommandImpact({
+  commandId: subtitleSegmentOverrideExample.commandId,
+  baseVersionId: subtitleSegmentOverrideExample.baseVersionId,
+  resultVersionId: subtitleSegmentOverrideExample.resultVersionId,
+  variantId: '9:16', segmentId: subtitleSegmentOverrideExample.segmentId,
+  range: subtitleSegmentOverrideExample.range,
+  dimensionKinds: ['position', 'text'],
+  durationFrames: 2380,
+  outputReferences: [{ artifactId: 'artifact-subtitle-segment-proxy-example-1', kind: 'proxy', sourceVersionId: subtitleSegmentOverrideExample.baseVersionId, variantId: '9:16' }],
+})
+const subtitleSegmentOverrideResetImpactExample = createSubtitleSegmentOverrideCommandImpact({
+  commandId: subtitleSegmentOverrideResetExample.commandId,
+  baseVersionId: subtitleSegmentOverrideResetExample.baseVersionId,
+  resultVersionId: subtitleSegmentOverrideResetExample.resultVersionId,
+  variantId: '9:16', segmentId: subtitleSegmentOverrideResetExample.segmentId,
+  range: subtitleSegmentOverrideResetExample.range,
+  dimensionKinds: [],
+  durationFrames: 2380,
+  outputReferences: [],
+})
+const subtitleSegmentResolutionOf = (value: typeof subtitleSegmentOverrideExample) => ({
+  overrideId: value.id, overrideHash: value.overrideHash, variantId: value.variantId, segmentId: value.segmentId,
+  range: value.range, action: value.action, previousOverrideId: value.previousOverrideId,
+  dimensions: value.dimensions, inherited: value.dimensions.length === 0,
+  protected: value.protected, createdAt: value.createdAt,
+})
+const subtitleSegmentOverrideResultExample = {
+  command: { id: subtitleSegmentOverrideExample.commandId, type: 'apply-subtitle-segment-override', baseVersionId: subtitleSegmentOverrideExample.baseVersionId, author: { type: 'api-client', id: clientId }, reason: 'Subir a legenda do gancho para não cobrir o rosto.', createdAt },
+  version: { id: subtitleSegmentOverrideExample.resultVersionId, sequence: 4, parentVersionId: subtitleSegmentOverrideExample.baseVersionId, baseHash: 'f'.repeat(64), current: true, previewAvailable: false, createdAt },
+  subtitleOverride: subtitleSegmentOverrideExample,
+  resolution: subtitleSegmentResolutionOf(subtitleSegmentOverrideExample),
+  impact: subtitleSegmentOverrideImpactExample,
+  replayed: false,
+}
+const subtitleSegmentOverrideResetResultExample = {
+  command: { id: subtitleSegmentOverrideResetExample.commandId, type: 'apply-subtitle-segment-override', baseVersionId: subtitleSegmentOverrideResetExample.baseVersionId, author: { type: 'api-client', id: clientId }, createdAt },
+  version: { id: subtitleSegmentOverrideResetExample.resultVersionId, sequence: 5, parentVersionId: subtitleSegmentOverrideResetExample.baseVersionId, baseHash: '9'.repeat(64), current: true, previewAvailable: false, createdAt },
+  subtitleOverride: subtitleSegmentOverrideResetExample,
+  resolution: subtitleSegmentResolutionOf(subtitleSegmentOverrideResetExample),
+  impact: subtitleSegmentOverrideResetImpactExample,
+  replayed: false,
+}
+
+/**
  * The retired v1 result shape, kept published for clients that pinned it. The runtime only ever
  * emits v2 — this literal documents the older contract without keeping a legacy code path.
  */
@@ -5228,7 +5334,8 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       subtitlePresetId: 'kinetic',
     }],
     'apollo://schemas/responsive-placement-result/v2': [{ data: RESPONSIVE_VISUAL_GOLDENS[0]!.placement, meta: { apiVersion: 'v1' } }],
-    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY],
+    'apollo://schemas/subtitle-style-registry/v1': [SUBTITLE_STYLE_REGISTRY_V1],
+    'apollo://schemas/subtitle-style-registry/v2': [SUBTITLE_STYLE_REGISTRY],
     'apollo://schemas/subtitle-css-preview-request/v1': [{ presetId: 'kinetic', text: 'Ação com clareza', format: '9:16', background: 'dark' }],
     'apollo://schemas/subtitle-css-preview/v1': [quickSubtitlePreview('kinetic', { text: 'Ação com clareza', format: '9:16', background: 'dark' })],
     'apollo://schemas/create-montage-alternatives-request/v1': [{ policyVersion: 'montage-alternatives-2026-08-v1', storyPlanRef: montageStoryPlanRefExample, seeds: [montageCandidateInputExample] }],
@@ -7075,6 +7182,31 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/export-subtitle-sidecar-request/v1': [
+      { variantId: '9:16', format: 'srt', locale: 'pt-BR' },
+    ],
+    'apollo://schemas/subtitle-sidecar-exported/v1': [
+      {
+        data: {
+          sidecar: subtitleSidecarExample,
+          projectVersion: { id: projectVersionId, sequence: 5, current: true },
+          alignment: {
+            renderElementMapHash: 'f'.repeat(64),
+            renderInputHash: 'b'.repeat(64),
+            outputArtifactId: artifactId,
+            outputSha256: 'e'.repeat(64),
+            cueCount: 2,
+            firstCueStartMs: 0,
+            lastCueEndMs: 2500,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/subtitle-sidecar-list/v1': [
+      { data: { sidecars: [subtitleSidecarExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-workspace/v1': [
       {
@@ -9882,6 +10014,32 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/project-subtitle-configuration-response/v1': [
       { data: { result: projectSubtitleConfigurationResultExample }, meta: { apiVersion: 'v1' } },
       { data: { result: null }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/subtitle-segment-override-impact/v1': [subtitleSegmentOverrideImpactExample, subtitleSegmentOverrideResetImpactExample],
+    'apollo://schemas/subtitle-segment-override-apply-request/v1': [
+      {
+        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: '9:16',
+        segmentId: 'subtitle-cue-example-hook',
+        dimensions: [{ kind: 'position', anchor: 'upper-third' }, { kind: 'text', text: 'O dono some do negócio em 90 dias.' }],
+        protected: true, reason: 'Subir a legenda do gancho para não cobrir o rosto.',
+      },
+      {
+        baseVersionId: 'project-version-example-subtitle-3', baseHash: 'e'.repeat(64), variantId: '9:16',
+        segmentId: 'subtitle-cue-example-cta', action: 'set', dimensions: [{ kind: 'visibility', visible: false }],
+      },
+      {
+        baseVersionId: 'project-version-example-subtitle-4', baseHash: 'f'.repeat(64), variantId: '9:16',
+        segmentId: 'subtitle-cue-example-hook', action: 'reset',
+      },
+    ],
+    'apollo://schemas/subtitle-segment-override-applied/v1': [
+      { data: subtitleSegmentOverrideResultExample, meta: { apiVersion: 'v1' } },
+      { data: subtitleSegmentOverrideResetResultExample, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/subtitle-segment-override-response/v1': [
+      { data: { result: subtitleSegmentOverrideResultExample }, meta: { apiVersion: 'v1' } },
+      { data: { result: null }, meta: { apiVersion: 'v1' } },
+      { data: { overrides: [subtitleSegmentOverrideExample] }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/project-edit-command-applied/v3': [
       {

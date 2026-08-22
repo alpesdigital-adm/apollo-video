@@ -2,7 +2,7 @@ import type { EditorialCutEditPlan } from '../apply-editorial-cut-command.ts'
 import type { DirectedEditPlan } from '../../domain/director-run.ts'
 import type { FormatSubjectEvidenceV1 } from '../../domain/format-quality-critic.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
-import type { SubtitlePresetId } from '../../domain/subtitle-system.ts'
+import type { SubtitlePresetId, SubtitlePresetSnapshot } from '../../domain/subtitle-system.ts'
 import type { ProxyQualityIssue } from '../render-workflow.ts'
 
 /**
@@ -71,9 +71,11 @@ export interface ProjectProxyRenderSource {
   /**
    * Persisted subtitle resolution for this variant, when the project has one. It carries the
    * F1.033 `registryHash`, so the worker can bind the subtitle geometry of the placement plan to
-   * the preset the Command actually recorded instead of guessing a default.
+   * the preset the Command actually recorded instead of guessing a default. When enabled it also
+   * carries the content-addressed `presetSnapshot` (FR-172): the tokens themselves, so a render
+   * recorded before a registry revision reproduces with the style it was recorded with.
    */
-  subtitleResolution?: Readonly<{ presetId: SubtitlePresetId; presetHash: string; registryHash: string; enabled: boolean }>
+  subtitleResolution?: Readonly<{ presetId: SubtitlePresetId; presetHash: string; registryHash: string; enabled: boolean; presetSnapshot?: Readonly<SubtitlePresetSnapshot> }>
   /**
    * Crop trajectory materialized upstream. The worker never invents one: it forwards what was
    * persisted and fails closed when it does not describe this render.
