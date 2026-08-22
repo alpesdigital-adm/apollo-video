@@ -46,6 +46,34 @@ test('independent Postgres client exposes only v2 model delegates', async () => 
   }
 })
 
+test('color pipeline binding migration backfills historical render operations', async () => {
+  const sql = await readFile(
+    new URL(
+      '../../prisma/v2/migrations/20260731080000_render_color_pipeline_bindings/migration.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  for (const table of [
+    'project_proxy_render_operations',
+    'project_final_export_operations',
+  ]) {
+    assert.match(
+      sql,
+      new RegExp(
+        `ALTER TABLE "${table}"\\s+ADD COLUMN "colorPipelineBindingsJson" TEXT NOT NULL DEFAULT '\\[\\]'`,
+      ),
+    )
+    assert.match(
+      sql,
+      new RegExp(
+        `ALTER TABLE "${table}"\\s+ALTER COLUMN "colorPipelineBindingsJson" DROP DEFAULT`,
+      ),
+    )
+  }
+})
+
 test('latest PostgreSQL operation constraints cover every V2 operation type and phase', async () => {
   const migrationsUrl = new URL(
     '../../prisma/v2/migrations/',
