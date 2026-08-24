@@ -594,7 +594,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     assert.equal(observedRenderInput.colorPlan.plan.planHash, appliedColorPlan.colorPlan.plan.planHash)
     assert.equal(observedRenderInput.colorPlan.compiled.manifestHash, appliedColorPlan.colorPlan.compiled.manifestHash)
     assert.match(outputManifestDocument.recipe.parametersHash, /^[a-f0-9]{64}$/)
-    assert.equal(outputManifestDocument.recipe.parametersRef, outputManifest.recipeParametersRef)
+    assert.equal(outputManifestDocument.recipe.parametersRef ?? null, outputManifest.recipeParametersRef)
     const { stdout: sampledPixel } = await execFileAsync(ffmpegPath, [
       '-hide_banner', '-loglevel', 'error', '-ss', '2', '-i', outputPath,
       '-frames:v', '1', '-vf', 'scale=1:1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1',
