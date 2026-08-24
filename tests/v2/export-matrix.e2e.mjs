@@ -75,8 +75,10 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
+  const { projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
+  const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
 
   const client = new PrismaClient()
@@ -365,6 +367,51 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     const retryOperation = retryOutcome
       ? await client.v2PublicOperation.findUnique({ where: { id: retryOutcome.operationId } })
       : null
+    const retryDetail = retryOutcome
+      ? await client.v2ProjectFinalExportOperation.findUnique({ where: { operationId: retryOutcome.operationId } })
+      : null
+    const retrySource = retryDetail
+      ? await new PrismaProjectFinalExportRepository(client).readImmutableApprovedSource({
+        workspaceId: retryDetail.workspaceId,
+        projectId: retryDetail.projectId,
+        projectVersionId: retryDetail.projectVersionId,
+        projectVersionHash: retryDetail.projectVersionHash,
+        editPlanSnapshotId: retryDetail.editPlanSnapshotId,
+        directorRunId: retryDetail.directorRunId,
+        qualitySnapshotId: retryDetail.qualitySnapshotId,
+        qualitySnapshotHash: retryDetail.qualitySnapshotHash,
+        proxyReviewId: retryDetail.proxyReviewId,
+        proxyReviewHash: retryDetail.proxyReviewHash,
+        proxyArtifactId: retryDetail.proxyArtifactId,
+        sourceArtifactId: retryDetail.sourceArtifactId,
+        sourceManifestId: retryDetail.sourceManifestId,
+      })
+      : null
+    const retryBindings = retryDetail ? JSON.parse(retryDetail.colorPipelineBindingsJson) : []
+    const retryOutputSpec = retryDetail ? {
+      aspectRatio: retryDetail.outputAspectRatio,
+      width: retryDetail.outputWidth,
+      height: retryDetail.outputHeight,
+      fps: retryDetail.outputFps,
+      codec: retryDetail.outputCodec,
+      audioCodec: retryDetail.outputAudioCodec,
+      container: retryDetail.outputContainer,
+      quality: retryDetail.outputQuality,
+    } : null
+    const recomputedInputHash = retryDetail && retrySource && retryOutputSpec
+      ? calculateVersionHash({
+        kind: 'project-final-export/v1', projectId: retryDetail.projectId,
+        projectVersionId: retryDetail.projectVersionId, projectVersionHash: retryDetail.projectVersionHash,
+        editPlanSnapshotId: retrySource.editPlanSnapshotId, editPlanHash: retrySource.editPlanHash,
+        directorRunId: retrySource.directorRunId, qualitySnapshotId: retrySource.qualitySnapshotId,
+        qualitySnapshotHash: retrySource.qualitySnapshotHash, proxyReviewId: retrySource.proxyReviewId,
+        proxyReviewHash: retrySource.proxyReviewHash, proxyArtifactId: retrySource.proxyArtifactId,
+        sourceArtifactId: retrySource.sourceArtifactId, sourceManifestId: retrySource.sourceManifestId,
+        sourceSha256: retrySource.sourceSha256,
+        renderSourcesFingerprint: projectRenderSourcesFingerprint(retrySource.renderSources),
+        colorPipelineBindings: retryBindings, outputSpec: retryOutputSpec,
+      })
+      : null
     assert.equal(retryOutcome?.status, 'retrying', stableSerialize({
       outcome: retryOutcome,
       errorCode: retryOperation?.errorCode,
@@ -372,6 +419,17 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
       errorRetryable: retryOperation?.errorRetryable,
       attempt: retryOperation?.attempt,
       maxAttempts: retryOperation?.maxAttempts,
+      workerChecks: {
+        sourceFound: Boolean(retrySource),
+        inputHashMatches: recomputedInputHash === retryDetail?.inputHash,
+        sourceFormat: retrySource?.format,
+        outputFormat: retryOutputSpec?.aspectRatio,
+        movementPolicy: retrySource?.editPlan.movementPolicy,
+        clipCount: retrySource?.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips.length,
+        bindingCount: retryBindings.length,
+        renderSourceIds: retrySource?.renderSources.map((source) => source.artifactId),
+        bindingSourceIds: retryBindings.map((binding) => binding.sourceArtifactId),
+      },
     }))
     const retryResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const retrying = await retryResponse.json()
