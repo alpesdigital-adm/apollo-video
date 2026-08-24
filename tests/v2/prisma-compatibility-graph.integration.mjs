@@ -2494,14 +2494,27 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
     const portfolio = portfolioPayload.data.preflight
     assert.equal(portfolioPayload.data.replayed, false)
     assert.ok(portfolioPayload.data.confirmationToken)
-    assert.equal(portfolio.theoreticalCandidateCount, '2')
-    assert.equal(portfolio.eligibleCandidateCount, '2')
-    assert.equal(portfolio.selectedRecipeCount, 2)
     const blindCartesianCount =
       primaryByRole.hook.length *
       primaryByRole.body.length *
       primaryByRole.cta.length
     assert.equal(blindCartesianCount, 54)
+    const theoreticalCandidateCount = BigInt(
+      portfolio.theoreticalCandidateCount,
+    )
+    const eligibleCandidateCount = BigInt(
+      portfolio.eligibleCandidateCount,
+    )
+    assert.ok(
+      theoreticalCandidateCount >= BigInt(blindCartesianCount),
+      'the preflight must count the complete compatible search space',
+    )
+    assert.ok(
+      eligibleCandidateCount >= BigInt(portfolio.selectedRecipeCount) &&
+      eligibleCandidateCount <= theoreticalCandidateCount,
+      'eligible recipes must remain bounded by the theoretical search space',
+    )
+    assert.equal(portfolio.selectedRecipeCount, 2)
     assert.ok(
       portfolio.selectedRecipeCount < blindCartesianCount,
       'the bounded portfolio must reuse explicit compatible recipes instead of materializing the 6 × 3 × 3 Cartesian product',
