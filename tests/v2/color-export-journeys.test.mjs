@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
 import { compileColorPlanTargets, createColorPlan, createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
+import { createProjectColorPlan, parseProjectColorPlan } from '../../src/v2/domain/project-color-plan.ts';
+import { createProjectColorPlanImpact, createProjectColorPlanInvalidations, parseProjectColorPlanImpact } from '../../src/v2/domain/project-color-plan-impact.ts';
+import { createProjectVersion } from '../../src/v2/domain/project-version.ts';
+import { setProjectColorPlanService } from '../../src/v2/application/project-color-plans.ts';
 
 const sourceColor = {
   colorSpace: 'camera-log',
@@ -189,6 +193,181 @@ test('T-FR-182 compiles a content-addressed target manifest without leaking sibl
     () => compileColorPlanTargets({ plan, targets: [targets[0], targets[0]] }),
     /targets must be unique/,
   );
+});
+
+test('T-FR-182 requires each differently encoded source to enter through its own technical transform', () => {
+  const log2 = {
+    colorSpace: 'camera-log2', transfer: 'log2', primaries: 'bt2020',
+    matrix: 'bt2020-ncl', range: 'limited', bitDepth: 12,
+  };
+  const plan = basePlan();
+  plan.sourceMetadata = { 'source-b': log2 };
+  plan.sources = {
+    'source-b': [
+      transform('technical-log2-to-working', 'technical', log2, workingColor),
+      transform('match-source-b', 'match', workingColor, workingColor),
+    ],
+  };
+  const sourceA = resolveColorPlan(plan, { sourceId: 'source-a' });
+  const sourceB = resolveColorPlan(plan, { sourceId: 'source-b' });
+  assert.equal(sourceA.sourceMetadata.transfer, 'log');
+  assert.equal(sourceB.sourceMetadata.transfer, 'log2');
+  assert.equal(sourceB.stages[0].id, 'technical-log2-to-working');
+
+  const missingTechnical = structuredClone(plan);
+  missingTechnical.sources['source-b'] = [transform('match-source-b', 'match', workingColor, workingColor)];
+  assert.throws(
+    () => resolveColorPlan(missingTechnical, { sourceId: 'source-b' }),
+    /technical input does not match prior output/,
+  );
+});
+
+test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation to one versioned command', () => {
+  const colorPlan = createProjectColorPlan({
+    id: 'project-color-plan-1',
+    workspaceId: 'workspace-color',
+    projectId: 'project-color',
+    commandId: 'command-color-plan-1',
+    baseVersionId: 'project-version-color-1',
+    resultVersionId: 'project-version-color-2',
+    plan: basePlan(),
+    targets: [
+      { sourceId: 'source-a', segmentId: 'segment-a' },
+      { sourceId: 'source-b', cameraId: 'camera-b', segmentId: 'segment-b' },
+    ],
+    createdAt: '2026-08-24T12:00:00.000Z',
+  });
+  assert.equal(parseProjectColorPlan(JSON.parse(JSON.stringify(colorPlan))).recordHash, colorPlan.recordHash);
+  const impact = createProjectColorPlanImpact({
+    commandId: colorPlan.commandId,
+    baseVersionId: colorPlan.baseVersionId,
+    resultVersionId: colorPlan.resultVersionId,
+    colorPlanId: colorPlan.id,
+    colorPlanHash: colorPlan.plan.planHash,
+    compiledManifestHash: colorPlan.compiled.manifestHash,
+    durationFrames: 300,
+    proxyVariantId: '9:16',
+    outputReferences: [
+      { artifactId: 'artifact-proxy-color-1', kind: 'proxy', sourceVersionId: colorPlan.baseVersionId, variantId: '9:16' },
+      { artifactId: 'artifact-final-color-1', kind: 'final', sourceVersionId: colorPlan.baseVersionId, variantId: '16:9' },
+    ],
+  });
+  assert.equal(parseProjectColorPlanImpact(JSON.parse(JSON.stringify(impact))).impactHash, impact.impactHash);
+  assert.deepEqual(impact.affectedRanges, [{ startFrame: 0, endFrame: 300 }]);
+  assert.deepEqual(impact.affectedVariantIds, ['16:9', '9:16']);
+  assert.equal(createProjectColorPlanInvalidations({ impact, createdAt: colorPlan.createdAt }).length, 2);
+
+  const tampered = JSON.parse(JSON.stringify(colorPlan));
+  tampered.compiled.targets[0].pipelineHash = '0'.repeat(64);
+  assert.throws(() => parseProjectColorPlan(tampered), /inconsistent/);
+});
+
+test('T-FR-182 applies ColorPlan through the shared Command and immutable ProjectVersion model', async () => {
+  const currentVersion = createProjectVersion({
+    id: 'project-version-color-service-1',
+    workspaceId: 'workspace-color-service',
+    projectId: 'project-color-service',
+    sequence: 1,
+    snapshotRefs: {
+      brief: 'snapshot-brief-color-service',
+      editPlan: 'snapshot-edit-color-service',
+      policies: 'snapshot-policy-color-service',
+    },
+    baseHash: '1'.repeat(64),
+    createdBy: 'system-color-service',
+    createdAt: '2026-08-24T11:00:00.000Z',
+  });
+  const outputs = [{
+    artifactId: 'artifact-color-service-proxy',
+    kind: 'proxy',
+    sourceVersionId: currentVersion.id,
+    variantId: '9:16',
+  }];
+  let stored = null;
+  const repository = {
+    async findIdempotent() {
+      return stored ? { requestFingerprint: stored.requestFingerprint, result: stored.result } : null;
+    },
+    async readContext() {
+      return {
+        currentVersion,
+        targets: [
+          { sourceId: 'source-a', segmentId: 'clip-a' },
+          { sourceId: 'source-b', cameraId: 'camera-b', segmentId: 'clip-b' },
+        ],
+        trustedSourceMetadata: {
+          'source-a': sourceColor,
+          'source-b': sourceColor,
+        },
+        currentDurationFrames: 180,
+        proxyVariantId: '9:16',
+        outputReferences: outputs,
+      };
+    },
+    async commitOrReplay(commit) {
+      const result = Object.freeze({
+        command: commit.command,
+        version: commit.version,
+        colorPlan: commit.colorPlan,
+        impact: commit.command.payload.impact,
+        invalidations: createProjectColorPlanInvalidations({ impact: commit.command.payload.impact, createdAt: commit.command.createdAt }),
+        replayed: false,
+      });
+      stored = { requestFingerprint: commit.requestFingerprint, result };
+      return result;
+    },
+  };
+  const ids = {
+    command: 'command-color-service-1',
+    version: 'project-version-color-service-2',
+    'color-plan': 'project-color-plan-service-1',
+  };
+  const service = setProjectColorPlanService({
+    repository,
+    createId: (kind) => ids[kind],
+    createEventId: () => '20000000-0000-4000-8000-000000000001',
+    clock: () => new Date('2026-08-24T12:00:00.000Z'),
+  });
+  const plan = basePlan();
+  plan.sourceMetadata = { 'source-a': sourceColor, 'source-b': sourceColor };
+  plan.sources = {
+    'source-b': [transform('source-b-match', 'match', workingColor, workingColor)],
+  };
+  plan.cameras = {
+    'camera-b': [transform('camera-b-match', 'match', workingColor, workingColor)],
+  };
+  plan.segments = {
+    'clip-b': [transform('clip-b-look', 'creative-lut', workingColor, workingColor, {
+      lut: { artifactId: 'lut-clip-b', sha256: '7'.repeat(64) },
+    })],
+  };
+  const request = {
+    workspaceId: currentVersion.workspaceId,
+    projectId: currentVersion.projectId,
+    baseVersionId: currentVersion.id,
+    baseHash: currentVersion.baseHash,
+    plan,
+    actor: { type: 'system', id: 'system-color-service' },
+    idempotencyKey: 'color-plan-service-001',
+  };
+  const applied = await service(request);
+  assert.equal(applied.command.type, 'set-project-color-plan');
+  assert.equal(applied.version.parentVersionId, currentVersion.id);
+  assert.equal(applied.colorPlan.compiled.targets.length, 2);
+  assert.deepEqual(applied.impact.affectedRanges, [{ startFrame: 0, endFrame: 180 }]);
+  assert.equal(applied.invalidations.length, 1);
+  assert.equal(applied.replayed, false);
+  assert.equal((await service(request)).colorPlan.recordHash, applied.colorPlan.recordHash);
+
+  const unknownTarget = structuredClone(request);
+  unknownTarget.idempotencyKey = 'color-plan-service-002';
+  unknownTarget.plan.segments = {
+    missing: [transform('missing-look', 'creative-lut', workingColor, workingColor, {
+      lut: { artifactId: 'lut-missing', sha256: '8'.repeat(64) },
+    })],
+  };
+  stored = null;
+  await assert.rejects(() => service(unknownTarget), /outside the current EditPlan/);
 });
 
 test('T-FR-180 rejects duplicate stages, broken color chains and LUT reuse outside its stage', () => {

@@ -46,6 +46,7 @@ export type ColorPlan = {
   metadata: ColorMetadata
   outputMetadata: ColorMetadata
   global: readonly Readonly<ColorTransform>[]
+  sourceMetadata?: Readonly<Record<string, Readonly<ColorMetadata>>>
   sources?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
   cameras?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
   segments?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
@@ -56,6 +57,7 @@ export type CanonicalColorPlan = Readonly<{
   metadata: Readonly<ColorMetadata>
   outputMetadata: Readonly<ColorMetadata>
   global: readonly Readonly<ColorTransform>[]
+  sourceMetadata: Readonly<Record<string, Readonly<ColorMetadata>>>
   sources: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
   cameras: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
   segments: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
@@ -420,6 +422,33 @@ function normalizeLayerMap(
   return Object.freeze(Object.fromEntries(normalized))
 }
 
+function normalizeSourceMetadataMap(
+  value: Readonly<Record<string, Readonly<ColorMetadata>>> | undefined,
+): Readonly<Record<string, Readonly<ColorMetadata>>> {
+  if (value === undefined) return Object.freeze({})
+  assertDomain(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    'INVALID_ARGUMENT',
+    'sourceMetadata must be an object',
+  )
+  const entries = Object.entries(value)
+  assertDomain(
+    entries.length <= 128,
+    'INVALID_ARGUMENT',
+    'sourceMetadata exceeds the maximum number of sources',
+  )
+  const normalized = entries.map(([rawKey, metadata]) => {
+    const key = normalizedToken(rawKey, 'sourceMetadata key')
+    return [key, normalizedMetadata(metadata, `sourceMetadata.${key}`)] as const
+  }).sort(([left], [right]) => left.localeCompare(right))
+  assertDomain(
+    new Set(normalized.map(([key]) => key)).size === normalized.length,
+    'INVALID_ARGUMENT',
+    'sourceMetadata keys must be unique after normalization',
+  )
+  return Object.freeze(Object.fromEntries(normalized))
+}
+
 export function createColorPlan(
   plan: Readonly<ColorPlan>,
 ): Readonly<CanonicalColorPlan> {
@@ -433,6 +462,7 @@ export function createColorPlan(
     metadata: normalizedMetadata(plan.metadata, 'metadata'),
     outputMetadata: normalizedMetadata(plan.outputMetadata, 'outputMetadata'),
     global: Object.freeze(normalizeLayer(plan.global, 'global')),
+    sourceMetadata: normalizeSourceMetadataMap(plan.sourceMetadata),
     sources: normalizeLayerMap(plan.sources, 'sources'),
     cameras: normalizeLayerMap(plan.cameras, 'cameras'),
     segments: normalizeLayerMap(plan.segments, 'segments'),
@@ -458,8 +488,6 @@ export function resolveColorPlan(
   }>,
 ) {
   const canonical = createColorPlan(plan)
-  const sourceMetadata = canonical.metadata
-  const outputMetadata = canonical.outputMetadata
   const sourceId = ref.sourceId
     ? normalizedToken(ref.sourceId, 'sourceId')
     : undefined
@@ -469,6 +497,10 @@ export function resolveColorPlan(
   const segmentId = ref.segmentId
     ? normalizedToken(ref.segmentId, 'segmentId')
     : undefined
+  const sourceMetadata = sourceId
+    ? canonical.sourceMetadata[sourceId] ?? canonical.metadata
+    : canonical.metadata
+  const outputMetadata = canonical.outputMetadata
   const layers = [
     canonical.global,
     ...(sourceId

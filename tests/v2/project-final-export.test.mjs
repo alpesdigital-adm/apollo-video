@@ -312,6 +312,7 @@ function workerDependencies(
       async catalogOutput(input) { calls.cataloged += 1; assert.equal(input.artifactId, persistedIdentity.artifactId) },
       operations: operations.repository,
       colorPipelines,
+      colorPlans: { async readEffectiveForVersion() { return null } },
       luts: {
         async materialize() { return { selectionId: 'selection-final-export', selectionHash: '8'.repeat(64), lutPaths: {} } },
         async cleanup() { calls.lutCleaned += 1 },

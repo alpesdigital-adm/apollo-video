@@ -22,6 +22,7 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
+import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { evaluateRenderedProxy } from './render-workflow.ts'
@@ -51,6 +52,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   perceptionTimelines: PerceptionTimelineRepository
   proxyReviews: ProxyReviewRepository
   colorPipelines: ColorPipelineCompilationRepository
+  colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
   clock?: () => Date
@@ -135,6 +137,11 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        projectVersionId: context.projectVersionId,
+      })
       const colorPipelines = await loadBoundRenderColorPipelines({
         repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
         projectId: context.projectId, bindings: context.colorPipelineBindings,
@@ -254,6 +261,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         lutPaths: materializedLut.lutPaths,
+        ...(colorPlan ? { colorPlan } : {}),
         clips, audioTimelineHash, fps: source.editPlan.fps, format: source.format, subtitleCues,
         ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions, ...(composition ? { composition } : {}),
@@ -287,7 +295,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, colorPlanHash: colorPlan?.plan.planHash ?? null, compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,

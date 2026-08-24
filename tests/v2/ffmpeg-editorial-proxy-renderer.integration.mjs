@@ -11,6 +11,7 @@ import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createManualCommandImpact, createReviewPatchCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import { createMediaColorProbe } from '../../src/v2/domain/color-and-export.ts'
+import { createProjectColorPlan } from '../../src/v2/domain/project-color-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../src/v2/domain/production-modes.ts'
 import { createDesiredAction, createDesiredActionReference } from '../../src/v2/domain/desired-action.ts'
 import { materializeManualEditPlan } from '../../src/v2/domain/manual-editing.ts'
@@ -163,6 +164,62 @@ function colorCompilation(artifactId) {
     ],
   })
 }
+
+test('T-FR-182 renderer applies a segment ColorPlan only to its exact compiled target', { timeout: 180_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-color-plan-render-'))
+  const sourcePath = join(root, 'source.mp4')
+  try {
+    execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=30:d=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=2',
+      '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', sourcePath,
+    ], { windowsHide: true })
+    const artifactId = 'artifact-color-plan-source'
+    const compilation = colorCompilation(artifactId)
+    const clips = [
+      { id: 'clip-color-control', sourceArtifactId: artifactId, sourceInFrame: 0, sourceOutFrame: 30, timelineInFrame: 0, timelineOutFrame: 30, rate: 1 },
+      { id: 'clip-color-local', sourceArtifactId: artifactId, sourceInFrame: 30, sourceOutFrame: 60, timelineInFrame: 30, timelineOutFrame: 60, rate: 1 },
+    ]
+    const localParameters = Object.freeze({ mode: 'adjust', brightness: 0, contrast: 1, saturation: 0 })
+    const colorPlan = createProjectColorPlan({
+      id: 'color-plan-render-golden', workspaceId: 'workspace-render-golden',
+      projectId: 'project-render-golden', commandId: 'command-color-plan-render',
+      baseVersionId: 'version-color-plan-base', resultVersionId: 'version-color-plan-result',
+      createdAt: '2026-08-24T16:00:00.000Z',
+      plan: {
+        schemaVersion: 'color-plan/v1', metadata: colorMetadata, outputMetadata: colorMetadata,
+        sourceMetadata: { [artifactId]: colorMetadata }, global: compilation.pipeline.stages,
+        segments: {
+          'clip-color-local': [{
+            id: 'match-local-monochrome', kind: 'match', version: 'v1', enabled: true,
+            input: colorMetadata, output: colorMetadata,
+            implementation: { provider: 'apollo-match', version: 'v1', parameters: localParameters, parametersHash: calculateCanonicalHash(localParameters) },
+          }],
+        },
+      },
+      targets: clips.map((clip) => ({ sourceId: artifactId, segmentId: clip.id })),
+    })
+    const renderer = new FfmpegEditorialProxyRenderer({ workRoot: join(root, 'work'), ffmpegPath })
+    const result = await renderer.render({
+      operationId: 'color-plan-target-render', renderKind: 'proxy',
+      sources: [{ artifactId, path: sourcePath, mediaType: 'video', colorPipelineCompilation: compilation }],
+      colorPlan, lutPaths: {}, clips, fps: 30, format: '16:9',
+    })
+    const pixelAt = (second) => execFileSync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', result.outputPath,
+      '-frames:v', '1', '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+    ], { windowsHide: true })
+    const control = pixelAt(0.5)
+    const local = pixelAt(1.5)
+    assert.ok(control[0] > control[1] * 2 + 20, `control sibling must remain red: ${[...control]}`)
+    assert.ok(Math.max(...local) - Math.min(...local) < 12, `local override must be monochrome: ${[...local]}`)
+    assert.ok(Math.abs(local[0] - control[0]) > 30, 'local pixels must differ materially from the sibling')
+    await renderer.cleanup('color-plan-target-render')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 test('T-FR-011 renderer materializes the canonical visual CTA and maps its exact frames', async () => {
   const root = await mkdtemp(join(tmpdir(), 'apollo-desired-action-render-'))

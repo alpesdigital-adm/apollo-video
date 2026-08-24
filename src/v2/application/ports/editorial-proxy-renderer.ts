@@ -4,6 +4,7 @@ import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 import type { RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
 import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
+import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
 
 /**
  * 1.7.0 adds the materialized geometry sections (`placementPlan`, `reframePlan`) to the render
@@ -16,9 +17,9 @@ import type { RenderReframePlanV1 } from '../../domain/render-reframe-plan.ts'
  * pixels. That is a new recipe, not a variation of 1.7.0: proxies are addressed by recipe version,
  * and reusing a 1.7.0 proxy for an anchored render would show subtitles in the wrong place.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.8.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.8.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.3.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.9.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.9.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.4.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {
@@ -46,6 +47,8 @@ export interface EditorialProxyRenderer {
       colorPipelineCompilation?: Readonly<ColorPipelineCompilation>
     }>[]
     lutPaths: Readonly<Record<string, string>>
+    /** Version-effective, content-addressed ColorPlan. When present every clip must bind exactly one compiled target. */
+    colorPlan?: Readonly<ProjectColorPlan>
     clips: readonly Readonly<EditorialCutClip>[]
     /** Canonical frame-first audio identity. Workers must provide it; direct
      * adapter diagnostics may omit it and let the adapter derive the same hash. */

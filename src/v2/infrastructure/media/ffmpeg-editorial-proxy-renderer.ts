@@ -12,6 +12,8 @@ import { OUTPUT_FORMAT_REGISTRY } from '../../domain/output-format-registry.ts'
 import { validateRenderPlacementPlan, type RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
 import { validateRenderReframePlan, type RenderReframeRangeV1 } from '../../domain/render-reframe-plan.ts'
 import { createEditorialAudioTimelineHash } from '../../domain/production-modes.ts'
+import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
+import { parseProjectColorPlan } from '../../domain/project-color-plan.ts'
 import { buildRenderElementMap } from '../../domain/review-system.ts'
 import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../domain/subtitle-anchor-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
@@ -499,24 +501,64 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     if (input.placementPlan) validateRenderPlacementPlan(input.placementPlan)
     const directory = this.directory(input.operationId)
     await mkdir(directory, { recursive: true })
-    const renderSources = await Promise.all(input.sources.map(async (source, index) => {
-      if (source.mediaType !== 'video') return source
-      const outputPath = join(directory, `color-source-${String(index).padStart(3, '0')}.mp4`)
-      await rm(outputPath, { force: true })
-      await this.colorProcessor.process({
-        sourcePath: source.path,
-        outputPath,
-        compilation: source.colorPipelineCompilation!,
-        lutPaths: input.lutPaths,
-        signal: input.signal,
-      })
-      return Object.freeze({ ...source, path: outputPath })
-    }))
-    const sourceIndex = new Map(
-      renderSources.map((source, index) => [source.artifactId, index]),
+    const colorPlan = input.colorPlan ? parseProjectColorPlan(input.colorPlan) : null
+    const colorTargetKey = (clip: EditorialRenderInput['clips'][number]) => calculateCanonicalHash({
+      sourceId: clip.sourceArtifactId.trim().toLowerCase(),
+      ...(clip.cameraId ? { cameraId: clip.cameraId.trim().toLowerCase() } : {}),
+      segmentId: clip.id.trim().toLowerCase(),
+    })
+    const colorTargetByKey = new Map(
+      colorPlan?.compiled.targets.map((target) => [calculateCanonicalHash(target.target), target]) ?? [],
     )
+    if (colorPlan && (
+      colorTargetByKey.size !== input.clips.length ||
+      input.clips.some((clip) => !colorTargetByKey.has(colorTargetKey(clip)))
+    )) throw new DomainError('INVALID_RENDER_INPUT', 'ColorPlan target manifest does not cover this EditPlan exactly')
+
+    const renderSources: Array<Readonly<EditorialRenderInput['sources'][number] & { colorPipelineHash?: string }>> = []
+    const sourceIndex = new Map<string, number>()
+    const clipVideoIndex = new Map<string, number>()
+    for (const [sourceOrdinal, source] of input.sources.entries()) {
+      if (source.mediaType !== 'video') {
+        sourceIndex.set(source.artifactId, renderSources.length)
+        renderSources.push(source)
+        continue
+      }
+      const clipsForSource = input.clips.filter((clip) => clip.sourceArtifactId === source.artifactId)
+      const executions = colorPlan
+        ? [...new Map(clipsForSource.map((clip) => {
+            const target = colorTargetByKey.get(colorTargetKey(clip))!
+            return [target.pipelineHash, target] as const
+          })).values()]
+        : [source.colorPipelineCompilation!.pipeline]
+      if (executions.length < 1) throw new DomainError('INVALID_RENDER_INPUT', 'Video source has no ColorPlan execution')
+      for (const [pipelineOrdinal, pipeline] of executions.entries()) {
+        if (
+          calculateCanonicalHash(pipeline.sourceMetadata) !== calculateCanonicalHash(source.colorPipelineCompilation!.pipeline.sourceMetadata) ||
+          calculateCanonicalHash(pipeline.outputMetadata) !== calculateCanonicalHash(source.colorPipelineCompilation!.pipeline.outputMetadata)
+        ) throw new DomainError('INVALID_RENDER_INPUT', 'ColorPlan pipeline diverges from trusted source colorimetry')
+        const outputPath = join(directory, `color-source-${String(sourceOrdinal).padStart(3, '0')}-${String(pipelineOrdinal).padStart(3, '0')}.mp4`)
+        await rm(outputPath, { force: true })
+        await this.colorProcessor.process({
+          sourcePath: source.path,
+          outputPath,
+          ...(colorPlan
+            ? { execution: { pipeline, executionHash: colorPlan.compiled.manifestHash } }
+            : { compilation: source.colorPipelineCompilation! }),
+          lutPaths: input.lutPaths,
+          signal: input.signal,
+        })
+        const index = renderSources.length
+        renderSources.push(Object.freeze({ ...source, path: outputPath, colorPipelineHash: pipeline.pipelineHash }))
+        if (!sourceIndex.has(source.artifactId)) sourceIndex.set(source.artifactId, index)
+        for (const clip of clipsForSource) {
+          const target = colorPlan ? colorTargetByKey.get(colorTargetKey(clip)) : null
+          if (!colorPlan || target?.pipelineHash === pipeline.pipelineHash) clipVideoIndex.set(clip.id, index)
+        }
+      }
+    }
     for (const clip of renderClips) {
-      const video = renderSources[sourceIndex.get(clip.sourceArtifactId) ?? -1]
+      const video = renderSources[clipVideoIndex.get(clip.id) ?? -1]
       const audioArtifactId = clip.audioSourceArtifactId ?? clip.sourceArtifactId
       const audio = renderSources[sourceIndex.get(audioArtifactId) ?? -1]
       const audioInFrame = clip.audioSourceInFrame ?? clip.sourceInFrame
@@ -686,7 +728,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
     const buildCompositionFilters = async (composition: typeof compositions[number]) => {
       const filters: string[] = []
       composition.clips.forEach((clip, index) => {
-        const videoIndex = sourceIndex.get(clip.sourceArtifactId)!
+        const videoIndex = clipVideoIndex.get(clip.id)!
         const audioIndex = sourceIndex.get(
           clip.audioSourceArtifactId ?? clip.sourceArtifactId,
         )!

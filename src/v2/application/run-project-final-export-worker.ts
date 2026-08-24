@@ -18,6 +18,7 @@ import type { PublicOperationRepository } from './ports/public-operation-reposit
 import type { RenderElementMapRepository } from './ports/render-element-map-repository.ts'
 import type { ColorPipelineCompilationRepository } from './ports/color-pipeline-compilation-repository.ts'
 import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-materializer.ts'
+import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import { projectRenderSourcesFingerprint } from './project-render-sources.ts'
@@ -52,6 +53,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
   renderer: EditorialProxyRenderer
   renderElementMaps: RenderElementMapRepository
   colorPipelines: ColorPipelineCompilationRepository
+  colorPlans: Pick<ProjectColorPlanRepository, 'readEffectiveForVersion'>
   luts: ProjectLutRenderMaterializer
   sources: ArtifactSourceMaterializer
   clock?: () => Date
@@ -178,6 +180,11 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       })
       if (!source) throw new DomainError('EDITORIAL_ACCEPTANCE_FAILED', 'Immutable approved final export source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+      const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
+        workspaceId: operation.workspaceId,
+        projectId: context.projectId,
+        projectVersionId: context.projectVersionId,
+      })
       const colorPipelines = await loadBoundRenderColorPipelines({
         repository: dependencies.colorPipelines, workspaceId: operation.workspaceId,
         projectId: context.projectId, bindings: context.colorPipelineBindings,
@@ -245,6 +252,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           ...(asset.mediaType === 'video' ? { colorPipelineCompilation: colorPipelines.get(asset.artifactId)! } : {}),
         })),
         lutPaths: materializedLut.lutPaths,
+        ...(colorPlan ? { colorPlan } : {}),
         clips,
         audioTimelineHash,
         fps: context.outputSpec.fps,
@@ -394,6 +402,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           sourceArtifactIds: source.renderSources.map((asset) => asset.artifactId),
           audioTimelineHash,
           colorPipelineBindings: context.colorPipelineBindings,
+          colorPlanHash: colorPlan?.plan.planHash ?? null,
+          compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
           projectLutSelectionHash: materializedLut.selectionHash,
           materializedCubeHash: materializedLut.materializedCubeHash ?? null,
         },
@@ -422,6 +432,8 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             outputSpec: context.outputSpec,
             approval: context.approval,
             colorPipelineBindings: context.colorPipelineBindings,
+            colorPlanHash: colorPlan?.plan.planHash ?? null,
+            compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
             projectLutSelectionId: materializedLut.selectionId,
             projectLutSelectionHash: materializedLut.selectionHash,
             materializedCubeHash: materializedLut.materializedCubeHash ?? null,
