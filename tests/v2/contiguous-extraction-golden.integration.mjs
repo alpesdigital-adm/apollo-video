@@ -785,7 +785,7 @@ function rightsBlockedMoment(masterSha256) {
 }
 
 test(
-  'T-FR-134 golden crosses index run, evidence, evaluation, selection, worker and renderer to one two-minute MP4 out of a real two-hour master',
+  'T-F2-GATE/T-FR-134 golden crosses index run, evidence, evaluation, selection, worker and renderer to one two-minute MP4 out of a real two-hour master',
   { timeout: 1_500_000 },
   async (t) => {
     assert.equal(typeof ffmpegPath, 'string')
