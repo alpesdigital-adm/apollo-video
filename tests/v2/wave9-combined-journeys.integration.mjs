@@ -605,6 +605,7 @@ async function renderThroughRealWorker(input) {
     async catalogOutput() {},
     operations,
     colorPipelines,
+    colorPlans: { async readEffectiveForVersion() { return null } },
     luts: {
       async materialize() {
         return { selectionId: input.lutSelectionId ?? 'selection-wave9', selectionHash: '7'.repeat(64), lutPaths: {} }

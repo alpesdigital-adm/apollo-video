@@ -586,6 +586,7 @@ async function renderThroughRealWorker(input) {
     async catalogOutput() {},
     operations,
     colorPipelines,
+    colorPlans: { async readEffectiveForVersion() { return null } },
     luts: {
       async materialize() {
         return { selectionId: `selection-${input.suffix}`, selectionHash: '7'.repeat(64), lutPaths: {} }
@@ -784,6 +785,9 @@ function assertWorkerContract(rendered, expected) {
     projectLutSelectionId: expected.lutSelectionId,
     projectLutSelectionHash: '7'.repeat(64),
     materializedCubeHash: null,
+    materializedCubeHashes: [],
+    colorPlanHash: null,
+    compiledColorPlanManifestHash: null,
     placementPlanHash: placementPlan.placementPlanHash,
     reframePlanHash: null,
     subtitleRegistryHash: null,

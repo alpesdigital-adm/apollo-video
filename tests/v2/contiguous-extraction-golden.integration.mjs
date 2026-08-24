@@ -657,6 +657,7 @@ function renderHarness(input) {
     async catalogOutput() {},
     operations,
     colorPipelines,
+    colorPlans: { async readEffectiveForVersion() { return null } },
     luts: {
       async materialize() {
         return {
