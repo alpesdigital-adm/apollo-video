@@ -506,6 +506,23 @@ test('final export worker fails closed if rights are revoked before persistence'
   assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1, lutCleaned: 1, cataloged: 0 })
 })
 
+test('final export worker does not complete the project before catalog convergence', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  dependencies.catalogOutput = async () => {
+    calls.cataloged += 1
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog convergence failed')
+  }
+
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-catalog-failure')
+
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(operations.operation.status, 'failed')
+  assert.equal(calls.cataloged, 1)
+  assert.equal(calls.attached, 0)
+  assert.equal(calls.failed, 1)
+})
+
 test('final export worker converges content deduplication under the active lease', async () => {
   const operations = createOperations()
   const persistedIdentity = {
