@@ -73,12 +73,14 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
   const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
+  const { setProjectLutSelectionService } = await import('../../src/v2/application/project-lut-selections.ts')
   const { setAssetRightsService } = await import('../../src/v2/application/set-asset-rights.ts')
   const { createProjectFinalExportWorker } = await import('../../src/v2/infrastructure/repository-factory.ts')
   const { projectRenderSourcesFingerprint } = await import('../../src/v2/application/project-render-sources.ts')
   const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
   const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
   const { PrismaProjectFinalExportRepository } = await import('../../src/v2/infrastructure/prisma/project-final-export-repository.ts')
+  const { PrismaProjectLutSelectionRepository } = await import('../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts')
   const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
 
   const client = new PrismaClient()
@@ -219,8 +221,21 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
         editPlanSnapshotId: snapshots.editPlan, policiesSnapshotId: snapshots.policies,
         baseHash, createdBy: issued.client.id, createdAt,
       } })
+      await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: baseVersionId } })
+      const noLut = await setProjectLutSelectionService({
+        repository: new PrismaProjectLutSelectionRepository(client),
+        createId: (kind) => `matrix-lut-${kind}-${key}-${suffix}`,
+        createEventId: randomUUID,
+        clock: () => createdAt,
+      })({
+        workspaceId, projectId, baseVersionId, baseHash,
+        selection: { mode: 'none' }, actor: { type: 'system', id: 'matrix-e2e-system' },
+        idempotencyKey: `matrix-lut-none-${key}-${suffix}`,
+        reason: 'Keep the export matrix colorimetrically neutral.',
+      })
+      assert.equal(noLut.selection.resolved.mode, 'none')
       await client.v2EditCommand.create({ data: {
-        id: commandId, workspaceId, projectId, baseVersionId, baseHash, type: 'run-director',
+        id: commandId, workspaceId, projectId, baseVersionId: noLut.version.id, baseHash: noLut.version.baseHash, type: 'run-director',
         scopeJson: stableSerialize({ kind: 'video', targetIds: [] }),
         payloadJson: stableSerialize({ schemaVersion: 1, directorRunId }), reason: 'Matrix E2E',
         actorType: 'api-client', actorId: issued.client.id, idempotencyKey: `matrix-director-${key}-${suffix}`,
@@ -228,13 +243,13 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
       } })
       const versionHash = calculateVersionHash({ projectId, version: versionId })
       await client.v2ProjectVersion.create({ data: {
-        id: versionId, workspaceId, projectId, sequence: 2, parentVersionId: baseVersionId,
+        id: versionId, workspaceId, projectId, sequence: 3, parentVersionId: noLut.version.id,
         briefSnapshotId: snapshots.brief, treatmentSnapshotId: snapshots.treatment, storySnapshotId: snapshots.story,
         editPlanSnapshotId: snapshots.editPlan, policiesSnapshotId: snapshots.policies,
         baseHash: versionHash, createdBy: issued.client.id, commandId, createdAt,
       } })
       await client.v2DirectorRun.create({ data: {
-        id: directorRunId, workspaceId, projectId, commandId, baseVersionId, resultVersionId: versionId,
+        id: directorRunId, workspaceId, projectId, commandId, baseVersionId: noLut.version.id, resultVersionId: versionId,
         status: 'succeeded', objective: 'discovery', objectiveVersion: 1, rubricRef: 'awareness-discovery/v1',
         plannerVersion: 'matrix-e2e-1.0.0', criticVersion: 'matrix-e2e-1.0.0',
         perceptionSnapshotId: snapshots.perception, treatmentSnapshotId: snapshots.treatment,
