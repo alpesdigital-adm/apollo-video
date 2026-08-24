@@ -32,9 +32,9 @@ async function freePort() {
   return address.port
 }
 
-async function waitForServer(baseUrl, child) {
+async function waitForServer(baseUrl, child, readLogs) {
   for (let attempt = 0; attempt < 300; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Next server exited with ${child.exitCode}`)
+    if (child.exitCode !== null) throw new Error(`Next server exited with ${child.exitCode}\n${readLogs().slice(-4_000)}`)
     try {
       if ((await fetch(`${baseUrl}/v1/health`)).ok) return
     } catch {}
@@ -294,7 +294,11 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
     const nextMode = process.env.APOLLO_E2E_SERVER_MODE === 'start' ? 'start' : 'dev'
-    server = spawn(process.execPath, ['node_modules/next/dist/bin/next', nextMode, '-p', String(port)], {
+    server = spawn(process.execPath, [
+      'node_modules/next/dist/bin/next', nextMode,
+      ...(nextMode === 'dev' ? ['--webpack'] : []),
+      '-p', String(port),
+    ], {
       cwd: process.cwd(),
       env: {
         ...process.env, NODE_ENV: nextMode === 'start' ? 'production' : 'development', __NEXT_PROCESSED_ENV: 'true',
@@ -307,7 +311,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     })
     server.stdout.on('data', (chunk) => { serverLogs += String(chunk) })
     server.stderr.on('data', (chunk) => { serverLogs += String(chunk) })
-    await waitForServer(baseUrl, server)
+    await waitForServer(baseUrl, server, () => serverLogs)
     const authorization = `Bearer ${issued.token}`
 
     for (const [index, cell] of cells.entries()) {
