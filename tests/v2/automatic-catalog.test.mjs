@@ -38,6 +38,27 @@ test('T-FR-049 inherits the most restrictive rights and consent without widening
   assert.match(inherited.sourceNote, /^Inherited fail-closed from 2 source\(s\); evidence [a-f0-9]{64}$/)
 })
 
+test('T-FR-049 gives equivalent inherited rights artifact-bound identities', () => {
+  const sourceSnapshots = [rights('artifact-source-a')]
+  const first = createInheritedCatalogRights({
+    candidate: candidate({ artifactId: 'artifact-output-a', manifestId: 'manifest-output-a' }),
+    sourceSnapshots,
+    sequence: 1,
+    createdAt: '2026-08-12T13:00:00.000Z',
+  })
+  const second = createInheritedCatalogRights({
+    candidate: candidate({ artifactId: 'artifact-output-b', manifestId: 'manifest-output-b' }),
+    sourceSnapshots,
+    sequence: 1,
+    createdAt: '2026-08-12T13:00:00.000Z',
+  })
+
+  assert.notEqual(first.id, second.id)
+  assert.equal(first.artifactId, 'artifact-output-a')
+  assert.equal(second.artifactId, 'artifact-output-b')
+  assert.deepEqual(first.allowedUses, second.allowedUses)
+})
+
 test('T-FR-049 fails closed for missing, revoked or incompatible consent evidence', () => {
   assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /no source rights evidence/)
   assert.throws(() => createInheritedCatalogRights({ candidate: candidate(), sourceSnapshots: [rights('artifact-source-a', { status: 'revoked', allowedUses: [], consent: { status: 'not-required', allowedUses: [] } })], sequence: 1, createdAt: '2026-08-12T13:00:00Z' }), /not approved/)
