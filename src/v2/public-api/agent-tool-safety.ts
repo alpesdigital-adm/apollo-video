@@ -315,6 +315,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles already ingested, critic-approved and rights-authorized synthetic media into one immutable EditPlan without submitting provider work or starting a render.',
     },
+    'apollo.projects.provider-jobs.enqueue': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Authorizes a durable worker to estimate and submit one paid TTS or avatar provider job after exact project, consent and source-rights checks.',
+    },
     'apollo.projects.policy-overrides.set': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',

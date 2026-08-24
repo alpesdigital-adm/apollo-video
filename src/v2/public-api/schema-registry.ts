@@ -13383,6 +13383,21 @@ const syntheticProductionPlanSchema: JsonSchema = {
     authorization: { type: 'object' }, createdAt: dateTimeSchema, planHash: sha256Schema,
   },
 }
+const providerJobPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'projectId', 'originProjectVersionId', 'operation', 'adapter', 'status', 'attempt', 'createdAt', 'updatedAt'],
+  properties: {
+    id: idSchema, projectId: idSchema, originProjectVersionId: idSchema,
+    operation: { enum: ['tts', 'audio-avatar'] },
+    adapter: { type: 'object', additionalProperties: false, required: ['id', 'version'], properties: { id: idSchema, version: idSchema } },
+    status: { enum: ['planned','estimated','submitted','queued','processing','suspected-stalled','retrieving','evaluating','approved','rejected','failed','canceled','expired','superseded'] },
+    attempt: { type: 'integer', minimum: 0 },
+    estimate: { type: 'object', additionalProperties: false, required: ['currency','costMinorUnits','estimatedLatencyMs'], properties: { currency: { type: 'string', pattern: '^[A-Z]{3}$' }, costMinorUnits: { type: 'integer', minimum: 0 }, estimatedLatencyMs: { type: 'integer', minimum: 0 } } },
+    resultArtifact: { type: 'object', additionalProperties: false, required: ['artifactId','artifactSha256','mediaType','byteSize'], properties: { artifactId: idSchema, artifactSha256: sha256Schema, mediaType: { enum: ['audio','video','image','data'] }, byteSize: { type: 'integer', minimum: 1 } } },
+    error: { type: 'object', additionalProperties: false, required: ['code','message','retryable'], properties: { code: idSchema, message: { type: 'string', minLength: 1, maxLength: 1000 }, retryable: { type: 'boolean' }, retryAfterMs: { type: 'integer', minimum: 0 } } },
+    createdAt: dateTimeSchema, updatedAt: dateTimeSchema, completedAt: dateTimeSchema,
+  },
+}
 
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
@@ -22513,6 +22528,18 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('synthetic-production-run-read', 1, 'Read one immutable synthetic production run',
     successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object', additionalProperties: false, required: ['id', 'status', 'editPlanSnapshotId', 'plan'], properties: { id: idSchema, status: { enum: ['compiled', 'rendering', 'completed', 'failed', 'canceled'] }, editPlanSnapshotId: idSchema, plan: syntheticProductionPlanSchema } } } }),
   ),
+  defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','use','market','locale'],
+    properties: {
+      projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { enum: ['tts','audio-avatar'] }, adapterId: idSchema, adapterVersion: idSchema,
+      providerInput: { type: 'object', maxProperties: 100, additionalProperties: true },
+      sourceArtifactIds: { type: 'array', maxItems: 64, uniqueItems: true, items: idSchema },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
+    },
+  }),
+  defineSchema('provider-job-mutated', 1, 'Created or replayed durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job','replayed'], properties: { job: providerJobPublicSchema, replayed: { type: 'boolean' } } })),
+  defineSchema('provider-job-read', 1, 'Normalized durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job'], properties: { job: providerJobPublicSchema } })),
   defineSchema(
     'speaker-diarization-read',
     1,

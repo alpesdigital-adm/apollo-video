@@ -5181,6 +5181,55 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.provider-jobs.enqueue": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "job",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/enqueue-provider-job-request/v1",
+      "outputSchemaRef": "apollo://schemas/provider-job-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/provider-jobs"
+      },
+      "toolName": "apollo.projects.provider-jobs.enqueue",
+      "supportsDryRun": false,
+      "costClass": "variable",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        202
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.provider-jobs.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/provider-job-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/provider-jobs/{jobId}"
+      },
+      "toolName": "apollo.projects.provider-jobs.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.proxy-renders.enqueue": {
       "version": "1.0.0",
       "exposure": "public",
@@ -44909,6 +44958,80 @@
           }
         }
       ]
+    },
+    "apollo://schemas/enqueue-provider-job-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "profileSnapshotId",
+        "operation",
+        "adapterId",
+        "adapterVersion",
+        "providerInput",
+        "sourceArtifactIds",
+        "use",
+        "market",
+        "locale"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "profileSnapshotId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "operation": {
+          "enum": [
+            "tts",
+            "audio-avatar"
+          ]
+        },
+        "adapterId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "adapterVersion": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "providerInput": {
+          "type": "object",
+          "maxProperties": 100,
+          "additionalProperties": true
+        },
+        "sourceArtifactIds": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        }
+      }
     },
     "apollo://schemas/error-envelope/v1": {
       "type": "object",
@@ -140962,6 +141085,424 @@
                 "runHash": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/provider-job-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job",
+            "replayed"
+          ],
+          "properties": {
+            "job": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "originProjectVersionId",
+                "operation",
+                "adapter",
+                "status",
+                "attempt",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "originProjectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "operation": {
+                  "enum": [
+                    "tts",
+                    "audio-avatar"
+                  ]
+                },
+                "adapter": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "status": {
+                  "enum": [
+                    "planned",
+                    "estimated",
+                    "submitted",
+                    "queued",
+                    "processing",
+                    "suspected-stalled",
+                    "retrieving",
+                    "evaluating",
+                    "approved",
+                    "rejected",
+                    "failed",
+                    "canceled",
+                    "expired",
+                    "superseded"
+                  ]
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "estimate": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "costMinorUnits",
+                    "estimatedLatencyMs"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    },
+                    "costMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "estimatedLatencyMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "resultArtifact": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "artifactId",
+                    "artifactSha256",
+                    "mediaType",
+                    "byteSize"
+                  ],
+                  "properties": {
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "artifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "mediaType": {
+                      "enum": [
+                        "audio",
+                        "video",
+                        "image",
+                        "data"
+                      ]
+                    },
+                    "byteSize": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "retryAfterMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/provider-job-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "job"
+          ],
+          "properties": {
+            "job": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "projectId",
+                "originProjectVersionId",
+                "operation",
+                "adapter",
+                "status",
+                "attempt",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "originProjectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "operation": {
+                  "enum": [
+                    "tts",
+                    "audio-avatar"
+                  ]
+                },
+                "adapter": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "status": {
+                  "enum": [
+                    "planned",
+                    "estimated",
+                    "submitted",
+                    "queued",
+                    "processing",
+                    "suspected-stalled",
+                    "retrieving",
+                    "evaluating",
+                    "approved",
+                    "rejected",
+                    "failed",
+                    "canceled",
+                    "expired",
+                    "superseded"
+                  ]
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "estimate": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "currency",
+                    "costMinorUnits",
+                    "estimatedLatencyMs"
+                  ],
+                  "properties": {
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    },
+                    "costMinorUnits": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "estimatedLatencyMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "resultArtifact": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "artifactId",
+                    "artifactSha256",
+                    "mediaType",
+                    "byteSize"
+                  ],
+                  "properties": {
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "artifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "mediaType": {
+                      "enum": [
+                        "audio",
+                        "video",
+                        "image",
+                        "data"
+                      ]
+                    },
+                    "byteSize": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "error": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "retryAfterMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "format": "date-time"
                 }
               }
             }

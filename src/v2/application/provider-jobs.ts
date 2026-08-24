@@ -155,6 +155,26 @@ export function enqueueProviderJobService(dependencies: {
   }
 }
 
+export function readProviderJobService(dependencies: { jobs: ProviderJobRepository }) {
+  return async function execute(request: {
+    workspaceId: string
+    projectId: string
+    jobId: string
+    actor: Readonly<AuthenticatedExternalActor>
+  }) {
+    requireScope(request.actor, 'projects:read')
+    const workspaceId = identity(request.workspaceId, 'workspaceId')
+    assertDomain(request.actor.workspaceId === workspaceId, 'AUTH_INVALID', 'Provider job actor does not belong to workspace')
+    const persisted = await dependencies.jobs.read({
+      workspaceId,
+      projectId: identity(request.projectId, 'projectId'),
+      jobId: identity(request.jobId, 'jobId'),
+    })
+    if (!persisted) throw new DomainError('PROJECT_NOT_FOUND', 'Provider job was not found')
+    return persisted
+  }
+}
+
 function normalizedFailure(error: unknown) {
   if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
     return Object.freeze({

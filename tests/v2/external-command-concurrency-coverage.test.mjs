@@ -341,6 +341,9 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'durable-covered', evidence: 'serializable current ProjectVersion, active profile, exact artifact digest and current rights snapshot rechecks plus actor-bound idempotency and immutable EditPlan snapshot',
   },
+  'apollo.projects.provider-jobs.enqueue': {
+    mode: 'durable-covered', evidence: 'actor-bound idempotent creation, immutable authorization, serializable project/profile/rights rechecks, leased stage claims and job-hash compare-and-swap transition history',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'durable-covered', evidence: 'serializable exact ProjectVersion, inherited policy and output-set recheck, immutable Policy Snapshot, typed EditCommand, CAS head update and actor-bound replay',
   },
@@ -410,7 +413,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    117,
+    118,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

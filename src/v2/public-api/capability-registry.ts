@@ -5902,4 +5902,19 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     toolName: 'apollo.projects.synthetic-production-runs.read', supportsDryRun: false, costClass: 'free',
     confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
   },
+  {
+    id: 'apollo.projects.provider-jobs.enqueue', version: '1.0.0', title: 'Enqueue synthetic provider job',
+    description: 'Creates one durable, version-bound and consent-authorized TTS or audio-avatar job; estimate and submit remain separate persisted worker stages.',
+    exposure: 'public', operationKind: 'job', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/enqueue-provider-job-request/v1', outputSchemaRef: 'apollo://schemas/provider-job-mutated/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/provider-jobs' }, toolName: 'apollo.projects.provider-jobs.enqueue',
+    supportsDryRun: false, costClass: 'variable', confirmation: 'human-approval', successStatuses: [200, 202], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.provider-jobs.read', version: '1.0.0', title: 'Read synthetic provider job',
+    description: 'Reads one normalized durable provider job without exposing credentials, raw provider payloads or permanent storage locations.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/provider-job-read/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/provider-jobs/{jobId}' },
+    toolName: 'apollo.projects.provider-jobs.read', supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
 ])

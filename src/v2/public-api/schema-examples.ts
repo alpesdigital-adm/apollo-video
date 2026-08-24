@@ -5386,6 +5386,10 @@ const syntheticPlanExample = {
   durationMs: 2000, use: 'ads', market: 'BRA', locale: 'pt-BR', profile: syntheticProfileExample,
   audio: {}, blocks: [{}], bRoll: [], overlays: [], captions: [], disclosure: 'Conteúdo gerado com IA', authorization: {}, createdAt, planHash: 'd'.repeat(64),
 }
+const providerJobExample = {
+  id: 'provider-job-example-1', projectId, originProjectVersionId: 'project-version-example-1', operation: 'audio-avatar',
+  adapter: { id: 'controlled-avatar', version: 'version-1' }, status: 'planned', attempt: 0, createdAt, updatedAt: createdAt,
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -5413,6 +5417,13 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/synthetic-production-run-read/v1': [{
       data: { run: { id: syntheticPlanExample.id, status: 'compiled', editPlanSnapshotId: 'snapshot-synthetic-example-1', plan: syntheticPlanExample } }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/enqueue-provider-job-request/v1': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
+      adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { audioArtifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR' },
+      sourceArtifactIds: ['artifact-audio-example-1'], use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/provider-job-read/v1': [{ data: { job: providerJobExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
     'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
     'apollo://schemas/responsive-placement-request/v1': [{
