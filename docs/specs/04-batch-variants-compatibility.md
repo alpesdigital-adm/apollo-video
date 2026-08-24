@@ -394,3 +394,22 @@ Estado agregado é derivado dos itens, não substitui estado individual.
 - Estimador de custo/duração por provider.
 - UX de revisão de takes ambíguos.
 
+## 26. Export matrix entregue
+
+FR-235 usa uma definição canônica limitada a 100 células recipe × formato ×
+locale. Cada célula aponta para ProjectVersion aprovado, possui nome de arquivo
+determinístico e reserva artifact/manifest próprios. Antes do commit, o serviço
+relê readiness, compilação colorimétrica, direitos de renderização e de entrada
+no catálogo, custo e storage; qualquer ausência falha fechado sem alocar uma
+operação. O commit autenticado despacha `project-final-export` independentes, e
+a leitura da matriz deriva `queued`, `running`, `partially-failed`, `ready`,
+`failed` ou `canceled` exclusivamente dos estados persistidos das células.
+
+O gate T-FR-235 do CI `32778637601` executou PostgreSQL e MinIO descartáveis,
+API pública, worker real e FFmpeg para 9:16, 16:9, 4:5, 1:1 e 21:9. Uma falha de
+renderer deliberada entrou em retry sem afetar as demais; a leitura intermediária
+preservou lote parcial e a final comprovou cinco artifacts/manifests e nomes
+distintos. O mesmo commit foi implantado como `apollo-video:596f388`, com as
+três rotas presentes na OpenAPI, 170 migrations, health 200 e zero restart. A
+matriz real de cinco MP4s pertence ao ambiente isolado content-addressed do CI;
+produção recebeu smoke operacional, não uma repetição destrutiva desse lote.

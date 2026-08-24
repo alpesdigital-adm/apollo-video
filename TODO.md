@@ -1461,12 +1461,28 @@ foi usado como evidência e não amplia o escopo destas quatro microtarefas.
 
 ### F2.028 — Export matrix [FR-235]
 
-- [ ] Modelar recipes × formats × locales como outputs endereçáveis. Evidência T-FR-235.
-- [ ] Fazer preflight de quantidade, direitos, readiness, custo e storage. Evidência T-FR-235.
-- [ ] Reutilizar planos/assets/cache comuns sem misturar artifacts. Evidência T-FR-235.
-- [ ] Renderizar e acompanhar cada célula com retry independente. Evidência T-FR-235.
-- [ ] Exportar arquivos/manifests com naming determinístico. Evidência T-FR-235.
-- [ ] Criar E2E com lote parcial nos cinco formatos. Evidência T-FR-235.
+- [x] Modelar recipes × formats × locales como outputs endereçáveis. Evidência T-FR-235.
+- [x] Fazer preflight de quantidade, direitos, readiness, custo e storage. Evidência T-FR-235.
+- [x] Reutilizar planos/assets/cache comuns sem misturar artifacts. Evidência T-FR-235.
+- [x] Renderizar e acompanhar cada célula com retry independente. Evidência T-FR-235.
+- [x] Exportar arquivos/manifests com naming determinístico. Evidência T-FR-235.
+- [x] Criar E2E com lote parcial nos cinco formatos. Evidência T-FR-235.
+
+Aceite F2.028: PR `#20`, merge `596f388` e CI pós-merge `32778637601`
+integralmente verdes. O E2E isolado atravessou API pública, PostgreSQL, MinIO,
+worker final e FFmpeg real para 9:16, 16:9, 4:5, 1:1 e 21:9; comprovou
+preflight confiável, naming/manifest distintos, estado parcial após três células,
+retry deliberado somente em uma operação e fechamento das cinco células sem
+conexões órfãs. Os shakedowns corrigiram dois defeitos de produção: conclusão do
+projeto antes da convergência do catálogo e colisão de IDs entre rights herdados
+equivalentes de artifacts diferentes. A imagem `apollo-video:596f388`
+(`2ffb52db94d1...`) foi implantada com 170 migrations em 2026-08-24; web e
+quatro workers ficaram na mesma imagem, health público 200, zero restart e zero
+erro crítico no postflight. A OpenAPI implantada expõe as três rotas da matriz e
+nega preflight sem autenticação com 401. Backup pré-migration validado por
+`pg_restore`: SHA-256 `cd04e290628d...`. O lote de cinco MP4s foi executado no
+ambiente Compose isolado do mesmo commit, não novamente em produção; o aceite
+operacional vincula essa evidência content-addressed ao deploy saudável.
 
 ### F2.029 — Jornadas de reuso e lote
 
