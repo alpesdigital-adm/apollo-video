@@ -68,7 +68,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
   assert.ok(ffmpegStatic)
   assert.ok(ffprobeStatic)
 
-  const { assetRightsRevision } = await import('../../src/v2/domain/asset-rights.ts')
+  const { assetRightsRevision, evaluateAssetUse } = await import('../../src/v2/domain/asset-rights.ts')
   const { createMediaColorProbe } = await import('../../src/v2/domain/color-and-export.ts')
   const { readOutputFormatPreset } = await import('../../src/v2/domain/output-format-registry.ts')
   const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
@@ -458,6 +458,15 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
       const operation = outcome
         ? await client.v2PublicOperation.findUnique({ where: { id: outcome.operationId } })
         : null
+      const detail = outcome
+        ? await client.v2ProjectFinalExportOperation.findUnique({ where: { operationId: outcome.operationId } })
+        : null
+      const rights = detail
+        ? await new PrismaAssetRightsRepository(client).findCurrent(detail.workspaceId, detail.sourceArtifactId)
+        : null
+      const project = detail
+        ? await client.v2Project.findUnique({ where: { id: detail.projectId } })
+        : null
       assert.equal(outcome?.status, 'succeeded', stableSerialize({
         outcome,
         errorCode: operation?.errorCode,
@@ -465,6 +474,11 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
         errorRetryable: operation?.errorRetryable,
         attempt: operation?.attempt,
         maxAttempts: operation?.maxAttempts,
+        projectStatus: project?.status,
+        currentVersionMatches: project?.currentVersionId === detail?.projectVersionId,
+        rightsDecision: detail ? evaluateAssetUse(rights?.snapshot ?? null, {
+          workspaceId: detail.workspaceId, use: 'rendering', locale: project?.locale ?? 'pt-BR',
+        }, new Date()) : null,
       }))
     }
     for (let index = 0; index < 3; index += 1) {
