@@ -274,7 +274,8 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
       await client.v2ProjectProxyRenderOperation.create({ data: {
         operationId: proxyOperationId, workspaceId, projectId, projectVersionId: versionId,
         editPlanSnapshotId: snapshots.editPlan, sourceArtifactId, sourceManifestId, inputHash: proxyInputHash,
-        outputSpecId: preset.spec.id, outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
+        colorPipelineBindingsJson: stableSerialize([]),
+        outputArtifactId: proxyArtifactId, outputManifestId: proxyManifestId,
         originalFileName: `${key}-proxy.mp4`, createdAt,
       } })
       await client.v2ProxyReview.create({ data: {
