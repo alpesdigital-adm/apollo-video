@@ -1486,6 +1486,17 @@ Arquivos .cube, nome, tags, intensidade, espaços de cor, compatibilidade, previ
 
 Plano global com correções por fonte e overrides por segmento.
 
+Entregue em 2026-08-24: o plano content-addressed aplica camadas globais, por
+source, camera e segmento com precedência determinística, integra o mesmo
+Command/ProjectVersion/PostgreSQL usado pelo editor e expõe leitura/escrita na
+API pública. Proxy e export materializam o manifesto compilado e LUTs imutáveis
+antes do renderer, que recebe apenas paths verificados. O CI do merge
+`2620ded` comprovou persistência, MinIO, worker e MP4 FFmpeg real: o ajuste
+local alterou somente os frames do segmento alvo. A imagem de produção
+`apollo-video:2620ded` aplicou a migration 169 e passou health, identidade de
+imagem, zero restart e inspeção de logs. Não há editor visual de ColorPlan na
+UI atual; o aceite de FR-182 é API-first e não afirma essa superfície.
+
 ### FR-183 — Multicam match
 
 Igualar exposição, white balance, contraste, saturação e pele antes da LUT.
