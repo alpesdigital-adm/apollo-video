@@ -316,7 +316,11 @@ interface ResolvedPatch {
 - SetLayout, SetCrop, SetPlacement.
 - Add/RemoveOverlay.
 - SetMovement, SetEffect.
-- SetColorPlan, SetLut.
+- SetColorPlan, SetLut. `SetColorPlan` persiste o plano content-addressed na
+  mesma transação da nova `ProjectVersion`; a resolução global → source →
+  camera → segment é determinística, e proxy/export carregam os hashes do plano
+  e do manifesto compilado até o renderer. O contrato público canônico é
+  `GET/POST /v1/projects/{projectId}/color-plan`.
 
 ### Texto/legenda
 

@@ -20,12 +20,12 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.019, o fechamento estrutural de F0.035 e as três primeiras entregas de F0.036, com a jornada integral do MVP Core e os
+Estado auditado após o gate F2.019, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036 e o ColorPlan F2.027, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **305 de 1.259 microtarefas verificadas como efetivamente entregues (24,2%, arredondamento conservador)**;
-- **954 microtarefas abertas ou aguardando nova comprovação**;
+- **309 de 1.259 microtarefas verificadas como efetivamente entregues (24,5%, arredondamento conservador)**;
+- **950 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
   permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
@@ -1444,10 +1444,20 @@ as evidências e o snapshot-base.
 
 ### F2.027 — ColorPlan [FR-182]
 
-- [ ] Modelar transforms globais, por source, por camera e por segment. Evidência T-FR-182.
-- [ ] Resolver precedência e overrides de forma determinística. Evidência T-FR-182.
-- [ ] Compilar plano para renderer e manifest. Evidência API color-v2.
-- [ ] Testar que override local não altera outros segmentos/formatos. Evidência T-FR-182.
+- [x] Modelar transforms globais, por source, por camera e por segment. Evidência T-FR-182.
+- [x] Resolver precedência e overrides de forma determinística. Evidência T-FR-182.
+- [x] Compilar plano para renderer e manifest. Evidência API color-v2.
+- [x] Testar que override local não altera outros segmentos/formatos. Evidência T-FR-182.
+
+Aceite F2.027: merge `2620ded`, CI `32762325726` integralmente verde e imagem
+`apollo-video:2620ded` implantada em 2026-08-24. O smoke atravessou API V2,
+PostgreSQL, ProjectVersion, worker, MinIO e FFmpeg real; o MP4 vertical provou
+o override de segmento por pixels, enquanto os demais frames permaneceram
+inalterados. Produção ficou com 169 migrations, web e quatro workers na imagem
+`8589f30e...`, health público 200, zero restart e zero erro crítico no
+postflight. Backup pré-migration validado por `pg_restore`: SHA-256
+`59863c6a...`. A UI ainda não oferece um editor visual de ColorPlan; isso não
+foi usado como evidência e não amplia o escopo destas quatro microtarefas.
 
 ### F2.028 — Export matrix [FR-235]
 
