@@ -37,7 +37,25 @@ test('T-FR-235 persists preflight and partial matrix state in PostgreSQL and rej
       operatorMaximumCostMinorUnits: 1000, operatorAvailableStorageBytes: 1_000_000_000,
       createdAt, expiresAt: '2026-08-24T18:10:00.000Z',
     })
-    const repository = new PrismaExportMatrixRepository(client)
+    const diagnosticClient = new Proxy(client, {
+      get(target, property, receiver) {
+        if (property !== '$transaction') return Reflect.get(target, property, receiver)
+        return async (...args) => {
+          try {
+            return await target.$transaction(...args)
+          } catch (error) {
+            console.error('export-matrix transaction diagnostic', {
+              name: error?.name,
+              code: error?.code,
+              message: error?.message,
+              meta: error?.meta,
+            })
+            throw error
+          }
+        }
+      },
+    })
+    const repository = new PrismaExportMatrixRepository(diagnosticClient)
     const stored = await repository.createPreflight({
       id: `preflight-export-matrix-${suffix}`, preflight, authenticationAudit: audit,
       requestFingerprint: '3'.repeat(64), idempotencyKey: `export-matrix-${suffix}`,
