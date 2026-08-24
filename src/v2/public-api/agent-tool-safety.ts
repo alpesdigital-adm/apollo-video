@@ -307,6 +307,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one segment-scoped EditCommand and immutable ProjectVersion that moves position, style, text or visibility for a single subtitle segment of a single variant; the range comes from the compiled segment, the transcript and every other variant stay byte-identical, and no render or provider work starts.',
     },
+    'apollo.synthetic-presenters.register': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Registers one versioned actor identity, avatar and voice consent scope that can authorize later paid synthetic generation, while preserving the evidence artifact and immutable audit.',
+    },
+    'apollo.projects.synthetic-production-runs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Compiles already ingested, critic-approved and rights-authorized synthetic media into one immutable EditPlan without submitting provider work or starting a render.',
+    },
     'apollo.projects.policy-overrides.set': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',

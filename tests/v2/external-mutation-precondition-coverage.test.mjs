@@ -337,6 +337,12 @@ const coverage = Object.freeze({
   'apollo.projects.subtitle-segment-overrides.apply': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, the compiled segment range of the target variant and the per-segment override head the command claims to replace',
   },
+  'apollo.synthetic-presenters.register': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the next immutable profile version, actor context, consent scope and exact evidence artifact digest; serializable persistence rechecks all of them',
+  },
+  'apollo.projects.synthetic-production-runs.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
   },
@@ -595,7 +601,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 56,
+    'idempotent-create': 58,
     'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,
