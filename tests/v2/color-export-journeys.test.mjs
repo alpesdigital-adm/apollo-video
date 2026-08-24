@@ -6,6 +6,8 @@ import { createProjectColorPlan, parseProjectColorPlan } from '../../src/v2/doma
 import { createProjectColorPlanImpact, createProjectColorPlanInvalidations, parseProjectColorPlanImpact } from '../../src/v2/domain/project-color-plan-impact.ts';
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts';
 import { setProjectColorPlanService } from '../../src/v2/application/project-color-plans.ts';
+import { parseSetProjectColorPlanBody } from '../../src/v2/public-api/project-color-plan-contract.ts';
+import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts';
 
 const sourceColor = {
   colorSpace: 'camera-log',
@@ -220,6 +222,24 @@ test('T-FR-182 requires each differently encoded source to enter through its own
     () => resolveColorPlan(missingTechnical, { sourceId: 'source-b' }),
     /technical input does not match prior output/,
   );
+});
+
+test('T-FR-182 publishes an exact API-first ColorPlan contract', () => {
+  const parsed = parseSetProjectColorPlanBody({
+    baseVersionId: 'project-version-color-api-1', baseHash: 'a'.repeat(64),
+    plan: basePlan(), reason: 'Aplicar o plano aprovado.',
+  });
+  assert.match(parsed.plan.planHash, /^[a-f0-9]{64}$/);
+  assert.throws(
+    () => parseSetProjectColorPlanBody({
+      baseVersionId: 'project-version-color-api-1', baseHash: 'a'.repeat(64),
+      plan: basePlan(), compatibilityFallback: true,
+    }),
+    /unknown fields/,
+  );
+  const capabilities = new Map(FOUNDATION_CAPABILITIES.map((capability) => [capability.id, capability]));
+  assert.equal(capabilities.get('apollo.projects.color-plan.read').endpoint.path, '/v1/projects/{projectId}/color-plan');
+  assert.equal(capabilities.get('apollo.projects.color-plan.set').inputSchemaRef, 'apollo://schemas/project-color-plan-set-request/v1');
 });
 
 test('T-FR-182 binds ColorPlan, target manifest and full-timeline invalidation to one versioned command', () => {

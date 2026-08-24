@@ -12598,6 +12598,30 @@ const colorTransformRequestSchema = {
     Object.entries(colorTransformSchema.properties).filter(([key]) => key !== 'input'),
   ),
 } as const
+const colorTransformLayerMapSchema = {
+  type: 'object', maxProperties: 128,
+  propertyNames: { pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
+  additionalProperties: { type: 'array', maxItems: 4, items: colorTransformSchema },
+} as const
+const colorPlanSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'metadata', 'outputMetadata', 'global', 'sourceMetadata', 'sources', 'cameras', 'segments', 'planHash'],
+  properties: {
+    schemaVersion: { const: 'color-plan/v1' }, metadata: colorMetadataSchema, outputMetadata: colorMetadataSchema,
+    global: { type: 'array', minItems: 4, maxItems: 4, items: colorTransformSchema },
+    sourceMetadata: {
+      type: 'object', maxProperties: 128,
+      propertyNames: { pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' }, additionalProperties: colorMetadataSchema,
+    },
+    sources: colorTransformLayerMapSchema, cameras: colorTransformLayerMapSchema, segments: colorTransformLayerMapSchema,
+    planHash: sha256Schema,
+  },
+} as const
+const colorPlanRequestSchema = {
+  ...colorPlanSchema,
+  required: ['schemaVersion', 'metadata', 'outputMetadata', 'global'],
+  properties: Object.fromEntries(Object.entries(colorPlanSchema.properties).filter(([key]) => key !== 'planHash')),
+} as const
 const resolvedColorPipelineSchema = {
   type: 'object',
   additionalProperties: false,
@@ -12616,6 +12640,60 @@ const resolvedColorPipelineSchema = {
     },
     manifestKey: { type: 'string', minLength: 1, maxLength: 1024 },
     pipelineHash: sha256Schema,
+  },
+} as const
+const resolvedColorPlanTargetSchema = {
+  ...resolvedColorPipelineSchema,
+  properties: {
+    ...resolvedColorPipelineSchema.properties,
+    target: {
+      type: 'object', additionalProperties: false, required: ['sourceId'],
+      properties: { sourceId: idSchema, cameraId: idSchema, segmentId: idSchema },
+    },
+  },
+} as const
+const compiledColorPlanSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'colorPlanHash', 'targets', 'manifestHash'],
+  properties: {
+    schemaVersion: { const: 'compiled-color-plan/v1' }, colorPlanHash: sha256Schema,
+    targets: { type: 'array', minItems: 1, maxItems: 512, items: resolvedColorPlanTargetSchema },
+    manifestHash: sha256Schema,
+  },
+} as const
+const projectColorPlanImpactSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'commandId', 'commandType', 'baseVersionId', 'resultVersionId', 'colorPlanId', 'colorPlanHash', 'compiledManifestHash', 'changeKinds', 'dependencyTypes', 'affectedRanges', 'affectedVariantIds', 'affectedArtifacts', 'minimalRenders', 'renderSemanticsChanged', 'renderDeferredUntilTimeline', 'impactHash'],
+  properties: {
+    schemaVersion: { const: 'project-color-plan-impact/v1' }, commandId: idSchema,
+    commandType: { const: 'set-project-color-plan' }, baseVersionId: idSchema, resultVersionId: idSchema,
+    colorPlanId: idSchema, colorPlanHash: sha256Schema, compiledManifestHash: sha256Schema,
+    changeKinds: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'color-plan' } },
+    dependencyTypes: { type: 'array', minItems: 1, maxItems: 1, items: { const: 'visual' } },
+    affectedRanges: commandImpactSchema.properties.affectedRanges,
+    affectedVariantIds: commandImpactSchema.properties.affectedVariantIds,
+    affectedArtifacts: commandImpactSchema.properties.affectedArtifacts,
+    minimalRenders: commandImpactSchema.properties.minimalRenders,
+    renderSemanticsChanged: { const: true }, renderDeferredUntilTimeline: { type: 'boolean' }, impactHash: sha256Schema,
+  },
+} as const
+const projectColorPlanResultSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['command', 'version', 'colorPlan', 'impact', 'invalidations', 'replayed'],
+  properties: {
+    command: {
+      type: 'object', additionalProperties: false, required: ['id', 'type', 'baseVersionId', 'author', 'createdAt'],
+      properties: { id: idSchema, type: { const: 'set-project-color-plan' }, baseVersionId: idSchema, author: { type: 'object', additionalProperties: false, required: ['type', 'id'], properties: { type: { enum: ['user', 'director', 'system', 'api-client'] }, id: idSchema, delegatedUserId: idSchema } }, reason: { type: 'string', minLength: 1, maxLength: 1000 }, createdAt: dateTimeSchema },
+    },
+    version: { type: 'object', additionalProperties: false, required: ['id', 'sequence', 'parentVersionId', 'baseHash', 'createdAt', 'visibleState'], properties: { id: idSchema, sequence: { type: 'integer', minimum: 2 }, parentVersionId: idSchema, baseHash: sha256Schema, createdAt: dateTimeSchema, visibleState: currentProjectVersionVisibleStateSchema } },
+    colorPlan: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'commandId', 'baseVersionId', 'resultVersionId', 'plan', 'compiled', 'createdAt', 'recordHash'],
+      properties: { schemaVersion: { const: 'project-color-plan/v1' }, id: idSchema, workspaceId: idSchema, projectId: idSchema, commandId: idSchema, baseVersionId: idSchema, resultVersionId: idSchema, plan: colorPlanSchema, compiled: compiledColorPlanSchema, createdAt: dateTimeSchema, recordHash: sha256Schema },
+    },
+    impact: projectColorPlanImpactSchema,
+    invalidations: { type: 'array', maxItems: 1000, items: commandArtifactInvalidationSchema },
+    replayed: { type: 'boolean' },
   },
 } as const
 const colorPipelineCompilationSchema = {
@@ -21540,6 +21618,17 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   })),
   defineSchema('project-lut-selection-response', 2, 'Current explicit project LUT selection with persisted impact and stale outputs', successSchema({
     type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectLutSelectionResultSchemaV2] } },
+  })),
+  defineSchema('project-color-plan-set-request', 1, 'Compile global, source, camera and segment color transforms against an exact ProjectVersion', {
+    type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'plan'],
+    properties: { baseVersionId: idSchema, baseHash: sha256Schema, plan: colorPlanRequestSchema, reason: { type: 'string', minLength: 1, maxLength: 1000 } },
+  }),
+  defineSchema('project-color-plan-applied', 1, 'Applied content-addressed ColorPlan, immutable version, stale outputs and proxy operation', successSchema({
+    ...projectColorPlanResultSchema,
+    properties: { ...projectColorPlanResultSchema.properties, operation: publicOperationSchemaV3 },
+  })),
+  defineSchema('project-color-plan-response', 1, 'Current content-addressed project ColorPlan and its compiled target manifest', successSchema({
+    type: 'object', additionalProperties: false, required: ['result'], properties: { result: { anyOf: [{ type: 'null' }, projectColorPlanResultSchema] } },
   })),
   defineSchema('project-subtitle-configuration-set-request', 1, 'Set one closed subtitle mode for an output variant, or revert it to the previous origin', {
     type: 'object', additionalProperties: false, required: ['baseVersionId', 'baseHash', 'variantId'], properties: {

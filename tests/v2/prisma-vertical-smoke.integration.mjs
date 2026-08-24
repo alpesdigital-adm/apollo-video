@@ -26,6 +26,7 @@ import { runNextMediaIngestOperationService } from '../../src/v2/application/run
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { runProjectDirectorService } from '../../src/v2/application/run-project-director.ts'
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
+import { setProjectColorPlanService } from '../../src/v2/application/project-color-plans.ts'
 import { setProjectPolicyOverridesService } from '../../src/v2/application/project-policy-overrides.ts'
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { createMediaTranscript } from '../../src/v2/domain/media-transcript.ts'
@@ -52,6 +53,7 @@ import { PrismaMediaArtifactRepository } from '../../src/v2/infrastructure/prism
 import { PrismaImageAnalysisRepository } from '../../src/v2/infrastructure/prisma/image-analysis-repository.ts'
 import { PrismaMediaTransferRepository } from '../../src/v2/infrastructure/prisma/media-transfer-repository.ts'
 import { PrismaProjectLutSelectionRepository } from '../../src/v2/infrastructure/prisma/project-lut-selection-repository.ts'
+import { PrismaProjectColorPlanRepository } from '../../src/v2/infrastructure/prisma/project-color-plan-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from '../../src/v2/infrastructure/prisma/project-policy-overrides-repository.ts'
 import { PrismaProjectMediaRepository } from '../../src/v2/infrastructure/prisma/project-media-repository.ts'
 import { PrismaProjectProxyRenderRepository } from '../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts'
@@ -448,6 +450,44 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     })
     assert.equal(noLut.selection.resolved.mode, 'none')
     assert.equal(noLut.version.parentVersionId, directed.version.id)
+    const colorPlans = new PrismaProjectColorPlanRepository(prisma)
+    const directedClip = directed.run.editPlan.videoTracks.find((track) => track.kind === 'base-video').clips[0]
+    const localMatchParameters = { mode: 'adjust', brightness: 0, contrast: 1, saturation: 0 }
+    const appliedColorPlan = await setProjectColorPlanService({
+      repository: colorPlans,
+      createId: (kind) => `vertical-color-plan-${kind}-${randomUUID()}`,
+      createEventId: randomUUID,
+      clock,
+    })({
+      workspaceId,
+      projectId: seed.project.id,
+      baseVersionId: noLut.version.id,
+      baseHash: noLut.version.baseHash,
+      plan: {
+        schemaVersion: 'color-plan/v1', metadata: sourceMetadata, outputMetadata: sourceMetadata,
+        sourceMetadata: { [staticSource.sourceArtifactId]: sourceMetadata },
+        global: compiledColor.compilation.pipeline.stages,
+        segments: {
+          [directedClip.id]: [{
+            id: 'match-vertical-monochrome', kind: 'match', version: 'v1', enabled: true,
+            input: sourceMetadata, output: sourceMetadata,
+            implementation: {
+              provider: 'apollo-match', version: 'v1', parameters: localMatchParameters,
+              parametersHash: calculateCanonicalHash(localMatchParameters),
+            },
+          }],
+        },
+      },
+      actor: proxyActor,
+      idempotencyKey: 'vertical-smoke-color-plan-v1',
+      reason: 'Prove a persisted segment ColorPlan through the durable worker and real MP4.',
+    })
+    assert.equal(appliedColorPlan.version.parentVersionId, noLut.version.id)
+    assert.equal(appliedColorPlan.colorPlan.compiled.targets.length, 1)
+    assert.equal(appliedColorPlan.colorPlan.compiled.targets[0].target.segmentId, directedClip.id)
+    assert.equal((await colorPlans.readEffectiveForVersion({
+      workspaceId, projectId: seed.project.id, projectVersionId: appliedColorPlan.version.id,
+    })).recordHash, appliedColorPlan.colorPlan.recordHash)
 
     if (useS3) {
       await rm(join(root, 'workspaces'), { recursive: true, force: true })
@@ -463,7 +503,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     })({
       workspaceId,
       projectId: seed.project.id,
-      expectedProjectVersionId: noLut.version.id,
+      expectedProjectVersionId: appliedColorPlan.version.id,
       actor: proxyActor,
       idempotencyKey: 'vertical-smoke-proxy-v1',
     })
@@ -497,6 +537,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       perceptionTimelines: new PrismaPerceptionTimelineRepository(prisma),
       proxyReviews: new PrismaProxyReviewRepository(prisma),
       colorPipelines,
+      colorPlans,
       luts: new LocalProjectLutRenderMaterializer(
         lutSelections,
         join(root, '.lut-work'),
@@ -545,13 +586,20 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     assert.equal(outputProbe.height, 960)
     assert.ok(Math.abs(outputProbe.duration - 6) < 0.15)
     assert.match(outputManifestDocument.artifact.sha256, /^[a-f0-9]{64}$/)
+    assert.equal(outputManifestDocument.recipe.parameters.colorPlanHash, appliedColorPlan.colorPlan.plan.planHash)
+    assert.equal(outputManifestDocument.recipe.parameters.compiledColorPlanManifestHash, appliedColorPlan.colorPlan.compiled.manifestHash)
+    const { stdout: sampledPixel } = await execFileAsync(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', '2', '-i', outputPath,
+      '-frames:v', '1', '-vf', 'scale=1:1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1',
+    ], { windowsHide: true, encoding: 'buffer' })
+    assert.ok(Math.max(...sampledPixel) - Math.min(...sampledPixel) < 12, `persisted local ColorPlan must reach MP4 pixels: ${[...sampledPixel]}`)
     await verificationMaterializer.cleanup('vertical-smoke-fresh-verification')
     assert.equal(await prisma.v2RenderElementMap.count({
-      where: { workspaceId, projectId: seed.project.id, projectVersionId: noLut.version.id },
+      where: { workspaceId, projectId: seed.project.id, projectVersionId: appliedColorPlan.version.id },
     }), 1)
 
     const inheritedPolicyBefore = await prisma.v2ProjectSnapshot.findUniqueOrThrow({
-      where: { id: noLut.version.snapshotRefs.policies },
+      where: { id: appliedColorPlan.version.snapshotRefs.policies },
       select: { id: true, contentJson: true, contentHash: true },
     })
     const policyRepository = new PrismaProjectPolicyOverridesRepository(prisma)
@@ -563,8 +611,8 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     })({
       workspaceId,
       projectId: seed.project.id,
-      baseVersionId: noLut.version.id,
-      baseHash: noLut.version.baseHash,
+      baseVersionId: appliedColorPlan.version.id,
+      baseHash: appliedColorPlan.version.baseHash,
       overrides: {
         logo: { mode: 'none' },
         instagramHandle: { mode: 'none' },
@@ -576,7 +624,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       reason: 'Disable project-only branding while preserving workspace policy.',
     })
     assert.equal(policyResult.command.type, 'set-project-policy-overrides')
-    assert.equal(policyResult.version.parentVersionId, noLut.version.id)
+    assert.equal(policyResult.version.parentVersionId, appliedColorPlan.version.id)
     assert.equal(policyResult.policySnapshot.contentSchemaVersion, 2)
     assert.deepEqual(policyResult.resolved.logo, { value: null, origin: 'project-none' })
     assert.deepEqual(policyResult.resolved.instagramHandle, { value: null, origin: 'project-none' })
@@ -631,7 +679,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     }
     t.diagnostic(JSON.stringify({
       directorRunId: directed.run.id,
-      projectVersionId: noLut.version.id,
+      projectVersionId: appliedColorPlan.version.id,
       treatmentSnapshotId: directed.command.payload.snapshotRefs.treatment,
       treatment: {
         mode: directed.run.treatmentPlan.mode,

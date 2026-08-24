@@ -188,6 +188,57 @@ const colorPipelineCompilationExample = {
   createdAt,
   compilationHash: '6'.repeat(64),
 }
+const projectColorPlanRequestExample = {
+  baseVersionId: 'project-version-color-base-1', baseHash: 'a'.repeat(64),
+  plan: {
+    schemaVersion: 'color-plan/v1', metadata: colorSourceMetadataExample,
+    outputMetadata: colorOutputMetadataExample, global: colorPipelineStagesExample,
+    sourceMetadata: { [artifactId]: colorSourceMetadataExample },
+    sources: {}, cameras: {}, segments: {},
+  },
+  reason: 'Aplicar o plano de cor aprovado por alvo.',
+}
+const projectColorPlanResolvedTargetExample = {
+  ...colorPipelineCompilationExample.pipeline,
+  target: { sourceId: artifactId, segmentId: 'clip-color-example-1' },
+  pipelineHash: 'b'.repeat(64),
+}
+const projectColorPlanAggregateExample = {
+  schemaVersion: 'project-color-plan/v1', id: 'project-color-plan-example-1', workspaceId, projectId,
+  commandId: 'project-color-command-example-1', baseVersionId: 'project-version-color-base-1',
+  resultVersionId: 'project-version-color-result-2',
+  plan: { ...projectColorPlanRequestExample.plan, planHash: 'c'.repeat(64) },
+  compiled: {
+    schemaVersion: 'compiled-color-plan/v1', colorPlanHash: 'c'.repeat(64),
+    targets: [projectColorPlanResolvedTargetExample], manifestHash: 'd'.repeat(64),
+  },
+  createdAt, recordHash: 'e'.repeat(64),
+}
+const projectColorPlanImpactExample = {
+  schemaVersion: 'project-color-plan-impact/v1', commandId: projectColorPlanAggregateExample.commandId,
+  commandType: 'set-project-color-plan', baseVersionId: projectColorPlanAggregateExample.baseVersionId,
+  resultVersionId: projectColorPlanAggregateExample.resultVersionId,
+  colorPlanId: projectColorPlanAggregateExample.id, colorPlanHash: projectColorPlanAggregateExample.plan.planHash,
+  compiledManifestHash: projectColorPlanAggregateExample.compiled.manifestHash,
+  changeKinds: ['color-plan'], dependencyTypes: ['visual'],
+  affectedRanges: [{ startFrame: 0, endFrame: 300 }], affectedVariantIds: ['9:16'],
+  affectedArtifacts: [], minimalRenders: [{ kind: 'proxy', variantId: '9:16', ranges: [{ startFrame: 0, endFrame: 300 }] }],
+  renderSemanticsChanged: true, renderDeferredUntilTimeline: false, impactHash: 'f'.repeat(64),
+}
+const projectColorPlanResultExample = {
+  command: {
+    id: projectColorPlanAggregateExample.commandId, type: 'set-project-color-plan',
+    baseVersionId: projectColorPlanAggregateExample.baseVersionId,
+    author: { type: 'api-client', id: clientId }, reason: projectColorPlanRequestExample.reason, createdAt,
+  },
+  version: {
+    id: projectColorPlanAggregateExample.resultVersionId, sequence: 2,
+    parentVersionId: projectColorPlanAggregateExample.baseVersionId, baseHash: '9'.repeat(64), createdAt,
+    visibleState: { schemaVersion: 'visible-state/v1', label: 'current', tone: 'info', progress: { mode: 'none' }, primaryAction: 'open-result', availableActions: ['open-result'], terminal: false },
+  },
+  colorPlan: projectColorPlanAggregateExample, impact: projectColorPlanImpactExample,
+  invalidations: [], replayed: false,
+}
 const treatmentPerceptionSummaryExample = {
   id: 'perception-summary-example-1', schemaVersion: 1, summaryHash: '7'.repeat(64),
   confidence: .92, speakerCoverage: .8, visualVariety: .45, evidenceItemCount: 12, durationMs: 30_000,
@@ -6030,6 +6081,12 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         data: { compilation: colorPipelineCompilationExample },
         meta: { apiVersion: 'v1' },
       },
+    ],
+    'apollo://schemas/project-color-plan-set-request/v1': [projectColorPlanRequestExample],
+    'apollo://schemas/project-color-plan-applied/v1': [{ data: projectColorPlanResultExample, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/project-color-plan-response/v1': [
+      { data: { result: projectColorPlanResultExample }, meta: { apiVersion: 'v1' } },
+      { data: { result: null }, meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/create-treatment-plan-request/v1': [{ projectVersionId: 'project-version-example-1', policySnapshotId: 'project-snapshot-policy-1', objective: 'sale', mode: 'talking-head', perceptionSummary: treatmentPerceptionSummaryExample }],
     'apollo://schemas/treatment-plan-mutated/v1': [{ data: { treatmentPlan: persistedTreatmentPlanExample, replayed: false }, meta: { apiVersion: 'v1' } }],

@@ -320,6 +320,9 @@ const coverage = Object.freeze({
   'apollo.projects.lut-selection.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus resolved workspace default or active LUT',
   },
+  'apollo.projects.color-plan.set': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, trusted source metadata and complete clip target set',
+  },
   'apollo.projects.subtitle-configuration.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion plus the per-variant configuration head the command claims to replace',
   },
@@ -589,7 +592,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,
-    'base-version-bound-action': 8,
+    'base-version-bound-action': 9,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
