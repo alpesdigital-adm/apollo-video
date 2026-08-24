@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts';
-import { createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
+import { compileColorPlanTargets, createColorPlan, createExportMatrix, createMediaColorProbe, OUTPUT_FORMATS, parseCube, preflightExports, renderExportCell, resolveColorPlan, SDR_COLOR_FIXTURES, selectWorkspaceLut } from '../../src/v2/domain/color-and-export.ts';
 
 const sourceColor = {
   colorSpace: 'camera-log',
@@ -109,6 +109,86 @@ test('T-FR-182 applies deterministic local overrides without changing sibling se
   };
   assert.equal(resolveColorPlan(plan, { segmentId: 'a' }).stages[2].id, 'creative-warm');
   assert.equal(resolveColorPlan(plan, { segmentId: 'b' }).stages[2].id, 'creative-film-look');
+});
+
+test('T-FR-182 canonicalizes every override layer and rejects dormant invalid transforms', () => {
+  const left = basePlan();
+  left.sources = {
+    'SOURCE-B': [transform('match-b', 'match', workingColor, workingColor)],
+    'source-a': [transform('match-a', 'match', workingColor, workingColor)],
+  };
+  left.cameras = {
+    'camera-a': [transform('camera-a-match', 'match', workingColor, workingColor)],
+  };
+  left.segments = {
+    'segment-a': [transform('segment-a-look', 'creative-lut', workingColor, workingColor, {
+      lut: { artifactId: 'lut-segment-a', sha256: 'e'.repeat(64) },
+    })],
+  };
+  const right = basePlan();
+  right.sources = {
+    'source-a': [transform('match-a', 'match', workingColor, workingColor)],
+    'source-b': [transform('match-b', 'match', workingColor, workingColor)],
+  };
+  right.cameras = left.cameras;
+  right.segments = left.segments;
+
+  const canonical = createColorPlan(left);
+  assert.deepEqual(Object.keys(canonical.sources), ['source-a', 'source-b']);
+  assert.equal(canonical.planHash, createColorPlan(right).planHash);
+  assert.equal(
+    resolveColorPlan(left, { sourceId: 'SOURCE-A', cameraId: 'CAMERA-A', segmentId: 'SEGMENT-A' }).stages[2].id,
+    'segment-a-look',
+  );
+
+  const dormantInvalid = basePlan();
+  dormantInvalid.segments = {
+    unused: [{
+      ...transform('invalid-unused', 'match', workingColor, workingColor),
+      implementation: {
+        ...transform('invalid-unused', 'match', workingColor, workingColor).implementation,
+        parametersHash: '0'.repeat(64),
+      },
+    }],
+  };
+  assert.throws(
+    () => resolveColorPlan(dormantInvalid, { segmentId: 'other' }),
+    /parametersHash does not match parameters/,
+  );
+});
+
+test('T-FR-182 compiles a content-addressed target manifest without leaking sibling overrides', () => {
+  const plan = basePlan();
+  plan.sources = {
+    'source-b': [transform('source-b-match', 'match', workingColor, workingColor)],
+  };
+  plan.cameras = {
+    'camera-b': [transform('camera-b-match', 'match', workingColor, workingColor)],
+  };
+  plan.segments = {
+    'segment-b': [transform('segment-b-look', 'creative-lut', workingColor, workingColor, {
+      lut: { artifactId: 'lut-segment-b', sha256: 'f'.repeat(64) },
+    })],
+  };
+  const targets = [
+    { sourceId: 'source-b', cameraId: 'camera-b', segmentId: 'segment-b' },
+    { sourceId: 'source-a', cameraId: 'camera-a', segmentId: 'segment-a' },
+  ];
+  const compiled = compileColorPlanTargets({ plan, targets });
+  const reordered = compileColorPlanTargets({ plan, targets: targets.toReversed() });
+  assert.equal(compiled.manifestHash, reordered.manifestHash);
+  assert.equal(compiled.colorPlanHash, createColorPlan(plan).planHash);
+  assert.equal(compiled.targets.length, 2);
+  const sibling = compiled.targets.find((target) => target.target.segmentId === 'segment-a');
+  const overridden = compiled.targets.find((target) => target.target.segmentId === 'segment-b');
+  assert.equal(sibling.stages[1].id, 'camera-match-reference-a');
+  assert.equal(sibling.stages[2].id, 'creative-film-look');
+  assert.equal(overridden.stages[1].id, 'camera-b-match');
+  assert.equal(overridden.stages[2].id, 'segment-b-look');
+  assert.throws(
+    () => compileColorPlanTargets({ plan, targets: [targets[0], targets[0]] }),
+    /targets must be unique/,
+  );
 });
 
 test('T-FR-180 rejects duplicate stages, broken color chains and LUT reuse outside its stage', () => {
