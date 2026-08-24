@@ -111,17 +111,19 @@ export function enqueueProjectFinalExportService(dependencies: {
         workspaceId,
         asset.artifactId,
       )
-      const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
-        workspaceId,
-        use: 'rendering',
-        locale: source.locale,
-      }, dependencies.clock())
-      if (rightsDecision.outcome !== 'allow') {
-        throw new DomainError(
-          'ASSET_RIGHTS_BLOCKED',
-          'A render source does not permit final export',
-          { artifactId: asset.artifactId, reasonCodes: rightsDecision.reasonCodes },
-        )
+      for (const requiredUse of ['rendering', 'editorial-reuse'] as const) {
+        const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
+          workspaceId,
+          use: requiredUse,
+          locale: source.locale,
+        }, dependencies.clock())
+        if (rightsDecision.outcome !== 'allow') {
+          throw new DomainError(
+            'ASSET_RIGHTS_BLOCKED',
+            'A render source does not permit final export and catalog promotion',
+            { artifactId: asset.artifactId, requiredUse, reasonCodes: rightsDecision.reasonCodes },
+          )
+        }
       }
     }
     const colorPipelineBindings = await resolveRenderColorPipelineBindings({

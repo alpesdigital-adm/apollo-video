@@ -139,7 +139,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
       createId: () => `matrix-rights-${suffix}`,
     })({
       workspaceId, artifactId: sourceArtifactId, baseRevision: assetRightsRevision(sourceArtifactId, 0),
-      draft: { status: 'approved', allowedUses: ['rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
+      draft: { status: 'approved', allowedUses: ['editorial-reuse', 'rendering'], prohibitedUses: [], allowedLocales: ['pt-BR'], consent: { status: 'not-required', allowedUses: [] } },
       actor: { type: 'api-client', id: issued.client.id },
     })
 

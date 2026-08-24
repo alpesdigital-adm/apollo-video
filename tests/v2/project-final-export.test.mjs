@@ -49,7 +49,7 @@ function exportActor(credentialId = 'credential-final-export-test') {
   })
 }
 
-function rightsSnapshot() {
+function rightsSnapshot(allowedUses = ['editorial-reuse', 'rendering']) {
   return createAssetRightsSnapshot({
     id: 'rights-final-export-test',
     workspaceId,
@@ -57,7 +57,7 @@ function rightsSnapshot() {
     sequence: 1,
     draft: {
       status: 'approved',
-      allowedUses: ['rendering'],
+      allowedUses,
       prohibitedUses: [],
       allowedLocales: ['pt-BR'],
       consent: { status: 'not-required', allowedUses: [] },
@@ -223,6 +223,28 @@ test('final export enqueue fails closed without current rendering rights', async
     actor: exportActor(),
     idempotencyKey: 'final-export-blocked',
   }), (error) => error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED')
+})
+
+test('final export enqueue fails before allocation when catalog promotion rights are missing', async () => {
+  const enqueue = enqueueProjectFinalExportService({
+    projects: { async readApprovedCurrentSource() { return approvedSource() } },
+    rights: { async findCurrent() { return { snapshot: rightsSnapshot(['rendering']), revision: 'revision-render-only' } } },
+    operations: {},
+    clock: () => new Date('2026-07-19T01:05:00.000Z'),
+    createId() { throw new Error('must not allocate') },
+  })
+  await assert.rejects(() => enqueue({
+    workspaceId,
+    projectId,
+    projectVersionId,
+    projectVersionHash: '1'.repeat(64),
+    format: '9:16',
+    approval: { approved: true },
+    actor: exportActor(),
+    idempotencyKey: 'final-export-catalog-rights-blocked',
+  }), (error) => error instanceof DomainError
+    && error.code === 'ASSET_RIGHTS_BLOCKED'
+    && error.details.requiredUse === 'editorial-reuse')
 })
 
 function createOperations() {

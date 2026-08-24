@@ -133,12 +133,14 @@ export function createExportMatrixPreflightService(dependencies: {
         rightsAllowed = true
         for (const asset of source.renderSources) {
           const rights = await dependencies.rights.findCurrent(workspaceId, asset.artifactId)
-          const decision = evaluateAssetUse(rights?.snapshot ?? null, {
-            workspaceId,
-            use: 'rendering',
-            locale: cell.locale,
-          }, dependencies.clock())
-          if (decision.outcome !== 'allow') rightsAllowed = false
+          for (const requiredUse of ['rendering', 'editorial-reuse'] as const) {
+            const decision = evaluateAssetUse(rights?.snapshot ?? null, {
+              workspaceId,
+              use: requiredUse,
+              locale: cell.locale,
+            }, dependencies.clock())
+            if (decision.outcome !== 'allow') rightsAllowed = false
+          }
         }
       }
       evidence.push(Object.freeze({

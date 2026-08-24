@@ -100,7 +100,7 @@ function source(projectId) {
   })
 }
 
-function rights(artifactId) {
+function rights(artifactId, allowedUses = ['editorial-reuse', 'rendering']) {
   return createAssetRightsSnapshot({
     id: `rights-${artifactId}`,
     workspaceId,
@@ -108,7 +108,7 @@ function rights(artifactId) {
     sequence: 1,
     draft: {
       status: 'approved',
-      allowedUses: ['rendering'],
+      allowedUses,
       prohibitedUses: [],
       allowedLocales: ['pt-BR'],
       consent: { status: 'not-required', allowedUses: [] },
@@ -265,6 +265,48 @@ test('T-FR-235 refuses commit when readiness or rights blocked preflight issuanc
   assert.equal(result.record.preflight.allowed, false)
   assert.equal(result.commitToken, undefined)
   assert.equal(result.record.preflight.blockers[0].code, 'CELL_NOT_READY')
+})
+
+test('T-FR-235 blocks preflight when a source can render but cannot enter the approved catalog', async () => {
+  const matrices = matrixRepository()
+  const result = await createExportMatrixPreflightService({
+    matrices: matrices.repository,
+    projects: { async readApprovedCurrentSource(input) { return source(input.projectId) } },
+    rights: {
+      async findCurrent(_workspaceId, artifactId) {
+        return { snapshot: rights(artifactId, ['rendering']), revision: 'revision-render-only' }
+      },
+    },
+    colorPipelines: {
+      async listForSource(input) {
+        return [{ compilation: {
+          id: `color-${input.sourceArtifactId}`,
+          sourceArtifactId: input.sourceArtifactId,
+          sourceManifestId: input.sourceManifestId,
+          compilationHash: 'e'.repeat(64),
+          pipeline: { pipelineHash: 'f'.repeat(64) },
+        } }]
+      },
+    },
+    capacity: { async read() { return { operatorMaximumCostMinorUnits: 1_000_000, operatorAvailableStorageBytes: 1_000_000_000 } } },
+    tokenIssuer: new HmacPreflightCommitTokenIssuer('export-matrix-test-secret-that-is-long-enough'),
+    clock: () => new Date('2026-08-24T18:00:00.000Z'),
+    createPreflightId: () => 'preflight-export-matrix-catalog-rights-blocked',
+  })({
+    workspaceId,
+    cells: [requests()[0]],
+    requestedMaximumCostMinorUnits: 1_000_000,
+    requestedMaximumStorageBytes: 1_000_000_000,
+    actor: actor(),
+    idempotencyKey: 'export-matrix-preflight-catalog-rights-blocked',
+  })
+
+  assert.equal(result.record.preflight.allowed, false)
+  assert.equal(result.commitToken, undefined)
+  assert.deepEqual(result.record.preflight.blockers, [{
+    code: 'CELL_RIGHTS_BLOCKED',
+    cellId: result.record.preflight.definition.cells[0].id,
+  }])
 })
 
 test('T-FR-235 treats a missing trusted color compilation as not ready', async () => {
