@@ -266,6 +266,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
         id: proxyOperationId, workspaceId, projectId, clientId: issued.client.id, type: 'project-proxy-render',
         status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: proxyArtifactId,
         cancelable: false, retryable: false, attempt: 1, maxAttempts: 3,
+        progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
         resultJson: stableSerialize({ resource: { type: 'media-artifact', id: proxyArtifactId, manifestId: proxyManifestId } }),
         idempotencyKey: `matrix-proxy-${key}-${suffix}`, requestFingerprint: proxyInputHash,
         createdAt, updatedAt: createdAt, startedAt: createdAt, completedAt: createdAt,
