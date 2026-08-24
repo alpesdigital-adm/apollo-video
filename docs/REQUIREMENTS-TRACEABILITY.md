@@ -329,7 +329,7 @@ deploy/aceite e FR-040 ainda precisa incluir segmentos na paginação global.
 | FR-180 | ColorPipeline | S2,S3 | D1,D5 | technical→match→LUT→output | visual golden |
 | FR-181 | Workspace LUT Library | S3,S7 | D0,D1,D6 | upload/select/disable .cube | e2e |
 | FR-182 | ColorPlan | S2 | D3,D5 | global/source/camera/segment override determinístico, persistido por ProjectVersion e materializado no renderer | T-FR-182 + API/PostgreSQL/MinIO/worker/FFmpeg + produção `2620ded` |
-| FR-235 | Export matrix | S2,S4 | D3,D4,D5 | variants×formats preflight/render | e2e |
+| FR-235 | Export matrix | S2,S4 | D3,D4,D5 | aggregate recipe×format×locale; preflight content-addressed de readiness, color, rights, custo e storage; uma operação/manifest por célula | T-FR-235 + API/PostgreSQL/MinIO/worker/FFmpeg de cinco formatos no CI `32778637601` + produção `596f388` |
 
 Atualização local de FR-134 — a superfície do editor possui 1 contrato estático adicional: busca momentos exclusivamente por `GET /v1/projects/{projectId}/long-form-moments`, envia a `POST /v1/projects/{projectId}/contiguous-extractions` somente objetivo, tópico normalizado, duração, tolerância e FPS com chave de idempotência estável, e apresenta uma faixa, cinco dimensões de evidência, o avaliador, um clip e zoom automático desligado. O fluxo foi inspecionado em desktop e mobile com respostas `/v1` controladas; essa inspeção comprova composição e responsividade da UI, não integração com backend/PostgreSQL. O E2E com PostgreSQL descartável, o deploy e o aceite continuam pendentes; FR-134 permanece parcial e nenhuma caixa de produto foi concluída por esta atualização.
 

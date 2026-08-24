@@ -1897,6 +1897,21 @@ decodificado dentro do golden definido para o renderer fixado.
 
 Variantes × formatos × idiomas com preflight de volume/custo.
 
+Aceite de produção em 24 de agosto de 2026: a matriz é um aggregate V2
+endereçável por recipe × formato × locale, publicado pelas capabilities
+`apollo.export-matrix-preflights.create`, `apollo.export-matrices.commit` e
+`apollo.export-matrices.read`. O preflight content-addressed relê a versão
+aprovada, compilação de cor e direitos correntes para `rendering` e
+`editorial-reuse`, estima custo/storage sob limites do operador e expira em até
+15 minutos. O commit consome token HMAC vinculado ao ator e cria uma operação
+final independente por célula; nomes, manifests e hashes não se misturam,
+enquanto source e planos imutáveis podem ser reutilizados. O CI pós-merge
+`32778637601` renderizou cinco MP4s reais (9:16, 16:9, 4:5, 1:1 e 21:9),
+comprovou estado parcial, retry isolado, promoção/catalogação e postflight sem
+backends órfãos. O merge `596f388` foi implantado na imagem homônima com health
+e quatro workers estáveis; a execução dos cinco MP4s ocorreu no Compose isolado
+do commit implantado, não no banco de produção.
+
 ### FR-236 — Estados
 
 Draft, ingesting, perceiving, planning, generating, reviewing-assets, rendering-proxy, reviewing-proxy, revising, rendering-final, completed, failed, canceled, archived.
