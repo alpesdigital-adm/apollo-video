@@ -35,6 +35,14 @@ const coverage = Object.freeze({
   'apollo.editorial-grammar.evaluate': {
     mode: 'read-only-deterministic', evidence: 'content-addressed editorial grammar preflight contracts with no persistence',
   },
+  'apollo.export-matrix-preflights.create': {
+    mode: 'durable-covered',
+    evidence: 'F2.028 actor-bound idempotency plus unique workspace/client/key persistence converges one immutable trusted readiness, rights, color, cost and storage snapshot',
+  },
+  'apollo.export-matrices.commit': {
+    mode: 'durable-covered',
+    evidence: 'F2.028 serializable unique preflight-to-matrix creation converges concurrent commits, while every cell dispatch has its own actor-bound final-export idempotency key and durable operation',
+  },
   'apollo.responsive-placement.solve': {
     mode: 'read-only-deterministic', evidence: 'content-addressed format-specific placement contracts with no persistence',
   },
@@ -396,7 +404,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    113,
+    115,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

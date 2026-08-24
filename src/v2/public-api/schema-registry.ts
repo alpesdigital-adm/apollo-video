@@ -24,6 +24,8 @@ export interface PublicSchemaDefinition {
 const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
+const PUBLIC_ERROR_CODES_V3 = PUBLIC_ERROR_CODES.filter((code) =>
+  code !== 'EXPORT_MATRIX_PREFLIGHT_NOT_FOUND' && code !== 'EXPORT_MATRIX_NOT_FOUND')
 const directorToolNameSchema = {
   enum: DIRECTOR_TOOL_DESCRIPTORS.map(({ name }) => name),
 } as const
@@ -13236,6 +13238,89 @@ const directorDecisionEntrySchema = {
   },
 } as const
 
+const exportMatrixFormatSchema: JsonSchema = { enum: ['9:16', '16:9', '4:5', '1:1', '21:9'] }
+const exportMatrixCellRequestSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['recipeId', 'projectId', 'projectVersionId', 'projectVersionHash', 'format', 'locale'],
+  properties: {
+    recipeId: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    projectVersionHash: sha256Schema, format: exportMatrixFormatSchema,
+    locale: { type: 'string', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$' },
+  },
+}
+const exportMatrixCellDefinitionSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['recipeId', 'projectId', 'projectVersionId', 'projectVersionHash', 'format', 'locale', 'id', 'sequence', 'address', 'addressHash', 'outputFileName', 'manifestFileName', 'cellHash'],
+  properties: {
+    recipeId: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    projectVersionHash: sha256Schema, format: exportMatrixFormatSchema,
+    locale: { type: 'string', pattern: '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$' },
+    id: idSchema, sequence: { type: 'integer', minimum: 1, maximum: 100 },
+    address: { type: 'string', minLength: 8, maxLength: 300 }, addressHash: sha256Schema,
+    outputFileName: { type: 'string', pattern: '^[A-Za-z0-9._-]+\\.mp4$', maxLength: 240 },
+    manifestFileName: { type: 'string', pattern: '^[A-Za-z0-9._-]+\\.manifest\\.json$', maxLength: 240 },
+    cellHash: sha256Schema,
+  },
+}
+const exportMatrixPreflightSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['schemaVersion', 'estimatePolicyVersion', 'definition', 'quantity', 'estimatedCostMinorUnits', 'maximumCostMinorUnits', 'estimatedStorageBytes', 'maximumStorageBytes', 'costLimitMinorUnits', 'storageLimitBytes', 'cells', 'blockers', 'allowed', 'snapshotHash', 'costFingerprint', 'createdAt', 'expiresAt', 'preflightHash'],
+  properties: {
+    schemaVersion: { const: 'export-matrix-preflight/v1' }, estimatePolicyVersion: { const: 'export-matrix-estimate/1.0.0' },
+    definition: {
+      type: 'object', additionalProperties: false, required: ['schemaVersion', 'workspaceId', 'cells', 'definitionHash'],
+      properties: { schemaVersion: { const: 'export-matrix/v1' }, workspaceId: idSchema, cells: { type: 'array', minItems: 1, maxItems: 100, items: exportMatrixCellDefinitionSchema }, definitionHash: sha256Schema },
+    },
+    quantity: { type: 'integer', minimum: 1, maximum: 100 },
+    estimatedCostMinorUnits: { type: 'integer', minimum: 0 }, maximumCostMinorUnits: { type: 'integer', minimum: 0 },
+    estimatedStorageBytes: { type: 'integer', minimum: 0 }, maximumStorageBytes: { type: 'integer', minimum: 0 },
+    costLimitMinorUnits: { type: 'integer', minimum: 0 }, storageLimitBytes: { type: 'integer', minimum: 0 },
+    cells: {
+      type: 'array', minItems: 1, maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['cellId', 'ready', 'rightsAllowed', 'durationFrames', 'fps', 'width', 'height', 'sourceFingerprint', 'durationSeconds', 'estimatedCostMinorUnits', 'maximumCostMinorUnits', 'estimatedStorageBytes', 'maximumStorageBytes', 'blockers'],
+        properties: {
+          cellId: idSchema, ready: { type: 'boolean' }, rightsAllowed: { type: 'boolean' }, durationFrames: { type: 'integer', minimum: 1 },
+          fps: { type: 'number', minimum: 1, maximum: 120 }, width: { type: 'integer', minimum: 2 }, height: { type: 'integer', minimum: 2 }, sourceFingerprint: sha256Schema,
+          durationSeconds: { type: 'number', exclusiveMinimum: 0 }, estimatedCostMinorUnits: { type: 'integer', minimum: 1 }, maximumCostMinorUnits: { type: 'integer', minimum: 1 },
+          estimatedStorageBytes: { type: 'integer', minimum: 1 }, maximumStorageBytes: { type: 'integer', minimum: 1 },
+          blockers: { type: 'array', uniqueItems: true, items: { enum: ['CELL_NOT_READY', 'CELL_RIGHTS_BLOCKED'] } },
+        },
+      },
+    },
+    blockers: {
+      type: 'array', maxItems: 102,
+      items: { type: 'object', additionalProperties: false, required: ['code'], properties: { code: { enum: ['CELL_NOT_READY', 'CELL_RIGHTS_BLOCKED', 'COST_LIMIT_EXCEEDED', 'STORAGE_LIMIT_EXCEEDED'] }, cellId: idSchema } },
+    },
+    allowed: { type: 'boolean' }, snapshotHash: sha256Schema, costFingerprint: sha256Schema, createdAt: dateTimeSchema, expiresAt: dateTimeSchema, preflightHash: sha256Schema,
+  },
+}
+const exportMatrixRuntimeSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id', 'workspaceId', 'preflightId', 'definitionHash', 'preflightHash', 'status', 'cells', 'createdByClientId', 'createdAt'],
+  properties: {
+    id: idSchema, workspaceId: idSchema, preflightId: idSchema, definitionHash: sha256Schema, preflightHash: sha256Schema,
+    status: { enum: ['queued', 'running', 'partially-failed', 'ready', 'failed', 'canceled'] },
+    cells: {
+      type: 'array', minItems: 1, maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'sequence', 'address', 'recipeId', 'projectId', 'projectVersionId', 'projectVersionHash', 'format', 'locale', 'outputFileName', 'manifestFileName', 'cellHash', 'status', 'attempt'],
+        properties: {
+          id: idSchema, sequence: { type: 'integer', minimum: 1 }, address: { type: 'string', minLength: 8, maxLength: 300 }, recipeId: idSchema, projectId: idSchema,
+          projectVersionId: idSchema, projectVersionHash: sha256Schema, format: exportMatrixFormatSchema, locale: { type: 'string' },
+          outputFileName: { type: 'string', maxLength: 240 }, manifestFileName: { type: 'string', maxLength: 240 }, cellHash: sha256Schema,
+          status: { enum: ['awaiting-dispatch', 'queued', 'running', 'retrying', 'ready', 'failed', 'canceled'] }, operationId: idSchema,
+          outputArtifactId: idSchema, outputManifestId: idSchema, attempt: { type: 'integer', minimum: 0 },
+          error: { type: 'object', additionalProperties: false, required: ['code', 'message', 'retryable'], properties: { code: { type: 'string', minLength: 1, maxLength: 128 }, message: { type: 'string', minLength: 1, maxLength: 500 }, retryable: { type: 'boolean' } } },
+        },
+      },
+    },
+    createdByClientId: idSchema, createdAt: dateTimeSchema,
+  },
+}
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
   defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
@@ -22086,6 +22171,30 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('export-matrix-preflight-request', 1, 'Request a trusted export matrix preflight', {
+    type: 'object', additionalProperties: false, required: ['cells', 'limits'],
+    properties: {
+      cells: { type: 'array', minItems: 1, maxItems: 100, items: exportMatrixCellRequestSchema },
+      limits: {
+        type: 'object', additionalProperties: false, required: ['maximumCostMinorUnits', 'maximumStorageBytes'],
+        properties: { maximumCostMinorUnits: { type: 'integer', minimum: 0, maximum: 100000000 }, maximumStorageBytes: { type: 'integer', minimum: 0 } },
+      },
+    },
+  }),
+  defineSchema('export-matrix-preflight-created', 1, 'Trusted export matrix preflight and optional commit token', successSchema({
+    type: 'object', additionalProperties: false, required: ['preflightId', 'preflight', 'replayed'],
+    properties: { preflightId: idSchema, preflight: exportMatrixPreflightSchema, commitToken: { type: 'string', minLength: 80, maxLength: 4096 }, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('commit-export-matrix-request', 1, 'Commit an allowed export matrix preflight', {
+    type: 'object', additionalProperties: false, required: ['commitToken', 'approval'],
+    properties: {
+      commitToken: { type: 'string', minLength: 80, maxLength: 4096 },
+      approval: { type: 'object', additionalProperties: false, required: ['approved'], properties: { approved: { const: true }, note: { type: 'string', minLength: 1, maxLength: 1000 } } },
+    },
+  }),
+  defineSchema('export-matrix-response', 1, 'Addressable export matrix with independent operation state', successSchema({
+    type: 'object', additionalProperties: false, required: ['matrix'], properties: { matrix: exportMatrixRuntimeSchema, replayed: { type: 'boolean' } },
+  })),
   defineSchema('api-client-list', 1, 'API client list response',
     successSchema({
       type: 'object',
@@ -22345,6 +22454,41 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     },
   }),
   defineSchema('error-envelope', 3, 'Public API error envelope with stable error categories', {
+    type: 'object',
+    additionalProperties: false,
+    required: ['error'],
+    properties: {
+      error: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['code', 'message', 'category', 'retryable', 'requestId'],
+        properties: {
+          code: { enum: PUBLIC_ERROR_CODES_V3 },
+          message: { type: 'string' },
+          category: {
+            enum: ['validation', 'auth', 'policy', 'conflict', 'quota', 'provider', 'internal'],
+          },
+          retryable: { type: 'boolean' },
+          requestId: { type: 'string' },
+          details: { type: 'object' },
+          conflict: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['currentVersionId', 'conflictingTargets', 'diff'],
+            properties: {
+              currentVersionId: idSchema,
+              conflictingTargets: {
+                type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true,
+                items: { type: 'string', minLength: 1, maxLength: 256 },
+              },
+              diff: versionDiffSchema,
+            },
+          },
+        },
+      },
+    },
+  }),
+  defineSchema('error-envelope', 4, 'Public API error envelope with export matrix errors', {
     type: 'object',
     additionalProperties: false,
     required: ['error'],

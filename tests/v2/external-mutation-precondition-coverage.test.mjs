@@ -36,6 +36,14 @@ const coverage = Object.freeze({
   'apollo.editorial-grammar.evaluate': {
     mode: 'read-only-preflight', evidence: 'deterministic content-addressed editorial grammar evaluation with no persistence',
   },
+  'apollo.export-matrix-preflights.create': {
+    mode: 'idempotent-create',
+    evidence: 'F2.028 request fingerprint binds the canonical matrix definition, caller limits and complete authenticated actor; trusted readiness, rights, color pipeline, cost and storage evidence is persisted before a token can be issued',
+  },
+  'apollo.export-matrices.commit': {
+    mode: 'natural-idempotent-create',
+    evidence: 'F2.028 commit consumes one short-lived actor, workspace, request, evidence snapshot and cost-bound token; the unique preflight relation converges replay before cells dispatch to independently idempotent final operations',
+  },
   'apollo.responsive-placement.solve': {
     mode: 'read-only-preflight', evidence: 'deterministic content-addressed format-specific placement evaluation with no persistence',
   },
@@ -587,8 +595,8 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 55,
-    'natural-idempotent-create': 3,
+    'idempotent-create': 56,
+    'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,

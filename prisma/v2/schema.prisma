@@ -179,6 +179,9 @@ model V2Workspace {
   contiguousMomentEvaluations            V2ContiguousMomentEvaluation[]
   contiguousExtractions                  V2ContiguousExtraction[]
   montageAlternativeRuns                 V2MontageAlternativeRun[]
+  exportMatrixPreflights                 V2ExportMatrixPreflight[]
+  exportMatrices                         V2ExportMatrix[]
+  exportMatrixCells                      V2ExportMatrixCell[]
 
   @@map("workspaces")
 }
@@ -219,6 +222,8 @@ model V2ApiClient {
   authoredProjectAdministrationCommands V2ProjectAdministrationCommand[]     @relation("ProjectAdministrationCommandActor")
   createdWebhookEndpoints               V2WebhookEndpoint[]                  @relation("WebhookEndpointCreator")
   createdWebhookSubscriptions           V2WebhookSubscription[]              @relation("WebhookSubscriptionCreator")
+  createdExportMatrixPreflights         V2ExportMatrixPreflight[]            @relation("ExportMatrixPreflightCreator")
+  createdExportMatrices                 V2ExportMatrix[]                     @relation("ExportMatrixCreator")
   proxyReviewDecisions                  V2ProxyReviewDecision[]
   qualityIterations                     V2QualityIteration[]
   mvpCoreGates                          V2MvpCoreGate[]
@@ -2688,6 +2693,7 @@ model V2PublicOperation {
   reviewPatchBatch                 V2ReviewPatchBatch?
   controlCommands                  V2PublicOperationControlCommand[]
   artifactInvalidationResolutions  V2CommandArtifactInvalidationResolution[]
+  exportMatrixCell                 V2ExportMatrixCell?
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, clientId, idempotencyKey])
@@ -3272,6 +3278,104 @@ model V2ProjectFinalExportAttempt {
   @@index([workspaceId, completedAt(sort: Desc)])
   @@index([workspaceId, status, completedAt(sort: Desc)])
   @@map("project_final_export_attempts")
+}
+
+model V2ExportMatrixPreflight {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  definitionHash          String   @db.Char(64)
+  preflightHash           String   @db.Char(64)
+  snapshotHash            String   @db.Char(64)
+  costFingerprint         String   @db.Char(64)
+  preflightJson           String   @db.Text
+  allowed                 Boolean
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+  expiresAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy V2ApiClient     @relation("ExportMatrixPreflightCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  matrix    V2ExportMatrix?
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@index([workspaceId, allowed, expiresAt])
+  @@map("export_matrix_preflights")
+}
+
+model V2ExportMatrix {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  preflightId             String   @unique @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  definitionHash          String   @db.Char(64)
+  preflightHash           String   @db.Char(64)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  preflight V2ExportMatrixPreflight @relation(fields: [preflightId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient             @relation("ExportMatrixCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  cells     V2ExportMatrixCell[]
+
+  @@unique([id, workspaceId])
+  @@unique([preflightId, workspaceId])
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@map("export_matrices")
+}
+
+model V2ExportMatrixCell {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  matrixId             String   @db.VarChar(128)
+  sequence             Int
+  address              String   @db.VarChar(300)
+  recipeId             String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  projectVersionId     String   @db.VarChar(128)
+  projectVersionHash   String   @db.Char(64)
+  outputAspectRatio    String   @db.VarChar(16)
+  locale               String   @db.VarChar(35)
+  outputFileName       String   @db.VarChar(240)
+  manifestFileName     String   @db.VarChar(240)
+  cellHash             String   @db.Char(64)
+  dispatchStatus       String   @db.VarChar(32)
+  operationId          String?  @unique @db.VarChar(128)
+  dispatchErrorCode    String?  @db.VarChar(128)
+  dispatchErrorMessage String?  @db.VarChar(500)
+  dispatchRetryable    Boolean?
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
+
+  workspace V2Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  matrix    V2ExportMatrix     @relation(fields: [matrixId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  operation V2PublicOperation? @relation(fields: [operationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([matrixId, sequence])
+  @@unique([matrixId, address])
+  @@unique([operationId, workspaceId])
+  @@unique([id, workspaceId, matrixId])
+  @@index([workspaceId, matrixId, dispatchStatus, sequence])
+  @@index([workspaceId, projectId, projectVersionId])
+  @@map("export_matrix_cells")
 }
 
 model V2ProjectMediaAsset {

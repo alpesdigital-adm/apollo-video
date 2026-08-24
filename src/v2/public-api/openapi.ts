@@ -120,7 +120,7 @@ function responsesFor(capability: PublicCapability) {
     description: 'Public error envelope without internal diagnostics.',
     content: {
       'application/json': {
-        schema: schemaReference('apollo://schemas/error-envelope/v3'),
+        schema: schemaReference('apollo://schemas/error-envelope/v4'),
       },
     },
   }

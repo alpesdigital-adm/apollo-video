@@ -336,7 +336,7 @@ test('version conflicts expose only the bounded semantic diff', async () => {
   const document = createOpenApiDocument()
   const errorSchema =
     document.paths['/v1/projects'].post.responses['409'].content['application/json'].schema
-  assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV3' })
+  assert.deepEqual(errorSchema, { $ref: '#/components/schemas/ErrorEnvelopeV4' })
 })
 
 test('public errors never expose a domain diagnostic through the client message', () => {
