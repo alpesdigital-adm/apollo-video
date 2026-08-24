@@ -454,9 +454,22 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     const worker = createProjectFinalExportWorker(workerEnvironment)
+    const assertSucceeded = async (outcome) => {
+      const operation = outcome
+        ? await client.v2PublicOperation.findUnique({ where: { id: outcome.operationId } })
+        : null
+      assert.equal(outcome?.status, 'succeeded', stableSerialize({
+        outcome,
+        errorCode: operation?.errorCode,
+        errorMessage: operation?.errorMessage,
+        errorRetryable: operation?.errorRetryable,
+        attempt: operation?.attempt,
+        maxAttempts: operation?.maxAttempts,
+      }))
+    }
     for (let index = 0; index < 3; index += 1) {
       const outcome = await worker(`matrix-worker-a-${index}-${suffix}`)
-      assert.equal(outcome?.status, 'succeeded')
+      await assertSucceeded(outcome)
     }
     const partialResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const partial = await partialResponse.json()
@@ -467,7 +480,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
 
     for (let index = 3; index < 5; index += 1) {
       const outcome = await worker(`matrix-worker-b-${index}-${suffix}`)
-      assert.equal(outcome?.status, 'succeeded')
+      await assertSucceeded(outcome)
     }
     const readyResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const ready = await readyResponse.json()
