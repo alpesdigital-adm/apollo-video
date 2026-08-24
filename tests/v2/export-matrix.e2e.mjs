@@ -182,7 +182,7 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
           id: `matrix-clip-${key}-${suffix}`, sourceArtifactId, sourceInFrame: 0, sourceOutFrame: 30,
           timelineInFrame: 0, timelineOutFrame: 30, rate: 1,
         }] }],
-        subtitleTracks: [], transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 30 },
+        subtitleTracks: [], transitions: [], movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
         composition: {
           layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
           faceSafeFallback: [0.08, 0.08, 0.84, 0.84], subtitleSafeRegion: [0.08, 0.68, 0.84, 0.22],
