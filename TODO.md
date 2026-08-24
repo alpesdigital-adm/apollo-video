@@ -20,15 +20,15 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.019, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036 e o ColorPlan F2.027, com a jornada integral do MVP Core e os
+Estado auditado após o gate F2.024, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core e os
 dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **309 de 1.259 microtarefas verificadas como efetivamente entregues (24,5%, arredondamento conservador)**;
-- **950 microtarefas abertas ou aguardando nova comprovação**;
+- **348 de 1.259 microtarefas verificadas como efetivamente entregues (27,6%, arredondamento conservador)**;
+- **911 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.019 foram entregues, mas não encerram o
+  permanecem abertos; F2.001 a F2.025, F2.027 e F2.028 foram entregues, mas não encerram o
   gate F2;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
@@ -1389,58 +1389,75 @@ as evidências e o snapshot-base.
 
 ### F2.020 — Integrity gate de prova [FR-131]
 
-- [ ] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe. Evidência T-FR-131.
-- [ ] Bloquear prova descontextualizada, incompatível ou expirada. Evidência T-FR-131.
-- [ ] Preservar qualifier/attribution nos modos visual e verbal. Evidência T-FR-131.
-- [ ] Emitir issue acionável sem sugerir fabricação de evidência. Evidência T-FR-131.
-- [ ] Criar policy eval com falsos positivos e falsos negativos críticos. Evidência T-FR-131.
+- [x] Comparar claim, produto, pessoa, período, audience e consent da prova com a recipe. Evidência T-FR-131.
+- [x] Bloquear prova descontextualizada, incompatível ou expirada. Evidência T-FR-131.
+- [x] Preservar qualifier/attribution nos modos visual e verbal. Evidência T-FR-131.
+- [x] Emitir issue acionável sem sugerir fabricação de evidência. Evidência T-FR-131.
+- [x] Criar policy eval com falsos positivos e falsos negativos críticos. Evidência T-FR-131.
 
 ### F2.021 — Modos de prova [FR-132]
 
-- [ ] Implementar cutaway, split-screen e proof card. Evidência T-FR-132.
-- [ ] Definir entrada/saída, duração mínima, identificação e legibilidade por modo. Evidência T-FR-132.
-- [ ] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto. Evidência T-FR-132.
-- [ ] Permitir override manual por segmento/formato. Evidência T-FR-132.
-- [ ] Criar visual goldens nos cinco formatos. Evidência: 15 combinações formato/modo.
+- [x] Implementar cutaway, split-screen e proof card. Evidência T-FR-132.
+- [x] Definir entrada/saída, duração mínima, identificação e legibilidade por modo. Evidência T-FR-132.
+- [x] Escolher modo conforme mídia, formato, ritmo e necessidade de contexto. Evidência T-FR-132.
+- [x] Permitir override manual por segmento/formato. Evidência T-FR-132.
+- [x] Criar visual goldens nos cinco formatos. Evidência: 15 combinações formato/modo.
 
 ### F2.022 — Long-form indexing [FR-133]
 
-- [ ] Criar workflow background resumível para probe, transcript, diarization, chunks e moments. Evidência T-FR-133.
-- [ ] Publicar resultados parciais pesquisáveis com tier/status explícito. Evidência T-FR-133.
-- [ ] Controlar custo e concorrência por duração/tier. Evidência T-FR-133.
-- [ ] Retomar processamento após restart sem duplicar segments. Evidência: idempotency por job/tier.
-- [ ] Testar vídeo de 2h dentro do orçamento de performance definido. Evidência T-FR-133.
+- [x] Criar workflow background resumível para probe, transcript, diarization, chunks e moments. Evidência T-FR-133.
+- [x] Publicar resultados parciais pesquisáveis com tier/status explícito. Evidência T-FR-133.
+- [x] Controlar custo e concorrência por duração/tier. Evidência T-FR-133.
+- [x] Retomar processamento após restart sem duplicar segments. Evidência: idempotency por job/tier.
+- [x] Testar vídeo de 2h dentro do orçamento de performance definido. Evidência T-FR-133.
 
 ### F2.023 — Contiguous extraction [FR-134]
 
-- [ ] Buscar janelas contínuas por objetivo, tópico e duração-alvo. Evidência T-FR-134.
-- [ ] Expandir boundaries para começo/fim semântico e contexto necessário. Evidência T-FR-134.
-- [ ] Pontuar autocontenção, densidade, integridade, áudio e visual. Evidência T-FR-134.
-- [ ] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range. Evidência T-FR-134.
-- [ ] Criar golden de conteúdo de 2min extraído de vídeo de 2h. Evidência T-FR-134.
+- [x] Buscar janelas contínuas por objetivo, tópico e duração-alvo. Evidência T-FR-134.
+- [x] Expandir boundaries para começo/fim semântico e contexto necessário. Evidência T-FR-134.
+- [x] Pontuar autocontenção, densidade, integridade, áudio e visual. Evidência T-FR-134.
+- [x] Compilar melhor janela em StoryPlan/EditPlan sem síntese multi-range. Evidência T-FR-134.
+- [x] Criar golden de conteúdo de 2min extraído de vídeo de 2h. Evidência T-FR-134.
 
 ### F2.024 — Repositório semântico cross-asset [FR-136]
 
-- [ ] Criar índice unificado de assets, segments, moments, speech e evidence. Evidência T-FR-136.
-- [ ] Restringir consulta por workspace, rights e consent antes do rerank. Evidência T-FR-136.
-- [ ] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual. Evidência T-FR-136.
-- [ ] Registrar candidates reutilizados e motivos de rejeição. Evidência T-FR-136.
-- [ ] Medir retrieval quality e latência com biblioteca crescente. Evidência T-FR-136.
+- [x] Criar índice unificado de assets, segments, moments, speech e evidence. Evidência T-FR-136.
+- [x] Restringir consulta por workspace, rights e consent antes do rerank. Evidência T-FR-136.
+- [x] Permitir ao Diretor pedir intenção, atmosfera, pessoa, fala e visual. Evidência T-FR-136.
+- [x] Registrar candidates reutilizados e motivos de rejeição. Evidência T-FR-136.
+- [x] Medir retrieval quality e latência com biblioteca crescente. Evidência T-FR-136.
 
 ### F2.025 — ColorPipeline [FR-180]
 
-- [ ] Implementar ordem technical transform → source/camera match → creative LUT → output transform. Evidência T-FR-180.
-- [ ] Persistir color space, transfer, primaries e transform versions. Evidência T-FR-180.
-- [ ] Impedir dupla aplicação de LUT/transform. Evidência T-FR-180.
-- [ ] Criar visual fixtures SDR de fontes distintas e clipping. Evidência T-FR-180.
+- [x] Implementar ordem technical transform → source/camera match → creative LUT → output transform. Evidência T-FR-180.
+- [x] Persistir color space, transfer, primaries e transform versions. Evidência T-FR-180.
+- [x] Impedir dupla aplicação de LUT/transform. Evidência T-FR-180.
+- [x] Criar visual fixtures SDR de fontes distintas e clipping. Evidência T-FR-180.
 
 ### F2.026 — Workspace LUT Library [FR-181]
 
-- [ ] Implementar upload, parse, validação e preview de `.cube`. Evidência T-FR-181.
-- [ ] Modelar licença, owner, tags, version e status ativo. Evidência T-FR-181.
-- [ ] Permitir default do workspace, seleção por projeto e `none` explícito. Evidência T-FR-181.
+- [x] Implementar upload, parse, validação e preview de `.cube`. Evidência T-FR-181.
+- [x] Modelar licença, owner, tags, version e status ativo. Evidência T-FR-181.
+- [x] Permitir default do workspace, seleção por projeto e `none` explícito. Evidência T-FR-181.
 - [ ] Criar UI de comparação e remoção segura sem quebrar versões antigas. Evidência API color-v2 e LUT imutável.
-- [ ] Criar E2E com LUT válido, inválido e glyph/nome incomum. Evidência T-FR-181.
+- [x] Criar E2E com LUT válido, inválido e glyph/nome incomum. Evidência T-FR-181.
+
+Aceite F2.020–F2.026 (exceto a caixa visual de `/brand`): merge de produção
+`596f388`, CI principal `32778637601` e CI de reconciliação `32780695560`
+integralmente verdes. Os jobs isolados executaram API `/v1`, PostgreSQL e
+MinIO reais para integrity/proof modes, workflow long-form com restart e
+fencing, corpus semântico 10/100/1.000 e exports; os jobs de qualidade
+executaram 15 goldens de prova, três MP4s de prova, o golden FFmpeg de
+7.200 s → 120 s, fixtures do ColorPipeline e o E2E HTTP/PostgreSQL de LUT
+válida, inválida e Unicode. A imagem `apollo-video:596f388` foi implantada
+com 170 migrations, web e quatro workers saudáveis, zero restart, health
+público 200 e nenhum backend E2E órfão. O workflow de 2 h usa providers
+controlados para transcript/diarization — ele comprova durabilidade, budget,
+idempotência e retomada, não contrato/custo de um provider externo. O golden
+FR-134 usa mídia FFmpeg real de 7.200 s e renderiza o MP4 contínuo de 120 s.
+A UI `/brand` está publicada e autenticada, mas sua comparação visual não foi
+aceita nesta rodada porque a sessão de inspeção não possuía login; por isso
+essa única microtarefa permanece aberta.
 
 ### F2.027 — ColorPlan [FR-182]
 

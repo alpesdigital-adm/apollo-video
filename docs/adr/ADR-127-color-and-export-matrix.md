@@ -9,3 +9,13 @@ Every recipe × format × locale is an independently retryable export cell with 
 ## Consequences
 
 Local color changes cannot leak to sibling segments. One failed format does not invalidate successful outputs, and all operations are exposed through the external color and export APIs.
+
+## Production evidence
+
+On 2026-08-24, main CI runs `32778637601` and `32780695560` proved the fixed
+pipeline, real FFmpeg fixtures, LUT import/preview/lifecycle through `/v1` and
+PostgreSQL, and the five-format addressable export matrix on disposable
+infrastructure. Image `apollo-video:596f388` was deployed with 170 migrations,
+one web process and four workers healthy. The authenticated visual acceptance
+of the `/brand` A/B comparison remains open; no other ColorPipeline or LUT
+Library result depends on that UI-only gate.

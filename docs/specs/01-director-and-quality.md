@@ -942,6 +942,16 @@ Métricas:
 14. Rights/policy podem bloquear publicação mesmo após geração.
 15. Um vídeo pode terminar sem transformação/B-roll quando essa é a melhor decisão.
 
+Aceite de produção de proof/long-form em 2026-08-24: FR-131 e FR-132 passaram
+por policy eval, API/PostgreSQL, quinze goldens e três MP4s reais; FR-133
+passou pelo workflow retomável de duas horas com fencing e budgets; FR-134
+materializou uma janela contínua de 120 s a partir de mídia real de 7.200 s; e
+FR-136 mediu qualidade/latência em corpus crescente até 1.000 documentos. Os
+CI runs `32778637601` e `32780695560` ficaram integralmente verdes e a imagem
+`apollo-video:596f388` foi implantada. Providers externos de transcript e
+diarização não foram usados no E2E de FR-133; essa limitação não é escondida
+nem convertida em prova de provider.
+
 ## 28. Questões para ADR/calibração
 
 - Modelo/orquestrador inicial e fallback.

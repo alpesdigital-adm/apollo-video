@@ -282,13 +282,10 @@ E2E de API/PostgreSQL roda no job `local-infrastructure` contra um banco
 `apollo-video-e2e-ci-proof-modes`, `connection_limit=5` e verificação de zero
 backends órfãos em `pg_stat_activity` ao final.
 
-## Pendências de aceite
+## Aceite de produção
 
-1. executar o E2E PostgreSQL em ambiente descartável local ou VPS formalmente
-   liberada e saudável. Os passos de CI existem (`local-infrastructure`), mas a
-   máquina de desenvolvimento usada nesta revisão não tem Docker nem `psql`;
-   nenhuma execução verde do E2E de API/PostgreSQL foi observada aqui, apenas os
-   testes de unidade, runtime e os goldens visuais;
-2. observar o job `local-infrastructure` verde com os novos passos;
-3. implantar e auditar produção;
-4. somente então marcar as cinco caixas do F2.021.
+CI `32778637601` executou T-FR-132 com API/PostgreSQL, tamper/stale e operação
+durável, além dos quinze goldens formato/modo e três MP4s reais; a reconciliação
+`32780695560` repetiu os gates. A imagem `apollo-video:596f388` foi implantada
+com health 200, quatro workers e zero restart. As cinco caixas de F2.021 foram
+aceitas em 2026-08-24.
