@@ -185,6 +185,8 @@ model V2Workspace {
   syntheticPresenterProfiles             V2SyntheticPresenterProfile[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
+  providerJobs                            V2ProviderJob[]
+  providerJobTransitions                 V2ProviderJobTransition[]
 
   @@map("workspaces")
 }
@@ -281,6 +283,7 @@ model V2ApiClient {
   authoredDirectorBudgetEvents          V2DirectorBudgetEvent[]
   createdSyntheticPresenterProfiles     V2SyntheticPresenterProfile[]        @relation("SyntheticPresenterProfileCreator")
   createdSyntheticProductionRuns        V2SyntheticProductionRun[]           @relation("SyntheticProductionRunCreator")
+  createdProviderJobs                   V2ProviderJob[]                       @relation("ProviderJobCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -652,6 +655,8 @@ model V2Project {
   perceptionTimelines                    V2PerceptionTimeline[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
+  providerJobs                            V2ProviderJob[]
+  providerJobTransitions                 V2ProviderJobTransition[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -852,6 +857,7 @@ model V2ProjectVersion {
   artifactInvalidationsAsResult   V2CommandArtifactInvalidation[]  @relation("ArtifactInvalidationResultVersion")
   proxyReusesAsBase               V2ProjectProxyRenderOperation[]  @relation("ProjectProxyReuseBaseVersion")
   syntheticProductionRuns         V2SyntheticProductionRun[]
+  providerJobs                    V2ProviderJob[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -1478,6 +1484,7 @@ model V2MediaArtifact {
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
   automaticCatalogRecords      V2AutomaticCatalogRecord[]
   syntheticProductionAssets    V2SyntheticProductionAsset[]
+  providerJobResults           V2ProviderJob[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3465,6 +3472,92 @@ model V2SyntheticProductionAsset {
   @@index([workspaceId, artifactId])
   @@index([workspaceId, providerJobId])
   @@map("synthetic_production_assets")
+}
+
+model V2ProviderJob {
+  id                      String    @id @db.VarChar(128)
+  workspaceId             String    @db.VarChar(128)
+  projectId               String    @db.VarChar(128)
+  originProjectVersionId  String    @db.VarChar(128)
+  schemaVersion           String    @db.VarChar(64)
+  operation               String    @db.VarChar(32)
+  adapterId               String    @db.VarChar(128)
+  adapterVersion          String    @db.VarChar(128)
+  providerJobId           String?   @db.VarChar(256)
+  inputJson               String    @db.Text
+  inputHash               String    @db.Char(64)
+  authorizationJson       String    @db.Text
+  authorizationHash       String    @db.Char(64)
+  estimateJson            String?   @db.Text
+  estimateHash            String?   @db.Char(64)
+  status                  String    @db.VarChar(32)
+  providerStatus          String?   @db.VarChar(24)
+  attempt                 Int       @default(0)
+  resultArtifactId        String?   @db.VarChar(128)
+  resultArtifactSha256    String?   @db.Char(64)
+  criticResultHash        String?   @db.Char(64)
+  normalizedErrorJson     String?   @db.Text
+  jobJson                 String    @db.Text
+  jobHash                 String    @db.Char(64)
+  requestFingerprint      String    @db.Char(64)
+  idempotencyKey          String    @db.VarChar(128)
+  createdByClientId       String    @db.VarChar(80)
+  actorCredentialId       String?   @db.VarChar(128)
+  actorEnvironment        String?   @db.VarChar(16)
+  actorAuthenticationKind String?   @db.VarChar(16)
+  actorContextHash        String?   @db.Char(64)
+  delegatedUserId         String?   @db.VarChar(128)
+  delegatedIdentityId     String?   @db.VarChar(128)
+  workspaceRole           String?   @db.VarChar(32)
+  submittedAt             DateTime? @db.Timestamptz(3)
+  heartbeatAt             DateTime? @db.Timestamptz(3)
+  completedAt             DateTime? @db.Timestamptz(3)
+  leaseOwner              String?   @db.VarChar(128)
+  leaseToken              String?   @db.VarChar(128)
+  leaseExpiresAt          DateTime? @db.Timestamptz(3)
+  createdAt               DateTime  @db.Timestamptz(3)
+  updatedAt               DateTime  @db.Timestamptz(3)
+
+  workspace            V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project              V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  originProjectVersion V2ProjectVersion @relation(fields: [originProjectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  resultArtifact       V2MediaArtifact?  @relation(fields: [resultArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy            V2ApiClient       @relation("ProviderJobCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  transitions          V2ProviderJobTransition[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, createdByClientId, actorContextHash, idempotencyKey])
+  @@unique([workspaceId, adapterId, providerJobId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, status, leaseExpiresAt, createdAt])
+  @@index([workspaceId, originProjectVersionId])
+  @@index([workspaceId, resultArtifactId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@map("provider_jobs")
+}
+
+model V2ProviderJobTransition {
+  id          String   @id @db.VarChar(128)
+  workspaceId String   @db.VarChar(128)
+  projectId   String   @db.VarChar(128)
+  jobId       String   @db.VarChar(128)
+  sequence    Int
+  fromStatus  String?  @db.VarChar(32)
+  toStatus    String   @db.VarChar(32)
+  jobHash     String   @db.Char(64)
+  leaseToken  String?  @db.VarChar(128)
+  occurredAt  DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([jobId, sequence])
+  @@index([workspaceId, projectId, occurredAt(sort: Desc)])
+  @@index([workspaceId, jobId, occurredAt])
+  @@map("provider_job_transitions")
 }
 
 model V2ExportMatrixCell {

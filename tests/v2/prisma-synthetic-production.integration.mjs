@@ -20,6 +20,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     registerSyntheticPresenterProfileService,
   } = await import('../../src/v2/application/synthetic-production.ts')
   const {
+    enqueueProviderJobService,
+    runProviderJobWorkerOnce,
+  } = await import('../../src/v2/application/provider-jobs.ts')
+  const {
     assetRightsRevision,
     createAssetRightsSnapshot,
   } = await import('../../src/v2/domain/asset-rights.ts')
@@ -42,6 +46,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { PrismaProjectWorkspaceQueryRepository } = await import(
     '../../src/v2/infrastructure/prisma/project-workspace-query-repository.ts'
   )
+  const { PrismaProviderJobRepository } = await import(
+    '../../src/v2/infrastructure/prisma/provider-job-repository.ts'
+  )
   const { PrismaSyntheticProductionRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-production-repository.ts'
   )
@@ -51,12 +58,17 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { nodeApiCredentialCrypto } = await import(
     '../../src/v2/infrastructure/security/api-credential.ts'
   )
+  const { ControlledAsyncMediaProviderAdapter } = await import(
+    '../../src/v2/infrastructure/controlled-async-media-provider.ts'
+  )
 
   const client = new PrismaClient()
   const clientId = 'synthetic-production-integration-client'
   const credentialId = 'synthetic-production-integration-credential'
 
   const cleanup = async () => {
+    await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
+    await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
@@ -274,6 +286,74 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(await client.v2ProjectSnapshot.count({
       where: { workspaceId, kind: 'edit-plan', id: 'synthetic-edit-plan-snapshot-integration' },
     }), 1)
+
+    const providerRepository = new PrismaProviderJobRepository(client)
+    let providerTransition = 0
+    const enqueued = await enqueueProviderJobService({
+      jobs: providerRepository,
+      profiles: syntheticRepository,
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      artifacts: artifactRepository,
+      rights: rightsRepository,
+      clock: () => new Date(now),
+      createJobId: () => 'synthetic-provider-job-integration',
+      createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
+    })({
+      workspaceId,
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      profileSnapshotId: registered.profile.snapshot.id,
+      operation: 'audio-avatar',
+      adapterId: 'controlled-avatar',
+      adapterVersion: 'version-1',
+      providerInput: { audioArtifactId: 'synthetic-audio-master', durationMs: 2_000, locale: 'pt-BR' },
+      sourceArtifactIds: ['synthetic-audio-master'],
+      use: 'ads',
+      market: 'BRA',
+      locale: 'pt-BR',
+      actor,
+      idempotencyKey: 'synthetic-provider-job-integration-key',
+    })
+    assert.equal(enqueued.persisted.job.status, 'planned')
+    const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
+      capabilities: {
+        operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
+        duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true,
+        supportsIdempotency: true, completion: 'polling', fetchedAt: now, expiresAt: '2030-01-01T00:00:00.000Z',
+      },
+      estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 },
+      statuses: ['queued', 'processing', 'completed'],
+      result: { controlledBytes: 'video-result' },
+    })
+    let providerTick = 0
+    const runProviderOnce = runProviderJobWorkerOnce({
+      jobs: providerRepository,
+      adapters: { get: ({ adapterId, adapterVersion }) => adapterId === adapter.id && adapterVersion === adapter.adapterVersion ? adapter : null },
+      ingestor: {
+        async ingest() {
+          await client.v2MediaArtifact.create({
+            data: {
+              id: 'synthetic-provider-output', workspaceId,
+              artifactKey: 'synthetic-integration/provider-output.mp4', sha256: hash('8'), byteSize: 8_192n,
+              mediaType: 'video', container: 'mp4', status: 'available', createdAt: new Date(now),
+            },
+          })
+          return { artifactId: 'synthetic-provider-output', artifactSha256: hash('8'), mediaType: 'video', byteSize: 8_192 }
+        },
+      },
+      critic: { async evaluate() { return { approved: true, resultHash: hash('7') } } },
+      clock: () => new Date(Date.parse(now) + (++providerTick * 1_000)),
+      createLeaseToken: () => `synthetic-provider-lease-${providerTick}`,
+      createTransitionId: () => `synthetic-provider-transition-${++providerTransition}`,
+    })
+    for (let stage = 0; stage < 7; stage += 1) await runProviderOnce('synthetic-provider-worker')
+    const completedProvider = await providerRepository.read({
+      workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id,
+    })
+    assert.equal(completedProvider?.job.status, 'approved')
+    assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
+    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 8)
+    assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
 
     const original = await client.v2SyntheticProductionRun.findUniqueOrThrow({
       where: { id: created.run.plan.id },
