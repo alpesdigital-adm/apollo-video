@@ -218,6 +218,9 @@ Esse ajuste não altera o formato major do PostgreSQL: continua em PostgreSQL
 
 ## Evidência de produção
 
-Esta seção só será preenchida após backup, migration, substituição dos
-serviços, smoke autenticado e auditoria pós-deploy. O TODO não deve considerar
-o F2.020 entregue antes dessa evidência.
+CI `32778637601` executou o E2E T-FR-131 pela API `/v1` e PostgreSQL
+descartável, com as oito dimensões, tamper/stale, replay, zero artifacts e
+postflight sem conexão órfã; `32780695560` repetiu o gate na reconciliação. A
+imagem `apollo-video:596f388` foi implantada após backup validado, aplicou 170
+migrations e ficou com health 200, web e quatro workers sem restart ou erro
+crítico. F2.020 foi aceito em 2026-08-24.

@@ -1301,6 +1301,12 @@ Critérios de aceite:
   produzir MP4 real de cutaway, split-screen e proof-card antes de marcar o
   requisito como entregue.
 
+Entregue em 2026-08-24: FR-131 e FR-132 passaram pela API pública e
+PostgreSQL descartável no CI, incluindo adulteração, stale, bloqueios de
+policy e replay. Os quinze pares formato/modo foram renderizados como goldens
+e cutaway, split-screen e proof-card também atravessaram operação durável até
+MP4 real. A mesma versão foi implantada na imagem `apollo-video:596f388`.
+
 ### FR-133 — Long-form indexing
 
 Lives e vídeos longos devem ser indexados por um workflow durável, retomável e
@@ -1346,9 +1352,22 @@ Critérios de aceite:
 - API, worker e UI observam o mesmo run;
 - nenhum MP4 ou cópia do master é criado pela indexação.
 
+Entregue em 2026-08-24: o CI retomou o workflow de duas horas após restart,
+provou fencing, idempotência por job/tier, resultados parciais, budgets e zero
+backends órfãos no PostgreSQL descartável. Transcript e diarização usam
+adapters controlados nesse E2E; portanto a entrega comprova a orquestração
+durável, não custo ou formato de resposta de um provider externo. A mídia real
+de 7.200 s é exercitada separadamente por FR-134.
+
 ### FR-134 — Contiguous extraction
 
 Encontrar janela autocontida de duração-alvo.
+
+Entregue em 2026-08-24: o golden FFmpeg usa master real de 7.200 s, calcula as
+cinco dimensões de evidência, escolhe e persiste uma janela semântica contínua,
+compila StoryPlan/EditPlan de um único range e materializa MP4 de 120 s sem
+síntese multi-range nem zoom automático. API e PostgreSQL também comprovam o
+registro e o replay do resultado.
 
 ### FR-135 — Editorial synthesis
 
@@ -1357,6 +1376,12 @@ Montar vários ranges preservando contexto e lineage.
 ### FR-136 — Repositório semântico
 
 Busca cross-library por assunto, história, prova, objeção, frase, pessoa e função.
+
+Entregue em 2026-08-24: a busca unificada filtra workspace, rights e consent
+antes do rerank, registra reutilizações/rejeições e aceita intenção, atmosfera,
+pessoa, fala e visual em canais estruturados. O CI mediu precision, recall,
+nDCG, MRR e latências p50/p95 em 10, 100 e 1.000 documentos reais no
+PostgreSQL, com drift/stale fail-closed e isolamento cross-workspace.
 
 ---
 
@@ -1478,9 +1503,22 @@ Prever export opcional SRT/VTT, além de legenda queimada.
 
 Detectar metadata/HDR → normalizar/tone-map → correção técnica → match → LUT criativa → output transform.
 
+Entregue em 2026-08-24: probe, compilação, persistência e renderer aplicam a
+ordem técnica fixa com hashes/versionamento e recusam transform duplicado ou
+pipeline divergente. Fixtures FFmpeg SDR de fontes distintas verificam output,
+clipping e integração multi-source. A versão está em produção em
+`apollo-video:596f388`.
+
 ### FR-181 — Workspace LUT Library
 
 Arquivos .cube, nome, tags, intensidade, espaços de cor, compatibilidade, preview, licença e política de uso.
+
+Entrega parcial aceita em 2026-08-24: API/PostgreSQL reais comprovam `.cube`
+válido, inválido e nome Unicode, preview PNG FFmpeg, versões imutáveis,
+licença/tags/lifecycle, default, seleção por projeto e `none`; os workers
+reconstroem a versão histórica selecionada. A UI `/brand` publicada oferece
+comparação A/B e remoção lógica, mas o aceite visual autenticado desta tela
+permanece pendente e não é contado como entregue.
 
 ### FR-182 — ColorPlan
 

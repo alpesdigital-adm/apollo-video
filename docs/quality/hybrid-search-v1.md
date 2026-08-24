@@ -244,3 +244,12 @@ Produção validada em 2026-07-27 na revisão `17301ad`:
 - exatamente um documento ativo para a identidade catalogada;
 - `physicalMaterialized=false` e contagem de media artifacts inalterada em
   `7` antes/depois do smoke.
+
+### Aceite da extensão cross-asset e escala
+
+CI `32778637601` catalogou 10, 100 e 1.000 documentos reais no PostgreSQL
+descartável, mediu precision/recall/nDCG/MRR e latências p50/p95, comprovou
+drift e result set stale com 409, auditou reutilização/rejeição e isolou o
+segundo workspace. A reconciliação `32780695560` repetiu o E2E sem backends
+órfãos. A mesma implementação está em produção na imagem
+`apollo-video:596f388`; F2.024 foi aceito em 2026-08-24.
