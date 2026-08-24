@@ -185,7 +185,11 @@ function hydrateMatrix(row: any): Readonly<ExportMatrixRecord> {
 }
 
 export class PrismaExportMatrixRepository implements ExportMatrixRepository {
-  constructor(private readonly client: Client) {}
+  private readonly client: Client
+
+  constructor(client: Client) {
+    this.client = client
+  }
 
   async findPreflightReplay(input: Parameters<ExportMatrixRepository['findPreflightReplay']>[0]) {
     const row = await this.client.v2ExportMatrixPreflight.findFirst({
