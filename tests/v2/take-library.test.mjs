@@ -153,6 +153,58 @@ test('T-FR-082 groups consecutive retakes by ScriptBlock with mandatory unique b
     take.assignment.confidence <= 1))
 })
 
+test('T-FR-082 canonicalizes alignment aliases that identify one physical retake boundary', () => {
+  const alignment = alignmentFixture()
+  const selected = alignment.alignments[0].selectedCandidate
+  assert.ok(selected)
+  const alias = Object.freeze({
+    ...selected,
+    id: 'script-candidate-boundary-alias',
+  })
+  const aliasedAlignment = Object.freeze({
+    ...alignment,
+    alignments: Object.freeze([
+      Object.freeze({
+        ...alignment.alignments[0],
+        alternatives: Object.freeze([
+          ...alignment.alignments[0].alternatives,
+          alias,
+        ]),
+      }),
+    ]),
+  })
+  const baseLibrary = createTakeLibraryRun({
+    id: 'take-library-boundary-base',
+    workspaceId: alignment.workspaceId,
+    projectId: alignment.projectId,
+    batchId: alignment.batchId,
+    alignment,
+    evaluations: evaluatedSources(alignment),
+    createdByClientId: 'client-fixture',
+    createdAt: '2026-07-27T23:02:00.000Z',
+  })
+  const aliasedLibrary = createTakeLibraryRun({
+    id: 'take-library-boundary-aliased',
+    workspaceId: alignment.workspaceId,
+    projectId: alignment.projectId,
+    batchId: alignment.batchId,
+    alignment: aliasedAlignment,
+    evaluations: evaluatedSources(aliasedAlignment),
+    createdByClientId: 'client-fixture',
+    createdAt: '2026-07-27T23:02:00.000Z',
+  })
+
+  assert.equal(aliasedLibrary.takes.length, baseLibrary.takes.length)
+  assert.deepEqual(
+    aliasedLibrary.takes.map((take) => take.retakeBoundaryId),
+    baseLibrary.takes.map((take) => take.retakeBoundaryId),
+  )
+  assert.equal(
+    new Set(aliasedLibrary.takes.map((take) => take.retakeBoundaryId)).size,
+    aliasedLibrary.takes.length,
+  )
+})
+
 test('T-FR-082 scores five dimensions and preserves primary, alternate, rejected and review states', () => {
   const alignment = alignmentFixture()
   const library = createTakeLibraryRun({

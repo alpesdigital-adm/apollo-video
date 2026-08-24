@@ -838,6 +838,10 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
         ...entry.alternatives,
       ]).map((candidate) => [candidate.id, candidate])).values(),
     ]
+    const selectedCandidateIds = new Set(
+      alignment.alignments.flatMap((entry) =>
+        entry.selectedCandidate ? [entry.selectedCandidate.id] : []),
+    )
     const libraryResponse = await apiFetch(libraryEndpoint, {
       method: 'POST',
       headers: {
@@ -851,7 +855,9 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
           sourceKind: 'alignment-candidate',
           sourceId: candidate.id,
           expectedSourceHash: candidate.candidateHash,
-          dimensions: dimensions(.94),
+          dimensions: dimensions(
+            selectedCandidateIds.has(candidate.id) ? .94 : .82,
+          ),
         })),
       }),
     })
