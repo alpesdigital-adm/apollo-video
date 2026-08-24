@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertProfileEligible, assertSyntheticPresenterEditPlan, catalogSyntheticMaster, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, evaluateSyntheticBlock, prepareAudio, reuseSyntheticBlock, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
+import { assertProfileEligible, assertSyntheticPresenterEditPlan, catalogSyntheticMaster, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, createSyntheticPresenterProfileSnapshot, evaluateSyntheticBlock, prepareAudio, reuseSyntheticBlock, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
 import { assertProviderContract, ElevenLabsAdapter, FakeAvatarAdapter, FakeTtsAdapter, HeyGenAdapter } from '../../src/v2/infrastructure/synthetic-providers.ts';
 import { compileSyntheticPresenterRenderInputs } from '../../src/v2/application/compile-synthetic-presenter-render.ts';
 
@@ -36,10 +36,9 @@ function durableFixture(overrides = {}) {
       { text: 'mundo', startMs: 900, endMs: 2_000 },
     ],
   }
-  const profileSnapshot = {
+  const profileSnapshot = createSyntheticPresenterProfileSnapshot({
     id: 'presenter-ana',
     version: 3,
-    snapshotHash: digest('c'),
     actorIdentityId: 'identity-ana',
     avatar: {
       adapterId: 'avatar-adapter',
@@ -57,7 +56,8 @@ function durableFixture(overrides = {}) {
     disclosure: 'Conteúdo gerado com IA',
     consent: {
       id: 'consent-ana',
-      snapshotHash: digest('d'),
+      evidenceArtifactId: 'artifact-consent-ana',
+      evidenceSha256: digest('d'),
       granted: true,
       allowedUses: ['ads'],
       allowedMarkets: ['BRA'],
@@ -65,7 +65,7 @@ function durableFixture(overrides = {}) {
       allowedOperations: ['tts', 'audio-avatar'],
       expiresAt: '2030-01-01T00:00:00.000Z',
     },
-  }
+  })
   const blocks = [
     {
       id: 'synthetic-block-one',
@@ -121,6 +121,12 @@ function durableFixture(overrides = {}) {
       locale: 'pt-BR',
       syntheticOperations: ['tts', 'audio-avatar'],
       artifactIds,
+      decisions: artifactIds.map((artifactId, index) => ({
+        artifactId,
+        rightsSnapshotId: `rights-snapshot-${index + 1}`,
+        rightsSnapshotHash: digest(String((index + 7) % 10)),
+        validUntil: '2029-01-01T00:15:00.000Z',
+      })),
       evaluatedAt: '2029-01-01T00:00:00.000Z',
       expiresAt: '2029-01-01T00:15:00.000Z',
     },
@@ -151,10 +157,31 @@ test('T-FR-092 creates immutable person-free EditPlan and portable RenderInputs'
 
 test('T-FR-092 fails closed before render on consent, rights, critic or timeline drift', () => {
   const fixture = durableFixture()
+  const disabledProfile = createSyntheticPresenterProfileSnapshot({
+    id: fixture.profile.id,
+    version: fixture.profile.version,
+    actorIdentityId: fixture.profile.actorIdentityId,
+    avatar: fixture.profile.avatar,
+    voice: fixture.profile.voice,
+    defaultLocale: fixture.profile.defaultLocale,
+    status: 'disabled',
+    disclosure: fixture.profile.disclosure,
+    consent: {
+      id: fixture.profile.consent.id,
+      evidenceArtifactId: fixture.profile.consent.evidenceArtifactId,
+      evidenceSha256: fixture.profile.consent.evidenceSha256,
+      granted: fixture.profile.consent.granted,
+      allowedUses: fixture.profile.consent.allowedUses,
+      allowedMarkets: fixture.profile.consent.allowedMarkets,
+      allowedLocales: fixture.profile.consent.allowedLocales,
+      allowedOperations: fixture.profile.consent.allowedOperations,
+      expiresAt: fixture.profile.consent.expiresAt,
+    },
+  })
   assert.throws(
     () => createSyntheticPresenterEditPlan({
       ...fixture,
-      profile: { ...fixture.profile, status: 'disabled' },
+      profile: disabledProfile,
     }),
     /consent is absent/,
   )

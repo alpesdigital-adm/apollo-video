@@ -88,6 +88,7 @@ import type { ProofNeedRepository } from '../application/ports/proof-need-reposi
 import type { MontageAlternativeRepository } from '../application/ports/montage-alternative-repository.ts'
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
+import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -228,6 +229,7 @@ import { PrismaProofNeedRepository } from './prisma/proof-need-repository.ts'
 import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative-repository.ts'
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
+import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -611,6 +613,10 @@ ProofIntegrityRepository {
 
 export function createProofModeRepository(): ProofModeRepository {
   return new PrismaProofModeRepository(resolveV2Client())
+}
+
+export function createSyntheticProductionRepository(): SyntheticProductionRepository {
+  return new PrismaSyntheticProductionRepository(resolveV2Client())
 }
 
 export function createLongFormIndexWorkflowRepository():

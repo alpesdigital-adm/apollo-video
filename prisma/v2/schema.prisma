@@ -182,6 +182,9 @@ model V2Workspace {
   exportMatrixPreflights                 V2ExportMatrixPreflight[]
   exportMatrices                         V2ExportMatrix[]
   exportMatrixCells                      V2ExportMatrixCell[]
+  syntheticPresenterProfiles             V2SyntheticPresenterProfile[]
+  syntheticProductionRuns                V2SyntheticProductionRun[]
+  syntheticProductionAssets              V2SyntheticProductionAsset[]
 
   @@map("workspaces")
 }
@@ -276,6 +279,8 @@ model V2ApiClient {
   authoredPerceptionTimelines           V2PerceptionTimeline[]               @relation("PerceptionTimelineActor")
   createdMontageAlternativeRuns         V2MontageAlternativeRun[]            @relation("MontageAlternativeRunCreator")
   authoredDirectorBudgetEvents          V2DirectorBudgetEvent[]
+  createdSyntheticPresenterProfiles     V2SyntheticPresenterProfile[]        @relation("SyntheticPresenterProfileCreator")
+  createdSyntheticProductionRuns        V2SyntheticProductionRun[]           @relation("SyntheticProductionRunCreator")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
@@ -645,6 +650,8 @@ model V2Project {
   creationCommand                        V2ProjectCreationCommand?
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
+  syntheticProductionRuns                V2SyntheticProductionRun[]
+  syntheticProductionAssets              V2SyntheticProductionAsset[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -726,6 +733,7 @@ model V2ProjectSnapshot {
   proxyRenderOperations   V2ProjectProxyRenderOperation[] @relation("ProjectProxyEditPlanSnapshot")
   finalEditPlanOperations V2ProjectFinalExportOperation[] @relation("FinalExportEditPlanSnapshot")
   finalExportOperations   V2ProjectFinalExportOperation[] @relation("FinalExportQualitySnapshot")
+  syntheticEditPlanRuns   V2SyntheticProductionRun[]      @relation("SyntheticEditPlanSnapshot")
 
   @@unique([id, projectId, workspaceId])
   @@unique([projectId, kind, contentHash])
@@ -843,6 +851,7 @@ model V2ProjectVersion {
   artifactInvalidationsAsBase     V2CommandArtifactInvalidation[]  @relation("ArtifactInvalidationBaseVersion")
   artifactInvalidationsAsResult   V2CommandArtifactInvalidation[]  @relation("ArtifactInvalidationResultVersion")
   proxyReusesAsBase               V2ProjectProxyRenderOperation[]  @relation("ProjectProxyReuseBaseVersion")
+  syntheticProductionRuns         V2SyntheticProductionRun[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -1468,6 +1477,7 @@ model V2MediaArtifact {
   imageAnalysisPreviews        V2ImageAnalysis[]                         @relation("ImageAnalysisPreviewArtifact")
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
   automaticCatalogRecords      V2AutomaticCatalogRecord[]
+  syntheticProductionAssets    V2SyntheticProductionAsset[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3341,6 +3351,120 @@ model V2ExportMatrix {
   @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("export_matrices")
+}
+
+model V2SyntheticPresenterProfile {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  profileId               String   @db.VarChar(128)
+  version                 Int
+  schemaVersion           String   @db.VarChar(64)
+  status                  String   @db.VarChar(16)
+  actorIdentityId         String   @db.VarChar(128)
+  defaultLocale           String   @db.VarChar(35)
+  disclosure              String   @db.VarChar(500)
+  consentSnapshotHash     String   @db.Char(64)
+  profileJson             String   @db.Text
+  profileHash             String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy V2ApiClient                @relation("SyntheticPresenterProfileCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  runs      V2SyntheticProductionRun[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, profileId, version])
+  @@unique([workspaceId, createdByClientId, actorContextHash, idempotencyKey])
+  @@index([workspaceId, profileId, createdAt(sort: Desc)])
+  @@index([workspaceId, status, defaultLocale])
+  @@index([workspaceId, consentSnapshotHash])
+  @@map("synthetic_presenter_profiles")
+}
+
+model V2SyntheticProductionRun {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  profileSnapshotId       String   @db.VarChar(128)
+  editPlanSnapshotId      String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  policyVersion           String   @db.VarChar(64)
+  status                  String   @db.VarChar(24)
+  use                     String   @db.VarChar(64)
+  market                  String   @db.VarChar(64)
+  locale                  String   @db.VarChar(35)
+  durationMs              Int
+  authorizationId         String   @db.VarChar(128)
+  authorizationHash       String   @db.Char(64)
+  planJson                String   @db.Text
+  planHash                String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace        V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project          V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion   V2ProjectVersion             @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  profileSnapshot  V2SyntheticPresenterProfile  @relation(fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  editPlanSnapshot V2ProjectSnapshot            @relation("SyntheticEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  createdBy        V2ApiClient                  @relation("SyntheticProductionRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  assets           V2SyntheticProductionAsset[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, workspaceId, projectId])
+  @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, projectVersionId])
+  @@index([workspaceId, profileSnapshotId])
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@map("synthetic_production_runs")
+}
+
+model V2SyntheticProductionAsset {
+  id             String  @id @db.VarChar(128)
+  workspaceId    String  @db.VarChar(128)
+  projectId      String  @db.VarChar(128)
+  runId          String  @db.VarChar(128)
+  artifactId     String  @db.VarChar(128)
+  role           String  @db.VarChar(32)
+  ordinal        Int
+  startMs        Int?
+  endMs          Int?
+  providerJobId  String? @db.VarChar(128)
+  criticHash     String? @db.Char(64)
+  artifactSha256 String  @db.Char(64)
+
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  run       V2SyntheticProductionRun @relation(fields: [runId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  artifact  V2MediaArtifact          @relation(fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([runId, ordinal])
+  @@unique([runId, artifactId])
+  @@index([workspaceId, projectId, role])
+  @@index([workspaceId, artifactId])
+  @@index([workspaceId, providerJobId])
+  @@map("synthetic_production_assets")
 }
 
 model V2ExportMatrixCell {

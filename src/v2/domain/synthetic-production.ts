@@ -118,6 +118,8 @@ export interface SyntheticArtifactRef {
 
 export interface SyntheticConsentSnapshot {
   id: string
+  evidenceArtifactId: string
+  evidenceSha256: string
   snapshotHash: string
   granted: boolean
   allowedUses: readonly string[]
@@ -150,6 +152,90 @@ export interface SyntheticPresenterProfileSnapshot {
   consent: Readonly<SyntheticConsentSnapshot>
 }
 
+export function createSyntheticPresenterProfileSnapshot(input: {
+  id: string
+  version: number
+  actorIdentityId: string
+  avatar: SyntheticPresenterProfileSnapshot['avatar']
+  voice: SyntheticPresenterProfileSnapshot['voice']
+  defaultLocale: string
+  status: SyntheticPresenterProfileSnapshot['status']
+  disclosure: string
+  consent: Omit<SyntheticConsentSnapshot, 'snapshotHash'>
+}): Readonly<SyntheticPresenterProfileSnapshot> {
+  assertDomain(
+    Number.isSafeInteger(input.version) && input.version >= 1 &&
+      Number.isSafeInteger(input.voice.version) && input.voice.version >= 1,
+    'INVALID_ARGUMENT',
+    'Synthetic presenter or voice version is invalid',
+  )
+  assertDomain(
+    LOCALE.test(input.defaultLocale),
+    'INVALID_ARGUMENT',
+    'Synthetic presenter locale is invalid',
+  )
+  assertDomain(
+    ['active', 'disabled', 'expired'].includes(input.status) &&
+      input.disclosure.trim().length >= 3 &&
+      input.disclosure.trim().length <= 500,
+    'INVALID_ARGUMENT',
+    'Synthetic presenter status or disclosure is invalid',
+  )
+  const consentBody = Object.freeze({
+    id: canonicalId(input.consent.id, 'consent.id'),
+    evidenceArtifactId: canonicalId(
+      input.consent.evidenceArtifactId,
+      'consent.evidenceArtifactId',
+    ),
+    evidenceSha256: canonicalHash(
+      input.consent.evidenceSha256,
+      'consent.evidenceSha256',
+    ),
+    granted: input.consent.granted === true,
+    allowedUses: Object.freeze([...new Set(input.consent.allowedUses)].toSorted()),
+    allowedMarkets: Object.freeze([...new Set(input.consent.allowedMarkets)].toSorted()),
+    allowedLocales: Object.freeze([...new Set(input.consent.allowedLocales)].toSorted()),
+    allowedOperations: Object.freeze([...new Set(input.consent.allowedOperations)].toSorted()),
+    expiresAt: isoInstant(input.consent.expiresAt, 'consent.expiresAt'),
+    ...(input.consent.revokedAt
+      ? { revokedAt: isoInstant(input.consent.revokedAt, 'consent.revokedAt') }
+      : {}),
+  })
+  assertDomain(
+    consentBody.allowedUses.length > 0 &&
+      consentBody.allowedMarkets.length > 0 &&
+      consentBody.allowedLocales.length > 0 &&
+      consentBody.allowedOperations.length > 0,
+    'INVALID_ARGUMENT',
+    'Synthetic consent scope cannot be empty',
+  )
+  const consent = Object.freeze({
+    ...consentBody,
+    snapshotHash: calculateCanonicalHash(consentBody),
+  })
+  const body = Object.freeze({
+    id: canonicalId(input.id, 'profile.id'),
+    version: input.version,
+    actorIdentityId: canonicalId(input.actorIdentityId, 'profile.actorIdentityId'),
+    avatar: Object.freeze({
+      adapterId: canonicalId(input.avatar.adapterId, 'profile.avatar.adapterId'),
+      adapterVersion: canonicalId(input.avatar.adapterVersion, 'profile.avatar.adapterVersion'),
+      identityRef: canonicalId(input.avatar.identityRef, 'profile.avatar.identityRef'),
+    }),
+    voice: Object.freeze({
+      id: canonicalId(input.voice.id, 'profile.voice.id'),
+      version: input.voice.version,
+      adapterId: canonicalId(input.voice.adapterId, 'profile.voice.adapterId'),
+      adapterVersion: canonicalId(input.voice.adapterVersion, 'profile.voice.adapterVersion'),
+    }),
+    defaultLocale: input.defaultLocale,
+    status: input.status,
+    disclosure: input.disclosure.trim(),
+    consent,
+  })
+  return Object.freeze({ ...body, snapshotHash: calculateCanonicalHash(body) })
+}
+
 export interface SyntheticUseAuthorization {
   id: string
   authorizationHash: string
@@ -159,6 +245,12 @@ export interface SyntheticUseAuthorization {
   locale: string
   syntheticOperations: readonly ('tts' | 'audio-avatar')[]
   artifactIds: readonly string[]
+  decisions: readonly Readonly<{
+    artifactId: string
+    rightsSnapshotId: string
+    rightsSnapshotHash: string
+    validUntil: string
+  }>[]
   evaluatedAt: string
   expiresAt: string
 }
@@ -320,6 +412,16 @@ function assertAuthorization(
     'ASSET_RIGHTS_BLOCKED',
     'Synthetic production authorization is absent, stale or incomplete',
   )
+  assertDomain(
+    authorization.decisions.length === input.artifactIds.length &&
+      authorization.decisions.every((decision) =>
+        available.has(decision.artifactId) &&
+        SHA256.test(decision.rightsSnapshotHash) &&
+        Date.parse(isoInstant(decision.validUntil, 'authorization.decision.validUntil')) >
+          Date.parse(input.now)),
+    'ASSET_RIGHTS_BLOCKED',
+    'Synthetic production rights decision lineage is incomplete or expired',
+  )
 }
 
 /**
@@ -393,6 +495,36 @@ export function createSyntheticPresenterEditPlan(input: {
       Number.isSafeInteger(input.profile.voice.version) && input.profile.voice.version >= 1,
     'INVALID_ARGUMENT',
     'Synthetic presenter or voice version is invalid',
+  )
+  const verifiedProfile = createSyntheticPresenterProfileSnapshot({
+    id: input.profile.id,
+    version: input.profile.version,
+    actorIdentityId: input.profile.actorIdentityId,
+    avatar: input.profile.avatar,
+    voice: input.profile.voice,
+    defaultLocale: input.profile.defaultLocale,
+    status: input.profile.status,
+    disclosure: input.profile.disclosure,
+    consent: {
+      id: input.profile.consent.id,
+      evidenceArtifactId: input.profile.consent.evidenceArtifactId,
+      evidenceSha256: input.profile.consent.evidenceSha256,
+      granted: input.profile.consent.granted,
+      allowedUses: input.profile.consent.allowedUses,
+      allowedMarkets: input.profile.consent.allowedMarkets,
+      allowedLocales: input.profile.consent.allowedLocales,
+      allowedOperations: input.profile.consent.allowedOperations,
+      expiresAt: input.profile.consent.expiresAt,
+      ...(input.profile.consent.revokedAt
+        ? { revokedAt: input.profile.consent.revokedAt }
+        : {}),
+    },
+  })
+  assertDomain(
+    verifiedProfile.snapshotHash === input.profile.snapshotHash &&
+      verifiedProfile.consent.snapshotHash === input.profile.consent.snapshotHash,
+    'PERSISTENCE_CONFLICT',
+    'Synthetic presenter profile snapshot hash is invalid',
   )
   assertConsent(input.profile, {
     use: input.use,
