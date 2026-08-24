@@ -280,6 +280,11 @@ export class PrismaWorkspaceLutRepository implements WorkspaceLutRepository {
     return row ? hydrateVersion(row) : null
   }
 
+  async readVersionById(input: { workspaceId: string; versionId: string }) {
+    const row = await this.client.v2WorkspaceLutVersion.findFirst({ where: { id: input.versionId, workspaceId: input.workspaceId } })
+    return row ? hydrateVersion(row) : null
+  }
+
   async list(input: { workspaceId: string; status?: 'active' | 'inactive'; limit: number }) {
     const heads = await this.client.v2WorkspaceLut.findMany({ where: { workspaceId: input.workspaceId, ...(input.status ? { status: input.status } : {}) }, orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }], take: input.limit })
     const ids = heads.flatMap((head) => head.currentVersionId ? [head.currentVersionId] : [])

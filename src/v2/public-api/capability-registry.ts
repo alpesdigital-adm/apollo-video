@@ -5477,6 +5477,21 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
   },
   {
+    id: 'apollo.projects.color-plan.read', version: '1.0.0', title: 'Read project ColorPlan',
+    description: 'Reads the effective content-addressed ColorPlan, compiled target pipelines, immutable result version and render impact.',
+    exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/project-color-plan-response/v1', endpoint: { method: 'GET', path: '/v1/projects/{projectId}/color-plan' }, toolName: 'apollo.projects.color-plan.read',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200], idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.color-plan.set', version: '1.0.0', title: 'Set project ColorPlan',
+    description: 'Creates a typed EditCommand and immutable ProjectVersion, compiles deterministic global/source/camera/segment pipelines and enqueues a full proxy render when the timeline exists.',
+    exposure: 'public', operationKind: 'command', authMode: 'required', requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/project-color-plan-set-request/v1', outputSchemaRef: 'apollo://schemas/project-color-plan-applied/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/color-plan' }, toolName: 'apollo.projects.color-plan.set',
+    supportsDryRun: false, costClass: 'free', confirmation: 'none', successStatuses: [200, 201], idempotency: 'required', requestBodyRequired: true,
+  },
+  {
     id: 'apollo.projects.subtitle-configuration.read', version: '1.0.0', title: 'Read project subtitle configuration',
     description: 'Reads the content-addressed subtitle mode, resolved versioned preset, origin and transcript binding for one output variant.',
     exposure: 'public', operationKind: 'query', authMode: 'required', requiredScopes: ['projects:read'],

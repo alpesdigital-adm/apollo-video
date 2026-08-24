@@ -4,9 +4,9 @@
     "uiActions": 105,
     "capabilities": 94,
     "endpoints": 94,
-    "registeredCapabilities": 246,
-    "operableCapabilities": 246,
-    "publicContractCapabilities": 246,
+    "registeredCapabilities": 248,
+    "operableCapabilities": 248,
+    "publicContractCapabilities": 248,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -4438,6 +4438,28 @@
       "endpoint": "POST /v1/projects/{projectId}/lut-selection",
       "inputSchemaRef": "apollo://schemas/project-lut-selection-set-request/v1",
       "outputSchemaRef": "apollo://schemas/project-lut-selection-applied/v3",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.color-plan.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/color-plan",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/project-color-plan-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.color-plan.set",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/color-plan",
+      "inputSchemaRef": "apollo://schemas/project-color-plan-set-request/v1",
+      "outputSchemaRef": "apollo://schemas/project-color-plan-applied/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

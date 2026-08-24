@@ -38,6 +38,10 @@ import {
   parseProjectLutSelectionImpact,
 } from '../../src/v2/domain/project-lut-selection-impact.ts'
 import {
+  createProjectColorPlanImpact,
+  parseProjectColorPlanImpact,
+} from '../../src/v2/domain/project-color-plan-impact.ts'
+import {
   createProjectPolicyOverridesImpact,
   parseProjectPolicyOverridesImpact,
 } from '../../src/v2/domain/project-policy-overrides-impact.ts'
@@ -181,6 +185,20 @@ function lutSelectionImpact(frames = durationFrames) {
   })
 }
 
+function colorPlanImpact(frames = durationFrames) {
+  return createProjectColorPlanImpact({
+    commandId: 'edit-command-registry-color-plan',
+    baseVersionId,
+    resultVersionId,
+    colorPlanId: 'project-color-plan-registry-1',
+    colorPlanHash: hashA,
+    compiledManifestHash: hashB,
+    durationFrames: frames,
+    proxyVariantId: '9:16',
+    outputReferences: frames > 0 ? outputs : [],
+  })
+}
+
 function subtitleConfigurationImpact(frames = durationFrames) {
   return createProjectSubtitleConfigurationImpact({
     commandId: 'edit-command-registry-subtitle',
@@ -265,6 +283,7 @@ const IMPACT_FIXTURES = {
   'remove-spoken-content': { build: editorialCutImpact, parse: parseEditorialCutImpact },
   'run-director': { build: directorRunImpact, parse: parseDirectorRunImpact },
   'set-project-lut-selection': { build: () => lutSelectionImpact(), parse: parseProjectLutSelectionImpact },
+  'set-project-color-plan': { build: () => colorPlanImpact(), parse: parseProjectColorPlanImpact },
   'set-project-subtitle-mode': { build: () => subtitleConfigurationImpact(), parse: parseProjectSubtitleConfigurationImpact },
   'replace-source-transcript': { build: sourceTranscriptImpact, parse: parseSourceTranscriptReplacementImpact },
   'set-project-policy-overrides': { build: projectPolicyImpact, parse: parseProjectPolicyOverridesImpact },
@@ -289,7 +308,7 @@ function command(type, overrides = {}) {
 
 test('T-F0-027 the registry is frozen, exhaustive and internally consistent', () => {
   assert.ok(Object.isFrozen(EDIT_COMMAND_POLICIES))
-  assert.equal(EDIT_COMMAND_TYPES.length, 11)
+  assert.equal(EDIT_COMMAND_TYPES.length, 12)
   assert.deepEqual([...EDIT_COMMAND_TYPES], Object.keys(EDIT_COMMAND_POLICIES).toSorted())
 
   for (const type of EDIT_COMMAND_TYPES) {
@@ -373,7 +392,7 @@ test('T-F0-027 every registered type is produced by an application service and v
       discovered.add(type)
     }
   }
-  assert.equal(callSites, 11, 'expected one createEditCommand call site per Command type')
+  assert.equal(callSites, 12, 'expected one createEditCommand call site per Command type')
   assert.deepEqual([...discovered].toSorted(), [...EDIT_COMMAND_TYPES])
 })
 
@@ -413,7 +432,7 @@ test('T-F0-027 partial-range types narrow renders to the edited region', () => {
 test('T-F0-027 full-timeline types always invalidate from frame zero', () => {
   assert.deepEqual(
     [...editCommandTypesByRenderPolicy('full-timeline')],
-    ['remove-spoken-content', 'run-director', 'set-project-lut-selection', 'set-project-subtitle-mode'],
+    ['remove-spoken-content', 'run-director', 'set-project-color-plan', 'set-project-lut-selection', 'set-project-subtitle-mode'],
   )
   for (const type of editCommandTypesByRenderPolicy('full-timeline')) {
     const impact = IMPACT_FIXTURES[type].build()
@@ -454,6 +473,15 @@ test('T-F0-027 deferred types enqueue no render before their unblocking event', 
   assert.deepEqual([...beforeTimeline.affectedRanges], [])
   assert.deepEqual([...beforeTimeline.affectedArtifacts], [])
   assert.equal(lutSelectionImpact().renderDeferredUntilTimeline, false)
+
+  // ColorPlan follows the same timeline gate and binds its compiled manifest.
+  assert.equal(editCommandPolicy('set-project-color-plan').deferralReason, 'timeline')
+  const colorBeforeTimeline = colorPlanImpact(0)
+  assert.equal(colorBeforeTimeline.renderDeferredUntilTimeline, true)
+  assert.deepEqual([...colorBeforeTimeline.minimalRenders], [])
+  assert.deepEqual([...colorBeforeTimeline.affectedRanges], [])
+  assert.deepEqual([...colorBeforeTimeline.affectedArtifacts], [])
+  assert.equal(colorPlanImpact().renderDeferredUntilTimeline, false)
 
   // The subtitle mode defers the same way, and never widens past its own variant.
   assert.equal(editCommandPolicy('set-project-subtitle-mode').deferralReason, 'timeline')

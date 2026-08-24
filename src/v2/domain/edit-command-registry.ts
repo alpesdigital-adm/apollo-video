@@ -31,6 +31,7 @@ export const EDIT_COMMAND_IMPACT_SCHEMAS = [
   'director-run-impact/v1',
   'source-transcript-replacement-impact/v1',
   'project-lut-selection-impact/v1',
+  'project-color-plan-impact/v1',
   'project-subtitle-configuration-impact/v1',
   'project-policy-overrides-impact/v1',
   'compare-action-impact/v1',
@@ -113,6 +114,16 @@ export const EDIT_COMMAND_POLICIES = Object.freeze({
     evidence: 'project-lut-selection-impact.ts:85 range covers { startFrame: 0, endFrame: '
       + 'durationFrames }; :106 minimalRenders stay empty and renderDeferredUntilTimeline is true '
       + 'while durationFrames is 0',
+  }),
+  'set-project-color-plan': Object.freeze({
+    renderPolicy: 'full-timeline',
+    impactSchema: 'project-color-plan-impact/v1',
+    requiresImpact: true,
+    supportsRenderFreeImpact: false,
+    deferralReason: 'timeline',
+    evidence: 'project-color-plan-impact.ts:80 createProjectColorPlanImpact covers the complete '
+      + 'timeline and persists a content-addressed ColorPlan plus compiled target manifest; '
+      + 'before a timeline exists the impact is explicitly deferred',
   }),
   'set-project-subtitle-mode': Object.freeze({
     // Not partial-range: a subtitle mode is a property of the whole compiled

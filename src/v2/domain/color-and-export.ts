@@ -45,11 +45,37 @@ export type ColorPlan = {
   schemaVersion: 'color-plan/v1'
   metadata: ColorMetadata
   outputMetadata: ColorMetadata
-  global: ColorTransform[]
-  sources?: Record<string, ColorTransform[]>
-  cameras?: Record<string, ColorTransform[]>
-  segments?: Record<string, ColorTransform[]>
+  global: readonly Readonly<ColorTransform>[]
+  sourceMetadata?: Readonly<Record<string, Readonly<ColorMetadata>>>
+  sources?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
+  cameras?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
+  segments?: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
 }
+
+export type CanonicalColorPlan = Readonly<{
+  schemaVersion: 'color-plan/v1'
+  metadata: Readonly<ColorMetadata>
+  outputMetadata: Readonly<ColorMetadata>
+  global: readonly Readonly<ColorTransform>[]
+  sourceMetadata: Readonly<Record<string, Readonly<ColorMetadata>>>
+  sources: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
+  cameras: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
+  segments: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
+  planHash: string
+}>
+
+export type ColorPlanTarget = Readonly<{
+  sourceId: string
+  cameraId?: string
+  segmentId?: string
+}>
+
+export type CompiledColorPlan = Readonly<{
+  schemaVersion: 'compiled-color-plan/v1'
+  colorPlanHash: string
+  targets: readonly Readonly<ReturnType<typeof resolveColorPlan>>[]
+  manifestHash: string
+}>
 
 const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 const SHA_256 = /^[a-f0-9]{64}$/
@@ -363,6 +389,96 @@ function normalizeLayer(
   return transforms
 }
 
+function normalizeLayerMap(
+  value: Readonly<Record<string, readonly Readonly<ColorTransform>[]>> | undefined,
+  field: 'sources' | 'cameras' | 'segments',
+): Readonly<Record<string, readonly Readonly<ColorTransform>[]>> {
+  if (value === undefined) return Object.freeze({})
+  assertDomain(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    'INVALID_ARGUMENT',
+    `${field} must be an object`,
+  )
+  const entries = Object.entries(value)
+  assertDomain(
+    entries.length <= 128,
+    'INVALID_ARGUMENT',
+    `${field} exceeds the maximum number of overrides`,
+  )
+  const normalized = entries.map(([rawKey, transforms]) => {
+    const key = normalizedToken(rawKey, `${field} key`)
+    assertDomain(
+      key !== '__proto__' && key !== 'constructor' && key !== 'prototype',
+      'INVALID_ARGUMENT',
+      `${field} key is reserved`,
+    )
+    return [key, Object.freeze(normalizeLayer(transforms, `${field}.${key}`))] as const
+  }).sort(([left], [right]) => left.localeCompare(right))
+  assertDomain(
+    new Set(normalized.map(([key]) => key)).size === normalized.length,
+    'INVALID_ARGUMENT',
+    `${field} keys must be unique after normalization`,
+  )
+  return Object.freeze(Object.fromEntries(normalized))
+}
+
+function normalizeSourceMetadataMap(
+  value: Readonly<Record<string, Readonly<ColorMetadata>>> | undefined,
+): Readonly<Record<string, Readonly<ColorMetadata>>> {
+  if (value === undefined) return Object.freeze({})
+  assertDomain(
+    value !== null && typeof value === 'object' && !Array.isArray(value),
+    'INVALID_ARGUMENT',
+    'sourceMetadata must be an object',
+  )
+  const entries = Object.entries(value)
+  assertDomain(
+    entries.length <= 128,
+    'INVALID_ARGUMENT',
+    'sourceMetadata exceeds the maximum number of sources',
+  )
+  const normalized = entries.map(([rawKey, metadata]) => {
+    const key = normalizedToken(rawKey, 'sourceMetadata key')
+    return [key, normalizedMetadata(metadata, `sourceMetadata.${key}`)] as const
+  }).sort(([left], [right]) => left.localeCompare(right))
+  assertDomain(
+    new Set(normalized.map(([key]) => key)).size === normalized.length,
+    'INVALID_ARGUMENT',
+    'sourceMetadata keys must be unique after normalization',
+  )
+  return Object.freeze(Object.fromEntries(normalized))
+}
+
+export function createColorPlan(
+  plan: Readonly<ColorPlan>,
+): Readonly<CanonicalColorPlan> {
+  assertDomain(
+    plan && plan.schemaVersion === 'color-plan/v1',
+    'INVALID_ARGUMENT',
+    'ColorPlan schemaVersion is invalid',
+  )
+  const content = Object.freeze({
+    schemaVersion: 'color-plan/v1' as const,
+    metadata: normalizedMetadata(plan.metadata, 'metadata'),
+    outputMetadata: normalizedMetadata(plan.outputMetadata, 'outputMetadata'),
+    global: Object.freeze(normalizeLayer(plan.global, 'global')),
+    sourceMetadata: normalizeSourceMetadataMap(plan.sourceMetadata),
+    sources: normalizeLayerMap(plan.sources, 'sources'),
+    cameras: normalizeLayerMap(plan.cameras, 'cameras'),
+    segments: normalizeLayerMap(plan.segments, 'segments'),
+  })
+  assertDomain(
+    COLOR_TRANSFORM_ORDER.every((kind) =>
+      content.global.some((transform) => transform.kind === kind)),
+    'INVALID_ARGUMENT',
+    'ColorPlan global layer must define every color stage explicitly',
+  )
+  return Object.freeze({
+    ...content,
+    planHash: calculateCanonicalHash(content),
+  })
+}
+
 export function resolveColorPlan(
   plan: Readonly<ColorPlan>,
   ref: Readonly<{
@@ -371,26 +487,30 @@ export function resolveColorPlan(
     segmentId?: string
   }>,
 ) {
-  assertDomain(
-    plan.schemaVersion === 'color-plan/v1',
-    'INVALID_ARGUMENT',
-    'ColorPlan schemaVersion is invalid',
-  )
-  const sourceMetadata = normalizedMetadata(plan.metadata, 'metadata')
-  const outputMetadata = normalizedMetadata(
-    plan.outputMetadata,
-    'outputMetadata',
-  )
+  const canonical = createColorPlan(plan)
+  const sourceId = ref.sourceId
+    ? normalizedToken(ref.sourceId, 'sourceId')
+    : undefined
+  const cameraId = ref.cameraId
+    ? normalizedToken(ref.cameraId, 'cameraId')
+    : undefined
+  const segmentId = ref.segmentId
+    ? normalizedToken(ref.segmentId, 'segmentId')
+    : undefined
+  const sourceMetadata = sourceId
+    ? canonical.sourceMetadata[sourceId] ?? canonical.metadata
+    : canonical.metadata
+  const outputMetadata = canonical.outputMetadata
   const layers = [
-    normalizeLayer(plan.global, 'global'),
-    ...(ref.sourceId
-      ? [normalizeLayer(plan.sources?.[ref.sourceId], `sources.${ref.sourceId}`)]
+    canonical.global,
+    ...(sourceId
+      ? [canonical.sources[sourceId] ?? []]
       : []),
-    ...(ref.cameraId
-      ? [normalizeLayer(plan.cameras?.[ref.cameraId], `cameras.${ref.cameraId}`)]
+    ...(cameraId
+      ? [canonical.cameras[cameraId] ?? []]
       : []),
-    ...(ref.segmentId
-      ? [normalizeLayer(plan.segments?.[ref.segmentId], `segments.${ref.segmentId}`)]
+    ...(segmentId
+      ? [canonical.segments[segmentId] ?? []]
       : []),
   ]
   const selected = new Map<ColorTransformKind, Readonly<ColorTransform>>()
@@ -425,9 +545,9 @@ export function resolveColorPlan(
     outputMetadata,
     stages: transforms,
     target: Object.freeze({
-      ...(ref.sourceId ? { sourceId: normalizedToken(ref.sourceId, 'sourceId') } : {}),
-      ...(ref.cameraId ? { cameraId: normalizedToken(ref.cameraId, 'cameraId') } : {}),
-      ...(ref.segmentId ? { segmentId: normalizedToken(ref.segmentId, 'segmentId') } : {}),
+      ...(sourceId ? { sourceId } : {}),
+      ...(cameraId ? { cameraId } : {}),
+      ...(segmentId ? { segmentId } : {}),
     }),
   })
   return Object.freeze({
@@ -437,6 +557,47 @@ export function resolveColorPlan(
         `${item.kind}:${item.id}@${item.version}:${item.implementation.parametersHash}`)
       .join('>'),
     pipelineHash: calculateCanonicalHash(content),
+  })
+}
+
+export function compileColorPlanTargets(input: {
+  plan: Readonly<ColorPlan>
+  targets: readonly Readonly<ColorPlanTarget>[]
+}): Readonly<CompiledColorPlan> {
+  const canonical = createColorPlan(input.plan)
+  assertDomain(
+    Array.isArray(input.targets) &&
+      input.targets.length >= 1 &&
+      input.targets.length <= 512,
+    'INVALID_ARGUMENT',
+    'ColorPlan compilation target count is invalid',
+  )
+  const targets = input.targets.map((target) => {
+    assertDomain(
+      target && typeof target === 'object' && !Array.isArray(target),
+      'INVALID_ARGUMENT',
+      'ColorPlan compilation target is invalid',
+    )
+    return resolveColorPlan(canonical, target)
+  }).sort((left, right) =>
+    calculateCanonicalHash(left.target).localeCompare(
+      calculateCanonicalHash(right.target),
+    ))
+  const targetKeys = targets.map((target) =>
+    calculateCanonicalHash(target.target))
+  assertDomain(
+    new Set(targetKeys).size === targetKeys.length,
+    'INVALID_ARGUMENT',
+    'ColorPlan compilation targets must be unique',
+  )
+  const content = Object.freeze({
+    schemaVersion: 'compiled-color-plan/v1' as const,
+    colorPlanHash: canonical.planHash,
+    targets: Object.freeze(targets),
+  })
+  return Object.freeze({
+    ...content,
+    manifestHash: calculateCanonicalHash(content),
   })
 }
 

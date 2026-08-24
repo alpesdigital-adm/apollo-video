@@ -62,6 +62,7 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { StoryPlanRepository } from '../application/ports/story-plan-repository.ts'
 import type { WorkspaceLutRepository } from '../application/ports/workspace-lut-repository.ts'
 import type { ProjectLutSelectionRepository } from '../application/ports/project-lut-selection-repository.ts'
+import type { ProjectColorPlanRepository } from '../application/ports/project-color-plan-repository.ts'
 import type { ProjectSubtitleConfigurationRepository } from '../application/ports/project-subtitle-configuration-repository.ts'
 import type { SubtitleSegmentOverrideRepository } from '../application/ports/subtitle-segment-override-repository.ts'
 import type { ProjectPolicyOverridesRepository } from '../application/ports/project-policy-overrides-repository.ts'
@@ -178,6 +179,7 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaStoryPlanRepository } from './prisma/story-plan-repository.ts'
 import { PrismaWorkspaceLutRepository } from './prisma/workspace-lut-repository.ts'
 import { PrismaProjectLutSelectionRepository } from './prisma/project-lut-selection-repository.ts'
+import { PrismaProjectColorPlanRepository } from './prisma/project-color-plan-repository.ts'
 import { PrismaProjectSubtitleConfigurationRepository } from './prisma/project-subtitle-configuration-repository.ts'
 import { PrismaSubtitleSegmentOverrideRepository } from './prisma/subtitle-segment-override-repository.ts'
 import { PrismaProjectPolicyOverridesRepository } from './prisma/project-policy-overrides-repository.ts'
@@ -429,6 +431,10 @@ export function createWorkspaceLutRepository(): WorkspaceLutRepository {
 
 export function createProjectLutSelectionRepository(): ProjectLutSelectionRepository {
   return new PrismaProjectLutSelectionRepository(resolveV2Client())
+}
+
+export function createProjectColorPlanRepository(): ProjectColorPlanRepository {
+  return new PrismaProjectColorPlanRepository(resolveV2Client())
 }
 
 export function createProjectSubtitleConfigurationRepository(): ProjectSubtitleConfigurationRepository {
@@ -1467,7 +1473,8 @@ export function createProjectProxyRenderWorker(
     proxyReviews: createProxyReviewRepository(),
     catalogOutput: createAutomaticCatalogService(clock),
     colorPipelines: createColorPipelineCompilationRepository(),
-    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
+    colorPlans: createProjectColorPlanRepository(),
+    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -1529,7 +1536,8 @@ export function createProjectFinalExportWorker(
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
     renderElementMaps: createRenderElementMapRepository(),
     colorPipelines: createColorPipelineCompilationRepository(),
-    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work')),
+    colorPlans: createProjectColorPlanRepository(),
+    luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
     sources: createArtifactSourceMaterializer(environment),
     clock,
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),

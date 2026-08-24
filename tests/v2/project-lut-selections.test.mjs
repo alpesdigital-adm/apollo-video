@@ -8,7 +8,7 @@ import addFormats from 'ajv-formats'
 
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { setProjectLutSelectionService } from '../../src/v2/application/project-lut-selections.ts'
-import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
+import { calculateCanonicalHash, stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { createProjectVersion } from '../../src/v2/domain/project-version.ts'
 import { createProjectLutSelection, projectLutRef } from '../../src/v2/domain/project-lut-selection.ts'
 import { createWorkspaceLutVersion } from '../../src/v2/domain/workspace-lut.ts'
@@ -388,14 +388,26 @@ test('T-FR-181 worker materializes the exact selected cube and intensity outside
       compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.5, cubeContent: creativeCube,
       preview: { byteSize: 128, sha256: 'e'.repeat(64) }, createdByClientId: 'client-project-lut', createdAt: '2026-07-31T17:02:00.000Z',
     })
+    const alternateLut = createWorkspaceLutVersion({
+      id: 'workspace-lut-alternate-1', workspaceId: lut.workspaceId, lutId: 'workspace-lut-alternate', version: 1,
+      name: 'Alternate look', owner: 'Apollo Studio', license: { policy: 'licensed', name: 'Workspace' },
+      compatibility: { inputColorSpace: 'rec709', outputColorSpace: 'rec709' }, intensity: 0.75,
+      cubeContent: `LUT_3D_SIZE 2\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n`,
+      preview: { byteSize: 128, sha256: 'd'.repeat(64) }, createdByClientId: 'client-project-lut', createdAt: '2026-07-31T17:02:00.000Z',
+    })
     const selection = createProjectLutSelection({
       id: 'project-lut-materialized-selection', workspaceId: lut.workspaceId, projectId: 'project-lut-test',
       baseVersionId: 'project-version-lut-base-1', resultVersionId: 'project-version-lut-result-2', commandId: 'project-lut-command-materialized',
       requested: { mode: 'lut-version', lutId: lut.lutId, version: 1 }, resolved: { mode: 'lut-version', lut: projectLutRef(lut) }, intensity: 0.5,
       createdAt: '2026-07-31T17:03:00.000Z',
     })
-    const creative = { kind: 'creative-lut', enabled: true, implementation: { provider: 'apollo-lut', parameters: { mode: 'lut3d', intensity: 0.5 } }, lut: { artifactId: lut.id, sha256: lut.cube.contentHash } }
-    const materializer = new LocalProjectLutRenderMaterializer({ async readEffectiveForVersion() { return { selection, resolvedLutVersion: lut } } }, join(root, 'work'))
+    const creativeParameters = { mode: 'lut3d', intensity: 0.5 }
+    const creative = { kind: 'creative-lut', enabled: true, implementation: { provider: 'apollo-lut', parameters: creativeParameters, parametersHash: calculateCanonicalHash(creativeParameters) }, lut: { artifactId: lut.id, sha256: lut.cube.contentHash } }
+    const materializer = new LocalProjectLutRenderMaterializer(
+      { async readEffectiveForVersion() { return { selection, resolvedLutVersion: lut } } },
+      join(root, 'work'),
+      { async readVersionById({ versionId }) { return versionId === alternateLut.id ? alternateLut : null } },
+    )
     const result = await materializer.materialize({
       workspaceId: lut.workspaceId, projectId: selection.projectId, projectVersionId: selection.resultVersionId,
       operationId: 'operation-project-lut-materialized', compilations: [{ pipeline: { stages: [{ kind: 'technical' }, { kind: 'match' }, creative, { kind: 'output' }] } }],
@@ -411,7 +423,35 @@ test('T-FR-181 worker materializes the exact selected cube and intensity outside
     await materializer.cleanup('operation-project-lut-materialized')
     await assert.rejects(access(path))
 
-    const mismatched = { ...creative, implementation: { ...creative.implementation, parameters: { mode: 'lut3d', intensity: 1 } } }
+    const fullParameters = { mode: 'lut3d', intensity: 1 }
+    const full = { ...creative, implementation: { ...creative.implementation, parameters: fullParameters, parametersHash: calculateCanonicalHash(fullParameters) } }
+    const noneParameters = { mode: 'none' }
+    const none = { ...creative, enabled: false, implementation: { ...creative.implementation, parameters: noneParameters, parametersHash: calculateCanonicalHash(noneParameters) }, lut: undefined }
+    const alternateParameters = { mode: 'lut3d', intensity: 0.75 }
+    const alternate = { ...creative, implementation: { ...creative.implementation, parameters: alternateParameters, parametersHash: calculateCanonicalHash(alternateParameters) }, lut: { artifactId: alternateLut.id, sha256: alternateLut.cube.contentHash } }
+    const targeted = await materializer.materialize({
+      workspaceId: lut.workspaceId, projectId: selection.projectId, projectVersionId: selection.resultVersionId,
+      operationId: 'operation-project-lut-targeted',
+      compilations: [{ pipeline: { stages: [{ kind: 'technical' }, { kind: 'match' }, creative, { kind: 'output' }] } }],
+      executions: [
+        { stages: [{ kind: 'technical' }, { kind: 'match' }, creative, { kind: 'output' }] },
+        { stages: [{ kind: 'technical' }, { kind: 'match' }, full, { kind: 'output' }] },
+        { stages: [{ kind: 'technical' }, { kind: 'match' }, none, { kind: 'output' }] },
+        { stages: [{ kind: 'technical' }, { kind: 'match' }, alternate, { kind: 'output' }] },
+      ],
+    })
+    assert.equal(targeted.assets.length, 3)
+    assert.equal(targeted.materializedCubeHashes.length, 3)
+    assert.equal(new Set(targeted.assets.map((asset) => asset.sha256)).size, 3)
+    assert.equal(targeted.asset, undefined)
+    const halfPath = targeted.lutPaths[`${lut.id}:${creative.implementation.parametersHash}`]
+    const fullPath = targeted.lutPaths[`${lut.id}:${full.implementation.parametersHash}`]
+    assert.notEqual(halfPath, fullPath)
+    assert.match(await readFile(halfPath, 'utf8'), /0\.5 0 0/)
+    assert.match(await readFile(fullPath, 'utf8'), /1 0 0/)
+    assert.match(await readFile(targeted.lutPaths[`${alternateLut.id}:${alternate.implementation.parametersHash}`], 'utf8'), /0 0 1/)
+
+    const mismatched = { ...full, lut: { ...full.lut, artifactId: 'workspace-lut-unselected-1' } }
     await assert.rejects(materializer.materialize({
       workspaceId: lut.workspaceId, projectId: selection.projectId, projectVersionId: selection.resultVersionId,
       operationId: 'operation-project-lut-mismatch', compilations: [{ pipeline: { stages: [{ kind: 'technical' }, { kind: 'match' }, mismatched, { kind: 'output' }] } }],

@@ -295,6 +295,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable ProjectVersion that pins an existing authorized LUT version or explicit none; it starts no render or provider work.',
     },
+    'apollo.projects.color-plan.set': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates one exact-version ColorPlan Command, immutable ProjectVersion and bounded proxy operation; all source colorimetry and compiled target hashes are revalidated server-side.',
+    },
     'apollo.projects.subtitle-configuration.set': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one variant-scoped EditCommand and immutable ProjectVersion that pins auto, workspace-default, manual or none by versioned preset reference; the transcript, its hash and every evidence record stay byte-identical and no render or provider work starts.',

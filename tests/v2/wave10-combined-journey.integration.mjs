@@ -870,6 +870,7 @@ async function renderThroughRealWorker(input) {
     async catalogOutput() {},
     operations,
     colorPipelines,
+    colorPlans: { async readEffectiveForVersion() { return null } },
     luts: {
       async materialize() {
         return { selectionId: 'selection-wave10', selectionHash: '7'.repeat(64), lutPaths: {} }
@@ -972,6 +973,9 @@ function assertRecipeParameters(rendered, expected) {
     projectLutSelectionId: 'selection-wave10',
     projectLutSelectionHash: '7'.repeat(64),
     materializedCubeHash: null,
+    materializedCubeHashes: [],
+    colorPlanHash: null,
+    compiledColorPlanManifestHash: null,
     placementPlanHash: rendered.renderInput.placementPlan.placementPlanHash,
     reframePlanHash: rendered.renderInput.reframePlan.reframePlanHash,
     subtitleRegistryHash: expected.registryHash,

@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
-import type { ColorMetadata, ColorTransform } from '../../domain/color-and-export.ts'
+import type { ColorMetadata, ColorTransform, resolveColorPlan } from '../../domain/color-and-export.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
@@ -31,6 +31,39 @@ function assertCompilation(value: Readonly<ColorPipelineCompilation>) {
   ) {
     throw new DomainError('INVALID_RENDER_INPUT', 'Color pipeline compilation failed integrity validation')
   }
+}
+
+export type ResolvedColorPipelineExecution = Readonly<{
+  pipeline: Readonly<ReturnType<typeof resolveColorPlan>>
+  executionHash: string
+}>
+
+function assertResolvedExecution(value: ResolvedColorPipelineExecution) {
+  const { pipelineHash, manifestKey: _manifestKey, ...pipelineContent } = value.pipeline
+  if (
+    !/^[a-f0-9]{64}$/.test(value.executionHash) ||
+    calculateCanonicalHash(pipelineContent) !== pipelineHash ||
+    value.pipeline.stages.length !== 4 ||
+    value.pipeline.stages.map((stage) => stage.kind).join('>') !==
+      'technical>match>creative-lut>output'
+  ) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Resolved color pipeline failed integrity validation')
+  }
+}
+
+function pipelineFrom(input: {
+  compilation?: Readonly<ColorPipelineCompilation>
+  execution?: ResolvedColorPipelineExecution
+}) {
+  if (Boolean(input.compilation) === Boolean(input.execution)) {
+    throw new DomainError('INVALID_RENDER_INPUT', 'Exactly one color pipeline execution is required')
+  }
+  if (input.compilation) {
+    assertCompilation(input.compilation)
+    return input.compilation.pipeline
+  }
+  assertResolvedExecution(input.execution!)
+  return input.execution!.pipeline
 }
 
 function zscaleMetadata(metadata: Readonly<ColorMetadata>, prefix = '') {
@@ -122,7 +155,8 @@ function creative(
     throw new DomainError('INVALID_RENDER_INPUT', 'creative LUT intensity is invalid')
   }
   const artifactId = stage.lut?.artifactId ?? ''
-  const path = lutPaths[artifactId]
+  const exactKey = `${artifactId}:${stage.implementation.parametersHash}`
+  const path = lutPaths[exactKey] ?? lutPaths[artifactId]
   if (!path || !isAbsolute(path)) {
     throw new DomainError('INVALID_RENDER_INPUT', 'Creative LUT was not materialized')
   }
@@ -130,25 +164,26 @@ function creative(
 }
 
 export function buildFfmpegColorPipelineFilter(input: {
-  compilation: Readonly<ColorPipelineCompilation>
+  compilation?: Readonly<ColorPipelineCompilation>
+  execution?: ResolvedColorPipelineExecution
   lutPaths?: Readonly<Record<string, string>>
 }) {
-  assertCompilation(input.compilation)
-  const [technical, matching, creativeLut, output] = input.compilation.pipeline.stages
+  const pipeline = pipelineFrom(input)
+  const [technical, matching, creativeLut, output] = pipeline.stages
   const filters = [
     zscale(technical),
     match(matching),
     creative(creativeLut, input.lutPaths ?? {}),
     zscale(output),
   ]
-  const bitDepth = input.compilation.pipeline.outputMetadata.bitDepth
+  const bitDepth = pipeline.outputMetadata.bitDepth
   if (![8, 10].includes(bitDepth)) {
     throw new DomainError('INVALID_RENDER_INPUT', 'FFmpeg color output bit depth is unsupported')
   }
   filters.push(`format=${bitDepth === 10 ? 'yuv420p10le' : 'yuv420p'}`)
   return Object.freeze({
     filter: filters.join(','),
-    outputMetadata: input.compilation.pipeline.outputMetadata,
+    outputMetadata: pipeline.outputMetadata,
     pixelFormat: bitDepth === 10 ? 'yuv420p10le' : 'yuv420p',
   })
 }
@@ -163,7 +198,8 @@ export class FfmpegColorPipelineProcessor {
   async process(input: {
     sourcePath: string
     outputPath: string
-    compilation: Readonly<ColorPipelineCompilation>
+    compilation?: Readonly<ColorPipelineCompilation>
+    execution?: ResolvedColorPipelineExecution
     lutPaths?: Readonly<Record<string, string>>
     signal?: AbortSignal
   }) {
@@ -217,8 +253,8 @@ export class FfmpegColorPipelineProcessor {
       sha256,
       byteSize: file.size,
       probe,
-      compilationHash: input.compilation.compilationHash,
-      pipelineHash: input.compilation.pipeline.pipelineHash,
+      compilationHash: input.compilation?.compilationHash ?? input.execution!.executionHash,
+      pipelineHash: input.compilation?.pipeline.pipelineHash ?? input.execution!.pipeline.pipelineHash,
     })
   }
 }

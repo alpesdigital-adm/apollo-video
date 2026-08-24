@@ -52,6 +52,8 @@ export interface EditorialExclusionOverrideInput extends SourceTimeRange {
 export interface EditorialCutClip {
   id: string
   sourceArtifactId: string
+  /** Optional stable camera identity used by target-scoped ColorPlan overrides. */
+  cameraId?: string
   audioSourceArtifactId?: string
   audioSourceInFrame?: number
   audioSourceOutFrame?: number

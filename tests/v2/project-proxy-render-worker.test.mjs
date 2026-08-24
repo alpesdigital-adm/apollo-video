@@ -172,6 +172,7 @@ function dependencies(operations, overrides = {}) {
     async catalogOutput(input) { calls.cataloged += 1; assert.equal(input.artifactId, 'artifact-project-proxy-output') },
     operations: operations.repository,
     colorPipelines: { async read() { return { compilation: colorCompilation } } },
+    colorPlans: { async readEffectiveForVersion() { return null } },
     luts: {
       async materialize() { return { selectionId: 'selection-project-proxy', selectionHash: '7'.repeat(64), lutPaths: {} } },
       async cleanup() { calls.lutCleaned += 1 },
