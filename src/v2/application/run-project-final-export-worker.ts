@@ -196,6 +196,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
       const materializedLut = await dependencies.luts.materialize({
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         operationId: operation.id, compilations: [...colorPipelines.values()],
+        ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
       const immutableInputHash = calculateVersionHash({
         kind: 'project-final-export/v1',
@@ -386,16 +387,16 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           ordinal,
           sha256: asset.sha256,
           byteSize: asset.byteSize,
-        })), ...(materializedLut.asset ? [{
-          id: `asset-${source.renderSources.length + 1}`,
-          artifactId: materializedLut.asset.artifactId,
-          artifactKey: materializedLut.asset.artifactKey,
+        })), ...(materializedLut.assets ?? (materializedLut.asset ? [materializedLut.asset] : [])).map((asset, index) => ({
+          id: `asset-${source.renderSources.length + index + 1}`,
+          artifactId: asset.artifactId,
+          artifactKey: asset.artifactKey,
           kind: 'lut' as const,
-          role: 'creative-lut',
-          ordinal: source.renderSources.length,
-          sha256: materializedLut.asset.sha256,
-          byteSize: materializedLut.asset.byteSize,
-        }] : [])],
+          role: `creative-lut:${asset.parametersHash}`,
+          ordinal: source.renderSources.length + index,
+          sha256: asset.sha256,
+          byteSize: asset.byteSize,
+        }))],
         props: {
           editPlan: source.editPlan,
           outputSpec: context.outputSpec,
@@ -406,6 +407,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null,
           projectLutSelectionHash: materializedLut.selectionHash,
           materializedCubeHash: materializedLut.materializedCubeHash ?? null,
+          materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
         },
       })
       const reconstructableManifest = createReconstructableMediaArtifactManifest({
@@ -437,14 +439,23 @@ export function runNextProjectFinalExportOperationService(dependencies: {
             projectLutSelectionId: materializedLut.selectionId,
             projectLutSelectionHash: materializedLut.selectionHash,
             materializedCubeHash: materializedLut.materializedCubeHash ?? null,
+            materializedCubeHashes: materializedLut.materializedCubeHashes ?? [],
           },
         },
-        sources: source.renderSources.map((asset) => ({
-          artifactKey: asset.artifactKey,
-          sha256: asset.sha256,
-          role: asset.role,
-          execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
-        })),
+        sources: [
+          ...source.renderSources.map((asset) => ({
+            artifactKey: asset.artifactKey,
+            sha256: asset.sha256,
+            role: asset.role,
+            execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
+          })),
+          ...(materializedLut.assets ?? []).map((asset) => ({
+            artifactKey: asset.artifactKey,
+            sha256: asset.sha256,
+            role: `creative-lut:${asset.parametersHash}`,
+            execution: { tool: { id: 'apollo-lut-materializer', version: '1', digest: asset.cubeHash } },
+          })),
+        ],
         probe: {
           width: rendered.probe.width,
           height: rendered.probe.height,

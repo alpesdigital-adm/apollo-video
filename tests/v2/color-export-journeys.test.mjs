@@ -344,6 +344,15 @@ test('T-FR-182 applies ColorPlan through the shared Command and immutable Projec
   };
   const service = setProjectColorPlanService({
     repository,
+    luts: {
+      async readVersionById({ versionId }) {
+        const hashes = { 'lut-film-look': 'a'.repeat(64), 'lut-clip-b': '7'.repeat(64) };
+        return hashes[versionId] ? { id: versionId, lutId: `${versionId}-head`, cube: { contentHash: hashes[versionId] }, license: { policy: 'owned' } } : null;
+      },
+      async read({ lutId }) {
+        return ['lut-film-look-head', 'lut-clip-b-head'].includes(lutId) ? { status: 'active' } : null;
+      },
+    },
     createId: (kind) => ids[kind],
     createEventId: () => '20000000-0000-4000-8000-000000000001',
     clock: () => new Date('2026-08-24T12:00:00.000Z'),

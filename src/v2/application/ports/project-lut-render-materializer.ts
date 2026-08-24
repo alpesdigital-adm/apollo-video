@@ -1,10 +1,23 @@
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
+import type { resolveColorPlan } from '../../domain/color-and-export.ts'
+
+export interface MaterializedProjectLutAsset {
+  artifactId: string
+  artifactKey: string
+  parametersHash: string
+  intensity: number
+  cubeHash: string
+  sha256: string
+  byteSize: number
+}
 
 export interface MaterializedProjectLut {
   selectionId: string
   selectionHash: string
   materializedCubeHash?: string
-  asset?: Readonly<{ artifactId: string; artifactKey: string; sha256: string; byteSize: number }>
+  materializedCubeHashes?: readonly string[]
+  asset?: Readonly<MaterializedProjectLutAsset>
+  assets?: readonly Readonly<MaterializedProjectLutAsset>[]
   lutPaths: Readonly<Record<string, string>>
 }
 
@@ -15,6 +28,7 @@ export interface ProjectLutRenderMaterializer {
     projectVersionId: string
     operationId: string
     compilations: readonly Readonly<ColorPipelineCompilation>[]
+    executions?: readonly Readonly<ReturnType<typeof resolveColorPlan>>[]
   }): Promise<Readonly<MaterializedProjectLut>>
   cleanup(operationId: string): Promise<void>
 }

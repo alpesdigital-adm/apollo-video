@@ -10,6 +10,7 @@ import {
   createProjectColorPlanRepository,
   createProjectProxyRenderRepository,
   createPublicOperationRepository,
+  createWorkspaceLutRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const idempotencyKey = request.headers.get('idempotency-key') ?? ''
     const result = await setProjectColorPlanService({
       repository: createProjectColorPlanRepository(),
+      luts: createWorkspaceLutRepository(),
       createId: (kind) => `project-color-${kind}-${randomUUID()}`,
       createEventId: randomUUID,
     })({ ...body, workspaceId: actor.workspaceId, projectId, actor, idempotencyKey })

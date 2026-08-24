@@ -16,10 +16,13 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  * a cue with no safe band is not written at all — so the same cue list can produce different
  * pixels. That is a new recipe, not a variation of 1.7.0: proxies are addressed by recipe version,
  * and reusing a 1.7.0 proxy for an anchored render would show subtitles in the wrong place.
+ *
+ * 1.10.0 binds each ColorPlan target to its exact resolved pipeline and materialized creative-LUT
+ * intensity. Final recipe 1.5.0 carries the same target-scoped color lineage.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.9.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.9.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.4.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.10.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.10.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.5.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {

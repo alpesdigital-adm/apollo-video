@@ -62,6 +62,7 @@ import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/pri
 import { PrismaRenderElementMapRepository } from '../../src/v2/infrastructure/prisma/render-element-map-repository.ts'
 import { PrismaPerceptionTimelineRepository } from '../../src/v2/infrastructure/prisma/perception-timeline-repository.ts'
 import { PrismaWorkspaceRepository } from '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+import { PrismaWorkspaceLutRepository } from '../../src/v2/infrastructure/prisma/workspace-lut-repository.ts'
 import { nodeApiCredentialCrypto } from '../../src/v2/infrastructure/security/api-credential.ts'
 import { createMediaUploadSessionSignerFromEnvironment } from '../../src/v2/infrastructure/security/media-upload-session-signer.ts'
 import { seedV2ProjectSource } from '../../scripts/seed-v2-project-source.mjs'
@@ -455,6 +456,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
     const localMatchParameters = { mode: 'adjust', brightness: 0, contrast: 1, saturation: 0 }
     const appliedColorPlan = await setProjectColorPlanService({
       repository: colorPlans,
+      luts: new PrismaWorkspaceLutRepository(prisma),
       createId: (kind) => `vertical-color-plan-${kind}-${randomUUID()}`,
       createEventId: randomUUID,
       clock,
@@ -541,6 +543,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       luts: new LocalProjectLutRenderMaterializer(
         lutSelections,
         join(root, '.lut-work'),
+        new PrismaWorkspaceLutRepository(prisma),
       ),
       sources: s3
         ? new S3ArtifactSourceMaterializer(join(root, '.s3-render-materialized'), s3)

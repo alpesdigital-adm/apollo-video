@@ -16,6 +16,7 @@ import type {
   ProjectColorPlanRepository,
   SetProjectColorPlanRequest,
 } from './ports/project-color-plan-repository.ts'
+import type { WorkspaceLutRepository } from './ports/workspace-lut-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 
@@ -94,6 +95,7 @@ function assertPlanTargets(
 
 export function setProjectColorPlanService(dependencies: {
   repository: ProjectColorPlanRepository
+  luts: Pick<WorkspaceLutRepository, 'read' | 'readVersionById'>
   createId: (kind: 'command' | 'version' | 'color-plan') => string
   createEventId: () => string
   clock?: () => Date
@@ -165,6 +167,21 @@ export function setProjectColorPlanService(dependencies: {
       targets: context.targets,
       createdAt,
     })
+    const creativeRefs = [...new Map(colorPlan.compiled.targets.flatMap((target) => {
+      const stage = target.stages.find((candidate) => candidate.kind === 'creative-lut')!
+      return stage.enabled && stage.lut ? [[stage.lut.artifactId, stage.lut] as const] : []
+    })).values()]
+    for (const ref of creativeRefs) {
+      const version = await dependencies.luts.readVersionById({ workspaceId, versionId: ref.artifactId })
+      const record = version ? await dependencies.luts.read({ workspaceId, lutId: version.lutId }) : null
+      if (
+        !version || version.cube.contentHash !== ref.sha256 ||
+        !record || record.status !== 'active' ||
+        !['owned', 'licensed'].includes(version.license.policy)
+      ) {
+        throw new DomainError('INVALID_ARGUMENT', 'ColorPlan creative LUT is unavailable or unauthorized')
+      }
+    }
     const impact = createProjectColorPlanImpact({
       commandId,
       baseVersionId,

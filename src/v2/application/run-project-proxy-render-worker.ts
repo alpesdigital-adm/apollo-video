@@ -153,6 +153,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       const materializedLut = await dependencies.luts.materialize({
         workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
         operationId: operation.id, compilations: [...colorPipelines.values()],
+        ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
       const immutableInputHash = projectProxyRenderInputHash({
         source,
@@ -295,7 +296,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key, artifactSha256: stored.sha256, byteSize: stored.byteSize, mediaType: 'video', container: 'mp4',
-        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, colorPlanHash: colorPlan?.plan.planHash ?? null, compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
+        recipe: { id: 'editorial-proxy', version: EDITORIAL_PROXY_RECIPE_VERSION, parameters: { inputHash: context.inputHash, audioTimelineHash, projectVersionId: context.projectVersionId, editPlanSnapshotId: context.editPlanSnapshotId, format: source.format, colorPipelineBindings: context.colorPipelineBindings, colorPlanHash: colorPlan?.plan.planHash ?? null, compiledColorPlanManifestHash: colorPlan?.compiled.manifestHash ?? null, rangeReuse: source.rangeReuse ? { schemaVersion: source.rangeReuse.schemaVersion, commandId: source.rangeReuse.commandId, impactHash: source.rangeReuse.impactHash, baseVersionId: source.rangeReuse.baseVersionId, ranges: source.rangeReuse.ranges, artifactId: source.rangeReuse.artifactId, manifestId: source.rangeReuse.manifestId, sha256: source.rangeReuse.sha256, byteSize: source.rangeReuse.byteSize } : null, projectLutSelectionId: materializedLut.selectionId, projectLutSelectionHash: materializedLut.selectionHash, materializedCubeHash: materializedLut.materializedCubeHash ?? null, materializedCubeHashes: materializedLut.materializedCubeHashes ?? [], placementPlanHash: placementPlan.placementPlanHash, reframePlanHash: reframePlan?.reframePlanHash ?? null, subtitleRegistryHash: subtitleResolution?.registryHash ?? null, subtitlePresetId: subtitleResolution?.enabled ? subtitleResolution.presetId : null, subtitlePresetVersion: subtitleResolution?.enabled ? 1 : null, subtitlePresetHash: subtitleResolution?.enabled ? subtitleResolution.presetHash : null, subtitlePresetSnapshotHash: subtitleResolution?.enabled ? subtitleResolution.presetSnapshot!.snapshotHash : null, subtitleAnchorPlanHash: placementPlan.subtitleAnchorPlan?.anchorPlanHash ?? null, perceptionTimelineHash: placementPlan.subtitleAnchorPlan?.perceptionTimelineHash ?? null } },
         sources: [
           ...source.renderSources.map((asset) => ({
             artifactKey: asset.artifactKey,
@@ -309,6 +310,12 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             role: 'reused-proxy-range',
             execution: { tool: { id: 'ffmpeg', version: 'static', digest: toolDigest } },
           }] : []),
+          ...(materializedLut.assets ?? []).map((asset) => ({
+            artifactKey: asset.artifactKey,
+            sha256: asset.sha256,
+            role: `creative-lut:${asset.parametersHash}`,
+            execution: { tool: { id: 'apollo-lut-materializer', version: '1', digest: asset.cubeHash } },
+          })),
         ],
         probe: { width: rendered.probe.width, height: rendered.probe.height, duration: rendered.probe.duration, fps: rendered.probe.fps },
       })

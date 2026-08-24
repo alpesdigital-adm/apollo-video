@@ -155,7 +155,8 @@ function creative(
     throw new DomainError('INVALID_RENDER_INPUT', 'creative LUT intensity is invalid')
   }
   const artifactId = stage.lut?.artifactId ?? ''
-  const path = lutPaths[artifactId]
+  const exactKey = `${artifactId}:${stage.implementation.parametersHash}`
+  const path = lutPaths[exactKey] ?? lutPaths[artifactId]
   if (!path || !isAbsolute(path)) {
     throw new DomainError('INVALID_RENDER_INPUT', 'Creative LUT was not materialized')
   }

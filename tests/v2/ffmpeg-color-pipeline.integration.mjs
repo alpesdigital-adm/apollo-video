@@ -153,3 +153,34 @@ test('T-FR-181 applies only a pre-materialized selected LUT path in the real col
     assert.ok(result.byteSize > 0)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('T-FR-187 binds target LUT intensities by parameters hash without path collisions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-color-target-luts-'))
+  try {
+    const sourcePath = join(root, 'source.mp4')
+    const redPath = join(root, 'red.cube')
+    const bluePath = join(root, 'blue.cube')
+    const halfOutput = join(root, 'half.mp4')
+    const fullOutput = join(root, 'full.mp4')
+    const redCube = `LUT_3D_SIZE 2\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n1 0 0\n`
+    const blueCube = `LUT_3D_SIZE 2\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n0 0 1\n`
+    await Promise.all([
+      generate(sourcePath, 'color=c=white:s=320x180:r=24:d=1'),
+      writeFile(redPath, redCube, 'utf8'),
+      writeFile(bluePath, blueCube, 'utf8'),
+    ])
+    const artifactId = 'selected-target-lut-version'
+    const half = compilation('target-lut-source', '2026-08-24T17:30:00.000Z', { artifactId, sha256: 'b'.repeat(64), intensity: 0.5 })
+    const full = compilation('target-lut-source', '2026-08-24T17:30:00.000Z', { artifactId, sha256: 'b'.repeat(64), intensity: 1 })
+    const halfHash = half.pipeline.stages[2].implementation.parametersHash
+    const fullHash = full.pipeline.stages[2].implementation.parametersHash
+    const lutPaths = { [`${artifactId}:${halfHash}`]: redPath, [`${artifactId}:${fullHash}`]: bluePath }
+    const processor = new FfmpegColorPipelineProcessor({ ffmpegPath: ffmpeg })
+    await processor.process({ sourcePath, outputPath: halfOutput, compilation: half, lutPaths })
+    await processor.process({ sourcePath, outputPath: fullOutput, compilation: full, lutPaths })
+    const halfRgb = await sampleRgb(halfOutput)
+    const fullRgb = await sampleRgb(fullOutput)
+    assert.ok(halfRgb[0] > halfRgb[2] + 100, `half target did not use red cube: ${[...halfRgb.slice(0, 3)]}`)
+    assert.ok(fullRgb[2] > fullRgb[0] + 100, `full target did not use blue cube: ${[...fullRgb.slice(0, 3)]}`)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

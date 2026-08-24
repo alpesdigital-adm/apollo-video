@@ -265,6 +265,13 @@ function targetsFromEditPlan(editPlan: Record<string, unknown>) {
   return Object.freeze(targets)
 }
 
+function creativeLutRefs(colorPlan: ProjectColorPlanCommit['colorPlan']) {
+  return [...new Map(colorPlan.compiled.targets.flatMap((target) => {
+    const stage = target.stages.find((candidate) => candidate.kind === 'creative-lut')!
+    return stage.enabled && stage.lut ? [[stage.lut.artifactId, stage.lut] as const] : []
+  })).values()]
+}
+
 async function readContext(client: DbClient, input: { workspaceId: string; projectId: string }): Promise<Readonly<ProjectColorPlanContext> | null> {
   const project = await client.v2Project.findFirst({
     where: { id: input.projectId, workspaceId: input.workspaceId },
@@ -429,6 +436,22 @@ export class PrismaProjectColorPlanRepository implements ProjectColorPlanReposit
             stableSerialize(input.colorPlan.compiled.targets.map((target) => stableSerialize(target.target)).toSorted()) ||
           stableSerialize(context.outputReferences) !== stableSerialize(input.command.payload.impact.affectedArtifacts)
         ) throw new DomainError('VERSION_CONFLICT', 'Project ColorPlan context changed before commit')
+        const lutRefs = creativeLutRefs(input.colorPlan)
+        if (lutRefs.length > 0) {
+          const versions = await transaction.v2WorkspaceLutVersion.findMany({
+            where: { workspaceId: input.command.workspaceId, id: { in: lutRefs.map((ref) => ref.artifactId) } },
+            select: { id: true, lutId: true, cubeContentHash: true, licensePolicy: true },
+          })
+          const heads = await transaction.v2WorkspaceLut.findMany({
+            where: { workspaceId: input.command.workspaceId, id: { in: versions.map((version) => version.lutId) } },
+            select: { id: true, status: true },
+          })
+          if (lutRefs.some((ref) => {
+            const version = versions.find((candidate) => candidate.id === ref.artifactId)
+            const head = version ? heads.find((candidate) => candidate.id === version.lutId) : null
+            return !version || version.cubeContentHash !== ref.sha256 || !head || head.status !== 'active' || !['owned', 'licensed'].includes(version.licensePolicy)
+          })) throw new DomainError('VERSION_CONFLICT', 'ColorPlan creative LUT availability changed before commit')
+        }
         await transaction.v2EditCommand.create({ data: {
           id: input.command.id,
           workspaceId: input.command.workspaceId,

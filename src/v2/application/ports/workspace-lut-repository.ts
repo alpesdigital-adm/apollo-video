@@ -52,6 +52,7 @@ export interface WorkspaceLutRepository {
   createVersion(input: { value: Readonly<PersistedWorkspaceLutImport>; previewPng: Uint8Array; expectedCurrentVersionId: string }): Promise<Readonly<{ value: Readonly<PersistedWorkspaceLutImport>; replayed: boolean }>>
   read(input: { workspaceId: string; lutId: string }): Promise<Readonly<WorkspaceLutRecord> | null>
   readVersion(input: { workspaceId: string; lutId: string; version: number }): Promise<Readonly<WorkspaceLutVersion> | null>
+  readVersionById(input: { workspaceId: string; versionId: string }): Promise<Readonly<WorkspaceLutVersion> | null>
   list(input: { workspaceId: string; status?: 'active' | 'inactive'; limit: number }): Promise<readonly Readonly<WorkspaceLutRecord>[]>
   readPreview(input: { workspaceId: string; lutId: string; version: number }): Promise<Readonly<{ png: Uint8Array; sha256: string }> | null>
   findStatusIdempotent(input: { workspaceId: string; createdByClientId: string; idempotencyKey: string }): Promise<Readonly<{ command: Readonly<WorkspaceLutStatusCommand>; record: Readonly<WorkspaceLutRecord> }> | null>
