@@ -104,7 +104,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 248)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 251)
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
@@ -186,7 +186,7 @@ test('T-FR-241 every public operation has an executable, versioned contract test
       for (const status of ['401', '403', '404', '409', '416', '422', '429', '500', '502', '503']) {
         assert.equal(
           referencedPublicSchema(operation.responses[status].content['application/json'].schema),
-          'apollo://schemas/error-envelope/v3',
+          'apollo://schemas/error-envelope/v4',
         )
       }
       assert.equal(getPublicSchema(capability.outputSchemaRef).ref, capability.outputSchemaRef)

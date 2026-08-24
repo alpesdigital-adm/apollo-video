@@ -4,9 +4,9 @@
     "uiActions": 105,
     "capabilities": 94,
     "endpoints": 94,
-    "registeredCapabilities": 248,
-    "operableCapabilities": 248,
-    "publicContractCapabilities": 248,
+    "registeredCapabilities": 251,
+    "operableCapabilities": 251,
+    "publicContractCapabilities": 251,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -4306,6 +4306,39 @@
       "endpoint": "POST /v1/projects/{projectId}/exports",
       "inputSchemaRef": "apollo://schemas/project-final-export-request/v1",
       "outputSchemaRef": "apollo://schemas/project-final-export-operation-accepted/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.export-matrix-preflights.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/export-matrix-preflights",
+      "inputSchemaRef": "apollo://schemas/export-matrix-preflight-request/v1",
+      "outputSchemaRef": "apollo://schemas/export-matrix-preflight-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.export-matrices.commit",
+      "exposure": "public",
+      "endpoint": "POST /v1/export-matrix-preflights/{preflightId}/commit",
+      "inputSchemaRef": "apollo://schemas/commit-export-matrix-request/v1",
+      "outputSchemaRef": "apollo://schemas/export-matrix-response/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.export-matrices.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/export-matrices/{matrixId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/export-matrix-response/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

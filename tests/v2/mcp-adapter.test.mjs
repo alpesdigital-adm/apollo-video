@@ -613,7 +613,6 @@ test('stdio MCP entrypoint discovers and executes exclusively through the Public
     command: process.execPath,
     args: [
       '--disable-warning=MODULE_TYPELESS_PACKAGE_JSON',
-      '--env-file=.env',
       'scripts/run-v2-mcp.mjs',
     ],
     cwd: process.cwd(),

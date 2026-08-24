@@ -54,6 +54,7 @@ export function enqueueProjectFinalExportService(dependencies: {
     actor: AuthenticatedExternalActor
     idempotencyKey: string
     traceId?: string
+    outputFileName?: string
   }) {
     const workspaceId = validateId(request.workspaceId, 'workspaceId')
     const projectId = validateId(request.projectId, 'projectId')
@@ -67,6 +68,13 @@ export function enqueueProjectFinalExportService(dependencies: {
     assertDomain(idempotencyKey.length >= 1 && idempotencyKey.length <= 128, 'INVALID_ARGUMENT', 'Idempotency-Key must contain 1 to 128 characters')
     assertDomain(request.approval?.approved === true, 'INVALID_ARGUMENT', 'Explicit final approval is required')
     const approvalNote = validateNote(request.approval.note)
+    const outputFileName = request.outputFileName?.trim()
+    assertDomain(
+      outputFileName === undefined ||
+        (outputFileName.length >= 5 && outputFileName.length <= 240 && /^[A-Za-z0-9._-]+\.mp4$/.test(outputFileName)),
+      'INVALID_ARGUMENT',
+      'outputFileName must be a portable MP4 file name',
+    )
     assertDomain(OUTPUT_ASPECT_RATIOS.includes(request.format as OutputAspectRatio), 'INVALID_OUTPUT_SPEC', 'Final export format is not supported')
     requirePreflightForActionService()({
       actionId: 'project-final-export.enqueue',
@@ -103,17 +111,19 @@ export function enqueueProjectFinalExportService(dependencies: {
         workspaceId,
         asset.artifactId,
       )
-      const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
-        workspaceId,
-        use: 'rendering',
-        locale: source.locale,
-      }, dependencies.clock())
-      if (rightsDecision.outcome !== 'allow') {
-        throw new DomainError(
-          'ASSET_RIGHTS_BLOCKED',
-          'A render source does not permit final export',
-          { artifactId: asset.artifactId, reasonCodes: rightsDecision.reasonCodes },
-        )
+      for (const requiredUse of ['rendering', 'editorial-reuse'] as const) {
+        const rightsDecision = evaluateAssetUse(rightsRecord?.snapshot ?? null, {
+          workspaceId,
+          use: requiredUse,
+          locale: source.locale,
+        }, dependencies.clock())
+        if (rightsDecision.outcome !== 'allow') {
+          throw new DomainError(
+            'ASSET_RIGHTS_BLOCKED',
+            'A render source does not permit final export and catalog promotion',
+            { artifactId: asset.artifactId, requiredUse, reasonCodes: rightsDecision.reasonCodes },
+          )
+        }
       }
     }
     const colorPipelineBindings = await resolveRenderColorPipelineBindings({
@@ -147,6 +157,7 @@ export function enqueueProjectFinalExportService(dependencies: {
       projectVersionHash,
       format: request.format,
       approval: { approved: true, ...(approvalNote ? { note: approvalNote } : {}) },
+      ...(outputFileName ? { outputFileName } : {}),
       inputHash,
       actorContextHash: audit.contextHash,
     })
@@ -194,7 +205,7 @@ export function enqueueProjectFinalExportService(dependencies: {
           approvedAt,
           ...(approvalNote ? { note: approvalNote } : {}),
         },
-        originalFileName: `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 190)}-final-${outputSpec.width}x${outputSpec.height}.mp4`,
+        originalFileName: outputFileName ?? `${source.originalFileName.replace(/\.[^.]+$/, '').slice(0, 190)}-final-${outputSpec.width}x${outputSpec.height}.mp4`,
       },
       idempotencyKey,
       requestFingerprint,

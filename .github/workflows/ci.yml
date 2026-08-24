@@ -251,6 +251,39 @@ jobs:
           orphans="$(docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-ci-proof-modes'")"
           test "$orphans" = 0
 
+      - name: Run export matrix persistence and five-format worker E2E
+        env:
+          APOLLO_EXPORT_MATRIX_DB: "1"
+          APOLLO_EXPORT_MATRIX_E2E: "1"
+          APOLLO_E2E_SERVER_MODE: dev
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_V2_ARTIFACT_ROOT: ${{ runner.temp }}/apollo-v2-export-matrix
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_export_matrix?schema=public&application_name=apollo-video-e2e-export-matrix-${{ github.run_id }}&connection_limit=5&pool_timeout=10&connect_timeout=10
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          preflight="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name like 'apollo-video-e2e-%'")"
+          test "$preflight" = 0
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e_export_matrix
+          npm run db:v2:migrate:deploy
+          npm run test:integration:export-matrix
+          npm run test:e2e:export-matrix
+
+      - name: Verify zero orphan export matrix E2E backends
+        if: always()
+        env:
+          APOLLO_EXPORT_MATRIX_APP_NAME: apollo-video-e2e-export-matrix-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$APOLLO_EXPORT_MATRIX_APP_NAME'")"
+            if test "$backends" = 0; then exit 0; fi
+            sleep 1
+          done
+          $compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pid, application_name, state from pg_stat_activity where application_name = '$APOLLO_EXPORT_MATRIX_APP_NAME'"
+          exit 1
+
       - name: Resume long-form indexing on a disposable Compose database
         env:
           APOLLO_LONG_FORM_WORKFLOW_E2E: "1"

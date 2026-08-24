@@ -435,6 +435,14 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Publishes one approved high-resolution final artifact bound to an exact immutable project version.',
     },
+    'apollo.export-matrix-preflights.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists a short-lived read-only evaluation of explicit output cells without queuing renders.',
+    },
+    'apollo.export-matrices.commit': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Fans out multiple approved high-resolution final render operations under one trusted cost and storage preflight.',
+    },
     'apollo.media.uploads.begin': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Registers one checksum-bound upload intent without transferring bytes or starting ingest.',

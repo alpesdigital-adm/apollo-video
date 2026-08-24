@@ -112,7 +112,7 @@ export function createInheritedCatalogRights(input: {
   }
   const draftHash = calculateCanonicalHash(draft)
   return createAssetRightsSnapshot({
-    id: `catalog-rights-${draftHash.slice(0, 48)}`,
+    id: `catalog-rights-${calculateCanonicalHash({ artifactId: candidate.artifactId, draftHash }).slice(0, 48)}`,
     workspaceId: candidate.workspaceId,
     artifactId: candidate.artifactId,
     sequence: input.sequence,

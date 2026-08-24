@@ -49,7 +49,7 @@ function exportActor(credentialId = 'credential-final-export-test') {
   })
 }
 
-function rightsSnapshot() {
+function rightsSnapshot(allowedUses = ['editorial-reuse', 'rendering']) {
   return createAssetRightsSnapshot({
     id: 'rights-final-export-test',
     workspaceId,
@@ -57,7 +57,7 @@ function rightsSnapshot() {
     sequence: 1,
     draft: {
       status: 'approved',
-      allowedUses: ['rendering'],
+      allowedUses,
       prohibitedUses: [],
       allowedLocales: ['pt-BR'],
       consent: { status: 'not-required', allowedUses: [] },
@@ -223,6 +223,28 @@ test('final export enqueue fails closed without current rendering rights', async
     actor: exportActor(),
     idempotencyKey: 'final-export-blocked',
   }), (error) => error instanceof DomainError && error.code === 'ASSET_RIGHTS_BLOCKED')
+})
+
+test('final export enqueue fails before allocation when catalog promotion rights are missing', async () => {
+  const enqueue = enqueueProjectFinalExportService({
+    projects: { async readApprovedCurrentSource() { return approvedSource() } },
+    rights: { async findCurrent() { return { snapshot: rightsSnapshot(['rendering']), revision: 'revision-render-only' } } },
+    operations: {},
+    clock: () => new Date('2026-07-19T01:05:00.000Z'),
+    createId() { throw new Error('must not allocate') },
+  })
+  await assert.rejects(() => enqueue({
+    workspaceId,
+    projectId,
+    projectVersionId,
+    projectVersionHash: '1'.repeat(64),
+    format: '9:16',
+    approval: { approved: true },
+    actor: exportActor(),
+    idempotencyKey: 'final-export-catalog-rights-blocked',
+  }), (error) => error instanceof DomainError
+    && error.code === 'ASSET_RIGHTS_BLOCKED'
+    && error.details.requiredUse === 'editorial-reuse')
 })
 
 function createOperations() {
@@ -504,6 +526,23 @@ test('final export worker fails closed if rights are revoked before persistence'
   assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
   assert.equal(operations.operation.status, 'failed')
   assert.deepEqual(calls, { rights: 2, rendered: 1, persisted: 0, mapped: 0, converged: 0, attached: 0, attempts: 1, failed: 1, cleaned: 1, lutCleaned: 1, cataloged: 0 })
+})
+
+test('final export worker does not complete the project before catalog convergence', async () => {
+  const operations = createOperations()
+  const { calls, dependencies } = workerDependencies(operations)
+  dependencies.catalogOutput = async () => {
+    calls.cataloged += 1
+    throw new DomainError('PERSISTENCE_CONFLICT', 'Catalog convergence failed')
+  }
+
+  const outcome = await runNextProjectFinalExportOperationService(dependencies)('worker-final-export-catalog-failure')
+
+  assert.deepEqual(outcome, { operationId: 'operation-final-export-test', status: 'failed' })
+  assert.equal(operations.operation.status, 'failed')
+  assert.equal(calls.cataloged, 1)
+  assert.equal(calls.attached, 0)
+  assert.equal(calls.failed, 1)
 })
 
 test('final export worker converges content deduplication under the active lease', async () => {

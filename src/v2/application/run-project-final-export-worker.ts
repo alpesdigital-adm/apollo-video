@@ -147,17 +147,19 @@ export function runNextProjectFinalExportOperationService(dependencies: {
           operation.workspaceId,
           artifactId,
         )
-        const decision = evaluateAssetUse(rights?.snapshot ?? null, {
-          workspaceId: operation.workspaceId,
-          use: 'rendering',
-          locale,
-        }, clock())
-        if (decision.outcome !== 'allow') {
-          throw new DomainError(
-            'ASSET_RIGHTS_BLOCKED',
-            'A render source no longer permits final export',
-            { artifactId, reasonCodes: decision.reasonCodes },
-          )
+        for (const requiredUse of ['rendering', 'editorial-reuse'] as const) {
+          const decision = evaluateAssetUse(rights?.snapshot ?? null, {
+            workspaceId: operation.workspaceId,
+            use: requiredUse,
+            locale,
+          }, clock())
+          if (decision.outcome !== 'allow') {
+            throw new DomainError(
+              'ASSET_RIGHTS_BLOCKED',
+              'A render source no longer permits final export and catalog promotion',
+              { artifactId, requiredUse, reasonCodes: decision.reasonCodes },
+            )
+          }
         }
       }
     }
@@ -517,6 +519,7 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         completedAt: attemptCompletedAt,
       })
       attemptRecorded = true
+      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
       await dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId,
         operationId: operation.id,
@@ -527,7 +530,6 @@ export function runNextProjectFinalExportOperationService(dependencies: {
         originalFileName: context.originalFileName,
         createdAt: clock().toISOString(),
       })
-      await dependencies.catalogOutput({ workspaceId: operation.workspaceId, artifactId: persisted.artifactId, manifestId: persisted.manifestId })
       stopHeartbeat()
       const succeeded = await withLeaseCommand(() =>
         dependencies.operations.succeed(command(clock())))

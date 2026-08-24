@@ -11127,6 +11127,63 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/export-matrix-preflight-request/v1': [
+      {
+        cells: [{ recipeId: 'recipe-export-example-1', projectId, projectVersionId: 'project-version-example-4', projectVersionHash: 'd'.repeat(64), format: '9:16', locale: 'pt-BR' }],
+        limits: { maximumCostMinorUnits: 1000, maximumStorageBytes: 1073741824 },
+      },
+    ],
+    'apollo://schemas/export-matrix-preflight-created/v1': [
+      {
+        data: {
+          preflightId: 'preflight-export-matrix-example-1',
+          preflight: {
+            schemaVersion: 'export-matrix-preflight/v1', estimatePolicyVersion: 'export-matrix-estimate/1.0.0',
+            definition: {
+              schemaVersion: 'export-matrix/v1', workspaceId,
+              cells: [{
+                recipeId: 'recipe-export-example-1', projectId, projectVersionId: 'project-version-example-4', projectVersionHash: 'd'.repeat(64), format: '9:16', locale: 'pt-BR',
+                id: 'cell-export-matrix-example-1', sequence: 1, address: 'recipe-export-example-1::9:16::pt-BR', addressHash: '1'.repeat(64),
+                outputFileName: 'project-example-1--recipe-export-example-1--9x16--pt-br--dddddddddddd.mp4',
+                manifestFileName: 'project-example-1--recipe-export-example-1--9x16--pt-br--dddddddddddd.manifest.json', cellHash: '2'.repeat(64),
+              }],
+              definitionHash: '3'.repeat(64),
+            },
+            quantity: 1, estimatedCostMinorUnits: 21, maximumCostMinorUnits: 27, estimatedStorageBytes: 10485760, maximumStorageBytes: 13107200,
+            costLimitMinorUnits: 1000, storageLimitBytes: 1073741824,
+            cells: [{
+              cellId: 'cell-export-matrix-example-1', ready: true, rightsAllowed: true, durationFrames: 300, fps: 30, width: 1080, height: 1920,
+              sourceFingerprint: '4'.repeat(64), durationSeconds: 10, estimatedCostMinorUnits: 21, maximumCostMinorUnits: 27,
+              estimatedStorageBytes: 10485760, maximumStorageBytes: 13107200, blockers: [],
+            }],
+            blockers: [], allowed: true, snapshotHash: '5'.repeat(64), costFingerprint: '6'.repeat(64), createdAt, expiresAt: '2026-07-12T20:10:00.000Z', preflightHash: '7'.repeat(64),
+          },
+          commitToken: 'a'.repeat(100), replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/commit-export-matrix-request/v1': [
+      { commitToken: 'a'.repeat(100), approval: { approved: true, note: 'Matriz revisada e aprovada.' } },
+    ],
+    'apollo://schemas/export-matrix-response/v1': [
+      {
+        data: {
+          matrix: {
+            id: 'matrix-export-example-1', workspaceId, preflightId: 'preflight-export-matrix-example-1', definitionHash: '3'.repeat(64), preflightHash: '7'.repeat(64), status: 'queued',
+            cells: [{
+              id: 'cell-export-matrix-example-1', sequence: 1, address: 'recipe-export-example-1::9:16::pt-BR', recipeId: 'recipe-export-example-1', projectId,
+              projectVersionId: 'project-version-example-4', projectVersionHash: 'd'.repeat(64), format: '9:16', locale: 'pt-BR',
+              outputFileName: 'project-example-1--recipe-export-example-1--9x16--pt-br--dddddddddddd.mp4', manifestFileName: 'project-example-1--recipe-export-example-1--9x16--pt-br--dddddddddddd.manifest.json',
+              cellHash: '2'.repeat(64), status: 'queued', operationId: 'operation-export-matrix-example-1', outputArtifactId: 'artifact-export-matrix-example-1', outputManifestId: 'manifest-export-matrix-example-1', attempt: 0,
+            }],
+            createdByClientId: 'api-client-example-1', createdAt,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/project-final-export-attempt-history/v1': [
       {
         data: {
@@ -11526,6 +11583,17 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           category: 'provider',
           retryable: true,
           requestId: 'request-provider-example-1',
+        },
+      },
+    ],
+    'apollo://schemas/error-envelope/v4': [
+      {
+        error: {
+          code: 'EXPORT_MATRIX_NOT_FOUND',
+          message: 'Export matrix was not found',
+          category: 'validation',
+          retryable: false,
+          requestId: 'request-export-matrix-example-1',
         },
       },
     ],

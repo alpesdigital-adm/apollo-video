@@ -121,6 +121,7 @@ import type { DirectorBudgetRepository } from '../application/ports/director-bud
 import type { ProjectProxyRenderRepository } from '../application/ports/project-proxy-render-repository.ts'
 import type { ProxyReviewRepository } from '../application/ports/proxy-review-repository.ts'
 import type { ProjectFinalExportRepository } from '../application/ports/project-final-export-repository.ts'
+import type { ExportMatrixRepository } from '../application/ports/export-matrix-repository.ts'
 import type { PublicOperationRepository } from '../application/ports/public-operation-repository.ts'
 import type { WorkspaceRepository } from '../application/ports/workspace-repository.ts'
 import type { WebhookRegistrationRepository } from '../application/ports/webhook-registration-repository.ts'
@@ -262,6 +263,7 @@ import { PrismaDirectorBudgetRepository } from './prisma/director-budget-reposit
 import { PrismaProjectProxyRenderRepository } from './prisma/project-proxy-render-repository.ts'
 import { PrismaProxyReviewRepository } from './prisma/proxy-review-repository.ts'
 import { PrismaProjectFinalExportRepository } from './prisma/project-final-export-repository.ts'
+import { PrismaExportMatrixRepository } from './prisma/export-matrix-repository.ts'
 import { PrismaPublicOperationRepository } from './prisma/public-operation-repository.ts'
 import { TelemetryPublicOperationRepository } from './telemetry-public-operation-repository.ts'
 import { CompositeOperationTelemetry, StructuredConsoleOperationTelemetry } from './structured-console-operation-telemetry.ts'
@@ -878,6 +880,10 @@ export function createProxyReviewRepository(): ProxyReviewRepository {
 
 export function createProjectFinalExportRepository(): ProjectFinalExportRepository {
   return new PrismaProjectFinalExportRepository(resolveV2Client())
+}
+
+export function createExportMatrixRepository(): ExportMatrixRepository {
+  return new PrismaExportMatrixRepository(resolveV2Client())
 }
 
 export function createMediaTransferRepository(): MediaTransferRepository {
