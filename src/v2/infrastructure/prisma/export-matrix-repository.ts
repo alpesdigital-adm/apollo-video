@@ -278,7 +278,7 @@ export class PrismaExportMatrixRepository implements ExportMatrixRepository {
             createdAt,
             cells: { create: input.preflight.preflight.definition.cells.map((cell) => ({
               id: cell.id,
-              workspaceId: source.workspaceId,
+              workspace: { connect: { id: source.workspaceId } },
               sequence: cell.sequence,
               address: cell.address,
               recipeId: cell.recipeId,
