@@ -605,7 +605,12 @@ function sourceDrafts(
         value.alignments.map((entry) => [entry.blockId, entry]),
       ).values(),
     ]
-    const chosen = distinctBlocks
+    const selectedBlocks = distinctBlocks.filter((entry) =>
+      entry.selectedCandidate?.id === value.candidate.id)
+    const chosenPool = selectedBlocks.length > 0
+      ? selectedBlocks
+      : distinctBlocks
+    const chosen = chosenPool
       .toSorted((left, right) =>
         right.confidence - left.confidence ||
         left.documentOrder - right.documentOrder)[0]!
@@ -615,7 +620,7 @@ function sourceDrafts(
       'INVALID_ARGUMENT',
       `Script block ${chosen.blockId} is missing`,
     )
-    const ambiguous = distinctBlocks.length > 1
+    const ambiguous = chosenPool.length > 1
     const evaluation = evaluations.get(key)
     const chosenAssignment = ambiguous
       ? (
@@ -1045,13 +1050,13 @@ function createTakesAndGroups(
   takes: readonly Readonly<TakeRecord>[]
   groups: readonly Readonly<TakeGroup>[]
 }> {
-  const drafts = sourceDrafts(alignment, supplied)
+  const allDrafts = sourceDrafts(alignment, supplied)
   assertDomain(
-    drafts.length >= 1 && drafts.length <= 2_000,
+    allDrafts.length >= 1 && allDrafts.length <= 2_000,
     'INVALID_ARGUMENT',
     'Alignment must expose 1 to 2000 take boundaries',
   )
-  const sourceKeys = new Set(drafts.map((draft) => sourceKey(draft)))
+  const sourceKeys = new Set(allDrafts.map((draft) => sourceKey(draft)))
   for (const key of supplied.keys()) {
     assertDomain(
       sourceKeys.has(key),
@@ -1059,6 +1064,30 @@ function createTakesAndGroups(
       `Evaluation ${key} does not belong to the alignment`,
     )
   }
+  const selectedCandidateIds = new Set(
+    alignment.alignments.flatMap((entry) =>
+      entry.selectedCandidate ? [entry.selectedCandidate.id] : []),
+  )
+  const boundaryDrafts = new Map<string, TakeSourceDraft[]>()
+  for (const draft of allDrafts) {
+    const boundaryKey = calculateCanonicalHash({
+      transcriptId: draft.transcriptId,
+      sourceArtifactId: draft.sourceArtifactId,
+      sourceRangeMs: draft.sourceRangeMs,
+      evidenceWordIndices: draft.evidenceWordIndices,
+    })
+    boundaryDrafts.set(boundaryKey, [
+      ...(boundaryDrafts.get(boundaryKey) ?? []),
+      draft,
+    ])
+  }
+  const drafts = [...boundaryDrafts.values()].map((aliases) =>
+    aliases.toSorted((left, right) =>
+      Number(selectedCandidateIds.has(right.sourceId)) -
+        Number(selectedCandidateIds.has(left.sourceId)) ||
+      (right.candidate?.metrics.total ?? 0) -
+        (left.candidate?.metrics.total ?? 0) ||
+      left.sourceId.localeCompare(right.sourceId))[0]!)
   const grouped = new Map<string, TakeRecord[]>()
   for (const draft of drafts) {
     const key = groupKey(draft.assignment)

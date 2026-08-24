@@ -56,7 +56,7 @@ async function stopChild(child) {
   }
 }
 
-test('F2.028 exports five deterministic cells through API, PostgreSQL and the real worker', {
+test('T-F2-GATE/F2.028 exports five deterministic cells with individual critics through API, PostgreSQL and the real worker', {
   skip: process.env.APOLLO_EXPORT_MATRIX_E2E !== '1' && 'set APOLLO_EXPORT_MATRIX_E2E=1 with an isolated database',
   timeout: 300_000,
 }, async () => {
@@ -504,6 +504,29 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     assert.deepEqual(ready.data.matrix.cells.map((cell) => cell.attempt).toSorted(), [1, 1, 1, 1, 2])
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputArtifactId)).size, 5)
     assert.equal(new Set(ready.data.matrix.cells.map((cell) => cell.outputManifestId)).size, 5)
+
+    const formatCritics = await client.v2ProjectFinalExportOperation.findMany({
+      where: {
+        workspaceId,
+        operationId: {
+          in: ready.data.matrix.cells.map((cell) => cell.operationId),
+        },
+      },
+      include: { qualitySnapshot: true },
+      orderBy: { outputAspectRatio: 'asc' },
+    })
+    assert.equal(formatCritics.length, 5)
+    assert.deepEqual(
+      [...new Set(formatCritics.map((item) => item.outputAspectRatio))].sort(),
+      [...FORMATS].sort(),
+    )
+    assert.equal(
+      new Set(formatCritics.map((item) => item.qualitySnapshotId)).size,
+      5,
+    )
+    assert.ok(formatCritics.every((item) =>
+      item.qualitySnapshotHash === item.qualitySnapshot.contentHash &&
+      JSON.parse(item.qualitySnapshot.contentJson).status === 'approved'))
 
     const outputHashes = new Set()
     for (const cell of ready.data.matrix.cells) {

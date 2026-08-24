@@ -172,7 +172,7 @@ function dimensions(score) {
   }))
 }
 
-test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists compatibility, exact validated-hook reuse, ProofNeeds, ProofIntegrity, ProofMode and bounded portfolio preflights through PostgreSQL and /v1', {
+test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists 6 hooks, 3 bodies, 3 CTAs, compatibility, exact validated-hook reuse, proof integrity and bounded recipes through PostgreSQL and /v1', {
   skip:
     process.env.APOLLO_COMPATIBILITY_GRAPH_E2E !== '1' &&
     'set APOLLO_COMPATIBILITY_GRAPH_E2E=1 and use an isolated V2 database',
@@ -226,7 +226,9 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
   const projectId = `compat-e2e-project-${suffix}`
   const batchId = `compat-e2e-batch-${suffix}`
   const alignmentId = `compat-e2e-alignment-${suffix}`
-  const artifactId = `compat-e2e-artifact-${suffix}`
+  const artifactId = `compat-e2e-hooks-artifact-${suffix}`
+  const bodyArtifactId = `compat-e2e-bodies-artifact-${suffix}`
+  const ctaArtifactId = `compat-e2e-ctas-artifact-${suffix}`
   const validatedArtifactId =
     `compat-e2e-validated-artifact-${suffix}`
   const validatedManifestId =
@@ -320,14 +322,26 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       name: 'Golden compatibility graph',
       objective: 'lead-generation',
       sourceGroups: [{
-        id: 'source-group-compatibility',
-        name: 'Roteiro completo',
+        id: 'source-group-hooks',
+        name: 'Seis hooks gravados',
         sourceArtifactIds: [artifactId],
+      }, {
+        id: 'source-group-bodies',
+        name: 'Três corpos e prova gravados',
+        sourceArtifactIds: [bodyArtifactId],
+      }, {
+        id: 'source-group-ctas',
+        name: 'Três CTAs gravados',
+        sourceArtifactIds: [ctaArtifactId],
       }],
       recipes: [{
         id: 'recipe-compatibility',
         name: 'Compatibilidade',
-        sourceGroupIds: ['source-group-compatibility'],
+        sourceGroupIds: [
+          'source-group-hooks',
+          'source-group-bodies',
+          'source-group-ctas',
+        ],
       }],
       variants: [{
         id: 'variant-vertical',
@@ -343,7 +357,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
       itemDefinitions: [{
         id: `compat-e2e-item-${suffix}`,
         key: 'compatibility/vertical',
-        sourceGroupId: 'source-group-compatibility',
+        sourceGroupId: 'source-group-hooks',
         recipeId: 'recipe-compatibility',
         variantId: 'variant-vertical',
       }],
@@ -427,109 +441,174 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     })
 
     const lines = {
-      hook: 'Pare agora e descubra o erro que bloqueia suas vendas',
-      body: 'O método organiza sua mensagem para atrair clientes certos',
+      hooks: [
+        'Pare agora e descubra o erro que bloqueia suas vendas',
+        'Seu anúncio pode estar afastando o cliente certo',
+        'Três segundos revelam por que sua mensagem não converte',
+        'Antes de investir mais verba corrija esta abertura',
+        'O problema não é alcance e sim a primeira promessa',
+        'Se o cliente não entende rápido ele continua rolando',
+      ],
+      bodies: [
+        'O método organiza sua mensagem para atrair clientes certos',
+        'A estrutura conecta problema mecanismo e benefício sem atalhos',
+        'Cada argumento usa contexto suficiente para sustentar a promessa',
+      ],
       proof: 'Mais de cem profissionais aplicaram o método com clareza',
-      cta: 'Clique no botão e fale com nossa equipe no WhatsApp',
+      ctas: [
+        'Clique no botão e fale com nossa equipe no WhatsApp',
+        'Baixe o diagnóstico e revise seu criativo agora',
+        'Agende uma conversa para escolher o próximo teste',
+      ],
     }
-    const spoken = Object.values(lines).join(' ')
-    const words = spoken.split(/\s+/).map((word, index) => ({
-      word,
-      start: index * .25,
-      end: index * .25 + .2,
-    }))
-    const transcript = createMediaTranscript({
-      language: 'pt-BR',
-      text: spoken,
-      words,
-      segments: [{
-        id: 1,
-        start: 0,
-        end: words.at(-1).end,
-        text: spoken,
-        confidence: .98,
-      }],
-      provider: 'fixture',
-      model: 'compatibility-e2e',
+    Object.assign(lines, {
+      hook: lines.hooks[0],
+      body: lines.bodies[0],
+      cta: lines.ctas[0],
     })
-    const manifestId = `compat-e2e-manifest-${suffix}`
-    const manifestJson = stableSerialize({
-      schemaVersion: 'media-artifact-manifest/v2',
-      artifactId,
-      mediaType: 'video',
-      container: 'mp4',
-      probe: {
-        width: 1080,
-        height: 1920,
-        duration: words.at(-1).end,
-        fps: 30,
+    const sourceFixtures = [
+      {
+        artifactId,
+        manifestId: `compat-e2e-hooks-manifest-${suffix}`,
+        transcriptId: `compat-e2e-hooks-transcript-${suffix}`,
+        originalFileName: 'seis-hooks-gravados.mp4',
+        utterances: lines.hooks,
       },
+      {
+        artifactId: bodyArtifactId,
+        manifestId: `compat-e2e-bodies-manifest-${suffix}`,
+        transcriptId: `compat-e2e-bodies-transcript-${suffix}`,
+        originalFileName: 'tres-corpos-e-depoimento.mp4',
+        utterances: [...lines.bodies, lines.proof],
+      },
+      {
+        artifactId: ctaArtifactId,
+        manifestId: `compat-e2e-ctas-manifest-${suffix}`,
+        transcriptId: `compat-e2e-ctas-transcript-${suffix}`,
+        originalFileName: 'tres-ctas-gravados.mp4',
+        utterances: lines.ctas,
+      },
+    ].map((fixture, sourceIndex) => {
+      const spoken = fixture.utterances.join(' ')
+      const words = spoken.split(/\s+/).map((word, index) => ({
+        word,
+        start: index * .25,
+        end: index * .25 + .2,
+      }))
+      return {
+        ...fixture,
+        sourceIndex,
+        words,
+        transcript: createMediaTranscript({
+          language: 'pt-BR',
+          text: spoken,
+          words,
+          segments: [{
+            id: sourceIndex + 1,
+            start: 0,
+            end: words.at(-1).end,
+            text: spoken,
+            confidence: .98,
+          }],
+          provider: 'fixture',
+          model: 'compatibility-e2e',
+        }),
+      }
     })
-    await client.v2MediaArtifact.create({
-      data: {
-        id: artifactId,
-        workspaceId,
-        artifactKey: `fixtures/${artifactId}.mp4`,
-        sha256: calculateCanonicalHash({ artifactId }),
-        byteSize: 1n,
+    for (const fixture of sourceFixtures) {
+      const manifestJson = stableSerialize({
+        schemaVersion: 'media-artifact-manifest/v2',
+        artifactId: fixture.artifactId,
         mediaType: 'video',
         container: 'mp4',
-        status: 'available',
-        createdAt,
-      },
-    })
-    await client.v2MediaArtifactManifest.create({
-      data: {
-        id: manifestId,
+        probe: {
+          width: 1080,
+          height: 1920,
+          duration: fixture.words.at(-1).end,
+          fps: 30,
+        },
+      })
+      await client.v2MediaArtifact.create({
+        data: {
+          id: fixture.artifactId,
+          workspaceId,
+          artifactKey: `fixtures/${fixture.artifactId}.mp4`,
+          sha256: calculateCanonicalHash({
+            artifactId: fixture.artifactId,
+          }),
+          byteSize: 1n,
+          mediaType: 'video',
+          container: 'mp4',
+          status: 'available',
+          createdAt,
+        },
+      })
+      await client.v2MediaArtifactManifest.create({
+        data: {
+          id: fixture.manifestId,
+          workspaceId,
+          artifactId: fixture.artifactId,
+          schemaVersion: 'media-artifact-manifest/v2',
+          manifestHash: calculateCanonicalHash({ manifestJson }),
+          recipeId: 'fixture.source',
+          recipeVersion: '1',
+          parametersHash: calculateCanonicalHash({
+            parameters: 'fixture',
+            sourceIndex: fixture.sourceIndex,
+          }),
+          manifestJson,
+          createdAt,
+        },
+      })
+      await client.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(),
+          workspaceId,
+          projectId,
+          artifactId: fixture.artifactId,
+          role: 'source-master',
+          originalFileName: fixture.originalFileName,
+          createdAt,
+        },
+      })
+      await client.v2MediaTranscript.create({
+        data: {
+          id: fixture.transcriptId,
+          workspaceId,
+          projectId,
+          sourceArtifactId: fixture.artifactId,
+          sourceManifestId: fixture.manifestId,
+          schemaVersion: fixture.transcript.schemaVersion,
+          language: fixture.transcript.language,
+          provider: fixture.transcript.provider,
+          model: fixture.transcript.model,
+          transcriptHash: fixture.transcript.transcriptHash,
+          transcriptJson: stableSerialize(fixture.transcript),
+          createdAt,
+        },
+      })
+      await setAssetRightsService({
+        repository: new PrismaAssetRightsRepository(client),
+        clock: () => createdAt,
+        createId: () =>
+          `compat-e2e-source-rights-${fixture.sourceIndex}-${suffix}`,
+      })({
         workspaceId,
-        artifactId,
-        schemaVersion: 'media-artifact-manifest/v2',
-        manifestHash: calculateCanonicalHash({ manifestJson }),
-        recipeId: 'fixture.source',
-        recipeVersion: '1',
-        parametersHash: calculateCanonicalHash({
-          parameters: 'fixture',
-        }),
-        manifestJson,
-        createdAt,
-      },
-    })
-    await client.v2MediaTranscript.create({
-      data: {
-        id: `compat-e2e-transcript-${suffix}`,
-        workspaceId,
-        projectId,
-        sourceArtifactId: artifactId,
-        sourceManifestId: manifestId,
-        schemaVersion: transcript.schemaVersion,
-        language: transcript.language,
-        provider: transcript.provider,
-        model: transcript.model,
-        transcriptHash: transcript.transcriptHash,
-        transcriptJson: stableSerialize(transcript),
-        createdAt,
-      },
-    })
-    await setAssetRightsService({
-      repository: new PrismaAssetRightsRepository(client),
-      clock: () => createdAt,
-      createId: () => `compat-e2e-source-rights-${suffix}`,
-    })({
-      workspaceId,
-      artifactId,
-      baseRevision: assetRightsRevision(artifactId, 0),
-      draft: {
-        status: 'approved',
-        allowedUses: ['rendering', 'editorial-reuse'],
-        prohibitedUses: [],
-        allowedLocales: ['pt-BR'],
-        consent: {
+        artifactId: fixture.artifactId,
+        baseRevision: assetRightsRevision(fixture.artifactId, 0),
+        draft: {
           status: 'approved',
           allowedUses: ['rendering', 'editorial-reuse'],
+          prohibitedUses: [],
+          allowedLocales: ['pt-BR'],
+          consent: {
+            status: 'approved',
+            allowedUses: ['rendering', 'editorial-reuse'],
+          },
         },
-      },
-      actor: { type: 'api-client', id: issued.client.id },
-    })
+        actor: { type: 'api-client', id: issued.client.id },
+      })
+    }
     const validatedArtifactSha256 = '9'.repeat(64)
     const validatedArtifactKey =
       `fixtures/${validatedArtifactId}.mp4`
@@ -661,19 +740,22 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         title: 'Golden compatibility graph',
         locale: 'pt-BR',
         rawText: [
-          `HOOK 1: ${lines.hook}.`,
-          `BODY 1: ${lines.body}.`,
+          ...lines.hooks.map((line, index) =>
+            `HOOK ${index + 1}: ${line}.`),
+          ...lines.bodies.map((line, index) =>
+            `BODY ${index + 1}: ${line}.`),
           `PROOF 1: ${lines.proof}.`,
-          `CTA 1: ${lines.cta}.`,
+          ...lines.ctas.map((line, index) =>
+            `CTA ${index + 1}: ${line}.`),
         ].join('\n'),
       }),
-      sources: [{
-        transcriptId: `compat-e2e-transcript-${suffix}`,
-        sourceArtifactId: artifactId,
-        transcriptHash: transcript.transcriptHash,
-        language: transcript.language,
-        transcript,
-      }],
+      sources: sourceFixtures.map((fixture) => ({
+        transcriptId: fixture.transcriptId,
+        sourceArtifactId: fixture.artifactId,
+        transcriptHash: fixture.transcript.transcriptHash,
+        language: fixture.transcript.language,
+        transcript: fixture.transcript,
+      })),
       createdByClientId: issued.client.id,
       createdAt: createdAt.toISOString(),
     })
@@ -756,6 +838,10 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
         ...entry.alternatives,
       ]).map((candidate) => [candidate.id, candidate])).values(),
     ]
+    const selectedCandidateIds = new Set(
+      alignment.alignments.flatMap((entry) =>
+        entry.selectedCandidate ? [entry.selectedCandidate.id] : []),
+    )
     const libraryResponse = await apiFetch(libraryEndpoint, {
       method: 'POST',
       headers: {
@@ -769,7 +855,9 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           sourceKind: 'alignment-candidate',
           sourceId: candidate.id,
           expectedSourceHash: candidate.candidateHash,
-          dimensions: dimensions(.94),
+          dimensions: dimensions(
+            selectedCandidateIds.has(candidate.id) ? .94 : .82,
+          ),
         })),
       }),
     })
@@ -783,6 +871,18 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     const eligible = library.takes.filter((take) =>
       ['primary', 'alternate'].includes(take.status) &&
       ['hook', 'body', 'proof', 'cta'].includes(take.assignment.role))
+    const primaryByRole = Object.groupBy(
+      eligible.filter((take) => take.status === 'primary'),
+      (take) => take.assignment.role,
+    )
+    assert.equal(primaryByRole.hook?.length, 6)
+    assert.equal(primaryByRole.body?.length, 3)
+    assert.equal(primaryByRole.cta?.length, 3)
+    assert.equal(primaryByRole.proof?.length, 1)
+    assert.deepEqual(
+      [...new Set(eligible.map((take) => take.sourceArtifactId))].sort(),
+      [artifactId, bodyArtifactId, ctaArtifactId].sort(),
+    )
     assert.deepEqual(
       [...new Set(eligible.map((take) => take.assignment.role))].sort(),
       ['body', 'cta', 'hook', 'proof'],
@@ -1398,9 +1498,9 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           'idempotency-key': `proof-need-speech-${suffix}`,
         },
         body: JSON.stringify({
-          sourceTranscriptId:
-            `compat-e2e-transcript-${suffix}`,
-          expectedTranscriptHash: transcript.transcriptHash,
+          sourceTranscriptId: sourceFixtures[1].transcriptId,
+          expectedTranscriptHash:
+            sourceFixtures[1].transcript.transcriptHash,
           extractionPolicyVersion:
             'speech-segment-extraction/v1',
           producer: {
@@ -1410,7 +1510,7 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
             confidence: 0.99,
           },
           annotations: [{
-            sourceSegmentId: 1,
+            sourceSegmentId: 2,
             speaker: {
               value: 'person-specialist',
               confidence: 0.99,
@@ -1474,7 +1574,9 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
           authenticityScore: 0.98,
           contextRangeMs: [
             0,
-            Math.ceil(words.at(-1).end * 1_000),
+            Math.ceil(
+              sourceFixtures[1].words.at(-1).end * 1_000,
+            ),
           ],
           frameRefs: ['proof-need-frame-e2e'],
           adjacentEvidenceIds: [],
@@ -2392,16 +2494,46 @@ test('T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 persists co
     const portfolio = portfolioPayload.data.preflight
     assert.equal(portfolioPayload.data.replayed, false)
     assert.ok(portfolioPayload.data.confirmationToken)
-    assert.equal(portfolio.theoreticalCandidateCount, '2')
-    assert.equal(portfolio.eligibleCandidateCount, '2')
+    const blindCartesianCount =
+      primaryByRole.hook.length *
+      primaryByRole.body.length *
+      primaryByRole.cta.length
+    assert.equal(blindCartesianCount, 54)
+    const theoreticalCandidateCount = BigInt(
+      portfolio.theoreticalCandidateCount,
+    )
+    const eligibleCandidateCount = BigInt(
+      portfolio.eligibleCandidateCount,
+    )
+    assert.ok(
+      theoreticalCandidateCount >= BigInt(blindCartesianCount),
+      'the preflight must count the complete compatible search space',
+    )
+    assert.ok(
+      eligibleCandidateCount >= BigInt(portfolio.selectedRecipeCount) &&
+      eligibleCandidateCount <= theoreticalCandidateCount,
+      'eligible recipes must remain bounded by the theoretical search space',
+    )
     assert.equal(portfolio.selectedRecipeCount, 2)
+    assert.ok(
+      portfolio.selectedRecipeCount < blindCartesianCount,
+      'the bounded portfolio must reuse explicit compatible recipes instead of materializing the 6 × 3 × 3 Cartesian product',
+    )
     assert.equal(portfolio.confirmation.required, true)
     assert.equal(portfolio.confirmation.satisfied, false)
     assert.equal(portfolio.productMaterialized, false)
     assert.equal(portfolio.estimates.jobsCreated, 0)
-    assert.equal(portfolio.estimates.reusedRecipeCount, 2)
-    assert.equal(portfolio.estimates.plannedJobCount, 0)
-    assert.equal(portfolio.estimates.estimatedCostMinorUnits, 0)
+    assert.ok(portfolio.estimates.reusedRecipeCount <= 2)
+    assert.equal(
+      portfolio.estimates.plannedJobCount,
+      portfolio.selectedRecipeCount -
+        portfolio.estimates.reusedRecipeCount,
+    )
+    assert.equal(
+      portfolio.estimates.estimatedCostMinorUnits,
+      portfolio.estimates.plannedJobCount *
+        portfolio.policy.estimatedCostPerOutputMinorUnits,
+    )
     assert.equal(portfolio.coverage.complete, true)
 
     const portfolioReplayResponse = await apiFetch(portfolioEndpoint, {

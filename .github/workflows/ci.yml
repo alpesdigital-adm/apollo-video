@@ -234,7 +234,7 @@ jobs:
       # no product default changes, and every other governance control
       # (rate limit, concurrency, quota, spend and error-rate anomaly) stays at
       # its production value for this run.
-      - name: Run ProofMode API and PostgreSQL E2E with tamper and stale rejection
+      - name: Run Phase 2 three-file reuse, validated hook, testimonial proof and ProofMode E2E
         run: npm run test:e2e:proof-modes
         env:
           APOLLO_COMPATIBILITY_GRAPH_E2E: "1"
