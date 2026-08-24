@@ -20,16 +20,16 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.024, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core e os
-dezenove primeiros slices de reutilização e produção em lote operando sobre PostgreSQL V2,
+Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core e o gate de reutilização e produção em lote operando sobre PostgreSQL V2,
 API pública e implantação em produção:
 
-- **348 de 1.259 microtarefas verificadas como efetivamente entregues (27,6%, arredondamento conservador)**;
-- **911 microtarefas abertas ou aguardando nova comprovação**;
+- **355 de 1.259 microtarefas verificadas como efetivamente entregues (28,1%, arredondamento conservador)**;
+- **904 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
-- o gate do MVP Core F1 foi aprovado; gates F2–F5 e o release final
-  permanecem abertos; F2.001 a F2.025, F2.027 e F2.028 foram entregues, mas não encerram o
-  gate F2;
+- os gates do MVP Core F1 e de reutilização/lote F2 foram aprovados; gates
+  F3–F5 e o release final permanecem abertos; a comparação visual autenticada
+  remanescente de F2.026 continua explicitamente aberta e não é contada como
+  entregue;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
 - componentes de código já escritos podem reduzir o trabalho futuro, mas só voltarão a `[x]` quando integrados e comprovados no fluxo V2.
 
@@ -1503,13 +1503,29 @@ operacional vincula essa evidência content-addressed ao deploy saudável.
 
 ### F2.029 — Jornadas de reuso e lote
 
-- [ ] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos. Evidência T-F2-GATE e testes production-batch.
-- [ ] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego. Evidência T-F2-GATE.
-- [ ] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos. Evidência T-FR-124.
-- [ ] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento. Evidência T-FR-131.
-- [ ] Extrair short contínuo de 2min de uma live de 2h. Evidência T-FR-134.
-- [ ] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual. Evidência T-FR-235.
-- [ ] Registrar evidências e aprovar gate da fase. Evidência T-F2-GATE e ADR-127.
+- [x] Executar roteiro com 6 hooks, 3 corpos e 3 CTAs gravados em três arquivos. Evidência T-F2-GATE e testes production-batch.
+- [x] Demonstrar separação de takes e recipes compatíveis sem produto cartesiano cego. Evidência T-F2-GATE.
+- [x] Executar Reel validado, conservar apenas hook essencial e anexar corpo/CTA novos. Evidência T-FR-124.
+- [x] Selecionar EvidenceSegment de depoimento e preservar contexto/consentimento. Evidência T-FR-131.
+- [x] Extrair short contínuo de 2min de uma live de 2h. Evidência T-FR-134.
+- [x] Produzir outputs 9:16, 16:9, 4:5, 1:1 e 21:9 com crítica individual. Evidência T-FR-235.
+- [x] Registrar evidências e aprovar gate da fase. Evidência T-F2-GATE e ADR-127.
+
+Aceite F2.029: PR `#23`, merge `9b6db0a` e CI `32784715187` com os
+dois jobs integralmente verdes. A jornada hospedada atravessou `/v1`,
+PostgreSQL e MinIO com três masters distintos; alinhou 13 blocos e
+canonicalizou 41 takes físicos sem duplicar fronteiras, preservando 13
+primários (6 hooks, 3 corpos, 1 depoimento e 3 CTAs). O preflight contou
+6.160 caminhos teóricos e selecionou somente 2 recipes, com custo derivado
+das recipes não reutilizadas e `productMaterialized=false`. A mesma execução
+comprovou hook validado, EvidenceSegment com contexto/consentimento, extração
+FFmpeg contínua de 120 s a partir de mídia real de 7.200 s e cinco MP4s com
+crítica individual. O shakedown encontrou e corrigiu a colisão de candidatos
+distintos sobre uma única fronteira física no Take Library. A imagem
+`apollo-video:9b6db0a` (`sha256:637b57011be6...`) foi implantada em produção
+com 170 migrations sem pendência; web e quatro workers ficaram saudáveis,
+com zero restart, health público 200, zero erro crítico e zero backend E2E.
+Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ---
 
