@@ -468,7 +468,7 @@ test('T-F0-030/T-FR-014 real PostgreSQL vertical smoke uploads without briefing,
       plan: {
         schemaVersion: 'color-plan/v1', metadata: sourceMetadata, outputMetadata: sourceMetadata,
         sourceMetadata: { [staticSource.sourceArtifactId]: sourceMetadata },
-        global: compiledColor.compilation.pipeline.stages,
+        global: compiledColor.value.compilation.pipeline.stages,
         segments: {
           [directedClip.id]: [{
             id: 'match-vertical-monochrome', kind: 'match', version: 'v1', enabled: true,
