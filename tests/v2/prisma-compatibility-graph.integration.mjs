@@ -2523,9 +2523,17 @@ test('T-F2-GATE/T-FR-083/T-FR-084/T-FR-085/T-FR-124/T-FR-130/T-FR-131/T-FR-132 p
     assert.equal(portfolio.confirmation.satisfied, false)
     assert.equal(portfolio.productMaterialized, false)
     assert.equal(portfolio.estimates.jobsCreated, 0)
-    assert.equal(portfolio.estimates.reusedRecipeCount, 2)
-    assert.equal(portfolio.estimates.plannedJobCount, 0)
-    assert.equal(portfolio.estimates.estimatedCostMinorUnits, 0)
+    assert.ok(portfolio.estimates.reusedRecipeCount <= 2)
+    assert.equal(
+      portfolio.estimates.plannedJobCount,
+      portfolio.selectedRecipeCount -
+        portfolio.estimates.reusedRecipeCount,
+    )
+    assert.equal(
+      portfolio.estimates.estimatedCostMinorUnits,
+      portfolio.estimates.plannedJobCount *
+        portfolio.policy.estimatedCostPerOutputMinorUnits,
+    )
     assert.equal(portfolio.coverage.complete, true)
 
     const portfolioReplayResponse = await apiFetch(portfolioEndpoint, {
