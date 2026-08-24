@@ -362,7 +362,17 @@ test('F2.028 exports five deterministic cells through API, PostgreSQL and the re
     }
     const failingWorker = createProjectFinalExportWorker({ ...workerEnvironment, FFMPEG_PATH: process.execPath })
     const retryOutcome = await failingWorker(`matrix-worker-retry-${suffix}`)
-    assert.equal(retryOutcome?.status, 'retrying')
+    const retryOperation = retryOutcome
+      ? await client.v2PublicOperation.findUnique({ where: { id: retryOutcome.operationId } })
+      : null
+    assert.equal(retryOutcome?.status, 'retrying', stableSerialize({
+      outcome: retryOutcome,
+      errorCode: retryOperation?.errorCode,
+      errorMessage: retryOperation?.errorMessage,
+      errorRetryable: retryOperation?.errorRetryable,
+      attempt: retryOperation?.attempt,
+      maxAttempts: retryOperation?.maxAttempts,
+    }))
     const retryResponse = await fetch(`${baseUrl}/v1/export-matrices/${matrixId}`, { headers: { authorization } })
     const retrying = await retryResponse.json()
     assert.equal(retryResponse.status, 200)
