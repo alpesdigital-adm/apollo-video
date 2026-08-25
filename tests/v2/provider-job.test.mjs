@@ -8,7 +8,7 @@ import {
   normalizeProviderStatus,
   transitionProviderJob,
 } from '../../src/v2/domain/provider-job.ts'
-import { runProviderJobWorkerOnce } from '../../src/v2/application/provider-jobs.ts'
+import { runProviderJobWorkerLoop, runProviderJobWorkerOnce } from '../../src/v2/application/provider-jobs.ts'
 import { ControlledAsyncMediaProviderAdapter } from '../../src/v2/infrastructure/controlled-async-media-provider.ts'
 
 const hash = (character) => character.repeat(64)
@@ -115,4 +115,44 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
   assert.deepEqual(history, ['planned', 'estimated', 'submitted', 'queued', 'processing', 'retrieving', 'evaluating', 'approved'])
   assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
   assert.equal(stored.job.resultArtifact.artifactSha256, hash('c'))
+})
+
+test('T-FR-101 provider failure is normalized without persisting upstream diagnostics', async () => {
+  let stored = { job: transitionProviderJob(planned(), { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 1, estimatedLatencyMs: 1 } }), requestFingerprint: hash('e') }
+  const jobs = {
+    async claimNext(input) { return { ...stored, lease: { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() } } },
+    async advance(input) { stored = { ...stored, job: input.next }; return stored },
+  }
+  const runOnce = runProviderJobWorkerOnce({
+    jobs,
+    adapters: { get: () => ({
+      id: 'controlled-avatar', adapterVersion: 'version-1',
+      async submit() { const error = new Error('secret upstream response must never persist'); error.code = 'UPSTREAM_DENIED'; error.retryable = true; throw error },
+    }) },
+    ingestor: { async ingest() { throw new Error('unreachable') } },
+    critic: { async evaluate() { throw new Error('unreachable') } },
+    clock: () => new Date(at(2)), createLeaseToken: () => 'provider-lease-redaction', createTransitionId: () => 'provider-transition-redaction',
+  })
+  await runOnce('provider-worker-redaction')
+  assert.deepEqual(stored.job.normalizedError, { code: 'UPSTREAM_DENIED', message: 'Provider operation failed', retryable: true })
+  assert.equal(JSON.stringify(stored).includes('secret upstream'), false)
+})
+
+test('T-FR-101 supervised provider loop stays idle, isolates iteration failure and stops on abort', async () => {
+  const controller = new AbortController()
+  const calls = []
+  let failures = 0
+  await runProviderJobWorkerLoop({
+    workerId: 'provider-worker-loop', signal: controller.signal, pollIntervalMs: 100,
+    runNext: async (workerId) => {
+      calls.push(workerId)
+      if (calls.length === 1) throw new Error('transient repository failure')
+      if (calls.length === 3) controller.abort()
+      return calls.length === 2 ? { status: 'estimated' } : null
+    },
+    onIterationError: () => { failures += 1 },
+    wait: async () => {},
+  })
+  assert.deepEqual(calls, ['provider-worker-loop', 'provider-worker-loop', 'provider-worker-loop'])
+  assert.equal(failures, 1)
 })

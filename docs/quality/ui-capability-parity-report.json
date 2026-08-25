@@ -4,9 +4,9 @@
     "uiActions": 105,
     "capabilities": 94,
     "endpoints": 94,
-    "registeredCapabilities": 251,
-    "operableCapabilities": 251,
-    "publicContractCapabilities": 251,
+    "registeredCapabilities": 256,
+    "operableCapabilities": 256,
+    "publicContractCapabilities": 256,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -4823,6 +4823,61 @@
       "endpoint": "GET /v1/governance/usage-audit",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/governance-usage-audit-page/v3",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.register",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters",
+      "inputSchemaRef": "apollo://schemas/register-synthetic-presenter-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-production-runs.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-production-runs",
+      "inputSchemaRef": "apollo://schemas/create-synthetic-production-run-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-production-run-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-production-runs.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-production-runs/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-production-run-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.provider-jobs.enqueue",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/provider-jobs",
+      "inputSchemaRef": "apollo://schemas/enqueue-provider-job-request/v1",
+      "outputSchemaRef": "apollo://schemas/provider-job-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.provider-jobs.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/provider-jobs/{jobId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/provider-job-read/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

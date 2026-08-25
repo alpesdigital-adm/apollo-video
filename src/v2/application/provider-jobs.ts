@@ -179,12 +179,49 @@ function normalizedFailure(error: unknown) {
   if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
     return Object.freeze({
       code: error.code,
-      message: error instanceof Error ? error.message : 'Provider operation failed',
+      message: 'Provider operation failed',
       retryable: 'retryable' in error && error.retryable === true,
       ...('retryAfterMs' in error && Number.isSafeInteger(error.retryAfterMs) ? { retryAfterMs: error.retryAfterMs as number } : {}),
     })
   }
-  return Object.freeze({ code: 'PROVIDER_FAILURE', message: error instanceof Error ? error.message : 'Provider operation failed', retryable: false })
+  return Object.freeze({ code: 'PROVIDER_FAILURE', message: 'Provider operation failed', retryable: false })
+}
+
+async function waitForProviderPoll(signal: AbortSignal, milliseconds: number): Promise<void> {
+  if (signal.aborted) return
+  await new Promise<void>((resolveWait) => {
+    const timeout = setTimeout(finish, milliseconds)
+    const abort = () => finish()
+    function finish() {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', abort)
+      resolveWait()
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
+export async function runProviderJobWorkerLoop(input: {
+  workerId: string
+  runNext: (workerId: string) => Promise<unknown | null>
+  signal: AbortSignal
+  pollIntervalMs?: number
+  onIterationError?: () => void
+  wait?: (signal: AbortSignal, milliseconds: number) => Promise<void>
+}): Promise<void> {
+  const workerId = identity(input.workerId, 'workerId')
+  const pollIntervalMs = input.pollIntervalMs ?? 1_000
+  assertDomain(Number.isSafeInteger(pollIntervalMs) && pollIntervalMs >= 100 && pollIntervalMs <= 60_000, 'INVALID_ARGUMENT', 'pollIntervalMs is invalid')
+  const wait = input.wait ?? waitForProviderPoll
+  while (!input.signal.aborted) {
+    try {
+      const outcome = await input.runNext(workerId)
+      if (!outcome) await wait(input.signal, pollIntervalMs)
+    } catch {
+      input.onIterationError?.()
+      await wait(input.signal, pollIntervalMs)
+    }
+  }
 }
 
 export function runProviderJobWorkerOnce(dependencies: {
