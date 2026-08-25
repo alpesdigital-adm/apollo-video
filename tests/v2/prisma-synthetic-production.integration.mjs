@@ -11,6 +11,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   skip: !process.env.V2_DATABASE_URL && 'V2_DATABASE_URL is required',
 }, async () => {
   const { createProjectService } = await import('../../src/v2/application/create-project.ts')
+  const { createStoryPlanService, readStoryPlanService } = await import('../../src/v2/application/story-plans.ts')
   const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
   const {
     createExternalAuditContext,
@@ -31,6 +32,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     createAssetRightsChangeIntent,
   } = await import('../../src/v2/domain/asset-rights-change.ts')
   const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+  const { STORY_GOLDEN_FIXTURES } = await import('../../src/v2/domain/story-plan.ts')
   const { PrismaApiClientRepository } = await import(
     '../../src/v2/infrastructure/prisma/api-client-repository.ts'
   )
@@ -51,6 +53,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   )
   const { PrismaSyntheticProductionRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-production-repository.ts'
+  )
+  const { PrismaStoryPlanRepository } = await import(
+    '../../src/v2/infrastructure/prisma/story-plan-repository.ts'
   )
   const { PrismaWorkspaceRepository } = await import(
     '../../src/v2/infrastructure/prisma/workspace-repository.ts'
@@ -82,6 +87,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })
     await client.v2IdempotencyRecord.deleteMany({ where: { workspaceId } })
     await client.v2ProjectCreationCommand.deleteMany({ where: { workspaceId } })
+    await client.v2StoryPlan.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
@@ -139,6 +145,54 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       actor,
       idempotency: { clientId, key: 'synthetic-integration-create-project' },
     })
+
+    const baseStory = STORY_GOLDEN_FIXTURES.linear
+    const sourceKinds = ['real', 'synthetic', 'proof', 'voiceover']
+    const presentations = ['source-video', 'synthetic-avatar', 'proof-insert', 'voiceover']
+    const brollBlock = {
+      id: 'broll', actId: 'development', role: 'context', intent: 'Illustrate the proof with approved B-roll',
+      dependencies: ['proof'], sourceCandidateIds: ['source-broll'], durationTargetMs: { min: 1000, ideal: 1500, max: 2500 },
+      content: { claimIds: [], qualifierIds: [], proofIds: [] }, presentation: 'b-roll',
+    }
+    const hybridStoryInput = {
+      productionMode: 'hybrid',
+      objective: baseStory.objective,
+      desiredActionRef: baseStory.desiredActionRef,
+      treatmentPlanRef: baseStory.treatmentPlanRef,
+      targetDurationMs: baseStory.targetDurationMs,
+      acts: baseStory.acts.map((act) => act.id === 'development' ? { ...act, blockIds: [...act.blockIds, 'broll'] } : act),
+      blocks: [...baseStory.blocks.map((block, index) => ({ ...block, presentation: presentations[index] })), brollBlock],
+      sourceRanges: [...baseStory.sourceRanges.map((range, index) => ({
+        ...range,
+        rightsRef: `hybrid-rights-${index + 1}`,
+        sourceKind: sourceKinds[index],
+        ...(index !== 2 ? { consentRef: `hybrid-consent-${index + 1}`, identityRef: 'hybrid-identity-ana', audioContinuityRef: 'hybrid-audio-ana' } : {}),
+        ...(index < 2 ? { sceneContinuityRef: 'hybrid-scene-studio' } : {}),
+        ...(index === 1 ? { disclosure: 'Avatar gerado por IA' } : {}),
+      })), { id: 'range-broll', artifactId: 'artifact-broll', startMs: 0, endMs: 1500, rightsRef: 'hybrid-rights-5', sourceKind: 'b-roll' }],
+      sourceCandidates: [...baseStory.sourceCandidates, { id: 'source-broll', sourceRangeId: 'range-broll', purpose: 'context', rank: 1 }],
+      qualifiers: baseStory.qualifiers,
+      claims: baseStory.claims,
+      proofContexts: baseStory.proofContexts,
+    }
+    const storyRepository = new PrismaStoryPlanRepository(client)
+    const hybridStory = await createStoryPlanService({
+      repository: storyRepository,
+      createId: () => 'hybrid-story-plan-integration',
+      clock: () => new Date(now),
+    })({
+      workspaceId,
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      plan: hybridStoryInput,
+      actor,
+      idempotencyKey: 'hybrid-story-plan-integration-key',
+    })
+    assert.equal(hybridStory.value.plan.schemaVersion, 4)
+    assert.equal(hybridStory.value.plan.productionMode, 'hybrid')
+    assert.equal((await client.v2StoryPlan.findUniqueOrThrow({ where: { id: hybridStory.value.plan.id } })).schemaVersion, 4)
+    const readHybrid = await readStoryPlanService({ repository: storyRepository })({ workspaceId, projectId: project.project.id, storyPlanId: hybridStory.value.plan.id })
+    assert.equal(readHybrid.plan.storyHash, hybridStory.value.plan.storyHash)
 
     const artifacts = [
       ['synthetic-consent-evidence', 'data', 'json', 'a'],

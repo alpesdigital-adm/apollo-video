@@ -6273,15 +6273,15 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.story-plans.create": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/create-story-plan-request/v1",
-      "outputSchemaRef": "apollo://schemas/story-plan-mutated/v1",
+      "inputSchemaRef": "apollo://schemas/create-story-plan-request/v2",
+      "outputSchemaRef": "apollo://schemas/story-plan-mutated/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/story-plans"
@@ -6299,14 +6299,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.story-plans.read": {
-      "version": "1.0.0",
+      "version": "2.0.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/story-plan-read/v1",
+      "outputSchemaRef": "apollo://schemas/story-plan-read/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/story-plans/{storyPlanId}"
@@ -36162,6 +36162,150 @@
                 }
               }
             },
+            "sourceCandidates": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "sourceRangeId",
+                  "purpose",
+                  "rank"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceRangeId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "purpose": {
+                    "enum": [
+                      "hook",
+                      "context",
+                      "argument",
+                      "proof",
+                      "cta"
+                    ]
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "qualifiers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "text"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "text",
+                  "qualifierIds",
+                  "proofContextIds"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048
+                  },
+                  "qualifierIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "proofContextIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                }
+              }
+            },
+            "proofContexts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "claimIds",
+                  "sourceCandidateIds",
+                  "attribution"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "claimIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "sourceCandidateIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "attribution": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            },
             "blocks": {
               "type": "array",
               "minItems": 1,
@@ -36340,6 +36484,350 @@
                     "type": "string",
                     "minLength": 3,
                     "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-story-plan-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "plan"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "plan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "objective",
+            "desiredActionRef",
+            "treatmentPlanRef",
+            "targetDurationMs",
+            "acts",
+            "blocks",
+            "sourceRanges",
+            "sourceCandidates",
+            "qualifiers",
+            "claims",
+            "proofContexts"
+          ],
+          "properties": {
+            "productionMode": {
+              "const": "hybrid"
+            },
+            "objective": {
+              "enum": [
+                "discovery",
+                "awareness",
+                "warming",
+                "lead-generation",
+                "sale",
+                "whatsapp",
+                "booking",
+                "download"
+              ]
+            },
+            "desiredActionRef": {
+              "type": "object"
+            },
+            "treatmentPlanRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "schemaVersion",
+                "contentHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "schemaVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "contentHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "targetDurationMs": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "min",
+                "max"
+              ],
+              "properties": {
+                "min": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "acts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "role",
+                  "blockIds"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "role": {
+                    "enum": [
+                      "opening",
+                      "development",
+                      "resolution"
+                    ]
+                  },
+                  "blockIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                }
+              }
+            },
+            "blocks": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "actId",
+                  "role",
+                  "intent",
+                  "dependencies",
+                  "sourceCandidateIds",
+                  "durationTargetMs",
+                  "content",
+                  "presentation"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "actId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "role": {
+                    "enum": [
+                      "hook",
+                      "context",
+                      "argument",
+                      "proof",
+                      "cta"
+                    ]
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "sourceCandidateIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  },
+                  "durationTargetMs": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "min",
+                      "ideal",
+                      "max"
+                    ],
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "ideal": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "max": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "content": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "claimIds",
+                      "qualifierIds",
+                      "proofIds"
+                    ],
+                    "properties": {
+                      "claimIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "qualifierIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "proofIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "ctaId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "presentation": {
+                    "enum": [
+                      "source-video",
+                      "voiceover",
+                      "cold-open-reference",
+                      "synthetic-avatar",
+                      "proof-insert",
+                      "b-roll"
+                    ]
+                  },
+                  "sourceRangeId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                }
+              }
+            },
+            "sourceRanges": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "artifactId",
+                  "startMs",
+                  "endMs",
+                  "rightsRef"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "startMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "endMs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "rightsRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "consentRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceKind": {
+                    "enum": [
+                      "real",
+                      "synthetic",
+                      "voiceover",
+                      "proof",
+                      "b-roll"
+                    ]
+                  },
+                  "identityRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "audioContinuityRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sceneContinuityRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "disclosure": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
                   }
                 }
               }
@@ -174014,6 +174502,150 @@
                     }
                   }
                 },
+                "sourceCandidates": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sourceRangeId",
+                      "purpose",
+                      "rank"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "purpose": {
+                        "enum": [
+                          "hook",
+                          "context",
+                          "argument",
+                          "proof",
+                          "cta"
+                        ]
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                },
+                "qualifiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text",
+                      "qualifierIds",
+                      "proofContextIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "qualifierIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "proofContextIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "proofContexts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "claimIds",
+                      "sourceCandidateIds",
+                      "attribution"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "claimIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "sourceCandidateIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "attribution": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
                 "blocks": {
                   "type": "array",
                   "minItems": 1,
@@ -174196,150 +174828,6 @@
                     }
                   }
                 },
-                "sourceCandidates": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "sourceRangeId",
-                      "purpose",
-                      "rank"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128
-                      },
-                      "sourceRangeId": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128
-                      },
-                      "purpose": {
-                        "enum": [
-                          "hook",
-                          "context",
-                          "argument",
-                          "proof",
-                          "cta"
-                        ]
-                      },
-                      "rank": {
-                        "type": "integer",
-                        "minimum": 1
-                      }
-                    }
-                  }
-                },
-                "qualifiers": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "text"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 1024
-                      }
-                    }
-                  }
-                },
-                "claims": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "text",
-                      "qualifierIds",
-                      "proofContextIds"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128
-                      },
-                      "text": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 2048
-                      },
-                      "qualifierIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 3,
-                          "maxLength": 128
-                        }
-                      },
-                      "proofContextIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 3,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "proofContexts": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "claimIds",
-                      "sourceCandidateIds",
-                      "attribution"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128
-                      },
-                      "claimIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 3,
-                          "maxLength": 128
-                        }
-                      },
-                      "sourceCandidateIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 3,
-                          "maxLength": 128
-                        }
-                      },
-                      "attribution": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 1024
-                      }
-                    }
-                  }
-                },
                 "storyHash": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
@@ -174391,7 +174879,7 @@
         }
       }
     },
-    "apollo://schemas/story-plan-read/v1": {
+    "apollo://schemas/story-plan-mutated/v2": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -174403,7 +174891,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "storyPlan"
+            "storyPlan",
+            "replayed"
           ],
           "properties": {
             "storyPlan": {
@@ -174433,7 +174922,10 @@
               ],
               "properties": {
                 "schemaVersion": {
-                  "const": 3
+                  "enum": [
+                    3,
+                    4
+                  ]
                 },
                 "id": {
                   "type": "string",
@@ -174454,6 +174946,9 @@
                   "type": "string",
                   "minLength": 3,
                   "maxLength": 128
+                },
+                "productionMode": {
+                  "const": "hybrid"
                 },
                 "objective": {
                   "enum": [
@@ -174674,7 +175169,10 @@
                         "enum": [
                           "source-video",
                           "voiceover",
-                          "cold-open-reference"
+                          "cold-open-reference",
+                          "synthetic-avatar",
+                          "proof-insert",
+                          "b-roll"
                         ]
                       },
                       "sourceRangeId": {
@@ -174726,6 +175224,35 @@
                         "type": "string",
                         "minLength": 3,
                         "maxLength": 128
+                      },
+                      "sourceKind": {
+                        "enum": [
+                          "real",
+                          "synthetic",
+                          "voiceover",
+                          "proof",
+                          "b-roll"
+                        ]
+                      },
+                      "identityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "audioContinuityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sceneContinuityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "disclosure": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
                       }
                     }
                   }
@@ -174904,7 +175431,1152 @@
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
                 }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "schemaVersion": {
+                        "const": 4
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "productionMode"
+                    ],
+                    "properties": {
+                      "productionMode": {
+                        "const": "hybrid"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/story-plan-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "storyPlan"
+          ],
+          "properties": {
+            "storyPlan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "projectVersionId",
+                "objective",
+                "desiredActionRef",
+                "treatmentPlanRef",
+                "targetDurationMs",
+                "acts",
+                "blocks",
+                "sourceRanges",
+                "sourceCandidates",
+                "qualifiers",
+                "claims",
+                "proofContexts",
+                "storyHash",
+                "createdBy",
+                "createdAt",
+                "requestFingerprint"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": 3
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "objective": {
+                  "enum": [
+                    "discovery",
+                    "awareness",
+                    "warming",
+                    "lead-generation",
+                    "sale",
+                    "whatsapp",
+                    "booking",
+                    "download"
+                  ]
+                },
+                "desiredActionRef": {
+                  "type": "object"
+                },
+                "treatmentPlanRef": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "schemaVersion",
+                    "contentHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "targetDurationMs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "min",
+                    "max"
+                  ],
+                  "properties": {
+                    "min": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "acts": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "role",
+                      "blockIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "opening",
+                          "development",
+                          "resolution"
+                        ]
+                      },
+                      "blockIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "sourceCandidates": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sourceRangeId",
+                      "purpose",
+                      "rank"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "purpose": {
+                        "enum": [
+                          "hook",
+                          "context",
+                          "argument",
+                          "proof",
+                          "cta"
+                        ]
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                },
+                "qualifiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text",
+                      "qualifierIds",
+                      "proofContextIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "qualifierIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "proofContextIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "proofContexts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "claimIds",
+                      "sourceCandidateIds",
+                      "attribution"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "claimIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "sourceCandidateIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "attribution": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
+                "blocks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "actId",
+                      "role",
+                      "intent",
+                      "dependencies",
+                      "sourceCandidateIds",
+                      "durationTargetMs",
+                      "content",
+                      "presentation"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "actId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "hook",
+                          "context",
+                          "argument",
+                          "proof",
+                          "cta"
+                        ]
+                      },
+                      "intent": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "dependencies": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "sourceCandidateIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "durationTargetMs": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "min",
+                          "ideal",
+                          "max"
+                        ],
+                        "properties": {
+                          "min": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "ideal": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "max": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      },
+                      "content": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "claimIds",
+                          "qualifierIds",
+                          "proofIds"
+                        ],
+                        "properties": {
+                          "claimIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "qualifierIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "proofIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "ctaId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "presentation": {
+                        "enum": [
+                          "source-video",
+                          "voiceover",
+                          "cold-open-reference"
+                        ]
+                      },
+                      "sourceRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "sourceRanges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "artifactId",
+                      "startMs",
+                      "endMs",
+                      "rightsRef"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "startMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "rightsRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "consentRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "storyHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "requestFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
               }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/story-plan-read/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "storyPlan"
+          ],
+          "properties": {
+            "storyPlan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "projectVersionId",
+                "objective",
+                "desiredActionRef",
+                "treatmentPlanRef",
+                "targetDurationMs",
+                "acts",
+                "blocks",
+                "sourceRanges",
+                "sourceCandidates",
+                "qualifiers",
+                "claims",
+                "proofContexts",
+                "storyHash",
+                "createdBy",
+                "createdAt",
+                "requestFingerprint"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "enum": [
+                    3,
+                    4
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "productionMode": {
+                  "const": "hybrid"
+                },
+                "objective": {
+                  "enum": [
+                    "discovery",
+                    "awareness",
+                    "warming",
+                    "lead-generation",
+                    "sale",
+                    "whatsapp",
+                    "booking",
+                    "download"
+                  ]
+                },
+                "desiredActionRef": {
+                  "type": "object"
+                },
+                "treatmentPlanRef": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "schemaVersion",
+                    "contentHash"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "targetDurationMs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "min",
+                    "max"
+                  ],
+                  "properties": {
+                    "min": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "acts": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "role",
+                      "blockIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "opening",
+                          "development",
+                          "resolution"
+                        ]
+                      },
+                      "blockIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "blocks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "actId",
+                      "role",
+                      "intent",
+                      "dependencies",
+                      "sourceCandidateIds",
+                      "durationTargetMs",
+                      "content",
+                      "presentation"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "actId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "hook",
+                          "context",
+                          "argument",
+                          "proof",
+                          "cta"
+                        ]
+                      },
+                      "intent": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "dependencies": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "sourceCandidateIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "durationTargetMs": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "min",
+                          "ideal",
+                          "max"
+                        ],
+                        "properties": {
+                          "min": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "ideal": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "max": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      },
+                      "content": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "claimIds",
+                          "qualifierIds",
+                          "proofIds"
+                        ],
+                        "properties": {
+                          "claimIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "qualifierIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "proofIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          },
+                          "ctaId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "presentation": {
+                        "enum": [
+                          "source-video",
+                          "voiceover",
+                          "cold-open-reference",
+                          "synthetic-avatar",
+                          "proof-insert",
+                          "b-roll"
+                        ]
+                      },
+                      "sourceRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  }
+                },
+                "sourceRanges": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "artifactId",
+                      "startMs",
+                      "endMs",
+                      "rightsRef"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "startMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "rightsRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "consentRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceKind": {
+                        "enum": [
+                          "real",
+                          "synthetic",
+                          "voiceover",
+                          "proof",
+                          "b-roll"
+                        ]
+                      },
+                      "identityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "audioContinuityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sceneContinuityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "disclosure": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    }
+                  }
+                },
+                "sourceCandidates": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "sourceRangeId",
+                      "purpose",
+                      "rank"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "purpose": {
+                        "enum": [
+                          "hook",
+                          "context",
+                          "argument",
+                          "proof",
+                          "cta"
+                        ]
+                      },
+                      "rank": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  }
+                },
+                "qualifiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "text",
+                      "qualifierIds",
+                      "proofContextIds"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      "qualifierIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "proofContextIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "proofContexts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "claimIds",
+                      "sourceCandidateIds",
+                      "attribution"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "claimIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "sourceCandidateIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "attribution": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    }
+                  }
+                },
+                "storyHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "requestFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "schemaVersion": {
+                        "const": 4
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "productionMode"
+                    ],
+                    "properties": {
+                      "productionMode": {
+                        "const": "hybrid"
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         },

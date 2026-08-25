@@ -3,7 +3,14 @@ import { createDesiredActionReference, type DesiredActionReference } from './des
 import { DomainError } from './errors.ts'
 
 export type StoryRole = 'hook' | 'context' | 'argument' | 'proof' | 'cta'
-export type StoryPresentation = 'source-video' | 'voiceover' | 'cold-open-reference'
+export type StoryPresentation =
+  | 'source-video'
+  | 'voiceover'
+  | 'cold-open-reference'
+  | 'synthetic-avatar'
+  | 'proof-insert'
+  | 'b-roll'
+export type StorySourceKind = 'real' | 'synthetic' | 'voiceover' | 'proof' | 'b-roll'
 export interface StoryDurationTarget { min: number; ideal: number; max: number }
 export interface StorySourceRange {
   id: string
@@ -12,6 +19,11 @@ export interface StorySourceRange {
   endMs: number
   rightsRef: string
   consentRef?: string
+  sourceKind?: StorySourceKind
+  identityRef?: string
+  audioContinuityRef?: string
+  sceneContinuityRef?: string
+  disclosure?: string
 }
 export interface StorySourceCandidate {
   id: string
@@ -37,7 +49,8 @@ export interface StoryBlock {
 export interface StoryAct { id: string; role: 'opening' | 'development' | 'resolution'; blockIds: readonly string[] }
 export interface TreatmentPlanReference { id: string; schemaVersion: number; contentHash: string }
 export interface StoryPlan {
-  schemaVersion: 1 | 2 | 3
+  schemaVersion: 1 | 2 | 3 | 4
+  productionMode?: 'hybrid'
   objective: string
   desiredActionRef?: Readonly<DesiredActionReference>
   treatmentPlanRef?: Readonly<TreatmentPlanReference>
@@ -98,7 +111,7 @@ export function validateStoryPlan(plan: StoryPlan): Readonly<{ plan: StoryPlan; 
     if (block.presentation === 'cold-open-reference' && !block.sourceRangeId) throw new DomainError('INVALID_ARGUMENT', 'Cold open must reference a source range')
   }
 
-  if (plan.schemaVersion === 3) {
+  if (plan.schemaVersion >= 3) {
     const expectedActionRef = createDesiredActionReference(plan.desiredActionRef!.action)
     assert(plan.desiredActionRef!.schemaVersion === expectedActionRef.schemaVersion && plan.desiredActionRef!.id === expectedActionRef.id && plan.desiredActionRef!.actionHash === expectedActionRef.actionHash, 'Story desired action reference failed integrity validation')
     assert(plan.treatmentPlanRef && ID.test(plan.treatmentPlanRef.id) && Number.isSafeInteger(plan.treatmentPlanRef.schemaVersion) && plan.treatmentPlanRef.schemaVersion > 0 && HASH.test(plan.treatmentPlanRef.contentHash), 'Story requires a versioned TreatmentPlan reference')
@@ -135,6 +148,61 @@ export function validateStoryPlan(plan: StoryPlan): Readonly<{ plan: StoryPlan; 
     const ctaBlocks = ordered.filter((block) => block.role === 'cta')
     for (const cta of ctaBlocks) assert(cta.dependencies.some((id) => ['argument', 'proof'].includes(byId.get(id)?.role ?? '')), 'CTA must depend on argument or proof context')
   }
+  if (plan.schemaVersion === 4) {
+    assert(plan.productionMode === 'hybrid', 'StoryPlan v4 requires hybrid production mode')
+    const ranges = ids(plan.sourceRanges ?? [], 'Source range')
+    const candidates = ids(plan.sourceCandidates ?? [], 'Source candidate')
+    const presentationKind: Readonly<Record<Exclude<StoryPresentation, 'cold-open-reference'>, StorySourceKind>> = {
+      'source-video': 'real',
+      voiceover: 'voiceover',
+      'synthetic-avatar': 'synthetic',
+      'proof-insert': 'proof',
+      'b-roll': 'b-roll',
+    }
+    for (const range of ranges.values()) {
+      assert(range.sourceKind !== undefined, `Hybrid source range ${range.id} requires sourceKind`)
+      assert(ID.test(range.rightsRef), `Hybrid source range ${range.id} requires rights lineage`)
+      if (['real', 'synthetic', 'voiceover'].includes(range.sourceKind)) {
+        assert(Boolean(range.consentRef && ID.test(range.consentRef)), `Hybrid source range ${range.id} requires consent lineage`)
+      }
+      if (['real', 'synthetic', 'voiceover'].includes(range.sourceKind)) {
+        assert(Boolean(range.identityRef && ID.test(range.identityRef)), `Hybrid source range ${range.id} requires identity lineage`)
+        assert(Boolean(range.audioContinuityRef && ID.test(range.audioContinuityRef)), `Hybrid source range ${range.id} requires audio continuity lineage`)
+      }
+      if (['real', 'synthetic'].includes(range.sourceKind)) {
+        assert(Boolean(range.sceneContinuityRef && ID.test(range.sceneContinuityRef)), `Hybrid source range ${range.id} requires scene continuity lineage`)
+      }
+      if (range.sourceKind === 'synthetic') {
+        assert(Boolean(range.disclosure?.trim()), `Hybrid synthetic range ${range.id} requires disclosure`)
+      }
+    }
+    const orderedRanges = ordered.map((block) => {
+      assert(block.sourceCandidateIds.length === 1, `Hybrid block ${block.id} must select exactly one source candidate`)
+      const candidate = candidates.get(block.sourceCandidateIds[0]!)
+      assert(candidate, `Hybrid block ${block.id} references missing source candidate`)
+      const range = ranges.get(candidate.sourceRangeId)
+      assert(range, `Hybrid block ${block.id} references missing source range`)
+      if (block.presentation !== 'cold-open-reference') {
+        assert(presentationKind[block.presentation] === range.sourceKind, `Hybrid block ${block.id} presentation does not match its source kind`)
+      }
+      return range
+    })
+    for (let index = 1; index < orderedRanges.length; index += 1) {
+      const previous = orderedRanges[index - 1]!
+      const current = orderedRanges[index]!
+      const identityTransition = ['real', 'synthetic'].includes(previous.sourceKind!) &&
+        ['real', 'synthetic'].includes(current.sourceKind!)
+      if (identityTransition) {
+        assert(previous.identityRef === current.identityRef, `Hybrid identity changes between ${previous.id} and ${current.id}`)
+        assert(previous.audioContinuityRef === current.audioContinuityRef, `Hybrid audio continuity changes between ${previous.id} and ${current.id}`)
+        assert(previous.sceneContinuityRef === current.sceneContinuityRef, `Hybrid scene continuity changes between ${previous.id} and ${current.id}`)
+      }
+    }
+    const kinds = new Set(orderedRanges.map((range) => range.sourceKind))
+    for (const required of ['real', 'synthetic', 'proof', 'b-roll', 'voiceover'] as const) {
+      assert(kinds.has(required), `Hybrid StoryPlan requires a ${required} source block`)
+    }
+  }
   const estimatedDurationMs = ordered.reduce((sum, block) => sum + block.durationTargetMs.ideal, 0)
   assert(estimatedDurationMs >= plan.targetDurationMs.min && estimatedDurationMs <= plan.targetDurationMs.max, 'Story duration is outside target')
   return Object.freeze({ plan: Object.freeze(plan), estimatedDurationMs, readyForEditPlan: true as const })
@@ -143,10 +211,21 @@ export function validateStoryPlan(plan: StoryPlan): Readonly<{ plan: StoryPlan; 
 export function createStoryPlan(input: Omit<PersistableStoryPlan, 'schemaVersion' | 'storyHash'>): Readonly<PersistableStoryPlan> {
   for (const [field, value] of Object.entries({ id: input.id, workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, createdById: input.createdBy.id })) assert(ID.test(value), `${field} is invalid`)
   assert(!Number.isNaN(Date.parse(input.createdAt)), 'createdAt is invalid')
+  assert(input.productionMode === undefined, 'Hybrid production must use StoryPlan v4')
   const core: StoryPlan = { ...input, schemaVersion: 3 }
   validateStoryPlan(core)
   const storyHash = calculateCanonicalHash(core)
   return Object.freeze({ ...input, schemaVersion: 3 as const, storyHash })
+}
+
+export function createHybridStoryPlan(
+  input: Omit<PersistableStoryPlan, 'schemaVersion' | 'storyHash' | 'productionMode'>,
+): Readonly<PersistableStoryPlan> {
+  for (const [field, value] of Object.entries({ id: input.id, workspaceId: input.workspaceId, projectId: input.projectId, projectVersionId: input.projectVersionId, createdById: input.createdBy.id })) assert(ID.test(value), `${field} is invalid`)
+  assert(!Number.isNaN(Date.parse(input.createdAt)), 'createdAt is invalid')
+  const core: StoryPlan = { ...input, schemaVersion: 4, productionMode: 'hybrid' }
+  validateStoryPlan(core)
+  return Object.freeze({ ...input, schemaVersion: 4 as const, productionMode: 'hybrid' as const, storyHash: calculateCanonicalHash(core) })
 }
 
 const sourceRanges: StorySourceRange[] = [

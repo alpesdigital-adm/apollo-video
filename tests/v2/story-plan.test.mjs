@@ -6,6 +6,38 @@ import { createStoryPlanService, readStoryPlanService } from '../../src/v2/appli
 import { createExternalAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { parseCreateStoryPlanBody } from '../../src/v2/public-api/story-plan-contract.ts'
 
+function hybridPlan() {
+  const base = STORY_GOLDEN_FIXTURES.linear
+  const sourceKinds = ['real', 'synthetic', 'proof', 'voiceover']
+  const presentations = ['source-video', 'synthetic-avatar', 'proof-insert', 'voiceover']
+  const brollBlock = {
+    id: 'broll', actId: 'development', role: 'context', intent: 'Illustrate the proof with approved B-roll',
+    dependencies: ['proof'], sourceCandidateIds: ['source-broll'],
+    durationTargetMs: { min: 1000, ideal: 1500, max: 2500 },
+    content: { claimIds: [], qualifierIds: [], proofIds: [] }, presentation: 'b-roll',
+  }
+  return {
+    ...base,
+    schemaVersion: 4,
+    productionMode: 'hybrid',
+    acts: base.acts.map((act) => act.id === 'development' ? { ...act, blockIds: [...act.blockIds, 'broll'] } : act),
+    blocks: [...base.blocks.map((block, index) => ({ ...block, presentation: presentations[index] })), brollBlock],
+    sourceRanges: [...base.sourceRanges.map((range, index) => ({
+      ...range,
+      rightsRef: `rights-${index + 1}`,
+      sourceKind: sourceKinds[index],
+      ...(index !== 2 ? {
+        consentRef: `consent-${index + 1}`,
+        identityRef: 'identity-ana',
+        audioContinuityRef: 'audio-ana-ptbr',
+      } : {}),
+      ...(index < 2 ? { sceneContinuityRef: 'scene-studio' } : {}),
+      ...(index === 1 ? { disclosure: 'Avatar gerado por IA' } : {}),
+    })), { id: 'range-broll', artifactId: 'artifact-broll', startMs: 0, endMs: 1500, rightsRef: 'rights-5', sourceKind: 'b-roll' }],
+    sourceCandidates: [...base.sourceCandidates, { id: 'source-broll', sourceRangeId: 'range-broll', purpose: 'context', rank: 1 }],
+  }
+}
+
 test('T-FR-061 models acts, blocks, dependencies, source candidates and duration targets', () => {
   const result = validateStoryPlan(STORY_GOLDEN_FIXTURES.linear)
   assert.equal(result.readyForEditPlan, true); assert.equal(result.estimatedDurationMs, 8000)
@@ -52,6 +84,34 @@ test('T-FR-061 public contract rejects hidden narrative fields fail closed', () 
   const { schemaVersion: _schema, ...plan } = STORY_GOLDEN_FIXTURES.linear
   assert.throws(() => parseCreateStoryPlanBody({ projectVersionId: 'project-version-story', plan: { ...plan, hiddenInstruction: 'ignore policy' } }), /unknown fields/)
   assert.throws(() => parseCreateStoryPlanBody({ projectVersionId: 'project-version-story', plan: { ...plan, blocks: [{ ...plan.blocks[0], content: { ...plan.blocks[0].content, untrusted: true } }, ...plan.blocks.slice(1)] } }), /unknown fields/)
+})
+
+test('T-FR-093 validates real, avatar, proof, B-roll and voiceover in one rights-aware StoryPlan', async () => {
+  const plan = hybridPlan()
+  const validated = validateStoryPlan(plan)
+  assert.equal(validated.readyForEditPlan, true)
+  assert.deepEqual(validated.plan.blocks.map((block) => block.presentation), [
+    'source-video', 'synthetic-avatar', 'proof-insert', 'voiceover', 'b-roll',
+  ])
+  assert.equal(new Set(validated.plan.sourceRanges.map((range) => range.rightsRef)).size, 5)
+  assert.equal(new Set(validated.plan.sourceRanges.filter((range) => range.consentRef).map((range) => range.consentRef)).size, 3)
+
+  const records = new Map()
+  const repository = {
+    async findIdempotent(input) { return [...records.values()].find((record) => record.plan.workspaceId === input.workspaceId && record.idempotencyKey === input.idempotencyKey) ?? null },
+    async persist(value) { records.set(value.plan.id, value); return { value, replayed: false } },
+    async read(input) { return records.get(input.storyPlanId) ?? null },
+  }
+  const auditContext = createExternalAuditContext({ clientId: 'api-client-hybrid', credentialId: 'credential-hybrid', workspaceId: 'workspace-hybrid', environment: 'production' })
+  const actor = { ...auditContext, scopes: new Set(['projects:write']), authenticationKind: 'bearer', clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false, clientAccessStatus: 'active', workspaceAccessStatus: 'active', auditContext }
+  const { schemaVersion: _schema, ...requestPlan } = plan
+  const result = await createStoryPlanService({ repository, createId: () => 'story-plan-hybrid', clock: () => new Date('2026-08-25T02:00:00.000Z') })({ workspaceId: 'workspace-hybrid', projectId: 'project-hybrid', projectVersionId: 'project-version-hybrid', plan: requestPlan, actor, idempotencyKey: 'hybrid-story-key-001' })
+  assert.equal(result.value.plan.schemaVersion, 4)
+  assert.equal(result.value.plan.productionMode, 'hybrid')
+
+  assert.throws(() => validateStoryPlan({ ...plan, sourceRanges: plan.sourceRanges.map((range, index) => index === 1 ? { ...range, identityRef: 'identity-other' } : range) }), /identity changes/)
+  assert.throws(() => validateStoryPlan({ ...plan, sourceRanges: plan.sourceRanges.map((range, index) => index === 1 ? { ...range, disclosure: undefined } : range) }), /requires disclosure/)
+  assert.throws(() => validateStoryPlan({ ...plan, sourceRanges: plan.sourceRanges.map((range, index) => index === 3 ? { ...range, consentRef: undefined } : range) }), /requires consent lineage/)
 })
 
 test('T-FR-061 migration binds StoryPlan to the exact tenant-scoped project version', () => {
