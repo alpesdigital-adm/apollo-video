@@ -25,6 +25,7 @@ import { runNextProjectFinalExportOperationService } from '../application/run-pr
 import { catalogApprovedOutputService } from '../application/catalog-approved-output.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
+import { runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -90,6 +91,7 @@ import type { ProofIntegrityRepository } from '../application/ports/proof-integr
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
+import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
 import type { MediaTransferRepository } from '../application/ports/media-transfer-repository.ts'
 import type { MediaDownloadGrantRepository } from '../application/ports/media-download-grant-repository.ts'
@@ -232,6 +234,13 @@ import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-reposit
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
+import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
+import { HeyGenV3AsyncMediaProviderAdapter } from './heygen-v3-provider.ts'
+import {
+  PersistedProviderResultCritic,
+  SafeProviderResultDownloader,
+  VerifiedProviderResultIngestor,
+} from './provider-result-ingestion.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
 import { PrismaMediaDownloadGrantRepository } from './prisma/media-download-grant-repository.ts'
@@ -862,13 +871,75 @@ function createVerifiedMediaStorage(environment: NodeJS.ProcessEnv) {
   return new S3VerifiedMediaStorage(local, s3)
 }
 
-function createArtifactSourceMaterializer(environment: NodeJS.ProcessEnv) {
+export function createArtifactSourceMaterializer(environment: NodeJS.ProcessEnv = process.env) {
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
   if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
   if (artifactStorageDriver(environment) === 'local') return new LocalArtifactSourceMaterializer(artifactRoot)
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Render work root is required for S3 artifact materialization')
   return new S3ArtifactSourceMaterializer(workRoot, createArtifactS3ClientFromEnvironment(environment))
+}
+
+function nonNegativeInteger(value: string | undefined, field: string): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', `${field} is invalid`)
+  return parsed
+}
+
+export function createProviderSubmissionInputMaterializer(environment: NodeJS.ProcessEnv = process.env) {
+  return new AuthorizedProviderSubmissionInputMaterializer({
+    profiles: createSyntheticProductionRepository(),
+    artifacts: createMediaArtifactQueryRepository(),
+    sources: createArtifactSourceMaterializer(environment),
+  })
+}
+
+export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = process.env): ProviderAdapterRegistry {
+  const heyGen = new HeyGenV3AsyncMediaProviderAdapter({
+    apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
+    costMinorUnitsPerMinute: nonNegativeInteger(
+      environment.APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE,
+      'HeyGen cost per minute',
+    ),
+  })
+  return Object.freeze({
+    get(input: { adapterId: string; adapterVersion: string }) {
+      return input.adapterId === heyGen.id && input.adapterVersion === heyGen.adapterVersion
+        ? heyGen
+        : null
+    },
+  })
+}
+
+export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process.env) {
+  const workRoot = environment.APOLLO_V2_PROVIDER_WORK_ROOT?.trim()
+  if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Provider result work root is required')
+  const allowedHosts = (environment.APOLLO_V2_HEYGEN_RESULT_HOSTS ?? 'files.heygen.ai')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+  const artifactQuery = createMediaArtifactQueryRepository()
+  const downloader = new SafeProviderResultDownloader({ workRoot, allowedHosts })
+  return runProviderJobWorkerOnce({
+    jobs: createProviderJobRepository(),
+    adapters: createProviderAdapterRegistry(environment),
+    materializer: createProviderSubmissionInputMaterializer(environment),
+    ingestor: new VerifiedProviderResultIngestor({
+      downloader,
+      storage: createVerifiedMediaStorage(environment),
+      artifacts: createMediaArtifactPersistenceRepository(environment),
+      artifactQuery,
+      prober: {
+        probe(sourcePath, options) {
+          return probeVideo(sourcePath, { ...options, environment, requireAudio: true })
+        },
+      },
+    }),
+    critic: new PersistedProviderResultCritic(artifactQuery),
+    clock: () => new Date(),
+    createLeaseToken: () => `provider-lease-${randomUUID()}`,
+    createTransitionId: () => `provider-transition-${randomUUID()}`,
+  })
 }
 
 export function createMediaSegmentMaterializationDependencies(environment: NodeJS.ProcessEnv = process.env) {

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type {
   AsyncMediaProviderAdapter,
   ProviderCapabilities,
@@ -11,6 +13,8 @@ const ADAPTER_ID = 'heygen-v3'
 const ADAPTER_VERSION = '3.0.0'
 const MAX_RESPONSE_BYTES = 1024 * 1024
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{2,255}$/
+const HASH = /^[a-f0-9]{64}$/
+const MAX_ASSET_BYTES = 32 * 1024 * 1024
 
 type Fetch = typeof fetch
 
@@ -87,28 +91,27 @@ function statusFromProvider(value: unknown): ProviderStatus {
 }
 
 function materializedInput(value: Readonly<Record<string, unknown>>) {
-  const allowed = ['avatarId', 'audioUrl', 'durationMs', 'aspectRatio']
+  const allowed = ['avatarId', 'audioBytes', 'audioSha256', 'audioByteSize', 'audioContainer', 'durationMs', 'aspectRatio']
   if (!Object.keys(value).every((key) => allowed.includes(key))) {
     throw new HeyGenProviderError('PROVIDER_INPUT_INVALID', false)
   }
   const avatarId = identifier(value.avatarId, 'avatar_id')
-  if (typeof value.audioUrl !== 'string') throw new HeyGenProviderError('INVALID_AUDIO_URL', false)
-  let audioUrl: URL
-  try {
-    audioUrl = new URL(value.audioUrl)
-  } catch {
-    throw new HeyGenProviderError('INVALID_AUDIO_URL', false)
-  }
-  if (audioUrl.protocol !== 'https:' || audioUrl.username || audioUrl.password || audioUrl.hash) {
-    throw new HeyGenProviderError('INVALID_AUDIO_URL', false)
-  }
+  if (!(value.audioBytes instanceof Uint8Array)) throw new HeyGenProviderError('INVALID_AUDIO_BYTES', false)
+  if (typeof value.audioSha256 !== 'string' || !HASH.test(value.audioSha256)) throw new HeyGenProviderError('INVALID_AUDIO_HASH', false)
+  const audioByteSize = Number(value.audioByteSize)
+  if (!Number.isSafeInteger(audioByteSize) || audioByteSize <= 0 || audioByteSize > MAX_ASSET_BYTES) throw new HeyGenProviderError('INVALID_AUDIO_SIZE', false)
+  if (value.audioContainer !== 'mp3' && value.audioContainer !== 'wav') throw new HeyGenProviderError('INVALID_AUDIO_CONTAINER', false)
   const durationMs = Number(value.durationMs)
   if (!Number.isSafeInteger(durationMs) || durationMs < 1_000 || durationMs > 1_800_000) {
     throw new HeyGenProviderError('INVALID_DURATION', false)
   }
   const aspectRatio = value.aspectRatio ?? '9:16'
   if (aspectRatio !== '9:16' && aspectRatio !== '16:9') throw new HeyGenProviderError('INVALID_ASPECT_RATIO', false)
-  return Object.freeze({ avatarId, audioUrl: audioUrl.toString(), durationMs, aspectRatio })
+  return Object.freeze({ avatarId, audioBytes: value.audioBytes, audioSha256: value.audioSha256, audioByteSize, audioContainer: value.audioContainer, durationMs, aspectRatio })
+}
+
+function mutationKey(value: string, stage: 'asset' | 'video'): string {
+  return `apollo:${stage}:${createHash('sha256').update(value).digest('hex')}`
 }
 
 export class HeyGenV3AsyncMediaProviderAdapter
@@ -149,7 +152,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     if (!Number.isFinite(fetchedAt.getTime())) throw new HeyGenProviderError('PROVIDER_CLOCK_INVALID', false)
     return Object.freeze({
       operations: Object.freeze(['audio-avatar', 'lip-sync'] as const),
-      inputFormats: Object.freeze(['mp3', 'wav', 'm4a']),
+      inputFormats: Object.freeze(['mp3', 'wav']),
       outputFormats: Object.freeze(['mp4']),
       aspectRatios: Object.freeze(['9:16', '16:9']),
       duration: Object.freeze({ minSeconds: 1, maxSeconds: 1_800 }),
@@ -176,11 +179,24 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
 
   async submit(input: Readonly<Record<string, unknown>>, context: Readonly<ProviderSubmitContext>) {
     const value = materializedInput(input)
+    const bytes = value.audioBytes
+    if (bytes.byteLength !== value.audioByteSize || createHash('sha256').update(bytes).digest('hex') !== value.audioSha256) {
+      throw new HeyGenProviderError('AUDIO_MATERIALIZATION_MISMATCH', false)
+    }
+    const form = new FormData()
+    const mediaType = value.audioContainer === 'mp3' ? 'audio/mpeg' : 'audio/wav'
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: mediaType }), `apollo-${value.audioSha256}.${value.audioContainer}`)
+    const uploaded = await this.request('/v3/assets', {
+      method: 'POST',
+      headers: { 'idempotency-key': mutationKey(context.idempotencyKey, 'asset') },
+      body: form,
+    }, context.signal)
+    const assetId = identifier(object(uploaded.data, 'data').asset_id, 'asset_id')
     const response = await this.request('/v3/videos', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': context.idempotencyKey },
+      headers: { 'content-type': 'application/json', 'idempotency-key': mutationKey(context.idempotencyKey, 'video') },
       body: JSON.stringify({
-        type: 'avatar', avatar_id: value.avatarId, audio_url: value.audioUrl,
+        type: 'avatar', avatar_id: value.avatarId, audio_asset_id: assetId,
         aspect_ratio: value.aspectRatio, output_format: 'mp4',
       }),
     }, context.signal)

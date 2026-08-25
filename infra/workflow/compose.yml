@@ -77,6 +77,17 @@ services:
     <<: *apollo-runtime
     command: ["./node_modules/.bin/tsx", "scripts/run-v2-long-form-worker.mjs"]
 
+  provider-worker:
+    <<: *apollo-runtime
+    profiles: ["synthetic-provider"]
+    command: ["./node_modules/.bin/tsx", "scripts/run-v2-provider-worker.mjs"]
+    environment:
+      <<: *apollo-environment
+      APOLLO_V2_PROVIDER_WORK_ROOT: /app/tmp/provider
+      APOLLO_V2_HEYGEN_API_KEY: ${APOLLO_V2_HEYGEN_API_KEY:-}
+      APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE: ${APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE:-}
+      APOLLO_V2_HEYGEN_RESULT_HOSTS: ${APOLLO_V2_HEYGEN_RESULT_HOSTS:-files.heygen.ai}
+
 volumes:
   apollo-local-artifacts:
   apollo-local-render-work:

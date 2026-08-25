@@ -211,7 +211,11 @@ function hydrateRun(
 
 export class PrismaSyntheticProductionRepository
 implements SyntheticProductionRepository {
-  constructor(private readonly prisma: PrismaClient = getV2PostgresClient()) {}
+  private readonly prisma: PrismaClient
+
+  constructor(prisma: PrismaClient = getV2PostgresClient()) {
+    this.prisma = prisma
+  }
 
   async findProfileReplay(input: {
     workspaceId: string
