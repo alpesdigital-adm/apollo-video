@@ -33,6 +33,14 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
   )
   assert.match(
     script,
+    /PROVIDER_WORKER=.*provider-worker/,
+  )
+  assert.match(
+    script,
+    /run-v2-provider-worker\.mjs/,
+  )
+  assert.match(
+    script,
     /GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR.*must be a positive integer/s,
   )
   assert.match(
@@ -41,7 +49,7 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
   )
   assert.match(
     script,
-    /for worker in "\$\{INGEST_WORKER\}" "\$\{RENDER_WORKER\}" "\$\{WEBHOOK_WORKER\}" "\$\{LONG_FORM_WORKER\}"/,
+    /for worker in "\$\{INGEST_WORKER\}" "\$\{RENDER_WORKER\}" "\$\{WEBHOOK_WORKER\}" "\$\{LONG_FORM_WORKER\}" "\$\{PROVIDER_WORKER\}"/,
   )
 })
 
