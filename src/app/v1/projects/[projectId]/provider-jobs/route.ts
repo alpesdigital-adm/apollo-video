@@ -6,6 +6,7 @@ import { DomainError } from '@/v2/domain/errors'
 import {
   createAssetRightsRepository,
   createMediaArtifactQueryRepository,
+  createProviderAdapterRegistry,
   createProjectWorkspaceQueryRepository,
   createProviderJobRepository,
   createSyntheticProductionRepository,
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const body = parseEnqueueProviderJobBody(raw)
     const result = await enqueueProviderJobService({
       jobs: createProviderJobRepository(),
+      adapters: createProviderAdapterRegistry(),
       profiles: createSyntheticProductionRepository(),
       projects: createProjectWorkspaceQueryRepository(),
       artifacts: createMediaArtifactQueryRepository(),

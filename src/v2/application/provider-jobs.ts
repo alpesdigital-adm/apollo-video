@@ -37,6 +37,7 @@ function jobAuthorizationHash(body: Omit<ProviderJobAuthorization, 'authorizatio
 
 export function enqueueProviderJobService(dependencies: {
   jobs: ProviderJobRepository
+  adapters: ProviderAdapterRegistry
   profiles: SyntheticProductionRepository
   projects: ProjectWorkspaceQueryRepository
   artifacts: MediaArtifactQueryRepository
@@ -90,6 +91,9 @@ export function enqueueProviderJobService(dependencies: {
     if (replay) {
       if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with a different provider job')
       return Object.freeze({ persisted: replay, replayed: true })
+    }
+    if (!dependencies.adapters.get({ adapterId: request.adapterId, adapterVersion: request.adapterVersion })) {
+      throw new DomainError('PRECONDITION_REQUIRED', 'Configured provider adapter is unavailable')
     }
     const [project, profile] = await Promise.all([
       dependencies.projects.read({ workspaceId, projectId }),

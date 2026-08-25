@@ -895,18 +895,16 @@ export function createProviderSubmissionInputMaterializer(environment: NodeJS.Pr
 }
 
 export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = process.env): ProviderAdapterRegistry {
-  const heyGen = new HeyGenV3AsyncMediaProviderAdapter({
-    apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
-    costMinorUnitsPerMinute: nonNegativeInteger(
-      environment.APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE,
-      'HeyGen cost per minute',
-    ),
-  })
   return Object.freeze({
     get(input: { adapterId: string; adapterVersion: string }) {
-      return input.adapterId === heyGen.id && input.adapterVersion === heyGen.adapterVersion
-        ? heyGen
-        : null
+      if (input.adapterId !== 'heygen-v3' || input.adapterVersion !== '3.0.0') return null
+      return new HeyGenV3AsyncMediaProviderAdapter({
+        apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
+        costMinorUnitsPerMinute: nonNegativeInteger(
+          environment.APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE,
+          'HeyGen cost per minute',
+        ),
+      })
     },
   })
 }

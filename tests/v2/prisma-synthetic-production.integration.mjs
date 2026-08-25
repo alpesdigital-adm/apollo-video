@@ -291,6 +291,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     let providerTransition = 0
     const enqueued = await enqueueProviderJobService({
       jobs: providerRepository,
+      adapters: { get: ({ adapterId, adapterVersion }) => adapterId === 'controlled-avatar' && adapterVersion === 'version-1' ? {} : null },
       profiles: syntheticRepository,
       projects: new PrismaProjectWorkspaceQueryRepository(client),
       artifacts: artifactRepository,
