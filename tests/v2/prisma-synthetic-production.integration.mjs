@@ -134,7 +134,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     })({
       workspaceId,
       name: 'Apresentador sintético sem pessoa real',
-      objective: 'sale',
+      objective: 'awareness',
       format: '9:16',
       actor,
       idempotency: { clientId, key: 'synthetic-integration-create-project' },
