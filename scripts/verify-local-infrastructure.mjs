@@ -43,7 +43,7 @@ requires(storage, /APOLLO_V2_S3_BUCKET: \$\{APOLLO_V2_S3_BUCKET:\?APOLLO_V2_S3_B
 requires(storage, /no-new-privileges:true/g, 'MinIO services must prevent privilege escalation')
 forbids(storage, /apollo-local-change-me|minioadmin|(?:^|["'])0\.0\.0\.0:/m, 'Object storage must not contain default credentials or public binds')
 
-for (const service of ['migrate', 'app', 'ingest-worker', 'render-worker', 'webhook-worker', 'long-form-worker']) {
+for (const service of ['migrate', 'app', 'ingest-worker', 'render-worker', 'webhook-worker', 'long-form-worker', 'provider-worker']) {
   requires(workflow, new RegExp(`\\n  ${service}:`), `Supervised local topology must declare ${service}`)
 }
 requires(workflow, /V2_DATABASE_URL: \$\{V2_DOCKER_DATABASE_URL:\?V2_DOCKER_DATABASE_URL is required\}/, 'Container runtime must require its internal PostgreSQL URL')

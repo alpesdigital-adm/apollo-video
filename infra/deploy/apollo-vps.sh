@@ -7,6 +7,7 @@ INGEST_WORKER="${APOLLO_INGEST_WORKER_CONTAINER:-${CONTAINER}-ingest-worker}"
 RENDER_WORKER="${APOLLO_RENDER_WORKER_CONTAINER:-${CONTAINER}-render-worker}"
 WEBHOOK_WORKER="${APOLLO_WEBHOOK_WORKER_CONTAINER:-${CONTAINER}-webhook-worker}"
 LONG_FORM_WORKER="${APOLLO_LONG_FORM_WORKER_CONTAINER:-${CONTAINER}-long-form-worker}"
+PROVIDER_WORKER="${APOLLO_PROVIDER_WORKER_CONTAINER:-${CONTAINER}-provider-worker}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
@@ -117,6 +118,7 @@ remove_container "${INGEST_WORKER}"
 remove_container "${RENDER_WORKER}"
 remove_container "${WEBHOOK_WORKER}"
 remove_container "${LONG_FORM_WORKER}"
+remove_container "${PROVIDER_WORKER}"
 
 docker run -d \
   --name "${CONTAINER}" \
@@ -189,6 +191,14 @@ docker run -d \
   "${IMAGE}" \
   ./node_modules/.bin/tsx scripts/run-v2-long-form-worker.mjs
 
+docker run -d \
+  --name "${PROVIDER_WORKER}" \
+  --memory 2g \
+  --cpus 2 \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  ./node_modules/.bin/tsx scripts/run-v2-provider-worker.mjs
+
 for attempt in $(seq 1 30); do
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER}")"
   if [[ "${health}" == "healthy" ]]; then
@@ -202,12 +212,12 @@ for attempt in $(seq 1 30); do
 done
 
 test "$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER}")" = "healthy"
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}"; do
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}" "${PROVIDER_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
 done
 
 sleep 5
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}"; do
+for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}" "${PROVIDER_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
   test "$(docker inspect --format '{{.RestartCount}}' "${worker}")" = "0"
 done
