@@ -2798,6 +2798,20 @@ Todos os contratos centrais devem ser desenhados no início. A liberação funci
 
 **Critério de saída:** lote H/B/CTA gera receitas compatíveis e múltiplos formatos com reutilização e preflight de custo.
 
+**Aceite executado em 24 de agosto de 2026:** o CI `32784715187`, no merge
+`9b6db0a`, atravessou API pública, PostgreSQL, MinIO, workers e FFmpeg. Três
+masters forneceram 6 hooks, 3 corpos, 1 depoimento e 3 CTAs; o Take Library
+canonicalizou aliases de alinhamento em 41 fronteiras físicas únicas e manteve
+13 primários. O portfólio contou 6.160 caminhos possíveis, escolheu somente 2
+recipes e manteve `productMaterialized=false`, sem confundir recipe nova com
+cache hit. Hook validado, depoimento com contexto/consentimento, short contínuo
+de 120 s extraído de mídia real de 7.200 s e cinco outputs criticados fecharam
+o critério da fase. A mesma revisão foi implantada como
+`apollo-video:9b6db0a` (`sha256:637b57011be6...`) com 170 migrations, health
+200, zero restart/erro crítico e zero backend E2E. A comparação visual
+autenticada remanescente de F2.026 continua aberta como tarefa própria e não
+foi contabilizada neste aceite.
+
 ## Fase 3 — Synthetic Presenter e transformação
 
 **Objetivo:** gerar e reutilizar apresentadores e mundos sintéticos.

@@ -413,3 +413,19 @@ distintos. O mesmo commit foi implantado como `apollo-video:596f388`, com as
 três rotas presentes na OpenAPI, 170 migrations, health 200 e zero restart. A
 matriz real de cinco MP4s pertence ao ambiente isolado content-addressed do CI;
 produção recebeu smoke operacional, não uma repetição destrutiva desse lote.
+
+## 27. Gate integrado da Fase 2
+
+O run `32784715187` executou a jornada T-F2-GATE sobre três arquivos físicos
+distintos. O alinhamento entregou 13 blocos e o Take Library consolidou aliases
+em 41 fronteiras únicas, mantendo como primários 6 hooks, 3 bodies, 1 proof e
+3 CTAs. A canonicalização é frame/source-bound e prioriza o candidato
+selecionado quando a mesma fronteira aparece como alternativa de outro bloco.
+
+O grafo totalmente compatível contou 6.160 caminhos teóricos. O preflight
+escaneou esse espaço sem criar o produto, selecionou duas recipes sob o limite
+semântico e calculou jobs/custo por `selected - reused`; recipe apenas parecida
+não é reportada como cache hit. O mesmo gate provou reuso de hook validado,
+EvidenceSegment com contexto e consentimento, short contínuo 7.200 s → 120 s e
+cinco outputs com QualitySnapshot próprio. PR `#23`, merge/deploy `9b6db0a` e
+digest `sha256:637b57011be6...` vinculam código, E2E e produção.

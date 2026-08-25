@@ -10,6 +10,19 @@ Every recipe × format × locale is an independently retryable export cell with 
 
 Local color changes cannot leak to sibling segments. One failed format does not invalidate successful outputs, and all operations are exposed through the external color and export APIs.
 
+## Phase 2 gate acceptance
+
+Run `32784715187` binds this matrix to the complete reuse journey. Three
+distinct masters produced 13 primary H/B/proof/CTA takes; aliases from script
+alignment are canonicalized by physical source boundary before compatibility
+and portfolio planning. The preflight counted 6,160 possible paths but selected
+two recipes without materializing the Cartesian product, and cost remained
+derived from selected recipes that were not exact reuse hits. Five independent
+format cells then crossed PostgreSQL, MinIO, the durable worker and FFmpeg with
+an individual quality snapshot. Merge `9b6db0a` was deployed as
+`apollo-video:9b6db0a`, digest `sha256:637b57011be6...`, with 170 migrations,
+healthy web plus four workers, zero restart and zero orphan E2E backend.
+
 ## Production evidence
 
 On 2026-08-24, main CI runs `32778637601` and `32780695560` proved the fixed
