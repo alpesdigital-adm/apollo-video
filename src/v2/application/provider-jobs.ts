@@ -7,6 +7,7 @@ import {
   transitionProviderJob,
   type ProviderJobAuthorization,
 } from '../domain/provider-job.ts'
+import { createSyntheticAvatarAudioRange } from '../domain/synthetic-audio-master.ts'
 import {
   materializeActorAuditContext,
   requireScope,
@@ -23,6 +24,7 @@ import type {
   ProviderSubmissionInputMaterializer,
 } from './ports/provider-job-runtime.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
+import type { SyntheticAudioMasterRepository } from './ports/synthetic-audio-master-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 
@@ -39,6 +41,7 @@ export function enqueueProviderJobService(dependencies: {
   jobs: ProviderJobRepository
   adapters: ProviderAdapterRegistry
   profiles: SyntheticProductionRepository
+  audioMasters: SyntheticAudioMasterRepository
   projects: ProjectWorkspaceQueryRepository
   artifacts: MediaArtifactQueryRepository
   rights: AssetRightsRepository
@@ -56,6 +59,8 @@ export function enqueueProviderJobService(dependencies: {
     adapterVersion: string
     providerInput: Readonly<Record<string, unknown>>
     sourceArtifactIds: readonly string[]
+    audioMasterId?: string
+    audioRange?: Readonly<{ startWordIndex: number; endWordIndex: number }>
     use: string
     market: string
     locale: string
@@ -71,7 +76,7 @@ export function enqueueProviderJobService(dependencies: {
     const now = dependencies.clock()
     assertDomain(Number.isFinite(now.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
     const requestFingerprint = calculateCanonicalHash({
-      schemaVersion: 'enqueue-provider-job-request/v1',
+      schemaVersion: 'enqueue-provider-job-request/v2',
       workspaceId, projectId, projectVersionId,
       profileSnapshotId: request.profileSnapshotId,
       operation: request.operation,
@@ -79,6 +84,8 @@ export function enqueueProviderJobService(dependencies: {
       adapterVersion: request.adapterVersion,
       providerInput: request.providerInput,
       sourceArtifactIds: request.sourceArtifactIds,
+      audioMasterId: request.audioMasterId,
+      audioRange: request.audioRange,
       use: request.use, market: request.market, locale: request.locale,
       actorContextHash: audit.contextHash,
     })
@@ -95,12 +102,36 @@ export function enqueueProviderJobService(dependencies: {
     if (!dependencies.adapters.get({ adapterId: request.adapterId, adapterVersion: request.adapterVersion })) {
       throw new DomainError('PRECONDITION_REQUIRED', 'Configured provider adapter is unavailable')
     }
-    const [project, profile] = await Promise.all([
+    const [project, profile, persistedAudioMaster] = await Promise.all([
       dependencies.projects.read({ workspaceId, projectId }),
       dependencies.profiles.readProfile({ workspaceId, snapshotId: request.profileSnapshotId }),
+      request.audioMasterId
+        ? dependencies.audioMasters.read({ workspaceId, projectId, audioMasterId: identity(request.audioMasterId, 'audioMasterId') })
+        : Promise.resolve(null),
     ])
     assertDomain(project?.project.currentVersionId === projectVersionId && project.version?.id === projectVersionId, 'VERSION_CONFLICT', 'Provider job must target the current project version')
     if (!profile) throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic presenter profile was not found')
+    let providerInput = request.providerInput
+    if (request.operation === 'audio-avatar') {
+      assertDomain(Boolean(persistedAudioMaster && request.audioRange), 'PRECONDITION_REQUIRED', 'Audio-avatar requires a persisted audio master and word range')
+      const master = persistedAudioMaster!.master
+      assertDomain(master.projectVersionId === projectVersionId && master.profileSnapshotId === profile.snapshot.id, 'VERSION_CONFLICT', 'Audio master does not belong to the exact project version and profile')
+      const range = createSyntheticAvatarAudioRange({ master, startWordIndex: request.audioRange!.startWordIndex, endWordIndex: request.audioRange!.endWordIndex })
+      assertDomain(range.durationMs >= 1_000, 'INVALID_ARGUMENT', 'Audio-avatar range is shorter than the provider-safe minimum')
+      assertDomain(request.sourceArtifactIds.length === 1 && request.sourceArtifactIds[0] === master.audio.artifactId, 'INVALID_ARGUMENT', 'Audio-avatar source must be the exact canonical audio master artifact')
+      assertDomain(Object.keys(request.providerInput).every((key) => key === 'aspectRatio'), 'INVALID_ARGUMENT', 'Audio-avatar provider input may only select aspectRatio')
+      providerInput = Object.freeze({
+        audioArtifactId: master.audio.artifactId,
+        durationMs: range.durationMs,
+        locale: master.audio.locale,
+        audioMasterId: master.id,
+        audioMasterHash: master.masterHash,
+        audioRange: Object.freeze({ startMs: range.startMs, endMs: range.endMs, rangeHash: range.rangeHash }),
+        ...(request.providerInput.aspectRatio ? { aspectRatio: request.providerInput.aspectRatio } : {}),
+      })
+    } else {
+      assertDomain(!request.audioMasterId && !request.audioRange, 'INVALID_ARGUMENT', 'TTS jobs cannot reference an existing audio master')
+    }
     const consent = profile.snapshot.consent
     assertDomain(
       profile.snapshot.status === 'active' && consent.granted && !consent.revokedAt &&
@@ -146,7 +177,7 @@ export function enqueueProviderJobService(dependencies: {
       operation: request.operation,
       adapterId: identity(request.adapterId, 'adapterId'),
       adapterVersion: identity(request.adapterVersion, 'adapterVersion'),
-      providerInput: request.providerInput,
+      providerInput,
       idempotencyKey: request.idempotencyKey,
       authorization: jobAuthorizationHash(authorizationBody),
       createdAt: now.toISOString(),

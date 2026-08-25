@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -8,6 +10,10 @@ import test from 'node:test'
 import { HeyGenProviderError, HeyGenV3AsyncMediaProviderAdapter } from '../../src/v2/infrastructure/heygen-v3-provider.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from '../../src/v2/infrastructure/provider-submission-input-materializer.ts'
 import { PersistedProviderResultCritic, SafeProviderResultDownloader, VerifiedProviderResultIngestor } from '../../src/v2/infrastructure/provider-result-ingestion.ts'
+
+const require = createRequire(import.meta.url)
+const ffmpegPath = require('ffmpeg-static')
+const ffprobePath = require('ffprobe-static').path
 
 function json(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
@@ -96,10 +102,11 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
       async cleanup() { cleanupCalls += 1 },
     },
     clock: () => new Date('2029-01-01T00:00:01.000Z'),
+    async extractAudioRange(input) { assert.deepEqual([input.startMs, input.endMs], [0, 2_000]); return bytes },
   })
   const job = {
     id: 'provider-job-one', workspaceId: 'workspace-one', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
-    input: { audioArtifactId: 'audio-one', durationMs: 2_000, aspectRatio: '9:16', avatarId: 'caller-must-not-control-this' },
+    input: { audioArtifactId: 'audio-one', durationMs: 2_000, aspectRatio: '9:16', audioMasterId: 'audio-master-one', audioMasterHash: 'c'.repeat(64), audioRange: { startMs: 0, endMs: 2_000, rangeHash: 'd'.repeat(64) } },
     authorization: {
       profileSnapshotId: profile.snapshot.id, profileSnapshotHash: profile.snapshot.snapshotHash,
       expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: 'audio-one', validUntil: '2030-01-01T00:00:00.000Z' }],
@@ -109,8 +116,49 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
   assert.equal(result.avatarId, 'avatar_authorized_123')
   assert.equal(result.audioSha256, sha256)
   assert.deepEqual(Buffer.from(result.audioBytes), bytes)
+  assert.equal(result.audioContainer, 'mp3')
   assert.equal(cleanupCalls, 1)
   await rm(root, { recursive: true, force: true })
+})
+
+test('T-FR-100 audio-first materializer extracts the exact approved range with real FFmpeg', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'apollo-audio-first-range-'))
+  const sourcePath = join(root, 'master.wav')
+  const outputPath = join(root, 'range.mp3')
+  let cleanupCalls = 0
+  try {
+    execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3', '-c:a', 'pcm_s16le', sourcePath], { windowsHide: true })
+    const sourceBytes = await readFile(sourcePath)
+    const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex')
+    const profile = { snapshot: { id: 'presenter-range:v1', snapshotHash: 'a'.repeat(64), status: 'active', avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_range_123' } } }
+    const artifact = {
+      id: 'audio-range-master', workspaceId: 'workspace-range', artifactKey: 'audio/range-master.wav', sha256: sourceSha256,
+      byteSize: BigInt(sourceBytes.length), mediaType: 'audio', container: 'wav', status: 'available', lifecycleRevision: 1,
+      manifests: [{ id: 'manifest-range', probe: { width: 0, height: 0, duration: 3, fps: 0 }, createdAt: '2029-01-01T00:00:00.000Z' }], createdAt: '2029-01-01T00:00:00.000Z',
+    }
+    const materializer = new AuthorizedProviderSubmissionInputMaterializer({
+      profiles: { async readProfile() { return profile } }, artifacts: { async findById() { return artifact } },
+      sources: { async materialize() { return { path: sourcePath, sha256: sourceSha256, byteSize: sourceBytes.length } }, async cleanup() { cleanupCalls += 1 } },
+      clock: () => new Date('2029-01-01T00:00:01.000Z'),
+    })
+    const result = await materializer.materialize({ job: {
+      id: 'provider-job-range', workspaceId: 'workspace-range', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      input: { audioArtifactId: artifact.id, durationMs: 1_500, aspectRatio: '9:16', audioMasterId: 'audio-master-range', audioMasterHash: 'b'.repeat(64), audioRange: { startMs: 500, endMs: 2_000, rangeHash: 'c'.repeat(64) } },
+      authorization: { profileSnapshotId: profile.snapshot.id, profileSnapshotHash: profile.snapshot.snapshotHash, expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: artifact.id, validUntil: '2030-01-01T00:00:00.000Z' }] },
+    } })
+    await writeFile(outputPath, result.audioBytes)
+    const probe = JSON.parse(execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,sample_rate', '-of', 'json', outputPath], { encoding: 'utf8', windowsHide: true }))
+    assert.equal(result.audioContainer, 'mp3')
+    assert.equal(result.durationMs, 1_500)
+    assert.equal(result.audioSha256, createHash('sha256').update(result.audioBytes).digest('hex'))
+    assert.notEqual(result.audioSha256, sourceSha256)
+    assert.equal(probe.streams[0].codec_name, 'mp3')
+    assert.equal(Number(probe.streams[0].sample_rate), 48_000)
+    assert.ok(Math.abs(Number(probe.format.duration) - 1.5) <= 0.05, `expected 1.5s, got ${probe.format.duration}`)
+    assert.equal(cleanupCalls, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('T-FR-101 provider result is probed, promoted and persisted before its critic can approve it', async () => {

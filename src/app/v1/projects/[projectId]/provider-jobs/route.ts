@@ -10,6 +10,7 @@ import {
   createProjectWorkspaceQueryRepository,
   createProviderJobRepository,
   createSyntheticProductionRepository,
+  createSyntheticAudioMasterRepository,
 } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       jobs: createProviderJobRepository(),
       adapters: createProviderAdapterRegistry(),
       profiles: createSyntheticProductionRepository(),
+      audioMasters: createSyntheticAudioMasterRepository(),
       projects: createProjectWorkspaceQueryRepository(),
       artifacts: createMediaArtifactQueryRepository(),
       rights: createAssetRightsRepository(),

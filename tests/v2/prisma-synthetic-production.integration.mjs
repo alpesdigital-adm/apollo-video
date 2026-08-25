@@ -24,6 +24,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     enqueueProviderJobService,
     runProviderJobWorkerOnce,
   } = await import('../../src/v2/application/provider-jobs.ts')
+  const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
   const {
     assetRightsRevision,
     createAssetRightsSnapshot,
@@ -54,6 +55,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { PrismaSyntheticProductionRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-production-repository.ts'
   )
+  const { PrismaSyntheticAudioMasterRepository } = await import(
+    '../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts'
+  )
   const { PrismaStoryPlanRepository } = await import(
     '../../src/v2/infrastructure/prisma/story-plan-repository.ts'
   )
@@ -73,6 +77,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
 
   const cleanup = async () => {
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
@@ -197,6 +202,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const artifacts = [
       ['synthetic-consent-evidence', 'data', 'json', 'a'],
       ['synthetic-audio-master', 'audio', 'wav', 'b'],
+      ['synthetic-audio-alignment', 'data', 'json', '6'],
       ['synthetic-avatar-block-one', 'video', 'mp4', 'c'],
       ['synthetic-avatar-block-two', 'video', 'mp4', 'd'],
     ]
@@ -259,6 +265,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const rightsRepository = new PrismaAssetRightsRepository(client)
     for (const [index, artifactId] of [
       'synthetic-audio-master',
+      'synthetic-audio-alignment',
       'synthetic-avatar-block-one',
       'synthetic-avatar-block-two',
     ].entries()) {
@@ -342,11 +349,47 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     }), 1)
 
     const providerRepository = new PrismaProviderJobRepository(client)
+    const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
+    const audioMasterResult = await createSyntheticAudioMasterService({
+      repository: audioMasterRepository,
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      profiles: syntheticRepository,
+      providerJobs: providerRepository,
+      artifacts: artifactRepository,
+      rights: rightsRepository,
+      clock: () => new Date(now),
+      createId: () => 'synthetic-approved-audio-master-integration',
+    })({
+      workspaceId,
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      profileSnapshotId: registered.profile.snapshot.id,
+      source: { kind: 'uploaded' },
+      audioArtifactId: 'synthetic-audio-master',
+      alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
+      durationMs: 2_000,
+      locale: 'pt-BR',
+      words: [
+        { word: 'Olá', startMs: 0, endMs: 1_000, confidence: 0.99 },
+        { word: 'mundo', startMs: 1_000, endMs: 2_000, confidence: 0.98 },
+      ],
+      approvedAt: now,
+      approvalCriticHash: hash('7'),
+      use: 'ads',
+      market: 'BRA',
+      actor,
+      idempotencyKey: 'synthetic-audio-master-integration-key',
+    })
+    assert.equal(audioMasterResult.replayed, false)
+    assert.equal(audioMasterResult.value.master.audio.durationMs, 2_000)
+    assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
+    assert.equal((await audioMasterRepository.read({ workspaceId, projectId: project.project.id, audioMasterId: audioMasterResult.value.master.id }))?.master.masterHash, audioMasterResult.value.master.masterHash)
     let providerTransition = 0
     const enqueued = await enqueueProviderJobService({
       jobs: providerRepository,
       adapters: { get: ({ adapterId, adapterVersion }) => adapterId === 'controlled-avatar' && adapterVersion === 'version-1' ? {} : null },
       profiles: syntheticRepository,
+      audioMasters: audioMasterRepository,
       projects: new PrismaProjectWorkspaceQueryRepository(client),
       artifacts: artifactRepository,
       rights: rightsRepository,
@@ -361,8 +404,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       operation: 'audio-avatar',
       adapterId: 'controlled-avatar',
       adapterVersion: 'version-1',
-      providerInput: { audioArtifactId: 'synthetic-audio-master', durationMs: 2_000, locale: 'pt-BR' },
+      providerInput: { aspectRatio: '9:16' },
       sourceArtifactIds: ['synthetic-audio-master'],
+      audioMasterId: audioMasterResult.value.master.id,
+      audioRange: { startWordIndex: 0, endWordIndex: 2 },
       use: 'ads',
       market: 'BRA',
       locale: 'pt-BR',

@@ -1,4 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { promisify } from 'node:util'
 
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { ProviderJob } from '../domain/provider-job.ts'
@@ -9,6 +12,18 @@ import type { SyntheticProductionRepository } from '../application/ports/synthet
 
 const MAX_HEYGEN_ASSET_BYTES = 32 * 1024 * 1024
 const AUDIO_CONTAINERS = new Set(['mp3', 'wav'])
+const execFileAsync = promisify(execFile)
+const require = createRequire(import.meta.url)
+const ffmpeg = require('ffmpeg-static') as string | null
+
+async function extractAudioRange(input: { path: string; startMs: number; endMs: number; signal?: AbortSignal }): Promise<Uint8Array> {
+  assertDomain(Boolean(ffmpeg), 'PRECONDITION_REQUIRED', 'FFmpeg is unavailable for audio-first range materialization')
+  const { stdout } = await execFileAsync(ffmpeg!, [
+    '-v', 'error', '-ss', (input.startMs / 1_000).toFixed(3), '-i', input.path,
+    '-t', ((input.endMs - input.startMs) / 1_000).toFixed(3), '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-f', 'mp3', 'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: MAX_HEYGEN_ASSET_BYTES + 1024, windowsHide: true, signal: input.signal })
+  return new Uint8Array(stdout)
+}
 
 function stringField(value: unknown, field: string): string {
   assertDomain(typeof value === 'string' && value.trim() === value && value.length >= 3, 'INVALID_ARGUMENT', `${field} is invalid`)
@@ -34,6 +49,7 @@ implements ProviderSubmissionInputMaterializer {
     artifacts: MediaArtifactQueryRepository
     sources: ArtifactSourceMaterializer
     clock?: () => Date
+    extractAudioRange?: (input: { path: string; startMs: number; endMs: number; signal?: AbortSignal }) => Promise<Uint8Array>
   }
 
   constructor(dependencies: AuthorizedProviderSubmissionInputMaterializer['dependencies']) {
@@ -70,12 +86,18 @@ implements ProviderSubmissionInputMaterializer {
     const byteSize = Number(artifact.byteSize)
     assertDomain(Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= MAX_HEYGEN_ASSET_BYTES, 'ASSET_NOT_USABLE', 'Provider audio exceeds the upload limit')
     const durationMs = durationField(job.input.durationMs)
+    const range = job.input.audioRange
+    assertDomain(typeof range === 'object' && range !== null && !Array.isArray(range), 'INVALID_ARGUMENT', 'providerInput.audioRange is invalid')
+    const { startMs, endMs, rangeHash } = range as Record<string, unknown>
+    assertDomain(Number.isSafeInteger(startMs) && Number.isSafeInteger(endMs) && Number(startMs) >= 0 && Number(endMs) > Number(startMs) && Number(endMs) - Number(startMs) === durationMs, 'INVALID_ARGUMENT', 'providerInput.audioRange timing is invalid')
+    assertDomain(typeof rangeHash === 'string' && /^[a-f0-9]{64}$/.test(rangeHash), 'INVALID_ARGUMENT', 'providerInput.audioRange hash is invalid')
+    assertDomain(typeof job.input.audioMasterId === 'string' && typeof job.input.audioMasterHash === 'string' && /^[a-f0-9]{64}$/.test(job.input.audioMasterHash), 'INVALID_ARGUMENT', 'providerInput audio master lineage is invalid')
     const probe = artifact.manifests
       .filter((manifest) => manifest.probe)
       .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))[0]?.probe
     assertDomain(Boolean(probe), 'ASSET_NOT_USABLE', 'Provider audio has no verified media probe')
     const measuredDurationMs = Math.round(probe!.duration * 1_000)
-    assertDomain(Math.abs(measuredDurationMs - durationMs) <= 1_000, 'PERSISTENCE_CONFLICT', 'Provider audio duration does not match its immutable probe')
+    assertDomain(Number(endMs) <= measuredDurationMs + 100, 'PERSISTENCE_CONFLICT', 'Provider audio range exceeds its immutable probe')
 
     const source = await this.dependencies.sources.materialize({
       operationId: job.id,
@@ -84,14 +106,15 @@ implements ProviderSubmissionInputMaterializer {
       byteSize,
     })
     try {
-      const audioBytes = new Uint8Array(await readFile(source.path, { signal: input.signal }))
+      const audioBytes = await (this.dependencies.extractAudioRange ?? extractAudioRange)({ path: source.path, startMs: Number(startMs), endMs: Number(endMs), signal: input.signal })
+      assertDomain(audioBytes.byteLength > 0 && audioBytes.byteLength <= MAX_HEYGEN_ASSET_BYTES, 'ASSET_NOT_USABLE', 'Materialized audio range exceeds provider limits')
       return Object.freeze({
         avatarId: profile.snapshot.avatar.identityRef,
         audioBytes,
-        audioSha256: source.sha256,
-        audioByteSize: source.byteSize,
-        audioContainer: artifact.container.toLowerCase(),
-        durationMs: measuredDurationMs,
+        audioSha256: createHash('sha256').update(audioBytes).digest('hex'),
+        audioByteSize: audioBytes.byteLength,
+        audioContainer: 'mp3',
+        durationMs,
         aspectRatio: aspectRatioField(job.input.aspectRatio),
       })
     } finally {

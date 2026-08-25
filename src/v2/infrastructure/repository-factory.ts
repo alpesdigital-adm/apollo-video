@@ -90,6 +90,7 @@ import type { MontageAlternativeRepository } from '../application/ports/montage-
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
+import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -233,6 +234,7 @@ import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
+import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
 import { HeyGenV3AsyncMediaProviderAdapter } from './heygen-v3-provider.ts'
@@ -628,6 +630,10 @@ export function createProofModeRepository(): ProofModeRepository {
 
 export function createSyntheticProductionRepository(): SyntheticProductionRepository {
   return new PrismaSyntheticProductionRepository(resolveV2Client())
+}
+
+export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepository {
+  return new PrismaSyntheticAudioMasterRepository(resolveV2Client())
 }
 
 export function createProviderJobRepository(): ProviderJobRepository {

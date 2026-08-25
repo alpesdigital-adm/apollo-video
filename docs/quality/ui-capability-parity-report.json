@@ -4,9 +4,9 @@
     "uiActions": 105,
     "capabilities": 94,
     "endpoints": 94,
-    "registeredCapabilities": 256,
-    "operableCapabilities": 256,
-    "publicContractCapabilities": 256,
+    "registeredCapabilities": 258,
+    "operableCapabilities": 258,
+    "publicContractCapabilities": 258,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -4840,6 +4840,28 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.synthetic-audio-masters.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-audio-masters",
+      "inputSchemaRef": "apollo://schemas/create-synthetic-audio-master-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-audio-master-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-audio-masters.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-audio-masters/{audioMasterId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-audio-master-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.synthetic-production-runs.create",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/synthetic-production-runs",
@@ -4865,7 +4887,7 @@
       "capabilityId": "apollo.projects.provider-jobs.enqueue",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/provider-jobs",
-      "inputSchemaRef": "apollo://schemas/enqueue-provider-job-request/v1",
+      "inputSchemaRef": "apollo://schemas/enqueue-provider-job-request/v2",
       "outputSchemaRef": "apollo://schemas/provider-job-mutated/v1",
       "internalOnlySurfaceId": null,
       "tests": [

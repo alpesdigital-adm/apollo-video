@@ -13,11 +13,25 @@ function string(value: unknown, field: string): string {
 
 export function parseEnqueueProviderJobBody(raw: unknown) {
   const body = record(raw, 'body')
-  const keys = ['projectVersionId', 'profileSnapshotId', 'operation', 'adapterId', 'adapterVersion', 'providerInput', 'sourceArtifactIds', 'use', 'market', 'locale']
-  assertDomain(Object.keys(body).every((key) => keys.includes(key)) && keys.every((key) => key in body), 'INVALID_ARGUMENT', 'body contains missing or unsupported properties')
+  const requiredKeys = ['projectVersionId', 'profileSnapshotId', 'operation', 'adapterId', 'adapterVersion', 'providerInput', 'sourceArtifactIds', 'use', 'market', 'locale']
+  const keys = [...requiredKeys, 'audioMasterId', 'audioRange']
+  assertDomain(Object.keys(body).every((key) => keys.includes(key)) && requiredKeys.every((key) => key in body), 'INVALID_ARGUMENT', 'body contains missing or unsupported properties')
   assertDomain(body.operation === 'tts' || body.operation === 'audio-avatar', 'INVALID_ARGUMENT', 'body.operation is unsupported')
   const providerInput = record(body.providerInput, 'body.providerInput')
   assertDomain(Array.isArray(body.sourceArtifactIds) && body.sourceArtifactIds.length <= 64, 'INVALID_ARGUMENT', 'body.sourceArtifactIds must be a bounded array')
+  assertDomain(new Set(body.sourceArtifactIds).size === body.sourceArtifactIds.length, 'INVALID_ARGUMENT', 'body.sourceArtifactIds must contain unique values')
+  let audioFirst: Readonly<{ audioMasterId: string; audioRange: Readonly<{ startWordIndex: number; endWordIndex: number }> }> | undefined
+  if (body.operation === 'audio-avatar') {
+    const range = record(body.audioRange, 'body.audioRange')
+    assertDomain(Object.keys(range).every((key) => ['startWordIndex', 'endWordIndex'].includes(key)) && ['startWordIndex', 'endWordIndex'].every((key) => key in range), 'INVALID_ARGUMENT', 'body.audioRange is invalid')
+    assertDomain(Number.isSafeInteger(range.startWordIndex) && Number.isSafeInteger(range.endWordIndex) && (range.startWordIndex as number) >= 0 && (range.endWordIndex as number) > (range.startWordIndex as number) && (range.endWordIndex as number) <= 100_000, 'INVALID_ARGUMENT', 'body.audioRange indexes must identify a bounded forward range')
+    assertDomain(body.sourceArtifactIds.length === 1, 'INVALID_ARGUMENT', 'audio-avatar requires exactly one canonical audio source')
+    assertDomain(Object.keys(providerInput).every((key) => key === 'aspectRatio'), 'INVALID_ARGUMENT', 'audio-avatar providerInput may only select aspectRatio')
+    assertDomain(providerInput.aspectRatio === undefined || ['16:9', '9:16'].includes(providerInput.aspectRatio as string), 'INVALID_ARGUMENT', 'body.providerInput.aspectRatio is unsupported')
+    audioFirst = Object.freeze({ audioMasterId: string(body.audioMasterId, 'body.audioMasterId'), audioRange: Object.freeze({ startWordIndex: range.startWordIndex as number, endWordIndex: range.endWordIndex as number }) })
+  } else {
+    assertDomain(body.audioMasterId === undefined && body.audioRange === undefined, 'INVALID_ARGUMENT', 'TTS jobs cannot reference an audio master')
+  }
   return Object.freeze({
     projectVersionId: string(body.projectVersionId, 'body.projectVersionId'),
     profileSnapshotId: string(body.profileSnapshotId, 'body.profileSnapshotId'),
@@ -29,6 +43,7 @@ export function parseEnqueueProviderJobBody(raw: unknown) {
     use: string(body.use, 'body.use'),
     market: string(body.market, 'body.market'),
     locale: string(body.locale, 'body.locale'),
+    ...audioFirst,
   })
 }
 
