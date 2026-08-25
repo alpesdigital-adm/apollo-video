@@ -8,9 +8,9 @@ function exactItems(value: unknown, fields: readonly string[], field: string) { 
 export function parseCreateStoryPlanBody(value: unknown): Readonly<{ projectVersionId: string; plan: Omit<StoryPlan, 'schemaVersion'> }> {
   const body = object(value, 'body'); const plan = object(body.plan, 'plan')
   exact(body, ['projectVersionId', 'plan'], 'body')
-  exact(plan, ['objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'], 'plan')
+  exact(plan, ['productionMode', 'objective', 'desiredActionRef', 'treatmentPlanRef', 'targetDurationMs', 'acts', 'blocks', 'sourceRanges', 'sourceCandidates', 'qualifiers', 'claims', 'proofContexts'], 'plan')
   exactItems(plan.acts, ['id', 'role', 'blockIds'], 'plan.acts')
-  exactItems(plan.sourceRanges, ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef', 'consentRef'], 'plan.sourceRanges')
+  exactItems(plan.sourceRanges, ['id', 'artifactId', 'startMs', 'endMs', 'rightsRef', 'consentRef', 'sourceKind', 'identityRef', 'audioContinuityRef', 'sceneContinuityRef', 'disclosure'], 'plan.sourceRanges')
   exactItems(plan.sourceCandidates, ['id', 'sourceRangeId', 'purpose', 'rank'], 'plan.sourceCandidates')
   exactItems(plan.qualifiers, ['id', 'text'], 'plan.qualifiers'); exactItems(plan.claims, ['id', 'text', 'qualifierIds', 'proofContextIds'], 'plan.claims'); exactItems(plan.proofContexts, ['id', 'claimIds', 'sourceCandidateIds', 'attribution'], 'plan.proofContexts')
   exactItems(plan.blocks, ['id', 'actId', 'role', 'intent', 'dependencies', 'sourceCandidateIds', 'durationTargetMs', 'content', 'presentation', 'sourceRangeId'], 'plan.blocks')

@@ -283,6 +283,33 @@ const storyPlanCoreExample = {
   proofContexts: [{ id: 'proof-1', claimIds: ['claim-1'], sourceCandidateIds: ['candidate-proof'], attribution: 'Participant result' }],
 }
 const storyPlanExample = { schemaVersion: 3, id: 'story-plan-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', ...storyPlanCoreExample, storyHash: 'c'.repeat(64), createdBy: { type: 'api-client', id: clientId }, createdAt, requestFingerprint: 'd'.repeat(64) }
+const hybridStoryPlanCoreExample = {
+  ...storyPlanCoreExample,
+  productionMode: 'hybrid',
+  acts: [{ id: 'opening', role: 'opening', blockIds: ['block-real'] }, { id: 'development', role: 'development', blockIds: ['block-avatar', 'block-proof', 'block-broll'] }, { id: 'resolution', role: 'resolution', blockIds: ['block-cta'] }],
+  blocks: [
+    { id: 'block-real', actId: 'opening', role: 'hook', intent: 'Open with the real presenter', dependencies: [], sourceCandidateIds: ['candidate-real'], durationTargetMs: { min: 1000, ideal: 2000, max: 2500 }, content: { claimIds: [], qualifierIds: [], proofIds: [] }, presentation: 'source-video' },
+    { id: 'block-avatar', actId: 'development', role: 'argument', intent: 'Continue with the approved avatar', dependencies: ['block-real'], sourceCandidateIds: ['candidate-avatar'], durationTargetMs: { min: 1000, ideal: 2000, max: 2500 }, content: { claimIds: ['claim-1'], qualifierIds: ['qualifier-1'], proofIds: [] }, presentation: 'synthetic-avatar' },
+    { id: 'block-proof', actId: 'development', role: 'proof', intent: 'Show attributed proof', dependencies: ['block-avatar'], sourceCandidateIds: ['candidate-proof'], durationTargetMs: { min: 1000, ideal: 2000, max: 2500 }, content: { claimIds: [], qualifierIds: [], proofIds: ['proof-1'] }, presentation: 'proof-insert' },
+    { id: 'block-broll', actId: 'development', role: 'context', intent: 'Illustrate the proof with approved B-roll', dependencies: ['block-proof'], sourceCandidateIds: ['candidate-broll'], durationTargetMs: { min: 1000, ideal: 1500, max: 2000 }, content: { claimIds: [], qualifierIds: [], proofIds: [] }, presentation: 'b-roll' },
+    { id: 'block-cta', actId: 'resolution', role: 'cta', intent: 'Present the configured action', dependencies: ['block-proof'], sourceCandidateIds: ['candidate-cta'], durationTargetMs: { min: 1000, ideal: 2000, max: 2500 }, content: { claimIds: [], qualifierIds: [], proofIds: [], ctaId: storyPlanCoreExample.desiredActionRef.id }, presentation: 'voiceover' },
+  ],
+  sourceRanges: [
+    { id: 'range-real', artifactId: 'artifact-real-example-1', startMs: 0, endMs: 2000, rightsRef: 'rights-real-example-1', consentRef: 'consent-real-example-1', sourceKind: 'real', identityRef: 'identity-ana', audioContinuityRef: 'audio-ana-ptbr', sceneContinuityRef: 'scene-studio' },
+    { id: 'range-avatar', artifactId: 'artifact-avatar-example-1', startMs: 0, endMs: 2000, rightsRef: 'rights-avatar-example-1', consentRef: 'consent-avatar-example-1', sourceKind: 'synthetic', identityRef: 'identity-ana', audioContinuityRef: 'audio-ana-ptbr', sceneContinuityRef: 'scene-studio', disclosure: 'Avatar gerado por IA' },
+    { id: 'range-proof-hybrid', artifactId: 'artifact-proof-example-1', startMs: 0, endMs: 2000, rightsRef: 'rights-proof-example-1', sourceKind: 'proof' },
+    { id: 'range-broll-hybrid', artifactId: 'artifact-broll-example-1', startMs: 0, endMs: 1500, rightsRef: 'rights-broll-example-1', sourceKind: 'b-roll' },
+    { id: 'range-cta-hybrid', artifactId: 'artifact-voice-example-1', startMs: 0, endMs: 2000, rightsRef: 'rights-voice-example-1', consentRef: 'consent-voice-example-1', sourceKind: 'voiceover', identityRef: 'identity-ana', audioContinuityRef: 'audio-ana-ptbr' },
+  ],
+  sourceCandidates: [
+    { id: 'candidate-real', sourceRangeId: 'range-real', purpose: 'hook', rank: 1 },
+    { id: 'candidate-avatar', sourceRangeId: 'range-avatar', purpose: 'argument', rank: 1 },
+    { id: 'candidate-proof', sourceRangeId: 'range-proof-hybrid', purpose: 'proof', rank: 1 },
+    { id: 'candidate-broll', sourceRangeId: 'range-broll-hybrid', purpose: 'context', rank: 1 },
+    { id: 'candidate-cta', sourceRangeId: 'range-cta-hybrid', purpose: 'cta', rank: 1 },
+  ],
+}
+const hybridStoryPlanExample = { schemaVersion: 4, id: 'story-plan-hybrid-example-1', workspaceId, projectId, projectVersionId: 'project-version-example-1', ...hybridStoryPlanCoreExample, storyHash: 'e'.repeat(64), createdBy: { type: 'api-client', id: clientId }, createdAt, requestFingerprint: 'f'.repeat(64) }
 const montageStoryPlanRefExample = { id: storyPlanExample.id, hash: storyPlanExample.storyHash }
 const montageCandidateInputExample = { id: 'candidate-example-1', seed: 'seed-example-1', mode: 'chronological', hook: { id: 'hook-example-1', selfContained: true }, blockOrder: ['block-hook', 'block-body'], permittedBlockOrders: [['block-hook', 'block-body']], assets: [{ id: 'asset-example-1', rightsApproved: true }], patternBreaks: [{ id: 'break-example-1', atMs: 1000, group: 'group-hook' }], maximumPatternBreaks: 3, confidence: 0.9, rubricSignals: { narrative: 0.9, objective: 0.8, continuity: 0.85, evidence: 0.8 } }
 const montageCandidateExample = { schemaVersion: 'montage-candidate-seed/v1', ...montageCandidateInputExample, storyPlanRef: montageStoryPlanRefExample, seedHash: 'd'.repeat(64), status: 'eligible', hardGateResults: [{ code: 'HOOK_NOT_SELF_CONTAINED', passed: true, evidenceRefs: ['hook-example-1'] }, { code: 'ORDER_NOT_PERMITTED', passed: true, evidenceRefs: [storyPlanExample.id] }, { code: 'RIGHTS_NOT_APPROVED', passed: true, evidenceRefs: ['asset-example-1'] }, { code: 'PATTERN_BUDGET_EXCEEDED', passed: true, evidenceRefs: ['break-example-1'] }, { code: 'STORY_BLOCK_COVERAGE_INVALID', passed: true, evidenceRefs: [storyPlanExample.id] }], score: 0.8475, estimatedCost: 0.3, rejectionReasons: [], candidateHash: 'e'.repeat(64) }
@@ -6148,6 +6175,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/create-story-plan-request/v1': [{ projectVersionId: 'project-version-example-1', plan: storyPlanCoreExample }],
     'apollo://schemas/story-plan-mutated/v1': [{ data: { storyPlan: storyPlanExample, replayed: false }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/story-plan-read/v1': [{ data: { storyPlan: storyPlanExample }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/create-story-plan-request/v2': [{ projectVersionId: 'project-version-example-1', plan: hybridStoryPlanCoreExample }],
+    'apollo://schemas/story-plan-mutated/v2': [{ data: { storyPlan: hybridStoryPlanExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/story-plan-read/v2': [{ data: { storyPlan: hybridStoryPlanExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/public-operation-detail/v2': [
       { data: { operation: queuedMediaIngestOperationExample }, meta: { apiVersion: 'v1' } },
     ],

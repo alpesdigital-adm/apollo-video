@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient, type V2StoryPlan } from '../../../../generat
 import type { StoryPlanRepository, StoredStoryPlan } from '../../application/ports/story-plan-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
-import { createStoryPlan, type StoryPlan } from '../../domain/story-plan.ts'
+import { createHybridStoryPlan, createStoryPlan, type StoryPlan } from '../../domain/story-plan.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
 
@@ -10,8 +10,11 @@ function hydrate(row: V2StoryPlan): Readonly<StoredStoryPlan> {
   hydrateExternalActorAudit(row, row.createdByClientId)
   let stored: StoryPlan
   try { stored = JSON.parse(row.storyJson) as StoryPlan; if (stableSerialize(stored) !== row.storyJson) throw new Error('non-canonical') } catch { throw new DomainError('PERSISTENCE_CONFLICT', 'Stored StoryPlan JSON is invalid') }
-  const plan = createStoryPlan({ ...stored, id: row.id, workspaceId: row.workspaceId, projectId: row.projectId, projectVersionId: row.projectVersionId, createdBy: { type: 'api-client', id: row.createdByClientId }, createdAt: row.createdAt.toISOString() })
-  if (row.schemaVersion !== 3 || row.storyHash !== plan.storyHash || row.treatmentPlanId !== plan.treatmentPlanRef?.id || row.treatmentSchemaVersion !== plan.treatmentPlanRef?.schemaVersion || row.treatmentContentHash !== plan.treatmentPlanRef?.contentHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored StoryPlan failed integrity validation')
+  const planInput = { ...stored, id: row.id, workspaceId: row.workspaceId, projectId: row.projectId, projectVersionId: row.projectVersionId, createdBy: { type: 'api-client' as const, id: row.createdByClientId }, createdAt: row.createdAt.toISOString() }
+  const plan = row.schemaVersion === 4 && stored.productionMode === 'hybrid'
+    ? createHybridStoryPlan(planInput)
+    : createStoryPlan(planInput)
+  if (row.schemaVersion !== plan.schemaVersion || row.storyHash !== plan.storyHash || row.treatmentPlanId !== plan.treatmentPlanRef?.id || row.treatmentSchemaVersion !== plan.treatmentPlanRef?.schemaVersion || row.treatmentContentHash !== plan.treatmentPlanRef?.contentHash) throw new DomainError('PERSISTENCE_CONFLICT', 'Stored StoryPlan failed integrity validation')
   return Object.freeze({ plan, requestFingerprint: row.requestFingerprint, idempotencyKey: row.idempotencyKey })
 }
 

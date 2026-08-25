@@ -2,7 +2,7 @@ import { materializeActorAuditContext, requireScope, type AuthenticatedExternalA
 import type { StoryPlanRepository } from './ports/story-plan-repository.ts'
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { DomainError } from '../domain/errors.ts'
-import { createStoryPlan, type StoryPlan } from '../domain/story-plan.ts'
+import { createHybridStoryPlan, createStoryPlan, type StoryPlan } from '../domain/story-plan.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const IDEMPOTENCY = /^[\x21-\x7e]{8,128}$/
@@ -23,7 +23,10 @@ export function createStoryPlanService(dependencies: { repository: StoryPlanRepo
       if (replay.requestFingerprint !== requestFingerprint) throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was used with another StoryPlan request')
       return Object.freeze({ value: replay, replayed: true })
     }
-    const plan = createStoryPlan({ ...request.plan, id: id(dependencies.createId(), 'storyPlanId'), workspaceId, projectId, projectVersionId, createdBy: { type: 'api-client', id: createdByClientId }, createdAt: clock().toISOString() })
+    const planInput = { ...request.plan, id: id(dependencies.createId(), 'storyPlanId'), workspaceId, projectId, projectVersionId, createdBy: { type: 'api-client' as const, id: createdByClientId }, createdAt: clock().toISOString() }
+    const plan = request.plan.productionMode === 'hybrid'
+      ? createHybridStoryPlan(planInput)
+      : createStoryPlan(planInput)
     return dependencies.repository.persist({ plan, requestFingerprint, idempotencyKey: request.idempotencyKey }, audit)
   }
 }
