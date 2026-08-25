@@ -426,7 +426,7 @@ implements SyntheticProductionRepository {
             createdAt: new Date(input.editPlanSnapshot.createdAt),
           },
         })
-        const row = await transaction.v2SyntheticProductionRun.create({
+        await transaction.v2SyntheticProductionRun.create({
           data: {
             id: plan.id,
             workspaceId: plan.workspaceId,
@@ -454,15 +454,19 @@ implements SyntheticProductionRepository {
               input.authenticationAudit.clientId,
             ),
             createdAt: new Date(plan.createdAt),
-            assets: {
-              create: assets.map((asset, ordinal) => ({
-                ...asset,
-                workspaceId: plan.workspaceId,
-                projectId: plan.projectId,
-                ordinal,
-              })),
-            },
           },
+        })
+        await transaction.v2SyntheticProductionAsset.createMany({
+          data: assets.map((asset, ordinal) => ({
+            ...asset,
+            workspaceId: plan.workspaceId,
+            projectId: plan.projectId,
+            runId: plan.id,
+            ordinal,
+          })),
+        })
+        const row = await transaction.v2SyntheticProductionRun.findUniqueOrThrow({
+          where: { id: plan.id },
           include: { assets: { orderBy: { ordinal: 'asc' } } },
         })
         return Object.freeze({ run: hydrateRun(row), replayed: false })
