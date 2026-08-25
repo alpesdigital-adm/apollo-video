@@ -105,6 +105,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
   const runOnce = runProviderJobWorkerOnce({
     jobs,
     adapters: { get: ({ adapterId, adapterVersion }) => adapterId === adapter.id && adapterVersion === adapter.adapterVersion ? adapter : null },
+    materializer: { async materialize({ job }) { return { ...job.input, audioUrl: 'https://signed.invalid/audio?token=ephemeral-only' } } },
     ingestor: { async ingest() { ingested = true; return { artifactId: 'ingested-avatar-one', artifactSha256: hash('c'), mediaType: 'video', byteSize: 12_345 } } },
     critic: { async evaluate({ artifact }) { assert.equal(ingested, true); assert.equal(artifact.artifactId, 'ingested-avatar-one'); return { approved: true, resultHash: hash('d') } } },
     clock: () => new Date(at(++tick)),
@@ -115,6 +116,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
   assert.deepEqual(history, ['planned', 'estimated', 'submitted', 'queued', 'processing', 'retrieving', 'evaluating', 'approved'])
   assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
   assert.equal(stored.job.resultArtifact.artifactSha256, hash('c'))
+  assert.equal(JSON.stringify(stored).includes('ephemeral-only'), false)
 })
 
 test('T-FR-101 provider failure is normalized without persisting upstream diagnostics', async () => {
@@ -129,6 +131,7 @@ test('T-FR-101 provider failure is normalized without persisting upstream diagno
       id: 'controlled-avatar', adapterVersion: 'version-1',
       async submit() { const error = new Error('secret upstream response must never persist'); error.code = 'UPSTREAM_DENIED'; error.retryable = true; throw error },
     }) },
+    materializer: { async materialize({ job }) { return job.input } },
     ingestor: { async ingest() { throw new Error('unreachable') } },
     critic: { async evaluate() { throw new Error('unreachable') } },
     clock: () => new Date(at(2)), createLeaseToken: () => 'provider-lease-redaction', createTransitionId: () => 'provider-transition-redaction',

@@ -20,6 +20,7 @@ import type {
   ProviderAdapterRegistry,
   ProviderResultCritic,
   ProviderResultIngestor,
+  ProviderSubmissionInputMaterializer,
 } from './ports/provider-job-runtime.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
 
@@ -227,6 +228,7 @@ export async function runProviderJobWorkerLoop(input: {
 export function runProviderJobWorkerOnce(dependencies: {
   jobs: ProviderJobRepository
   adapters: ProviderAdapterRegistry
+  materializer: ProviderSubmissionInputMaterializer
   ingestor: ProviderResultIngestor
   critic: ProviderResultCritic
   clock: () => Date
@@ -259,7 +261,8 @@ export function runProviderJobWorkerOnce(dependencies: {
         assertDomain(!durationMs || durationMs / 1_000 >= capabilities.duration.minSeconds && durationMs / 1_000 <= capabilities.duration.maxSeconds, 'PRECONDITION_REQUIRED', 'Provider duration is unsupported')
         next = transitionProviderJob(job, { status: 'estimated', occurredAt: now.toISOString(), estimate: await adapter.estimate(job.input) })
       } else if (job.status === 'estimated') {
-        const submitted = await adapter.submit(job.input, {
+        const submissionInput = await dependencies.materializer.materialize({ job })
+        const submitted = await adapter.submit(submissionInput, {
           workspaceId: job.workspaceId,
           projectVersionId: job.originProjectVersionId,
           operationId: job.id,

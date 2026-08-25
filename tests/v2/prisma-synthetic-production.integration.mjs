@@ -329,6 +329,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const runProviderOnce = runProviderJobWorkerOnce({
       jobs: providerRepository,
       adapters: { get: ({ adapterId, adapterVersion }) => adapterId === adapter.id && adapterVersion === adapter.adapterVersion ? adapter : null },
+      materializer: { async materialize({ job }) { return job.input } },
       ingestor: {
         async ingest() {
           await client.v2MediaArtifact.create({

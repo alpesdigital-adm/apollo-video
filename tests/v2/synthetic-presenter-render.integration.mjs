@@ -97,6 +97,7 @@ test('T-FR-092 controlled provider output becomes a person-free real MP4 with di
   let tick = 0
   const runOnce = runProviderJobWorkerOnce({
     jobs, adapters: { get: () => provider },
+    materializer: { async materialize({ job }) { return job.input } },
     ingestor: { async ingest({ providerResult }) { assert.equal(providerResult.file, fixture.avatar); return { artifactId: avatar.artifactId, artifactSha256: avatar.sha256, mediaType: 'video', byteSize: avatar.byteSize } } },
     critic: { async evaluate({ artifact: result }) { assert.equal(result.artifactSha256, avatar.sha256); return { approved: true, resultHash: hash('d') } } },
     clock: () => new Date(Date.parse('2029-01-01T00:00:00.000Z') + (++tick * 1_000)), createLeaseToken: () => `controlled-real-lease-${tick}`, createTransitionId: () => `controlled-real-transition-${tick}`,

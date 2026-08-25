@@ -5,6 +5,12 @@ export interface ProviderAdapterRegistry {
   get(input: { adapterId: string; adapterVersion: string }): AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, unknown> | null
 }
 
+export interface ProviderSubmissionInputMaterializer {
+  materialize(input: {
+    job: Readonly<ProviderJob>
+  }): Promise<Readonly<Record<string, unknown>>>
+}
+
 export interface ProviderResultIngestor {
   ingest(input: {
     job: Readonly<ProviderJob>
