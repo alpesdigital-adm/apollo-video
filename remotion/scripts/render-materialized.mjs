@@ -155,9 +155,7 @@ async function startPrivateAssetServer(inputProps) {
   }
   return {
     inputProps: markedProps,
-    close: () => new Promise((resolveClose, rejectClose) =>
-      server.close((error) => (error ? rejectClose(error) : resolveClose())),
-    ),
+    server,
   }
 }
 
@@ -169,6 +167,8 @@ function positiveInteger(value, field, maximum) {
 }
 
 async function main() {
+  const phase = (value) => process.stderr.write(`RENDER_PHASE:${value}\n`)
+  phase('request-reading')
   const request = await readRequest()
   if (request?.schemaVersion !== 'apollo-remotion-render-request/v1') {
     throw new Error('render request schema is invalid')
@@ -199,56 +199,66 @@ async function main() {
     throw new Error('render input props are invalid')
   }
 
+  phase('assets-starting')
   const privateAssets = await startPrivateAssetServer(request.inputProps)
-  try {
-    const serveUrl = resolve(process.cwd(), 'build')
-    const selected = await selectComposition({
+  const serveUrl = resolve(process.cwd(), 'build')
+  phase('composition-selecting')
+  const selected = await selectComposition({
+    serveUrl,
+    id: 'apollo-video',
+    inputProps: privateAssets.inputProps,
+    logLevel: 'error',
+  })
+  const composition = {
+    ...selected,
+    width,
+    height,
+    fps,
+    durationInFrames,
+  }
+  if (renderKind === 'still') {
+    phase('still-rendering')
+    await renderStill({
       serveUrl,
-      id: 'apollo-video',
+      composition,
       inputProps: privateAssets.inputProps,
+      output: request.outputPath,
+      frame,
+      imageFormat: 'png',
+      overwrite: true,
       logLevel: 'error',
     })
-    const composition = {
-      ...selected,
-      width,
-      height,
-      fps,
-      durationInFrames,
-    }
-    if (renderKind === 'still') {
-      await renderStill({
-        serveUrl,
-        composition,
-        inputProps: privateAssets.inputProps,
-        output: request.outputPath,
-        frame,
-        imageFormat: 'png',
-        overwrite: true,
-        logLevel: 'error',
-      })
-    } else {
-      await renderMedia({
-        serveUrl,
-        composition,
-        inputProps: privateAssets.inputProps,
-        codec: 'h264',
-        outputLocation: request.outputPath,
-        overwrite: true,
-        crf: 23,
-        pixelFormat: 'yuv420p',
-        imageFormat: 'jpeg',
-        concurrency: 1,
-        disallowParallelEncoding: true,
-        logLevel: 'error',
-      })
-    }
-  } finally {
-    await privateAssets.close()
+  } else {
+    phase('media-rendering')
+    await renderMedia({
+      serveUrl,
+      composition,
+      inputProps: privateAssets.inputProps,
+      codec: 'h264',
+      outputLocation: request.outputPath,
+      overwrite: true,
+      crf: 23,
+      pixelFormat: 'yuv420p',
+      imageFormat: 'jpeg',
+      concurrency: 1,
+      disallowParallelEncoding: true,
+      logLevel: 'error',
+    })
   }
-  process.stdout.write(JSON.stringify({ ok: true, schemaVersion: 'apollo-remotion-render-result/v1' }))
+  phase('render-completed')
+  phase('completed')
+  await new Promise((resolveWrite) => {
+    process.stdout.write(
+      JSON.stringify({ ok: true, schemaVersion: 'apollo-remotion-render-result/v1' }),
+      resolveWrite,
+    )
+  })
+  process.exit(0)
 }
 
 main().catch((error) => {
-  process.stderr.write(`RENDER_WORKER_FAILED: ${error instanceof Error ? error.message : 'unknown error'}\n`)
-  process.exitCode = 1
+  process.stderr.write(
+    `RENDER_WORKER_FAILED: ${error instanceof Error ? error.message : 'unknown error'}\n`,
+    () => process.exit(1),
+  )
 })

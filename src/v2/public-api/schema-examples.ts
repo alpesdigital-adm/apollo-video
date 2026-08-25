@@ -5368,8 +5368,62 @@ const responsivePlacementResultV1Example = (() => {
   return Object.freeze({ ...body, schemaVersion: 'responsive-placement/v1' as const })
 })()
 
+const syntheticProfileExample = {
+  id: 'presenter-example-1', version: 1, snapshotHash: 'a'.repeat(64),
+  actorIdentityId: 'identity-example-1',
+  avatar: { adapterId: 'avatar-adapter', adapterVersion: 'version-1', identityRef: 'avatar-identity-example-1' },
+  voice: { id: 'voice-example-1', version: 1, adapterId: 'tts-adapter', adapterVersion: 'version-1' },
+  defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
+  consent: {
+    id: 'consent-example-1', evidenceArtifactId: 'artifact-consent-example-1', evidenceSha256: 'b'.repeat(64), snapshotHash: 'c'.repeat(64), granted: true,
+    allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'], allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+  },
+  createdAt,
+}
+const syntheticPlanExample = {
+  schemaVersion: 'synthetic-edit-plan/v1', policyVersion: 'synthetic-presenter-policy/v1', id: 'synthetic-run-example-1',
+  workspaceId, projectId, projectVersionId: 'project-version-example-1', mode: 'synthetic-presenter', hasRealPerson: false,
+  durationMs: 2000, use: 'ads', market: 'BRA', locale: 'pt-BR', profile: syntheticProfileExample,
+  audio: {}, blocks: [{}], bRoll: [], overlays: [], captions: [], disclosure: 'Conteúdo gerado com IA', authorization: {}, createdAt, planHash: 'd'.repeat(64),
+}
+const providerJobExample = {
+  id: 'provider-job-example-1', projectId, originProjectVersionId: 'project-version-example-1', operation: 'audio-avatar',
+  adapter: { id: 'controlled-avatar', version: 'version-1' }, status: 'planned', attempt: 0, createdAt, updatedAt: createdAt,
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/register-synthetic-presenter-request/v1': [{
+      profileId: 'presenter-example-1', version: 1, actorIdentityId: 'identity-example-1',
+      avatar: syntheticProfileExample.avatar, voice: syntheticProfileExample.voice,
+      defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
+      consent: {
+        id: 'consent-example-1', evidenceArtifactId: 'artifact-consent-example-1', granted: true,
+        allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'], allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2030-01-01T00:00:00.000Z',
+      },
+    }],
+    'apollo://schemas/synthetic-presenter-registered/v1': [{
+      data: { profile: syntheticProfileExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/create-synthetic-production-run-request/v1': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
+      audio: { artifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR', scriptHash: 'e'.repeat(64), alignment: [{ text: 'Olá mundo', startMs: 0, endMs: 2000 }] },
+      blocks: [{ id: 'synthetic-block-example-1', text: 'Olá mundo', rangeMs: [0, 2000], cacheKey: 'f'.repeat(64), providerJobId: 'provider-job-example-1', audioSha256: '1'.repeat(64), artifactId: 'artifact-avatar-example-1', critic: { id: 'critic-example-1', resultHash: '2'.repeat(64), status: 'approved' } }],
+      bRoll: [], overlays: [], captions: true, use: 'ads', market: 'BRA',
+    }],
+    'apollo://schemas/synthetic-production-run-mutated/v1': [{
+      data: { run: { id: syntheticPlanExample.id, status: 'compiled', editPlanSnapshotId: 'snapshot-synthetic-example-1', plan: syntheticPlanExample }, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-production-run-read/v1': [{
+      data: { run: { id: syntheticPlanExample.id, status: 'compiled', editPlanSnapshotId: 'snapshot-synthetic-example-1', plan: syntheticPlanExample } }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/enqueue-provider-job-request/v1': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', operation: 'audio-avatar',
+      adapterId: 'controlled-avatar', adapterVersion: 'version-1', providerInput: { audioArtifactId: 'artifact-audio-example-1', durationMs: 2000, locale: 'pt-BR' },
+      sourceArtifactIds: ['artifact-audio-example-1'], use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/provider-job-mutated/v1': [{ data: { job: providerJobExample, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/provider-job-read/v1': [{ data: { job: providerJobExample }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/output-format-preset/v1': [OUTPUT_FORMAT_REGISTRY.presets['9:16']],
     'apollo://schemas/output-format-registry/v1': [OUTPUT_FORMAT_REGISTRY],
     'apollo://schemas/responsive-placement-request/v1': [{

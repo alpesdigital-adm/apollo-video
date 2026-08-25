@@ -179,6 +179,7 @@ async function runRenderWorker(input: {
     let timedOut = false
     let outputExceeded = false
     let cancelled = false
+    let lastPhase: string | undefined
 
     const finish = (error?: DomainError) => {
       if (settled) return
@@ -208,6 +209,9 @@ async function runRenderWorker(input: {
     })
     child.stderr?.on('data', (chunk) => {
       stderr += String(chunk)
+      for (const match of stderr.matchAll(/RENDER_PHASE:([a-z-]+)/g)) {
+        lastPhase = match[1]
+      }
       if (Buffer.byteLength(stderr) > MAX_WORKER_OUTPUT_BYTES) {
         outputExceeded = true
         killProcessTree(child)
@@ -223,7 +227,9 @@ async function runRenderWorker(input: {
         return
       }
       if (timedOut) {
-        finish(new DomainError('RENDER_EXECUTION_FAILED', 'Render execution exceeded its timeout'))
+        finish(new DomainError('RENDER_EXECUTION_FAILED', 'Render execution exceeded its timeout', {
+          ...(lastPhase ? { phase: lastPhase } : {}),
+        }))
         return
       }
       if (outputExceeded) {
@@ -246,6 +252,7 @@ async function runRenderWorker(input: {
         finish(
           new DomainError('RENDER_EXECUTION_FAILED', 'Remotion render execution failed', {
             workerReportedFailure: stderr.length > 0,
+            ...(lastPhase ? { phase: lastPhase } : {}),
           }),
         )
         return

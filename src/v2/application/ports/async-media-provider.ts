@@ -1,15 +1,11 @@
-export const PROVIDER_OPERATIONS = [
-  'tts',
-  'audio-avatar',
-  'text-avatar',
-  'lip-sync',
-  'image-to-video',
-  'video-to-video',
-  'background-replace',
-  'camera-motion',
-] as const
+import type {
+  ProviderEstimate,
+  ProviderOperation,
+  ProviderStatus,
+} from '../../domain/provider-contract.ts'
 
-export type ProviderOperation = (typeof PROVIDER_OPERATIONS)[number]
+export { PROVIDER_OPERATIONS } from '../../domain/provider-contract.ts'
+export type { ProviderEstimate, ProviderOperation, ProviderStatus } from '../../domain/provider-contract.ts'
 
 export interface ProviderCapabilities {
   operations: readonly ProviderOperation[]
@@ -29,12 +25,6 @@ export interface ProviderCapabilities {
   expiresAt: string
 }
 
-export interface ProviderEstimate {
-  currency: string
-  costMinorUnits: number
-  estimatedLatencyMs: number
-}
-
 export interface ProviderSubmitContext {
   workspaceId: string
   projectVersionId: string
@@ -42,14 +32,6 @@ export interface ProviderSubmitContext {
   idempotencyKey: string
   signal?: AbortSignal
 }
-
-export type ProviderStatus =
-  | 'queued'
-  | 'processing'
-  | 'retrieving'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
 
 export interface ProviderWebhookEvent {
   eventId: string
