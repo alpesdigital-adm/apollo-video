@@ -8,6 +8,7 @@ export interface ProviderAdapterRegistry {
 export interface ProviderSubmissionInputMaterializer {
   materialize(input: {
     job: Readonly<ProviderJob>
+    signal?: AbortSignal
   }): Promise<Readonly<Record<string, unknown>>>
 }
 
@@ -15,6 +16,7 @@ export interface ProviderResultIngestor {
   ingest(input: {
     job: Readonly<ProviderJob>
     providerResult: unknown
+    signal?: AbortSignal
   }): Promise<Readonly<ProviderJobResultArtifact>>
 }
 

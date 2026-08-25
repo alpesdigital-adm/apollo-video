@@ -40,7 +40,7 @@ implements ProviderSubmissionInputMaterializer {
     this.dependencies = dependencies
   }
 
-  async materialize(input: { job: Readonly<ProviderJob> }): Promise<Readonly<Record<string, unknown>>> {
+  async materialize(input: { job: Readonly<ProviderJob>; signal?: AbortSignal }): Promise<Readonly<Record<string, unknown>>> {
     const { job } = input
     assertDomain(job.operation === 'audio-avatar', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
     const now = (this.dependencies.clock ?? (() => new Date()))()
@@ -84,7 +84,7 @@ implements ProviderSubmissionInputMaterializer {
       byteSize,
     })
     try {
-      const audioBytes = new Uint8Array(await readFile(source.path))
+      const audioBytes = new Uint8Array(await readFile(source.path, { signal: input.signal }))
       return Object.freeze({
         avatarId: profile.snapshot.avatar.identityRef,
         audioBytes,

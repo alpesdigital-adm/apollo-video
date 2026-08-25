@@ -208,7 +208,7 @@ async function waitForProviderPoll(signal: AbortSignal, milliseconds: number): P
 
 export async function runProviderJobWorkerLoop(input: {
   workerId: string
-  runNext: (workerId: string) => Promise<unknown | null>
+  runNext: (workerId: string, signal?: AbortSignal) => Promise<unknown | null>
   signal: AbortSignal
   pollIntervalMs?: number
   onIterationError?: () => void
@@ -220,7 +220,7 @@ export async function runProviderJobWorkerLoop(input: {
   const wait = input.wait ?? waitForProviderPoll
   while (!input.signal.aborted) {
     try {
-      const outcome = await input.runNext(workerId)
+      const outcome = await input.runNext(workerId, input.signal)
       if (!outcome) await wait(input.signal, pollIntervalMs)
     } catch {
       input.onIterationError?.()
@@ -240,7 +240,7 @@ export function runProviderJobWorkerOnce(dependencies: {
   createTransitionId: () => string
   leaseMs?: number
 }) {
-  return async function execute(workerId: string) {
+  return async function execute(workerId: string, signal?: AbortSignal) {
     const now = dependencies.clock()
     const leaseMs = dependencies.leaseMs ?? 30_000
     const claimed = await dependencies.jobs.claimNext({
@@ -265,16 +265,17 @@ export function runProviderJobWorkerOnce(dependencies: {
         assertDomain(!durationMs || durationMs / 1_000 >= capabilities.duration.minSeconds && durationMs / 1_000 <= capabilities.duration.maxSeconds, 'PRECONDITION_REQUIRED', 'Provider duration is unsupported')
         next = transitionProviderJob(job, { status: 'estimated', occurredAt: now.toISOString(), estimate: await adapter.estimate(job.input) })
       } else if (job.status === 'estimated') {
-        const submissionInput = await dependencies.materializer.materialize({ job })
+        const submissionInput = await dependencies.materializer.materialize({ job, signal })
         const submitted = await adapter.submit(submissionInput, {
           workspaceId: job.workspaceId,
           projectVersionId: job.originProjectVersionId,
           operationId: job.id,
           idempotencyKey: job.idempotencyKey,
+          signal,
         })
         next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submitted.providerJobId })
       } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
-        const providerStatus = await adapter.getStatus(job.providerJobId!)
+        const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
         const status = normalizeProviderStatus(providerStatus)
         if (status === 'failed') {
           next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus, normalizedError: { code: 'PROVIDER_REPORTED_FAILURE', message: 'Provider reported a terminal failure', retryable: false } })
@@ -282,8 +283,8 @@ export function runProviderJobWorkerOnce(dependencies: {
           next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus })
         }
       } else if (job.status === 'retrieving') {
-        const providerResult = await adapter.retrieve(job.providerJobId!)
-        const artifact = await dependencies.ingestor.ingest({ job, providerResult })
+        const providerResult = await adapter.retrieve(job.providerJobId!, signal)
+        const artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
         next = transitionProviderJob(job, { status: 'evaluating', occurredAt: now.toISOString(), resultArtifact: artifact })
       } else if (job.status === 'evaluating') {
         const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact! })
@@ -292,6 +293,7 @@ export function runProviderJobWorkerOnce(dependencies: {
         throw new DomainError('VERSION_CONFLICT', `Provider job status ${job.status} is not executable`)
       }
     } catch (error) {
+      if (signal?.aborted) throw error
       next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: normalizedFailure(error) })
     }
     return dependencies.jobs.advance({

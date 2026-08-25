@@ -20,7 +20,7 @@ const DEFAULT_TIMEOUT_MS = 120_000
 const TOOL_DIGEST = createHash('sha256').update('heygen-v3-provider-result/1.0.0').digest('hex')
 
 export interface ProviderResultDownloader {
-  download(input: { operationId: string; url: string }): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>>
+  download(input: { operationId: string; url: string; signal?: AbortSignal }): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>>
   cleanup(operationId: string): Promise<void>
 }
 
@@ -43,7 +43,7 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
     this.allowedHosts = new Set(allowedHosts)
   }
 
-  async download(input: { operationId: string; url: string }) {
+  async download(input: { operationId: string; url: string; signal?: AbortSignal }) {
     let url: URL
     try { url = new URL(input.url) } catch { throw new DomainError('RENDER_OUTPUT_INVALID', 'Provider result URL is invalid') }
     assertDomain(url.protocol === 'https:' && (!url.port || url.port === '443') && !url.username && !url.password && !url.hash && this.allowedHosts.has(url.hostname.toLowerCase()), 'RENDER_OUTPUT_INVALID', 'Provider result URL is not allowed')
@@ -57,7 +57,7 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
     const target = join(directory, `${randomUUID()}.mp4`)
     await mkdir(directory, { recursive: true })
     try {
-      return await this.downloadPinned(url, addresses[0]!, target)
+      return await this.downloadPinned(url, addresses[0]!, target, input.signal)
     } catch (error) {
       await rm(target, { force: true }).catch(() => undefined)
       if (error instanceof DomainError) throw error
@@ -70,12 +70,15 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
     await rm(join(this.workRoot, namespace), { recursive: true, force: true })
   }
 
-  private downloadPinned(url: URL, address: Readonly<{ address: string; family: 4 | 6 }>, target: string): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>> {
+  private downloadPinned(url: URL, address: Readonly<{ address: string; family: 4 | 6 }>, target: string, signal?: AbortSignal): Promise<Readonly<{ path: string; sha256: string; byteSize: number }>> {
     return new Promise((resolvePromise, reject) => {
       let settled = false
+      const abort = () => request.destroy(new Error('provider-result-aborted'))
       const fail = (error: unknown) => {
         if (settled) return
         settled = true
+        clearTimeout(deadline)
+        signal?.removeEventListener('abort', abort)
         reject(error)
       }
       const request = httpsRequest({
@@ -116,13 +119,19 @@ export class SafeProviderResultDownloader implements ProviderResultDownloader {
             const metadata = await stat(target)
             assertDomain(byteSize > 0 && metadata.isFile() && metadata.size === byteSize, 'RENDER_OUTPUT_INVALID', 'Provider result bytes are incomplete')
             settled = true
+            clearTimeout(deadline)
+            signal?.removeEventListener('abort', abort)
             resolvePromise(Object.freeze({ path: target, sha256: digest.digest('hex'), byteSize }))
           } catch (error) { fail(error) }
         })
         response.pipe(output)
       })
+      const deadline = setTimeout(() => request.destroy(new Error('provider-result-deadline')), this.timeoutMs)
+      deadline.unref()
       request.setTimeout(this.timeoutMs, () => request.destroy(new Error('provider-result-timeout')))
       request.on('error', fail)
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted) abort()
       request.end()
     })
   }
@@ -149,12 +158,12 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
     this.dependencies = dependencies
   }
 
-  async ingest(input: { job: Readonly<ProviderJob>; providerResult: unknown }) {
+  async ingest(input: { job: Readonly<ProviderJob>; providerResult: unknown; signal?: AbortSignal }) {
     const result = providerResult(input.providerResult)
     assertDomain(result.providerJobId === input.job.providerJobId, 'PERSISTENCE_CONFLICT', 'Provider result identity does not match the durable job')
     try {
-      const downloaded = await this.dependencies.downloader.download({ operationId: input.job.id, url: result.downloadUrl })
-      const probe = await this.dependencies.prober.probe(downloaded.path, { signal: undefined })
+      const downloaded = await this.dependencies.downloader.download({ operationId: input.job.id, url: result.downloadUrl, signal: input.signal })
+      const probe = await this.dependencies.prober.probe(downloaded.path, { signal: input.signal })
       const stored = await this.dependencies.storage.promoteDerived({ workspaceId: input.job.workspaceId, sourcePath: downloaded.path, sha256: downloaded.sha256, extension: 'mp4', prefix: 'synthetic-provider-results' })
       assertDomain(stored.sha256 === downloaded.sha256 && stored.byteSize === downloaded.byteSize, 'PERSISTENCE_CONFLICT', 'Provider result storage identity drifted')
       const sources = await Promise.all(input.job.authorization.artifactDecisions.map(async (decision) => {
