@@ -129,3 +129,12 @@ test('T-FR-061 migration binds StoryPlan to the exact tenant-scoped project vers
     /FOREIGN KEY \("projectVersionId", "projectId"\) REFERENCES "project_versions"\("id", "projectId"\)/,
   )
 })
+
+test('T-FR-093 migration admits only published source and hybrid StoryPlan schemas', () => {
+  const migration = readFileSync(new URL(
+    '../../prisma/v2/migrations/20260825023000_story_plans_v4/migration.sql',
+    import.meta.url,
+  ), 'utf8')
+  assert.match(migration, /DROP CONSTRAINT "story_plans_schema_check"/)
+  assert.match(migration, /CHECK \("schemaVersion" IN \(3, 4\)\)/)
+})
