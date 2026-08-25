@@ -120,6 +120,9 @@ jobs:
       - name: Bundle Remotion renderer
         run: npm run remotion:build
 
+      - name: Run synthetic presenter provider-to-MP4 golden
+        run: npm run test:integration:synthetic-presenter
+
       - name: Run authorized Remotion smoke render
         run: npm run test:integration:render
 
