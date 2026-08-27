@@ -64,6 +64,12 @@ function hydrateProfile(
     row.profileJson,
     `synthetic presenter profile ${row.id}`,
   )
+  if (row.id !== `${stored.id}:v${stored.version}`) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored synthetic presenter profile ${row.id} lost its versioned physical identity`,
+    )
+  }
   const recreated = createSyntheticPresenterProfileSnapshot({
     id: stored.id,
     version: stored.version,
@@ -104,6 +110,7 @@ function hydrateProfile(
   }
   return Object.freeze({
     snapshot: recreated,
+    profileSnapshotId: row.id,
     requestFingerprint: row.requestFingerprint,
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt.toISOString(),

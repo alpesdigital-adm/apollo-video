@@ -115,7 +115,7 @@ export function enqueueProviderJobService(dependencies: {
     if (request.operation === 'audio-avatar') {
       assertDomain(Boolean(persistedAudioMaster && request.audioRange), 'PRECONDITION_REQUIRED', 'Audio-avatar requires a persisted audio master and word range')
       const master = persistedAudioMaster!.master
-      assertDomain(master.projectVersionId === projectVersionId && master.profileSnapshotId === profile.snapshot.id, 'VERSION_CONFLICT', 'Audio master does not belong to the exact project version and profile')
+      assertDomain(master.projectVersionId === projectVersionId && master.profileSnapshotId === profile.profileSnapshotId, 'VERSION_CONFLICT', 'Audio master does not belong to the exact project version and profile')
       const range = createSyntheticAvatarAudioRange({ master, startWordIndex: request.audioRange!.startWordIndex, endWordIndex: request.audioRange!.endWordIndex })
       assertDomain(range.durationMs >= 1_000, 'INVALID_ARGUMENT', 'Audio-avatar range is shorter than the provider-safe minimum')
       assertDomain(request.sourceArtifactIds.length === 1 && request.sourceArtifactIds[0] === master.audio.artifactId, 'INVALID_ARGUMENT', 'Audio-avatar source must be the exact canonical audio master artifact')
@@ -162,7 +162,7 @@ export function enqueueProviderJobService(dependencies: {
     const validUntil = [consent.expiresAt, ...decisions.flatMap((decision) => decision.validUntil ? [decision.validUntil] : [])].toSorted()[0]!
     const authorizationBody = Object.freeze({
       id: `provider-authorization-${requestFingerprint.slice(0, 24)}`,
-      profileSnapshotId: profile.snapshot.id,
+      profileSnapshotId: profile.profileSnapshotId,
       profileSnapshotHash: profile.snapshot.snapshotHash,
       artifactDecisions: Object.freeze(decisions.map((decision) => {
         assertDomain(decision.rightsSnapshotId && decision.rightsSnapshotHash && decision.validUntil, 'ASSET_RIGHTS_BLOCKED', 'Provider source authorization is incomplete')

@@ -261,6 +261,13 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-integration-profile-key',
     })
     assert.equal(registered.profile.snapshot.consent.evidenceSha256, hash('a'))
+    assert.equal(registered.profile.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(
+      (await client.v2SyntheticPresenterProfile.findUniqueOrThrow({
+        where: { id: registered.profile.profileSnapshotId },
+      })).id,
+      'synthetic-presenter-integration:v1',
+    )
 
     const rightsRepository = new PrismaAssetRightsRepository(client)
     for (const [index, artifactId] of [
@@ -382,6 +389,11 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     })
     assert.equal(audioMasterResult.replayed, false)
     assert.equal(audioMasterResult.value.master.audio.durationMs, 2_000)
+    assert.equal(audioMasterResult.value.master.profileSnapshotId, registered.profile.profileSnapshotId)
+    const persistedMasterRow = await client.v2SyntheticAudioMaster.findUniqueOrThrow({
+      where: { id: audioMasterResult.value.master.id },
+    })
+    assert.equal(persistedMasterRow.profileSnapshotId, 'synthetic-presenter-integration:v1')
     assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
     assert.equal((await audioMasterRepository.read({ workspaceId, projectId: project.project.id, audioMasterId: audioMasterResult.value.master.id }))?.master.masterHash, audioMasterResult.value.master.masterHash)
     let providerTransition = 0
@@ -415,6 +427,8 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-provider-job-integration-key',
     })
     assert.equal(enqueued.persisted.job.status, 'planned')
+    assert.equal(enqueued.persisted.job.authorization.profileSnapshotId, registered.profile.profileSnapshotId)
+    assert.equal(enqueued.persisted.job.authorization.profileSnapshotHash, registered.profile.snapshot.snapshotHash)
     const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
       capabilities: {
         operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],

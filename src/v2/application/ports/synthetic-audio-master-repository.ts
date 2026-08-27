@@ -17,6 +17,12 @@ export interface SyntheticAudioMasterRepository {
   }): Promise<Readonly<PersistedSyntheticAudioMaster> | null>
   create(input: {
     master: Readonly<SyntheticAudioMaster>
+    /**
+     * Canonical hash of the versioned presenter profile snapshot the master
+     * references. Implementations must re-verify the snapshot row (physical
+     * identity + hash + status) inside the commit transaction.
+     */
+    profileSnapshotHash: string
     requestFingerprint: string
     idempotencyKey: string
     authenticationAudit: Readonly<ApiAccessAuditContext>

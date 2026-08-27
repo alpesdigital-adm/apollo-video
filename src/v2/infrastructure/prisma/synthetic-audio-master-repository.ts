@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient, type V2SyntheticAudioMaster } from '../../..
 
 import type { PersistedSyntheticAudioMaster, SyntheticAudioMasterRepository } from '../../application/ports/synthetic-audio-master-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
-import { DomainError } from '../../domain/errors.ts'
+import { assertDomain, DomainError } from '../../domain/errors.ts'
 import { assertSyntheticAudioMaster, type SyntheticAudioMaster } from '../../domain/synthetic-audio-master.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 import { externalActorAuditData, hydrateExternalActorAudit } from './external-actor-audit.ts'
@@ -45,7 +45,18 @@ export class PrismaSyntheticAudioMasterRepository implements SyntheticAudioMaste
   async create(input: Parameters<SyntheticAudioMasterRepository['create']>[0]) {
     const master = input.master
     try {
-      const row = await this.client.v2SyntheticAudioMaster.create({ data: {
+      const row = await this.client.$transaction(async (transaction) => {
+        const profile = await transaction.v2SyntheticPresenterProfile.findFirst({
+          where: {
+            id: master.profileSnapshotId,
+            workspaceId: master.workspaceId,
+            profileHash: input.profileSnapshotHash,
+            status: 'active',
+          },
+          select: { id: true },
+        })
+        assertDomain(Boolean(profile), 'VERSION_CONFLICT', 'Synthetic presenter profile snapshot changed before audio master commit')
+        return transaction.v2SyntheticAudioMaster.create({ data: {
         id: master.id, workspaceId: master.workspaceId, projectId: master.projectId, projectVersionId: master.projectVersionId,
         profileSnapshotId: master.profileSnapshotId, schemaVersion: master.schemaVersion, sourceKind: master.source.kind,
         ttsProviderJobId: master.source.kind === 'tts' ? master.source.providerJobId : null,
@@ -56,6 +67,7 @@ export class PrismaSyntheticAudioMasterRepository implements SyntheticAudioMaste
         ...externalActorAuditData(input.authenticationAudit, master.workspaceId, input.authenticationAudit.clientId),
         createdAt: new Date(master.createdAt),
       } })
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
       return Object.freeze({ value: hydrate(row), replayed: false })
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

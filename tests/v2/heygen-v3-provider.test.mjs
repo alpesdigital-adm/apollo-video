@@ -84,9 +84,10 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
   let cleanupCalls = 0
   const profile = {
     snapshot: {
-      id: 'presenter-one:v1', snapshotHash: 'a'.repeat(64), status: 'active',
+      id: 'presenter-one', snapshotHash: 'a'.repeat(64), status: 'active',
       avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_authorized_123' },
     },
+    profileSnapshotId: 'presenter-one:v1',
   }
   const artifact = {
     id: 'audio-one', workspaceId: 'workspace-one', artifactKey: 'audio/source.wav', sha256,
@@ -108,7 +109,7 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
     id: 'provider-job-one', workspaceId: 'workspace-one', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
     input: { audioArtifactId: 'audio-one', durationMs: 2_000, aspectRatio: '9:16', audioMasterId: 'audio-master-one', audioMasterHash: 'c'.repeat(64), audioRange: { startMs: 0, endMs: 2_000, rangeHash: 'd'.repeat(64) } },
     authorization: {
-      profileSnapshotId: profile.snapshot.id, profileSnapshotHash: profile.snapshot.snapshotHash,
+      profileSnapshotId: profile.profileSnapshotId, profileSnapshotHash: profile.snapshot.snapshotHash,
       expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: 'audio-one', validUntil: '2030-01-01T00:00:00.000Z' }],
     },
   }
@@ -130,7 +131,7 @@ test('T-FR-100 audio-first materializer extracts the exact approved range with r
     execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3', '-c:a', 'pcm_s16le', sourcePath], { windowsHide: true })
     const sourceBytes = await readFile(sourcePath)
     const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex')
-    const profile = { snapshot: { id: 'presenter-range:v1', snapshotHash: 'a'.repeat(64), status: 'active', avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_range_123' } } }
+    const profile = { snapshot: { id: 'presenter-range', snapshotHash: 'a'.repeat(64), status: 'active', avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_range_123' } }, profileSnapshotId: 'presenter-range:v1' }
     const artifact = {
       id: 'audio-range-master', workspaceId: 'workspace-range', artifactKey: 'audio/range-master.wav', sha256: sourceSha256,
       byteSize: BigInt(sourceBytes.length), mediaType: 'audio', container: 'wav', status: 'available', lifecycleRevision: 1,
@@ -144,7 +145,7 @@ test('T-FR-100 audio-first materializer extracts the exact approved range with r
     const result = await materializer.materialize({ job: {
       id: 'provider-job-range', workspaceId: 'workspace-range', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
       input: { audioArtifactId: artifact.id, durationMs: 1_500, aspectRatio: '9:16', audioMasterId: 'audio-master-range', audioMasterHash: 'b'.repeat(64), audioRange: { startMs: 500, endMs: 2_000, rangeHash: 'c'.repeat(64) } },
-      authorization: { profileSnapshotId: profile.snapshot.id, profileSnapshotHash: profile.snapshot.snapshotHash, expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: artifact.id, validUntil: '2030-01-01T00:00:00.000Z' }] },
+      authorization: { profileSnapshotId: profile.profileSnapshotId, profileSnapshotHash: profile.snapshot.snapshotHash, expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: artifact.id, validUntil: '2030-01-01T00:00:00.000Z' }] },
     } })
     await writeFile(outputPath, result.audioBytes)
     const probe = JSON.parse(execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,sample_rate', '-of', 'json', outputPath], { encoding: 'utf8', windowsHide: true }))

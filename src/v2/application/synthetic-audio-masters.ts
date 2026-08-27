@@ -76,6 +76,11 @@ export function createSyntheticAudioMasterService(dependencies: {
     ])
     assertDomain(project?.project.currentVersionId === projectVersionId && project.version?.id === projectVersionId, 'VERSION_CONFLICT', 'Synthetic audio must target the current project version')
     if (!profile) throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic presenter profile was not found')
+    assertDomain(
+      request.profileSnapshotId === profile.profileSnapshotId || request.profileSnapshotId === profile.snapshot.id,
+      'VERSION_CONFLICT',
+      'Synthetic audio profile reference does not resolve to the persisted profile snapshot',
+    )
     assertDomain(audio?.status === 'available' && audio.mediaType === 'audio', 'ASSET_NOT_USABLE', 'Synthetic audio artifact is unavailable')
     assertDomain(alignmentEvidence?.status === 'available' && alignmentEvidence.mediaType === 'data', 'ASSET_NOT_USABLE', 'Word alignment evidence artifact is unavailable')
     const requiredOperations = request.source.kind === 'tts' ? ['tts', 'audio-avatar'] as const : ['audio-avatar'] as const
@@ -84,7 +89,13 @@ export function createSyntheticAudioMasterService(dependencies: {
     if (request.source.kind === 'tts') {
       const persisted = await dependencies.providerJobs.read({ workspaceId, projectId, jobId: id(request.source.providerJobId, 'providerJobId') })
       const job = persisted?.job
-      assertDomain(job?.status === 'approved' && job.operation === 'tts' && job.authorization.profileSnapshotId === profile.snapshot.id, 'PRECONDITION_REQUIRED', 'TTS provider job is not approved for this profile')
+      assertDomain(
+        job?.status === 'approved' && job.operation === 'tts' &&
+        job.authorization.profileSnapshotId === profile.profileSnapshotId &&
+        job.authorization.profileSnapshotHash === profile.snapshot.snapshotHash,
+        'PRECONDITION_REQUIRED',
+        'TTS provider job is not approved for this profile',
+      )
       assertDomain(job.resultArtifact?.artifactId === audio.id && job.resultArtifact.artifactSha256 === audio.sha256 && job.criticResultHash === request.approvalCriticHash, 'PERSISTENCE_CONFLICT', 'TTS result does not match approved audio evidence')
       assertDomain(job.input.text === request.source.text && job.input.locale === request.locale, 'VERSION_CONFLICT', 'TTS source text or locale changed after provider approval')
       assertDomain(Boolean(job.completedAt) && Date.parse(job.completedAt!) <= Date.parse(request.approvedAt), 'VERSION_CONFLICT', 'TTS approval time precedes provider completion')
@@ -95,13 +106,13 @@ export function createSyntheticAudioMasterService(dependencies: {
     assertDomain(decisions.every(({ outcome }) => outcome === 'allow'), 'ASSET_RIGHTS_BLOCKED', 'Synthetic audio or alignment evidence is not authorized')
     const master = createSyntheticAudioMaster({
       id: id(dependencies.createId(), 'createId()'), workspaceId, projectId, projectVersionId,
-      profileSnapshotId: profile.snapshot.id, source: request.source,
+      profileSnapshotId: profile.profileSnapshotId, source: request.source,
       audio: { artifactId: audio.id, artifactSha256: audio.sha256, durationMs: request.durationMs, locale: request.locale },
       alignmentEvidence: { artifactId: alignmentEvidence.id, artifactSha256: alignmentEvidence.sha256 },
       words: request.words, approvedAt: request.approvedAt, approvalCriticHash: request.approvalCriticHash,
       createdAt: now.toISOString(),
     })
-    return dependencies.repository.create({ master, requestFingerprint, idempotencyKey: request.idempotencyKey, authenticationAudit: audit })
+    return dependencies.repository.create({ master, profileSnapshotHash: profile.snapshot.snapshotHash, requestFingerprint, idempotencyKey: request.idempotencyKey, authenticationAudit: audit })
   }
 }
 
