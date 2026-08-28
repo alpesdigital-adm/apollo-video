@@ -433,7 +433,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       capabilities: {
         operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
         duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true,
-        supportsIdempotency: true, completion: 'polling', fetchedAt: now, expiresAt: '2030-01-01T00:00:00.000Z',
+        supportsIdempotency: true, supportsCancellation: false, completion: 'polling', fetchedAt: now, expiresAt: '2030-01-01T00:00:00.000Z',
       },
       estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 },
       statuses: ['queued', 'processing', 'completed'],

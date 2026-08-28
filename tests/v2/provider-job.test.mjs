@@ -93,7 +93,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
     capabilities: {
       operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
       duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true,
-      supportsIdempotency: true, completion: 'polling', fetchedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
+      supportsIdempotency: true, supportsCancellation: false, completion: 'polling', fetchedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
     },
     estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 },
     statuses: ['queued', 'processing', 'completed'],
@@ -119,6 +119,57 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
   assert.equal(JSON.stringify(stored).includes('ephemeral-only'), false)
 })
 
+test('T-FR-101 synchronous provider completes through the durable job without polling or retrieval', async () => {
+  let stored = { job: planned(), requestFingerprint: hash('e') }
+  let lease
+  const history = ['planned']
+  const jobs = {
+    async claimNext(input) {
+      if (lease || ['approved', 'rejected', 'failed'].includes(stored.job.status)) return null
+      lease = { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() }
+      return { ...stored, lease }
+    },
+    async advance(input) {
+      assert.equal(input.current.job.jobHash, stored.job.jobHash)
+      stored = { ...stored, job: input.next }
+      history.push(input.next.status)
+      lease = undefined
+      return stored
+    },
+  }
+  const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
+    capabilities: {
+      operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
+      duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: false,
+      supportsIdempotency: false, supportsCancellation: false, completion: 'synchronous', fetchedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
+    },
+    estimate: { currency: 'USD', costMinorUnits: 9, estimatedLatencyMs: 800 },
+    statuses: [],
+    result: { bytes: 'immediate-video', mediaType: 'video' },
+    completedAt: at(3),
+    observedCost: { currency: 'USD', costMinorUnits: 9 },
+  })
+  let tick = 0
+  let ingested = false
+  const runOnce = runProviderJobWorkerOnce({
+    jobs,
+    adapters: { get: ({ adapterId, adapterVersion }) => adapterId === adapter.id && adapterVersion === adapter.adapterVersion ? adapter : null },
+    materializer: { async materialize({ job }) { return job.input } },
+    ingestor: { async ingest({ providerResult }) { assert.equal(providerResult.bytes, 'immediate-video'); ingested = true; return { artifactId: 'ingested-sync-one', artifactSha256: hash('c'), mediaType: 'video', byteSize: 777 } } },
+    critic: { async evaluate({ artifact }) { assert.equal(ingested, true); assert.equal(artifact.artifactId, 'ingested-sync-one'); return { approved: true, resultHash: hash('d') } } },
+    clock: () => new Date(at(++tick)),
+    createLeaseToken: () => `provider-lease-sync-${tick}`,
+    createTransitionId: () => `provider-transition-sync-${tick}`,
+  })
+  for (let stage = 0; stage < 5; stage += 1) await runOnce('provider-worker-sync')
+  assert.deepEqual(history, ['planned', 'estimated', 'submitted', 'retrieving', 'evaluating', 'approved'])
+  assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit'])
+  assert.equal(stored.job.providerJobId, 'controlled-avatar:provider-job-key')
+  assert.equal(stored.job.providerStatus, 'completed')
+  assert.equal(stored.job.resultArtifact.artifactSha256, hash('c'))
+  assert.equal(stored.job.attempt, 1)
+})
+
 test('T-FR-101 provider failure is normalized without persisting upstream diagnostics', async () => {
   let stored = { job: transitionProviderJob(planned(), { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 1, estimatedLatencyMs: 1 } }), requestFingerprint: hash('e') }
   const jobs = {
@@ -128,7 +179,7 @@ test('T-FR-101 provider failure is normalized without persisting upstream diagno
   const runOnce = runProviderJobWorkerOnce({
     jobs,
     adapters: { get: () => ({
-      id: 'controlled-avatar', adapterVersion: 'version-1',
+      id: 'controlled-avatar', adapterVersion: 'version-1', configHash: hash('g'),
       async submit() { const error = new Error('secret upstream response must never persist'); error.code = 'UPSTREAM_DENIED'; error.retryable = true; throw error },
     }) },
     materializer: { async materialize({ job }) { return job.input } },

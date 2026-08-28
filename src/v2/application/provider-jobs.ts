@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { ProviderAdapterError } from '../domain/provider-contract.ts'
 import {
   createProviderJob,
   normalizeProviderStatus,
@@ -212,6 +213,14 @@ export function readProviderJobService(dependencies: { jobs: ProviderJobReposito
 }
 
 function normalizedFailure(error: unknown) {
+  if (error instanceof ProviderAdapterError) {
+    return Object.freeze({
+      code: error.code,
+      message: 'Provider operation failed',
+      retryable: error.retryable === true,
+      ...(Number.isSafeInteger(error.retryAfterMs) ? { retryAfterMs: error.retryAfterMs } : {}),
+    })
+  }
   if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
     return Object.freeze({
       code: error.code,
@@ -294,28 +303,53 @@ export function runProviderJobWorkerOnce(dependencies: {
         assertDomain(capabilities.operations.includes(job.operation), 'PRECONDITION_REQUIRED', 'Provider operation is unsupported')
         assertDomain(!locale || !capabilities.locales || capabilities.locales.includes(locale), 'PRECONDITION_REQUIRED', 'Provider locale is unsupported')
         assertDomain(!durationMs || durationMs / 1_000 >= capabilities.duration.minSeconds && durationMs / 1_000 <= capabilities.duration.maxSeconds, 'PRECONDITION_REQUIRED', 'Provider duration is unsupported')
+        if (capabilities.completion !== 'synchronous') {
+          assertDomain(typeof adapter.getStatus === 'function' && typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Asynchronous provider adapter must implement polling and retrieval')
+        }
+        if (capabilities.supportsCancellation) {
+          assertDomain(typeof adapter.cancel === 'function', 'PRECONDITION_REQUIRED', 'Provider declares cancellation support without an implementation')
+        }
+        if (capabilities.completion === 'webhook' || capabilities.completion === 'both') {
+          assertDomain(typeof adapter.verifyWebhook === 'function', 'PRECONDITION_REQUIRED', 'Provider declares webhook completion without verification')
+        }
         next = transitionProviderJob(job, { status: 'estimated', occurredAt: now.toISOString(), estimate: await adapter.estimate(job.input) })
       } else if (job.status === 'estimated') {
         const submissionInput = await dependencies.materializer.materialize({ job, signal })
-        const submitted = await adapter.submit(submissionInput, {
+        const submission = await adapter.submit(submissionInput, {
           workspaceId: job.workspaceId,
           projectVersionId: job.originProjectVersionId,
           operationId: job.id,
           idempotencyKey: job.idempotencyKey,
           signal,
         })
-        next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submitted.providerJobId })
-      } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
-        const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
-        const status = normalizeProviderStatus(providerStatus)
-        if (status === 'failed') {
-          next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus, normalizedError: { code: 'PROVIDER_REPORTED_FAILURE', message: 'Provider reported a terminal failure', retryable: false } })
+        if (submission.kind === 'completed') {
+          assertDomain(Number.isFinite(Date.parse(submission.bundle.completedAt)), 'INVALID_ARGUMENT', 'Provider result bundle completedAt is invalid')
+          const artifact = await dependencies.ingestor.ingest({ job, providerResult: submission.bundle.result, signal })
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.bundle.providerJobRef, providerStatus: 'completed', resultArtifact: artifact })
         } else {
-          next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus })
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.providerJobId })
+        }
+      } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
+        if (job.providerStatus === 'completed') {
+          assertDomain(Boolean(job.resultArtifact), 'PERSISTENCE_CONFLICT', 'Synchronously completed provider job lost its ingested result artifact')
+          next = transitionProviderJob(job, { status: 'retrieving', occurredAt: now.toISOString() })
+        } else {
+          assertDomain(typeof adapter.getStatus === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter cannot be polled')
+          const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
+          const status = normalizeProviderStatus(providerStatus)
+          if (status === 'failed') {
+            next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus, normalizedError: { code: 'PROVIDER_REPORTED_FAILURE', message: 'Provider reported a terminal failure', retryable: false } })
+          } else {
+            next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus })
+          }
         }
       } else if (job.status === 'retrieving') {
-        const providerResult = await adapter.retrieve(job.providerJobId!, signal)
-        const artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
+        let artifact = job.resultArtifact
+        if (!artifact) {
+          assertDomain(typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter has no retrieval path')
+          const providerResult = await adapter.retrieve(job.providerJobId!, signal)
+          artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
+        }
         next = transitionProviderJob(job, { status: 'evaluating', occurredAt: now.toISOString(), resultArtifact: artifact })
       } else if (job.status === 'evaluating') {
         const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact! })

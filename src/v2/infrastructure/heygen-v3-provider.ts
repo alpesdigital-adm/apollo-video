@@ -6,8 +6,11 @@ import type {
   ProviderEstimate,
   ProviderStatus,
   ProviderSubmitContext,
+  ProviderSubmissionResult,
 } from '../application/ports/async-media-provider.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
+import { ProviderAdapterError } from '../domain/provider-contract.ts'
 
 const ADAPTER_ID = 'heygen-v3'
 const ADAPTER_VERSION = '3.0.0'
@@ -24,17 +27,10 @@ export interface HeyGenV3ProviderResult {
   mediaType: 'video'
 }
 
-export class HeyGenProviderError extends Error {
-  readonly code: string
-  readonly retryable: boolean
-  readonly retryAfterMs?: number
-
+export class HeyGenProviderError extends ProviderAdapterError {
   constructor(code: string, retryable: boolean, retryAfterMs?: number) {
-    super('HeyGen provider operation failed')
+    super(code, retryable, retryAfterMs, 'HeyGen provider operation failed')
     this.name = 'HeyGenProviderError'
-    this.code = code
-    this.retryable = retryable
-    this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -118,6 +114,7 @@ export class HeyGenV3AsyncMediaProviderAdapter
 implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3ProviderResult> {
   readonly id = ADAPTER_ID
   readonly adapterVersion = ADAPTER_VERSION
+  readonly configHash: string
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly fetch: Fetch
@@ -145,6 +142,16 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     this.clock = input.clock ?? (() => new Date())
     this.costMinorUnitsPerMinute = input.costMinorUnitsPerMinute
     this.requestTimeoutMs = requestTimeoutMs
+    // Runtime identity of this adapter instance: versioned adapter code +
+    // non-secret configuration. The API key is deliberately excluded so the
+    // hash can be persisted in artifact lineage.
+    this.configHash = calculateCanonicalHash({
+      adapterId: ADAPTER_ID,
+      adapterVersion: ADAPTER_VERSION,
+      baseUrl: this.baseUrl,
+      costMinorUnitsPerMinute: this.costMinorUnitsPerMinute,
+      requestTimeoutMs: this.requestTimeoutMs,
+    })
   }
 
   async getCapabilities(): Promise<Readonly<ProviderCapabilities>> {
@@ -159,6 +166,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
       identityReference: 'profile-id' as const,
       supportsSeed: false,
       supportsIdempotency: true,
+      supportsCancellation: false,
       completion: 'polling' as const,
       fetchedAt: fetchedAt.toISOString(),
       expiresAt: new Date(fetchedAt.getTime() + 15 * 60_000).toISOString(),
@@ -177,7 +185,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     })
   }
 
-  async submit(input: Readonly<Record<string, unknown>>, context: Readonly<ProviderSubmitContext>) {
+  async submit(input: Readonly<Record<string, unknown>>, context: Readonly<ProviderSubmitContext>): Promise<Readonly<ProviderSubmissionResult<HeyGenV3ProviderResult>>> {
     const value = materializedInput(input)
     const bytes = value.audioBytes
     if (bytes.byteLength !== value.audioByteSize || createHash('sha256').update(bytes).digest('hex') !== value.audioSha256) {
@@ -201,7 +209,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
       }),
     }, context.signal)
     const data = object(response.data, 'data')
-    return Object.freeze({ providerJobId: identifier(data.video_id, 'video_id') })
+    return Object.freeze({ kind: 'accepted' as const, providerJobId: identifier(data.video_id, 'video_id') })
   }
 
   async getStatus(providerJobId: string, signal?: AbortSignal): Promise<ProviderStatus> {
