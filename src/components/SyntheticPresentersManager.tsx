@@ -1,7 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+
+import AppShellNavigation from './AppShellNavigation'
+import LogoutButton from './LogoutButton'
 
 interface ApiError { code: string; message: string }
 
@@ -317,15 +321,27 @@ export default function SyntheticPresentersManager() {
     }
   }
 
+  const shell = (content: React.ReactNode) => (
+    <main className="min-h-screen bg-[#070707] text-[#f4f1ea]">
+      <div className="mx-auto flex min-h-screen max-w-[1720px]">
+        <aside className="sticky top-0 hidden h-screen w-[236px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0a0a0a] px-5 py-6 lg:flex">
+          <Link className="flex items-center gap-3 px-2" href="/"><span className="grid h-9 w-9 place-items-center rounded-[10px] border border-[#e0af37]/35 bg-[#e0af37]/10 text-sm font-black text-[#efc75f]">A</span><span className="text-sm font-bold tracking-[0.22em] text-white">APOLLO</span></Link>
+          <AppShellNavigation active="presenters" /><div className="mt-auto"><LogoutButton /></div>
+        </aside>
+        <section className="min-w-0 flex-1 px-5 py-8 sm:px-8 xl:px-12">{content}</section>
+      </div>
+    </main>
+  )
+
   if (state === 'loading') {
-    return <p role="status" data-testid="presenters-loading">Carregando apresentadores sintéticos…</p>
+    return shell(<p role="status" data-testid="presenters-loading">Carregando apresentadores sintéticos…</p>)
   }
   if (state === 'error') {
-    return (
+    return shell(
       <div role="alert" data-testid="presenters-error">
         <p>Falha ao carregar os apresentadores: {loadError}</p>
         <button type="button" onClick={() => window.location.reload()}>Tentar novamente</button>
-      </div>
+      </div>,
     )
   }
 
@@ -336,8 +352,8 @@ export default function SyntheticPresentersManager() {
     </label>
   )
 
-  return (
-    <main data-testid="presenters-manager" style={{ display: 'grid', gap: 24, gridTemplateColumns: 'minmax(280px, 380px) 1fr', alignItems: 'start' }}>
+  return shell(
+    <div data-testid="presenters-manager" style={{ display: 'grid', gap: 24, gridTemplateColumns: 'minmax(280px, 380px) 1fr', alignItems: 'start' }}>
       <section aria-label="Apresentadores sintéticos">
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <h1 style={{ fontSize: 20, margin: 0 }}>Apresentadores sintéticos</h1>
@@ -516,6 +532,6 @@ export default function SyntheticPresentersManager() {
           </article>
         )}
       </section>
-    </main>
+    </div>,
   )
 }

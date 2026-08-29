@@ -1586,7 +1586,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:139",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:143",
       "capabilityId": "apollo.synthetic-presenters.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters",
@@ -1605,7 +1605,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:149",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:153",
       "capabilityId": "apollo.sessions.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/session",
@@ -1620,7 +1620,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:178",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:182",
       "capabilityId": "apollo.synthetic-presenters.get",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}",
@@ -1639,7 +1639,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:219",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:223",
       "capabilityId": "apollo.synthetic-presenters.register",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters",
@@ -1659,7 +1659,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:254",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:258",
       "capabilityId": "apollo.synthetic-presenters.attach-consent-proof",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/consent-proofs",
@@ -1680,7 +1680,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:281",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:285",
       "capabilityId": "apollo.synthetic-presenters.activate",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/activation",
@@ -1701,7 +1701,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:292",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:296",
       "capabilityId": "apollo.synthetic-presenters.deactivate",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/deactivation",
@@ -1722,7 +1722,7 @@
       ]
     },
     {
-      "uiAction": "src/components/SyntheticPresentersManager.tsx:307",
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:311",
       "capabilityId": "apollo.synthetic-presenters.evaluate-eligibility",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/eligibility-evaluations",

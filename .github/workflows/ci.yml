@@ -386,6 +386,9 @@ jobs:
           APOLLO_V2_S3_BUCKET: apollo-blockplan-${{ github.run_id }}-${{ github.run_attempt }}
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-block-plan-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Install locked renderer dependencies for the production build
+        run: npm ci --prefix remotion
+
       - name: Build production application for the browser journey
         run: npm run build
 
