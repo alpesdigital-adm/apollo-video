@@ -259,7 +259,13 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
 
   async ingest(input: { job: Readonly<ProviderJob>; providerResult: unknown; signal?: AbortSignal }) {
     const result = ttsProviderResult(input.providerResult)
-    assertDomain(result.requestId === input.job.providerJobId, 'PERSISTENCE_CONFLICT', 'TTS result identity does not match the durable job')
+    // Synchronous completion ingests inside the estimated→submitted tick, so
+    // the durable job has no providerJobId yet; the worker seals the same
+    // bundle.providerJobRef (= requestId) into that transition right after.
+    // When the job already carries a provider identity, it must match.
+    if (input.job.providerJobId !== undefined) {
+      assertDomain(result.requestId === input.job.providerJobId, 'PERSISTENCE_CONFLICT', 'TTS result identity does not match the durable job')
+    }
     const jobScriptHash = typeof input.job.input.scriptHash === 'string' ? input.job.input.scriptHash : undefined
     if (jobScriptHash !== undefined) {
       assertDomain(result.scriptHash === jobScriptHash, 'PERSISTENCE_CONFLICT', 'TTS result script hash does not match the approved job input')
@@ -314,8 +320,12 @@ export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
       const alignmentArtifactId = `tts-alignment-${identityHash.slice(0, 32)}`
       const audioManifest = createMediaArtifactManifestV2({
         artifactKey: storedAudio.key, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer,
-        recipe: { id: 'synthetic-tts-result', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, inputHash: input.job.inputHash, authorizationHash: input.job.authorization.authorizationHash, probedDurationSeconds } },
+        recipe: { id: 'synthetic-tts-result', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, inputHash: input.job.inputHash, authorizationHash: input.job.authorization.authorizationHash } },
         sources: [],
+        // Audio has no frame geometry; the manifest probe carries only the
+        // real ffprobe duration. validateProbe checks the fields present, so
+        // this stays truthful instead of fabricating width/height/fps.
+        probe: { duration: probedDurationSeconds } as unknown as { width: number; height: number; duration: number; fps: number },
       })
       const alignmentManifest = createMediaArtifactManifestV2({
         artifactKey: storedAlignment.key, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json',
