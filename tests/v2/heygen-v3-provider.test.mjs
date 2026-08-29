@@ -35,7 +35,11 @@ test('T-FR-101 HeyGen v3 adapter normalizes submit, polling and retrieval withou
     },
   })
   const capabilities = await adapter.getCapabilities()
-  assert.deepEqual(capabilities.operations, ['audio-avatar', 'lip-sync'])
+  assert.deepEqual(capabilities.operations, ['audio-avatar'])
+  assert.equal(capabilities.completion, 'polling')
+  assert.equal(capabilities.supportsCancellation, false)
+  assert.equal(typeof adapter.cancel, 'undefined')
+  assert.equal(typeof adapter.verifyWebhook, 'undefined')
   assert.deepEqual(await adapter.estimate({ durationMs: 61_000 }), { currency: 'USD', costMinorUnits: 300, estimatedLatencyMs: 152_500 })
   const submitted = await adapter.submit({ avatarId: 'avatar_123', audioBytes: new Uint8Array(audio), audioSha256: createHash('sha256').update(audio).digest('hex'), audioByteSize: audio.length, audioContainer: 'wav', durationMs: 61_000, aspectRatio: '9:16' }, {
     workspaceId: 'workspace-one', projectVersionId: 'version-one', operationId: 'operation-one', idempotencyKey: 'apollo-idempotency-one',

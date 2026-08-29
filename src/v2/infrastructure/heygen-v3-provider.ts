@@ -12,6 +12,26 @@ import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
 import { ProviderAdapterError } from '../domain/provider-contract.ts'
 
+/*
+ * HeyGen v3 adapter. Facts verified against the official documentation on
+ * 2026-08-27 (https://developers.heygen.com/reference/create-video.md,
+ * .../upload-asset.md, .../get-video.md):
+ * - POST /v3/assets (multipart, max 32MB, mp3/wav supported) → data.asset_id;
+ *   POST /v3/videos (type avatar + audio_asset_id for lip-synced speech,
+ *   mutually exclusive with script) → data.video_id; GET /v3/videos/{id} →
+ *   data.status + data.video_url. Auth: X-Api-Key header.
+ * - The official Idempotency-Key request header exists on both mutations,
+ *   so supportsIdempotency: true is truthful.
+ * - VideoStatus is exactly pending | processing | completed | failed; any
+ *   other value fails closed as PROVIDER_STATUS_UNKNOWN.
+ * - There is no documented cancellation of a processing video (Delete Video
+ *   destroys finished artifacts), so supportsCancellation stays false and no
+ *   cancel() method exists.
+ * - Webhooks exist upstream, but this adapter does not implement webhook
+ *   verification, so completion is declared as 'polling' only.
+ * - Lip-sync is a separate official product (Create Lipsync); this adapter
+ *   only implements audio-avatar and its capabilities say exactly that.
+ */
 const ADAPTER_ID = 'heygen-v3'
 const ADAPTER_VERSION = '3.0.0'
 const MAX_RESPONSE_BYTES = 1024 * 1024
@@ -78,11 +98,12 @@ async function responseBody(response: Response): Promise<Record<string, unknown>
 }
 
 function statusFromProvider(value: unknown): ProviderStatus {
-  if (value === 'pending' || value === 'waiting' || value === 'queued') return 'queued'
+  // Official VideoStatus enum only; anything else fails closed instead of
+  // being optimistically normalized.
+  if (value === 'pending') return 'queued'
   if (value === 'processing') return 'processing'
   if (value === 'completed') return 'completed'
   if (value === 'failed') return 'failed'
-  if (value === 'cancelled' || value === 'canceled') return 'cancelled'
   throw new HeyGenProviderError('PROVIDER_STATUS_UNKNOWN', false)
 }
 
@@ -158,7 +179,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     const fetchedAt = this.clock()
     if (!Number.isFinite(fetchedAt.getTime())) throw new HeyGenProviderError('PROVIDER_CLOCK_INVALID', false)
     return Object.freeze({
-      operations: Object.freeze(['audio-avatar', 'lip-sync'] as const),
+      operations: Object.freeze(['audio-avatar'] as const),
       inputFormats: Object.freeze(['mp3', 'wav']),
       outputFormats: Object.freeze(['mp4']),
       aspectRatios: Object.freeze(['9:16', '16:9']),
