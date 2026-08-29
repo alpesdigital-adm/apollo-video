@@ -383,6 +383,41 @@ jobs:
           APOLLO_V2_S3_BUCKET: apollo-blockplan-${{ github.run_id }}-${{ github.run_attempt }}
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-block-plan-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Build production application for the browser journey
+        run: npm run build
+
+      - name: Run presenter lifecycle browser journey against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:presenter-lifecycle
+        env:
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          # Exclusive per-run bucket: the test creates it, enables versioning,
+          # proves zero orphan objects and deletes it afterwards.
+          APOLLO_V2_S3_BUCKET: apollo-presenter-${{ github.run_id }}-${{ github.run_attempt }}
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-presenter-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan presenter journey backends and objects
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-presenter-ci'")"
+            if test "$backends" = 0; then break; fi
+            sleep 1
+          done
+          test "$backends" = 0
+          if $compose exec -T minio mc ls "local/apollo-presenter-${{ github.run_id }}-${{ github.run_attempt }}" >/dev/null 2>&1; then
+            echo "run-exclusive presenter bucket still exists after cleanup" >&2
+            exit 1
+          fi
+
       - name: Verify zero orphan block plan backends and objects
         if: always()
         run: |
