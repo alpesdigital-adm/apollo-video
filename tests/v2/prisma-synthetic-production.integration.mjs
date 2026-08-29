@@ -24,6 +24,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     enqueueProviderJobService,
     runProviderJobWorkerOnce,
   } = await import('../../src/v2/application/provider-jobs.ts')
+  const { createSyntheticAudioMasterService } = await import('../../src/v2/application/synthetic-audio-masters.ts')
   const {
     assetRightsRevision,
     createAssetRightsSnapshot,
@@ -54,6 +55,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const { PrismaSyntheticProductionRepository } = await import(
     '../../src/v2/infrastructure/prisma/synthetic-production-repository.ts'
   )
+  const { PrismaSyntheticAudioMasterRepository } = await import(
+    '../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts'
+  )
   const { PrismaStoryPlanRepository } = await import(
     '../../src/v2/infrastructure/prisma/story-plan-repository.ts'
   )
@@ -72,7 +76,9 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const credentialId = 'synthetic-production-integration-credential'
 
   const cleanup = async () => {
+    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
@@ -197,6 +203,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const artifacts = [
       ['synthetic-consent-evidence', 'data', 'json', 'a'],
       ['synthetic-audio-master', 'audio', 'wav', 'b'],
+      ['synthetic-audio-alignment', 'data', 'json', '6'],
       ['synthetic-avatar-block-one', 'video', 'mp4', 'c'],
       ['synthetic-avatar-block-two', 'video', 'mp4', 'd'],
     ]
@@ -255,10 +262,18 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-integration-profile-key',
     })
     assert.equal(registered.profile.snapshot.consent.evidenceSha256, hash('a'))
+    assert.equal(registered.profile.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(
+      (await client.v2SyntheticPresenterProfile.findUniqueOrThrow({
+        where: { id: registered.profile.profileSnapshotId },
+      })).id,
+      'synthetic-presenter-integration:v1',
+    )
 
     const rightsRepository = new PrismaAssetRightsRepository(client)
     for (const [index, artifactId] of [
       'synthetic-audio-master',
+      'synthetic-audio-alignment',
       'synthetic-avatar-block-one',
       'synthetic-avatar-block-two',
     ].entries()) {
@@ -342,11 +357,52 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     }), 1)
 
     const providerRepository = new PrismaProviderJobRepository(client)
+    const audioMasterRepository = new PrismaSyntheticAudioMasterRepository(client)
+    const audioMasterResult = await createSyntheticAudioMasterService({
+      repository: audioMasterRepository,
+      projects: new PrismaProjectWorkspaceQueryRepository(client),
+      profiles: syntheticRepository,
+      providerJobs: providerRepository,
+      artifacts: artifactRepository,
+      rights: rightsRepository,
+      clock: () => new Date(now),
+      createId: () => 'synthetic-approved-audio-master-integration',
+    })({
+      workspaceId,
+      projectId: project.project.id,
+      projectVersionId: project.version.id,
+      profileSnapshotId: registered.profile.snapshot.id,
+      source: { kind: 'uploaded' },
+      audioArtifactId: 'synthetic-audio-master',
+      alignmentEvidenceArtifactId: 'synthetic-audio-alignment',
+      durationMs: 2_000,
+      locale: 'pt-BR',
+      words: [
+        { word: 'Olá', startMs: 0, endMs: 1_000, confidence: 0.99 },
+        { word: 'mundo', startMs: 1_000, endMs: 2_000, confidence: 0.98 },
+      ],
+      approvedAt: now,
+      approvalCriticHash: hash('7'),
+      use: 'ads',
+      market: 'BRA',
+      actor,
+      idempotencyKey: 'synthetic-audio-master-integration-key',
+    })
+    assert.equal(audioMasterResult.replayed, false)
+    assert.equal(audioMasterResult.value.master.audio.durationMs, 2_000)
+    assert.equal(audioMasterResult.value.master.profileSnapshotId, registered.profile.profileSnapshotId)
+    const persistedMasterRow = await client.v2SyntheticAudioMaster.findUniqueOrThrow({
+      where: { id: audioMasterResult.value.master.id },
+    })
+    assert.equal(persistedMasterRow.profileSnapshotId, 'synthetic-presenter-integration:v1')
+    assert.equal(await client.v2SyntheticAudioMaster.count({ where: { workspaceId } }), 1)
+    assert.equal((await audioMasterRepository.read({ workspaceId, projectId: project.project.id, audioMasterId: audioMasterResult.value.master.id }))?.master.masterHash, audioMasterResult.value.master.masterHash)
     let providerTransition = 0
     const enqueued = await enqueueProviderJobService({
       jobs: providerRepository,
       adapters: { get: ({ adapterId, adapterVersion }) => adapterId === 'controlled-avatar' && adapterVersion === 'version-1' ? {} : null },
       profiles: syntheticRepository,
+      audioMasters: audioMasterRepository,
       projects: new PrismaProjectWorkspaceQueryRepository(client),
       artifacts: artifactRepository,
       rights: rightsRepository,
@@ -361,8 +417,10 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       operation: 'audio-avatar',
       adapterId: 'controlled-avatar',
       adapterVersion: 'version-1',
-      providerInput: { audioArtifactId: 'synthetic-audio-master', durationMs: 2_000, locale: 'pt-BR' },
+      providerInput: { aspectRatio: '9:16' },
       sourceArtifactIds: ['synthetic-audio-master'],
+      audioMasterId: audioMasterResult.value.master.id,
+      audioRange: { startWordIndex: 0, endWordIndex: 2 },
       use: 'ads',
       market: 'BRA',
       locale: 'pt-BR',
@@ -370,11 +428,13 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
       idempotencyKey: 'synthetic-provider-job-integration-key',
     })
     assert.equal(enqueued.persisted.job.status, 'planned')
+    assert.equal(enqueued.persisted.job.authorization.profileSnapshotId, registered.profile.profileSnapshotId)
+    assert.equal(enqueued.persisted.job.authorization.profileSnapshotHash, registered.profile.snapshot.snapshotHash)
     const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
       capabilities: {
         operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
         duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true,
-        supportsIdempotency: true, completion: 'polling', fetchedAt: now, expiresAt: '2030-01-01T00:00:00.000Z',
+        supportsIdempotency: true, supportsCancellation: false, completion: 'polling', fetchedAt: now, expiresAt: '2030-01-01T00:00:00.000Z',
       },
       estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 },
       statuses: ['queued', 'processing', 'completed'],
@@ -406,10 +466,53 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const completedProvider = await providerRepository.read({
       workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id,
     })
-    assert.equal(completedProvider?.job.status, 'approved')
+    assert.equal(
+      completedProvider?.job.status,
+      'approved',
+      `provider job failed: ${JSON.stringify(completedProvider?.job.normalizedError ?? null)}`,
+    )
     assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
-    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 9)
     assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
+
+    const { PrismaProviderResultArtifactRepository } = await import(
+      '../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts'
+    )
+    const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
+    const ledgerBase = {
+      workspaceId,
+      projectId: project.project.id,
+      jobId: enqueued.persisted.job.id,
+      schemaVersion: 'provider-result-artifact/v1',
+      providerJobRef: completedProvider.job.providerJobId,
+      adapterId: 'controlled-avatar',
+      adapterVersion: 'version-1',
+      adapterConfigHash: hash('a'),
+      inputHash: completedProvider.job.inputHash,
+      authorizationHash: completedProvider.job.authorization.authorizationHash,
+      completedAt: now,
+      createdAt: now,
+    }
+    const ledgerRecords = [
+      { ...ledgerBase, id: 'provider-result-ledger-video', role: 'primary-video', artifactId: 'synthetic-provider-output', artifactSha256: hash('8'), byteSize: 8_192, mediaType: 'video', container: 'mp4', observedCost: { currency: 'USD', costMinorUnits: 12 } },
+      { ...ledgerBase, id: 'provider-result-ledger-alignment', role: 'alignment-evidence', artifactId: 'synthetic-audio-alignment', artifactSha256: hash('6'), byteSize: 512, mediaType: 'data', container: 'json' },
+    ]
+    const ledgerFirst = await resultArtifactRepository.persistOrReplay({ records: ledgerRecords })
+    assert.equal(ledgerFirst.replayed, false)
+    assert.equal(ledgerFirst.records.length, 2)
+    const ledgerReplay = await resultArtifactRepository.persistOrReplay({ records: ledgerRecords })
+    assert.equal(ledgerReplay.replayed, true)
+    assert.equal(await client.v2ProviderResultArtifact.count({ where: { workspaceId } }), 2)
+    await assert.rejects(
+      resultArtifactRepository.persistOrReplay({
+        records: [{ ...ledgerRecords[0], artifactSha256: hash('9') }, ledgerRecords[1]],
+      }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+    )
+    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id })
+    assert.deepEqual(ledgerRows.map(({ role }) => role), ['alignment-evidence', 'primary-video'])
+    assert.equal(ledgerRows[1].observedCost.costMinorUnits, 12)
+    assert.equal(ledgerRows[1].providerJobRef, completedProvider.job.providerJobId)
 
     const original = await client.v2SyntheticProductionRun.findUniqueOrThrow({
       where: { id: created.run.plan.id },

@@ -6,9 +6,34 @@ import type {
   ProviderEstimate,
   ProviderStatus,
   ProviderSubmitContext,
+  ProviderSubmissionResult,
 } from '../application/ports/async-media-provider.ts'
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { assertDomain } from '../domain/errors.ts'
+import { ProviderAdapterError } from '../domain/provider-contract.ts'
 
+/*
+ * HeyGen v3 adapter. Facts verified against the official documentation on
+ * 2026-08-27 (https://developers.heygen.com/reference/create-video.md,
+ * .../upload-asset.md, .../get-video.md):
+ * - POST /v3/assets (multipart, max 32MB, mp3/wav supported) → data.asset_id;
+ *   POST /v3/videos (type avatar + audio_asset_id for lip-synced speech,
+ *   mutually exclusive with script) → data.video_id; GET /v3/videos/{id} →
+ *   data.status + data.video_url. Auth: X-Api-Key header.
+ * - The official reference does not document Idempotency-Key for either
+ *   mutation. Apollo therefore treats both effects as non-idempotent and
+ *   relies on its persisted effect ledger instead of claiming an upstream
+ *   guarantee that the provider has not published.
+ * - VideoStatus is exactly pending | processing | completed | failed; any
+ *   other value fails closed as PROVIDER_STATUS_UNKNOWN.
+ * - There is no documented cancellation of a processing video (Delete Video
+ *   destroys finished artifacts), so supportsCancellation stays false and no
+ *   cancel() method exists.
+ * - Webhooks exist upstream, but this adapter does not implement webhook
+ *   verification, so completion is declared as 'polling' only.
+ * - Lip-sync is a separate official product (Create Lipsync); this adapter
+ *   only implements audio-avatar and its capabilities say exactly that.
+ */
 const ADAPTER_ID = 'heygen-v3'
 const ADAPTER_VERSION = '3.0.0'
 const MAX_RESPONSE_BYTES = 1024 * 1024
@@ -24,17 +49,10 @@ export interface HeyGenV3ProviderResult {
   mediaType: 'video'
 }
 
-export class HeyGenProviderError extends Error {
-  readonly code: string
-  readonly retryable: boolean
-  readonly retryAfterMs?: number
-
+export class HeyGenProviderError extends ProviderAdapterError {
   constructor(code: string, retryable: boolean, retryAfterMs?: number) {
-    super('HeyGen provider operation failed')
+    super(code, retryable, retryAfterMs, 'HeyGen provider operation failed')
     this.name = 'HeyGenProviderError'
-    this.code = code
-    this.retryable = retryable
-    this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -82,11 +100,12 @@ async function responseBody(response: Response): Promise<Record<string, unknown>
 }
 
 function statusFromProvider(value: unknown): ProviderStatus {
-  if (value === 'pending' || value === 'waiting' || value === 'queued') return 'queued'
+  // Official VideoStatus enum only; anything else fails closed instead of
+  // being optimistically normalized.
+  if (value === 'pending') return 'queued'
   if (value === 'processing') return 'processing'
   if (value === 'completed') return 'completed'
   if (value === 'failed') return 'failed'
-  if (value === 'cancelled' || value === 'canceled') return 'cancelled'
   throw new HeyGenProviderError('PROVIDER_STATUS_UNKNOWN', false)
 }
 
@@ -110,14 +129,11 @@ function materializedInput(value: Readonly<Record<string, unknown>>) {
   return Object.freeze({ avatarId, audioBytes: value.audioBytes, audioSha256: value.audioSha256, audioByteSize, audioContainer: value.audioContainer, durationMs, aspectRatio })
 }
 
-function mutationKey(value: string, stage: 'asset' | 'video'): string {
-  return `apollo:${stage}:${createHash('sha256').update(value).digest('hex')}`
-}
-
 export class HeyGenV3AsyncMediaProviderAdapter
 implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3ProviderResult> {
   readonly id = ADAPTER_ID
   readonly adapterVersion = ADAPTER_VERSION
+  readonly configHash: string
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly fetch: Fetch
@@ -145,20 +161,31 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     this.clock = input.clock ?? (() => new Date())
     this.costMinorUnitsPerMinute = input.costMinorUnitsPerMinute
     this.requestTimeoutMs = requestTimeoutMs
+    // Runtime identity of this adapter instance: versioned adapter code +
+    // non-secret configuration. The API key is deliberately excluded so the
+    // hash can be persisted in artifact lineage.
+    this.configHash = calculateCanonicalHash({
+      adapterId: ADAPTER_ID,
+      adapterVersion: ADAPTER_VERSION,
+      baseUrl: this.baseUrl,
+      costMinorUnitsPerMinute: this.costMinorUnitsPerMinute,
+      requestTimeoutMs: this.requestTimeoutMs,
+    })
   }
 
   async getCapabilities(): Promise<Readonly<ProviderCapabilities>> {
     const fetchedAt = this.clock()
     if (!Number.isFinite(fetchedAt.getTime())) throw new HeyGenProviderError('PROVIDER_CLOCK_INVALID', false)
     return Object.freeze({
-      operations: Object.freeze(['audio-avatar', 'lip-sync'] as const),
+      operations: Object.freeze(['audio-avatar'] as const),
       inputFormats: Object.freeze(['mp3', 'wav']),
       outputFormats: Object.freeze(['mp4']),
       aspectRatios: Object.freeze(['9:16', '16:9']),
       duration: Object.freeze({ minSeconds: 1, maxSeconds: 1_800 }),
       identityReference: 'profile-id' as const,
       supportsSeed: false,
-      supportsIdempotency: true,
+      supportsIdempotency: false,
+      supportsCancellation: false,
       completion: 'polling' as const,
       fetchedAt: fetchedAt.toISOString(),
       expiresAt: new Date(fetchedAt.getTime() + 15 * 60_000).toISOString(),
@@ -177,7 +204,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     })
   }
 
-  async submit(input: Readonly<Record<string, unknown>>, context: Readonly<ProviderSubmitContext>) {
+  async submit(input: Readonly<Record<string, unknown>>, context: Readonly<ProviderSubmitContext>): Promise<Readonly<ProviderSubmissionResult<HeyGenV3ProviderResult>>> {
     const value = materializedInput(input)
     const bytes = value.audioBytes
     if (bytes.byteLength !== value.audioByteSize || createHash('sha256').update(bytes).digest('hex') !== value.audioSha256) {
@@ -188,20 +215,19 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     form.append('file', new Blob([new Uint8Array(bytes)], { type: mediaType }), `apollo-${value.audioSha256}.${value.audioContainer}`)
     const uploaded = await this.request('/v3/assets', {
       method: 'POST',
-      headers: { 'idempotency-key': mutationKey(context.idempotencyKey, 'asset') },
       body: form,
     }, context.signal)
     const assetId = identifier(object(uploaded.data, 'data').asset_id, 'asset_id')
     const response = await this.request('/v3/videos', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': mutationKey(context.idempotencyKey, 'video') },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         type: 'avatar', avatar_id: value.avatarId, audio_asset_id: assetId,
         aspect_ratio: value.aspectRatio, output_format: 'mp4',
       }),
     }, context.signal)
     const data = object(response.data, 'data')
-    return Object.freeze({ providerJobId: identifier(data.video_id, 'video_id') })
+    return Object.freeze({ kind: 'accepted' as const, providerJobId: identifier(data.video_id, 'video_id') })
   }
 
   async getStatus(providerJobId: string, signal?: AbortSignal): Promise<ProviderStatus> {

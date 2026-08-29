@@ -12,6 +12,7 @@ const valid = {
   identityReference: 'profile-id',
   supportsSeed: true,
   supportsIdempotency: true,
+  supportsCancellation: true,
   completion: 'both',
   concurrencyLimit: 4,
   regionRestrictions: ['BR'],
@@ -29,11 +30,23 @@ test('T-F0-033 Provider adapter capabilities match Spec 06 and are immutable', (
 })
 
 test('T-F0-033 Provider capability boundary rejects drift, secrets, duplicates and stale TTL shape', () => {
+  const missingSupportsCancellation = { ...valid }
+  delete missingSupportsCancellation.supportsCancellation
   for (const candidate of [
     { ...valid, apiKey: 'secret' },
     { ...valid, operations: ['tts', 'tts'] },
     { ...valid, operations: ['unknown'] },
     { ...valid, duration: { minSeconds: 10, maxSeconds: 1 } },
     { ...valid, expiresAt: valid.fetchedAt },
+    missingSupportsCancellation,
+    { ...valid, completion: 'fire-and-forget' },
+    { ...valid, supportsCancellation: 'yes' },
   ]) assert.throws(() => validateProviderCapabilities(candidate), (error) => error?.code === 'INVALID_ARGUMENT')
+})
+
+test('T-FR-101 contract accepts synchronous completion for immediate-result providers', () => {
+  const capabilities = validateProviderCapabilities({ ...valid, completion: 'synchronous', supportsIdempotency: false, supportsCancellation: false })
+  assert.equal(capabilities.completion, 'synchronous')
+  assert.equal(capabilities.supportsIdempotency, false)
+  assert.equal(capabilities.supportsCancellation, false)
 })

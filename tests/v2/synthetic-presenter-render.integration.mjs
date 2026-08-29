@@ -88,10 +88,15 @@ test('T-FR-092 controlled provider output becomes a person-free real MP4 with di
       lease = { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() }
       return { ...stored, lease }
     },
+    async beginSubmission(input) {
+      assert.equal(input.current.job.jobHash, stored.job.jobHash)
+      stored = { ...stored, job: input.next }
+      return { ...stored, lease: input.current.lease }
+    },
     async advance(input) { assert.equal(input.current.job.jobHash, stored.job.jobHash); stored = { ...stored, job: input.next }; lease = undefined; return stored },
   }
   const provider = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
-    capabilities: { operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'], duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true, supportsIdempotency: true, completion: 'polling', fetchedAt: '2029-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z' },
+    capabilities: { operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'], duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: true, supportsIdempotency: true, supportsCancellation: false, completion: 'polling', fetchedAt: '2029-01-01T00:00:00.000Z', expiresAt: '2030-01-01T00:00:00.000Z' },
     estimate: { currency: 'USD', costMinorUnits: 10, estimatedLatencyMs: 2_000 }, statuses: ['queued','processing','completed'], result: { file: fixture.avatar },
   })
   let tick = 0

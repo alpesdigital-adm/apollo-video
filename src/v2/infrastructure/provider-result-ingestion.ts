@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { createWriteStream } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { request as httpsRequest } from 'node:https'
 import { isAbsolute, join, normalize, resolve } from 'node:path'
 
@@ -9,7 +9,11 @@ import type { MediaArtifactPersistenceRepository } from '../application/ports/me
 import type { MediaArtifactQueryRepository } from '../application/ports/media-artifact-query-repository.ts'
 import type { MediaSourceProber, VerifiedMediaStorage } from '../application/ports/media-ingest.ts'
 import type { ProviderResultCritic, ProviderResultIngestor } from '../application/ports/provider-job-runtime.ts'
-import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
+import {
+  PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+  type ProviderResultArtifactRepository,
+} from '../application/ports/provider-result-artifact-repository.ts'
+import { calculateCanonicalHash, stableSerialize } from '../domain/canonical-hash.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import type { ProviderJob } from '../domain/provider-job.ts'
@@ -192,6 +196,180 @@ export class VerifiedProviderResultIngestor implements ProviderResultIngestor {
   }
 }
 
+const TTS_TOOL_DIGEST = createHash('sha256').update('elevenlabs-tts-provider-result/1.0.0').digest('hex')
+const HASH = /^[a-f0-9]{64}$/
+
+function ttsProviderResult(value: unknown): Readonly<{
+  requestId: string
+  modelId: string
+  adapterConfigHash: string
+  scriptHash: string
+  audioBytes: Uint8Array
+  audioSha256: string
+  audioByteSize: number
+  audioContainer: 'mp3' | 'wav'
+  mediaType: 'audio'
+  alignment: Readonly<{ characters: readonly string[]; startTimesSeconds: readonly number[]; endTimesSeconds: readonly number[] }>
+}> {
+  assertDomain(typeof value === 'object' && value !== null && !Array.isArray(value), 'RENDER_OUTPUT_INVALID', 'TTS provider result is invalid')
+  const record = value as Record<string, unknown>
+  assertDomain(
+    typeof record.requestId === 'string' && typeof record.modelId === 'string' &&
+    typeof record.adapterConfigHash === 'string' && HASH.test(record.adapterConfigHash) &&
+    typeof record.scriptHash === 'string' && HASH.test(record.scriptHash) &&
+    record.audioBytes instanceof Uint8Array && record.audioBytes.byteLength > 0 &&
+    typeof record.audioSha256 === 'string' && HASH.test(record.audioSha256) &&
+    Number.isSafeInteger(record.audioByteSize) && Number(record.audioByteSize) > 0 &&
+    (record.audioContainer === 'mp3' || record.audioContainer === 'wav') &&
+    record.mediaType === 'audio' &&
+    typeof record.alignment === 'object' && record.alignment !== null,
+    'RENDER_OUTPUT_INVALID',
+    'TTS provider result is invalid',
+  )
+  return record as ReturnType<typeof ttsProviderResult>
+}
+
+/**
+ * Ingests the multi-artifact result of a synchronous TTS submission: the
+ * audio bytes are re-hashed, probed with real ffprobe and promoted into
+ * controlled storage; the character alignment is serialized as a
+ * content-addressed evidence artifact. Both artifacts carry full provenance
+ * (adapter id/version/configHash, model, providerJobRef, scriptHash) and are
+ * recorded in the provider_result_artifacts ledger inside one transaction.
+ */
+export interface AudioDurationProber {
+  probeDurationSeconds(path: string, options?: { signal?: AbortSignal }): Promise<number>
+}
+
+export class VerifiedTtsResultIngestor implements ProviderResultIngestor {
+  private readonly dependencies: {
+    workRoot: string
+    storage: VerifiedMediaStorage
+    artifacts: MediaArtifactPersistenceRepository
+    artifactQuery: MediaArtifactQueryRepository
+    resultArtifacts: ProviderResultArtifactRepository
+    audioProber: AudioDurationProber
+    clock?: () => Date
+  }
+
+  constructor(dependencies: VerifiedTtsResultIngestor['dependencies']) {
+    assertDomain(isAbsolute(normalize(resolve(dependencies.workRoot.trim()))), 'PERSISTENCE_NOT_CONFIGURED', 'TTS result work root is invalid')
+    this.dependencies = dependencies
+  }
+
+  async ingest(input: { job: Readonly<ProviderJob>; providerResult: unknown; signal?: AbortSignal }) {
+    const result = ttsProviderResult(input.providerResult)
+    // Synchronous completion ingests inside the estimated→submitted tick, so
+    // the durable job has no providerJobId yet; the worker seals the same
+    // bundle.providerJobRef (= requestId) into that transition right after.
+    // When the job already carries a provider identity, it must match.
+    if (input.job.providerJobId !== undefined) {
+      assertDomain(result.requestId === input.job.providerJobId, 'PERSISTENCE_CONFLICT', 'TTS result identity does not match the durable job')
+    }
+    const jobScriptHash = typeof input.job.input.scriptHash === 'string' ? input.job.input.scriptHash : undefined
+    if (jobScriptHash !== undefined) {
+      assertDomain(result.scriptHash === jobScriptHash, 'PERSISTENCE_CONFLICT', 'TTS result script hash does not match the approved job input')
+    }
+    const audioBytes = Buffer.from(result.audioBytes)
+    assertDomain(
+      audioBytes.byteLength === result.audioByteSize &&
+      createHash('sha256').update(audioBytes).digest('hex') === result.audioSha256,
+      'PERSISTENCE_CONFLICT',
+      'TTS audio bytes do not match their declared identity',
+    )
+    const namespace = createHash('sha256').update(input.job.id).digest('hex').slice(0, 32)
+    const directory = join(normalize(resolve(this.dependencies.workRoot.trim())), namespace)
+    await mkdir(directory, { recursive: true })
+    try {
+      const audioPath = join(directory, `${randomUUID()}.${result.audioContainer}`)
+      await writeFile(audioPath, audioBytes, { flag: 'wx' })
+      const probedDurationSeconds = await this.dependencies.audioProber.probeDurationSeconds(audioPath, { signal: input.signal })
+      assertDomain(Number.isFinite(probedDurationSeconds) && probedDurationSeconds > 0, 'RENDER_OUTPUT_INVALID', 'TTS audio has no measurable duration')
+      // Bind the paid audio to its alignment: the last aligned character must
+      // end inside the probed audio, within a small tolerance.
+      const alignmentEndSeconds = result.alignment.endTimesSeconds.at(-1) ?? 0
+      assertDomain(
+        alignmentEndSeconds > 0 && Math.abs(probedDurationSeconds - alignmentEndSeconds) <= Math.max(1, probedDurationSeconds * 0.25),
+        'PERSISTENCE_CONFLICT',
+        'TTS alignment does not cover the probed audio duration',
+      )
+      const alignmentPayload = stableSerialize({
+        schemaVersion: 'tts-alignment-evidence/v1',
+        providerJobRef: result.requestId,
+        scriptHash: result.scriptHash,
+        audioSha256: result.audioSha256,
+        characters: result.alignment.characters,
+        startTimesSeconds: result.alignment.startTimesSeconds,
+        endTimesSeconds: result.alignment.endTimesSeconds,
+      })
+      const alignmentBytes = Buffer.from(alignmentPayload, 'utf8')
+      const alignmentSha256 = createHash('sha256').update(alignmentBytes).digest('hex')
+      const alignmentPath = join(directory, `${randomUUID()}.json`)
+      await writeFile(alignmentPath, alignmentBytes, { flag: 'wx' })
+      const storedAudio = await this.dependencies.storage.promoteDerived({ workspaceId: input.job.workspaceId, sourcePath: audioPath, sha256: result.audioSha256, extension: result.audioContainer, prefix: 'synthetic-tts-results' })
+      assertDomain(storedAudio.sha256 === result.audioSha256 && storedAudio.byteSize === result.audioByteSize, 'PERSISTENCE_CONFLICT', 'TTS audio storage identity drifted')
+      const storedAlignment = await this.dependencies.storage.promoteDerived({ workspaceId: input.job.workspaceId, sourcePath: alignmentPath, sha256: alignmentSha256, extension: 'json', prefix: 'synthetic-tts-alignment' })
+      assertDomain(storedAlignment.sha256 === alignmentSha256 && storedAlignment.byteSize === alignmentBytes.byteLength, 'PERSISTENCE_CONFLICT', 'TTS alignment storage identity drifted')
+      const identityHash = calculateCanonicalHash({ schemaVersion: 'tts-result-identity/v1', workspaceId: input.job.workspaceId, jobId: input.job.id, providerJobRef: result.requestId, audioSha256: result.audioSha256, alignmentSha256 })
+      const execution = {
+        tool: { id: 'elevenlabs', version: 'v1', digest: TTS_TOOL_DIGEST },
+        model: { provider: 'elevenlabs', id: result.modelId, version: input.job.adapterVersion, config: { operation: input.job.operation, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, profileSnapshotHash: input.job.authorization.profileSnapshotHash } },
+      }
+      const now = (this.dependencies.clock ?? (() => new Date()))().toISOString()
+      const audioArtifactId = `tts-audio-${identityHash.slice(0, 32)}`
+      const alignmentArtifactId = `tts-alignment-${identityHash.slice(0, 32)}`
+      const audioManifest = createMediaArtifactManifestV2({
+        artifactKey: storedAudio.key, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer,
+        recipe: { id: 'synthetic-tts-result', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, inputHash: input.job.inputHash, authorizationHash: input.job.authorization.authorizationHash } },
+        sources: [],
+        // Audio has no frame geometry; the manifest probe carries only the
+        // real ffprobe duration. validateProbe checks the fields present, so
+        // this stays truthful instead of fabricating width/height/fps.
+        probe: { duration: probedDurationSeconds } as unknown as { width: number; height: number; duration: number; fps: number },
+      })
+      const alignmentManifest = createMediaArtifactManifestV2({
+        artifactKey: storedAlignment.key, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json',
+        recipe: { id: 'synthetic-tts-alignment', version: '1.0.0', parameters: { jobId: input.job.id, providerJobRef: result.requestId, adapterId: input.job.adapterId, adapterVersion: input.job.adapterVersion, adapterConfigHash: result.adapterConfigHash, scriptHash: result.scriptHash, audioSha256: result.audioSha256 } },
+        sources: [{ artifactKey: storedAudio.key, sha256: storedAudio.sha256, role: 'tts-primary-audio', execution }],
+      })
+      await this.dependencies.artifacts.persistOrReplay({
+        workspaceId: input.job.workspaceId, artifactId: audioArtifactId, manifestId: `tts-audio-manifest-${identityHash.slice(0, 32)}`,
+        lineageIds: [], manifest: audioManifest, createdAt: now,
+      })
+      await this.dependencies.artifacts.persistOrReplay({
+        workspaceId: input.job.workspaceId, artifactId: alignmentArtifactId, manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`,
+        lineageIds: [`lineage-${calculateCanonicalHash({ manifestId: `tts-alignment-manifest-${identityHash.slice(0, 32)}`, artifactId: audioArtifactId, index: 0 })}`],
+        manifest: alignmentManifest, createdAt: now,
+      })
+      const base = {
+        workspaceId: input.job.workspaceId,
+        projectId: input.job.projectId,
+        jobId: input.job.id,
+        schemaVersion: PROVIDER_RESULT_ARTIFACT_SCHEMA_VERSION,
+        providerJobRef: result.requestId,
+        adapterId: input.job.adapterId,
+        adapterVersion: input.job.adapterVersion,
+        modelRef: result.modelId,
+        adapterConfigHash: result.adapterConfigHash,
+        inputHash: input.job.inputHash,
+        authorizationHash: input.job.authorization.authorizationHash,
+        scriptHash: result.scriptHash,
+        completedAt: now,
+        createdAt: now,
+      }
+      await this.dependencies.resultArtifacts.persistOrReplay({
+        records: [
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-audio`, role: 'primary-audio', artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, byteSize: storedAudio.byteSize, mediaType: 'audio', container: result.audioContainer },
+          { ...base, id: `provider-result-artifact-${identityHash.slice(0, 24)}-alignment`, role: 'alignment-evidence', artifactId: alignmentArtifactId, artifactSha256: storedAlignment.sha256, byteSize: storedAlignment.byteSize, mediaType: 'data', container: 'json' },
+        ],
+      })
+      return Object.freeze({ artifactId: audioArtifactId, artifactSha256: storedAudio.sha256, mediaType: 'audio' as const, byteSize: storedAudio.byteSize })
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+}
+
 export class PersistedProviderResultCritic implements ProviderResultCritic {
   private readonly artifacts: MediaArtifactQueryRepository
 
@@ -210,6 +388,46 @@ export class PersistedProviderResultCritic implements ProviderResultCritic {
     const ratioMatches = expectedRatio === '16:9' ? actualRatio > 1.7 && actualRatio < 1.82 : actualRatio > 0.53 && actualRatio < 0.59
     const durationMatches = Number.isSafeInteger(expectedDurationMs) && Math.abs(actualDurationMs - expectedDurationMs) <= Math.max(2_000, Math.round(expectedDurationMs * 0.05))
     const result = Object.freeze({ schemaVersion: 'provider-result-critic/v1', jobId: input.job.id, artifactId: input.artifact.artifactId, artifactSha256: input.artifact.artifactSha256, expectedDurationMs, actualDurationMs, expectedRatio, width: probe!.width, height: probe!.height, ratioMatches, durationMatches, approved: ratioMatches && durationMatches })
+    return Object.freeze({ approved: result.approved, resultHash: calculateCanonicalHash(result) })
+  }
+}
+
+/**
+ * Approves a TTS audio result only after re-reading the persisted artifact
+ * row and the provider_result_artifacts ledger: identity (sha256/byteSize/
+ * mediaType) must match what the worker ingested, both roles (primary-audio
+ * and alignment-evidence) must exist for this job, and the ledger's script
+ * hash must equal the approved job input. Duration plausibility against the
+ * alignment was already enforced at ingestion time with a real ffprobe.
+ */
+export class PersistedTtsResultCritic implements ProviderResultCritic {
+  private readonly artifacts: MediaArtifactQueryRepository
+  private readonly resultArtifacts: ProviderResultArtifactRepository
+
+  constructor(artifacts: MediaArtifactQueryRepository, resultArtifacts: ProviderResultArtifactRepository) {
+    this.artifacts = artifacts
+    this.resultArtifacts = resultArtifacts
+  }
+
+  async evaluate(input: { job: Readonly<ProviderJob>; artifact: Readonly<{ artifactId: string; artifactSha256: string; mediaType: 'audio' | 'video' | 'image' | 'data'; byteSize: number }> }) {
+    const persisted = await this.artifacts.findById(input.job.workspaceId, input.artifact.artifactId)
+    assertDomain(Boolean(persisted) && persisted!.sha256 === input.artifact.artifactSha256 && Number(persisted!.byteSize) === input.artifact.byteSize && persisted!.mediaType === 'audio', 'PERSISTENCE_CONFLICT', 'TTS critic cannot verify the persisted audio result')
+    const ledger = await this.resultArtifacts.listByJob({ workspaceId: input.job.workspaceId, projectId: input.job.projectId, jobId: input.job.id })
+    const audioEntry = ledger.find((entry) => entry.role === 'primary-audio')
+    const alignmentEntry = ledger.find((entry) => entry.role === 'alignment-evidence')
+    assertDomain(
+      audioEntry?.artifactId === input.artifact.artifactId && audioEntry.artifactSha256 === input.artifact.artifactSha256 && alignmentEntry !== undefined,
+      'PERSISTENCE_CONFLICT',
+      'TTS critic requires both audio and alignment ledger entries for the job',
+    )
+    const jobScriptHash = typeof input.job.input.scriptHash === 'string' ? input.job.input.scriptHash : undefined
+    const scriptMatches = jobScriptHash === undefined || audioEntry!.scriptHash === jobScriptHash
+    const result = Object.freeze({
+      schemaVersion: 'tts-result-critic/v1', jobId: input.job.id, artifactId: input.artifact.artifactId,
+      artifactSha256: input.artifact.artifactSha256, alignmentArtifactId: alignmentEntry!.artifactId,
+      alignmentSha256: alignmentEntry!.artifactSha256, providerJobRef: audioEntry!.providerJobRef,
+      scriptMatches, approved: scriptMatches,
+    })
     return Object.freeze({ approved: result.approved, resultHash: calculateCanonicalHash(result) })
   }
 }

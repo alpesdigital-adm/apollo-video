@@ -13334,6 +13334,40 @@ const syntheticRangeSchema: JsonSchema = {
   type: 'array', minItems: 2, maxItems: 2,
   items: { type: 'integer', minimum: 0 },
 }
+const syntheticAudioWordSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['word', 'startMs', 'endMs', 'confidence'],
+  properties: {
+    word: { type: 'string', minLength: 1, maxLength: 240 },
+    startMs: { type: 'integer', minimum: 0, maximum: 21_599_999 },
+    endMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+  },
+}
+const syntheticAudioMasterSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId',
+    'profileSnapshotId', 'source', 'audio', 'alignmentEvidence', 'words',
+    'wordsHash', 'approvedAt', 'approvalCriticHash', 'createdAt', 'masterHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-audio-master/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    projectVersionId: idSchema, profileSnapshotId: idSchema,
+    source: {
+      oneOf: [
+        { type: 'object', additionalProperties: false, required: ['kind', 'text', 'providerJobId'], properties: { kind: { const: 'tts' }, text: { type: 'string', minLength: 1, maxLength: 100000 }, providerJobId: idSchema } },
+        { type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: { const: 'uploaded' } } },
+      ],
+    },
+    audio: { type: 'object', additionalProperties: false, required: ['artifactId', 'artifactSha256', 'durationMs', 'locale'], properties: { artifactId: idSchema, artifactSha256: sha256Schema, durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 }, locale: { type: 'string', minLength: 2, maxLength: 35 } } },
+    alignmentEvidence: { type: 'object', additionalProperties: false, required: ['artifactId', 'artifactSha256'], properties: { artifactId: idSchema, artifactSha256: sha256Schema } },
+    words: { type: 'array', minItems: 1, maxItems: 100000, items: syntheticAudioWordSchema },
+    wordsHash: sha256Schema, approvedAt: dateTimeSchema, approvalCriticHash: sha256Schema,
+    createdAt: dateTimeSchema, masterHash: sha256Schema,
+  },
+}
 const syntheticPresenterProfileSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -22540,6 +22574,31 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('synthetic-production-run-read', 1, 'Read one immutable synthetic production run',
     successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object', additionalProperties: false, required: ['id', 'status', 'editPlanSnapshotId', 'plan'], properties: { id: idSchema, status: { enum: ['compiled', 'rendering', 'completed', 'failed', 'canceled'] }, editPlanSnapshotId: idSchema, plan: syntheticProductionPlanSchema } } } }),
   ),
+  defineSchema('create-synthetic-audio-master-request', 1, 'Approve immutable aligned audio before synthetic video generation', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'profileSnapshotId', 'source', 'audioArtifactId', 'alignmentEvidenceArtifactId', 'durationMs', 'locale', 'words', 'approvedAt', 'approvalCriticHash', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, profileSnapshotId: idSchema,
+      source: {
+        oneOf: [
+          { type: 'object', additionalProperties: false, required: ['kind', 'text', 'providerJobId'], properties: { kind: { const: 'tts' }, text: { type: 'string', minLength: 1, maxLength: 100000 }, providerJobId: idSchema } },
+          { type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: { const: 'uploaded' } } },
+        ],
+      },
+      audioArtifactId: idSchema, alignmentEvidenceArtifactId: idSchema,
+      durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      words: { type: 'array', minItems: 1, maxItems: 100000, items: syntheticAudioWordSchema },
+      approvedAt: dateTimeSchema, approvalCriticHash: sha256Schema,
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('synthetic-audio-master-mutated', 1, 'Created or replayed immutable synthetic audio master',
+    successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster', 'replayed'], properties: { audioMaster: syntheticAudioMasterSchema, replayed: { type: 'boolean' } } }),
+  ),
+  defineSchema('synthetic-audio-master-read', 1, 'Read one immutable synthetic audio master',
+    successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster'], properties: { audioMaster: syntheticAudioMasterSchema } }),
+  ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','use','market','locale'],
@@ -22549,6 +22608,32 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       sourceArtifactIds: { type: 'array', maxItems: 64, uniqueItems: true, items: idSchema },
       use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
     },
+  }),
+  defineSchema('enqueue-provider-job-request', 2, 'Enqueue TTS or an audio-first avatar range from an approved master', {
+    oneOf: [
+      {
+        type: 'object', additionalProperties: false,
+        required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','use','market','locale'],
+        properties: {
+          projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { const: 'tts' }, adapterId: idSchema, adapterVersion: idSchema,
+          providerInput: { type: 'object', maxProperties: 100, additionalProperties: true },
+          sourceArtifactIds: { type: 'array', maxItems: 64, uniqueItems: true, items: idSchema },
+          use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
+        },
+      },
+      {
+        type: 'object', additionalProperties: false,
+        required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','audioMasterId','audioRange','use','market','locale'],
+        properties: {
+          projectVersionId: idSchema, profileSnapshotId: idSchema, operation: { const: 'audio-avatar' }, adapterId: idSchema, adapterVersion: idSchema,
+          providerInput: { type: 'object', additionalProperties: false, properties: { aspectRatio: { enum: ['16:9', '9:16'] } } },
+          sourceArtifactIds: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: idSchema },
+          audioMasterId: idSchema,
+          audioRange: { type: 'object', additionalProperties: false, required: ['startWordIndex', 'endWordIndex'], properties: { startWordIndex: { type: 'integer', minimum: 0, maximum: 99999 }, endWordIndex: { type: 'integer', minimum: 1, maximum: 100000 } } },
+          use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 }, locale: { type: 'string', minLength: 2, maxLength: 35 },
+        },
+      },
+    ],
   }),
   defineSchema('provider-job-mutated', 1, 'Created or replayed durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job','replayed'], properties: { job: providerJobPublicSchema, replayed: { type: 'boolean' } } })),
   defineSchema('provider-job-read', 1, 'Normalized durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job'], properties: { job: providerJobPublicSchema } })),

@@ -12,6 +12,7 @@ export const PROVIDER_JOB_SCHEMA_VERSION = 'provider-job/v1' as const
 export const PROVIDER_JOB_STATUSES = [
   'planned',
   'estimated',
+  'submitting',
   'submitted',
   'queued',
   'processing',
@@ -219,7 +220,8 @@ export function createProviderJob(input: {
 
 const ALLOWED_TRANSITIONS: Readonly<Record<ProviderJobStatus, readonly ProviderJobStatus[]>> = Object.freeze({
   planned: ['estimated', 'failed', 'canceled', 'expired', 'superseded'],
-  estimated: ['submitted', 'failed', 'canceled', 'expired', 'superseded'],
+  estimated: ['submitting', 'failed', 'canceled', 'expired', 'superseded'],
+  submitting: ['submitted', 'failed', 'canceled', 'expired', 'superseded'],
   submitted: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
   queued: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
   processing: ['processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
@@ -272,9 +274,9 @@ export function transitionProviderJob(job: Readonly<ProviderJob>, input: {
     ...(resultArtifact ? { resultArtifact } : {}),
     ...(input.criticResultHash ? { criticResultHash: input.criticResultHash } : {}),
     ...(input.normalizedError ? { normalizedError: input.normalizedError } : {}),
-    attempt: input.status === 'submitted' ? job.attempt + 1 : job.attempt,
+    attempt: input.status === 'submitting' ? job.attempt + 1 : job.attempt,
     ...(input.status === 'submitted' ? { submittedAt: occurredAt } : {}),
-    ...(['queued', 'processing', 'suspected-stalled', 'retrieving'].includes(input.status) ? { heartbeatAt: occurredAt } : {}),
+    ...(['submitting', 'queued', 'processing', 'suspected-stalled', 'retrieving'].includes(input.status) ? { heartbeatAt: occurredAt } : {}),
     ...(terminal ? { completedAt: occurredAt } : {}),
     updatedAt: occurredAt,
   })

@@ -90,6 +90,7 @@ import type { MontageAlternativeRepository } from '../application/ports/montage-
 import type { ProofIntegrityRepository } from '../application/ports/proof-integrity-repository.ts'
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
+import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -233,13 +234,18 @@ import { PrismaMontageAlternativeRepository } from './prisma/montage-alternative
 import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-repository.ts'
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
+import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
+import { ElevenLabsTtsProviderAdapter } from './elevenlabs-tts-provider.ts'
 import { HeyGenV3AsyncMediaProviderAdapter } from './heygen-v3-provider.ts'
+import { PrismaProviderResultArtifactRepository } from './prisma/provider-result-artifact-repository.ts'
 import {
   PersistedProviderResultCritic,
+  PersistedTtsResultCritic,
   SafeProviderResultDownloader,
   VerifiedProviderResultIngestor,
+  VerifiedTtsResultIngestor,
 } from './provider-result-ingestion.ts'
 import { PrismaMaterializationAuthorizationRepository } from './prisma/materialization-authorization-repository.ts'
 import { PrismaMediaTransferRepository } from './prisma/media-transfer-repository.ts'
@@ -335,7 +341,7 @@ import { calculateFileSha256 } from './media/local-artifact-manifest.ts'
 import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extractor.ts'
 import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
 import { createConfiguredImageVisionProvider } from './image/composite-image-vision-provider.ts'
-import { inspectUploadedMedia, probeVideo } from './media/video-probe.ts'
+import { inspectUploadedMedia, probeAudioDurationSeconds, probeVideo } from './media/video-probe.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
@@ -630,6 +636,10 @@ export function createSyntheticProductionRepository(): SyntheticProductionReposi
   return new PrismaSyntheticProductionRepository(resolveV2Client())
 }
 
+export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepository {
+  return new PrismaSyntheticAudioMasterRepository(resolveV2Client())
+}
+
 export function createProviderJobRepository(): ProviderJobRepository {
   return new PrismaProviderJobRepository(resolveV2Client())
 }
@@ -897,14 +907,31 @@ export function createProviderSubmissionInputMaterializer(environment: NodeJS.Pr
 export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = process.env): ProviderAdapterRegistry {
   return Object.freeze({
     get(input: { adapterId: string; adapterVersion: string }) {
-      if (input.adapterId !== 'heygen-v3' || input.adapterVersion !== '3.0.0') return null
-      return new HeyGenV3AsyncMediaProviderAdapter({
-        apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
-        costMinorUnitsPerMinute: nonNegativeInteger(
-          environment.APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE,
-          'HeyGen cost per minute',
-        ),
-      })
+      // Adapters are constructed lazily per lookup so the application boots
+      // without any provider credential; a job that targets an unconfigured
+      // adapter fails closed at claim time instead of at startup.
+      if (input.adapterId === 'heygen-v3' && input.adapterVersion === '3.0.0') {
+        return new HeyGenV3AsyncMediaProviderAdapter({
+          apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
+          costMinorUnitsPerMinute: nonNegativeInteger(
+            environment.APOLLO_V2_HEYGEN_COST_MINOR_UNITS_PER_MINUTE,
+            'HeyGen cost per minute',
+          ),
+        })
+      }
+      if (input.adapterId === 'elevenlabs-tts' && input.adapterVersion === '1.0.0') {
+        return new ElevenLabsTtsProviderAdapter({
+          apiKey: environment.APOLLO_V2_ELEVENLABS_API_KEY ?? '',
+          costMinorUnitsPerThousandCharacters: nonNegativeInteger(
+            environment.APOLLO_V2_ELEVENLABS_COST_MINOR_UNITS_PER_THOUSAND_CHARACTERS,
+            'ElevenLabs cost per thousand characters',
+          ),
+          ...(environment.APOLLO_V2_ELEVENLABS_TIMEOUT_MS ? { requestTimeoutMs: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_TIMEOUT_MS, 'ElevenLabs timeout') } : {}),
+          ...(environment.APOLLO_V2_ELEVENLABS_MAX_AUDIO_BYTES ? { maxAudioBytes: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_AUDIO_BYTES, 'ElevenLabs audio limit') } : {}),
+          ...(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS ? { maxCharacters: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS, 'ElevenLabs text limit') } : {}),
+        })
+      }
+      return null
     },
   })
 }
@@ -918,22 +945,46 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     .filter(Boolean)
   const artifactQuery = createMediaArtifactQueryRepository()
   const downloader = new SafeProviderResultDownloader({ workRoot, allowedHosts })
+  const resultArtifacts = new PrismaProviderResultArtifactRepository(resolveV2Client())
+  const videoIngestor = new VerifiedProviderResultIngestor({
+    downloader,
+    storage: createVerifiedMediaStorage(environment),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    artifactQuery,
+    prober: {
+      probe(sourcePath, options) {
+        return probeVideo(sourcePath, { ...options, environment, requireAudio: true })
+      },
+    },
+  })
+  const ttsIngestor = new VerifiedTtsResultIngestor({
+    workRoot,
+    storage: createVerifiedMediaStorage(environment),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    artifactQuery,
+    resultArtifacts,
+    audioProber: {
+      probeDurationSeconds(path, options) {
+        return probeAudioDurationSeconds(path, { ...options, environment })
+      },
+    },
+  })
+  const videoCritic = new PersistedProviderResultCritic(artifactQuery)
+  const ttsCritic = new PersistedTtsResultCritic(artifactQuery, resultArtifacts)
   return runProviderJobWorkerOnce({
     jobs: createProviderJobRepository(),
     adapters: createProviderAdapterRegistry(environment),
     materializer: createProviderSubmissionInputMaterializer(environment),
-    ingestor: new VerifiedProviderResultIngestor({
-      downloader,
-      storage: createVerifiedMediaStorage(environment),
-      artifacts: createMediaArtifactPersistenceRepository(environment),
-      artifactQuery,
-      prober: {
-        probe(sourcePath, options) {
-          return probeVideo(sourcePath, { ...options, environment, requireAudio: true })
-        },
+    ingestor: {
+      ingest(input) {
+        return (input.job.operation === 'tts' ? ttsIngestor : videoIngestor).ingest(input)
       },
-    }),
-    critic: new PersistedProviderResultCritic(artifactQuery),
+    },
+    critic: {
+      evaluate(input) {
+        return (input.job.operation === 'tts' ? ttsCritic : videoCritic).evaluate(input)
+      },
+    },
     clock: () => new Date(),
     createLeaseToken: () => `provider-lease-${randomUUID()}`,
     createTransitionId: () => `provider-transition-${randomUUID()}`,

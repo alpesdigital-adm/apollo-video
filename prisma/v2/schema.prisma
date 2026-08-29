@@ -183,10 +183,12 @@ model V2Workspace {
   exportMatrices                         V2ExportMatrix[]
   exportMatrixCells                      V2ExportMatrixCell[]
   syntheticPresenterProfiles             V2SyntheticPresenterProfile[]
+  syntheticAudioMasters                  V2SyntheticAudioMaster[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
+  providerResultArtifacts                V2ProviderResultArtifact[]
 
   @@map("workspaces")
 }
@@ -282,6 +284,7 @@ model V2ApiClient {
   createdMontageAlternativeRuns         V2MontageAlternativeRun[]            @relation("MontageAlternativeRunCreator")
   authoredDirectorBudgetEvents          V2DirectorBudgetEvent[]
   createdSyntheticPresenterProfiles     V2SyntheticPresenterProfile[]        @relation("SyntheticPresenterProfileCreator")
+  createdSyntheticAudioMasters          V2SyntheticAudioMaster[]             @relation("SyntheticAudioMasterCreator")
   createdSyntheticProductionRuns        V2SyntheticProductionRun[]           @relation("SyntheticProductionRunCreator")
   createdProviderJobs                   V2ProviderJob[]                       @relation("ProviderJobCreator")
 
@@ -654,9 +657,11 @@ model V2Project {
   administrationCommands                 V2ProjectAdministrationCommand[]
   perceptionTimelines                    V2PerceptionTimeline[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
+  syntheticAudioMasters                  V2SyntheticAudioMaster[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
+  providerResultArtifacts                V2ProviderResultArtifact[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -857,6 +862,7 @@ model V2ProjectVersion {
   artifactInvalidationsAsResult   V2CommandArtifactInvalidation[]  @relation("ArtifactInvalidationResultVersion")
   proxyReusesAsBase               V2ProjectProxyRenderOperation[]  @relation("ProjectProxyReuseBaseVersion")
   syntheticProductionRuns         V2SyntheticProductionRun[]
+  syntheticAudioMasters           V2SyntheticAudioMaster[]
   providerJobs                    V2ProviderJob[]
 
   @@unique([projectId, sequence])
@@ -1484,7 +1490,10 @@ model V2MediaArtifact {
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
   automaticCatalogRecords      V2AutomaticCatalogRecord[]
   syntheticProductionAssets    V2SyntheticProductionAsset[]
+  syntheticAudioMasters        V2SyntheticAudioMaster[] @relation("SyntheticAudioArtifact")
+  syntheticAlignmentMasters    V2SyntheticAudioMaster[] @relation("SyntheticAlignmentArtifact")
   providerJobResults           V2ProviderJob[]
+  providerResultArtifacts      V2ProviderResultArtifact[] @relation("ProviderResultArtifactMedia")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3388,6 +3397,7 @@ model V2SyntheticPresenterProfile {
   workspace V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   createdBy V2ApiClient                @relation("SyntheticPresenterProfileCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   runs      V2SyntheticProductionRun[]
+  audioMasters V2SyntheticAudioMaster[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, profileId, version])
@@ -3396,6 +3406,53 @@ model V2SyntheticPresenterProfile {
   @@index([workspaceId, status, defaultLocale])
   @@index([workspaceId, consentSnapshotHash])
   @@map("synthetic_presenter_profiles")
+}
+
+model V2SyntheticAudioMaster {
+  id                          String   @id @db.VarChar(128)
+  workspaceId                 String   @db.VarChar(128)
+  projectId                   String   @db.VarChar(128)
+  projectVersionId            String   @db.VarChar(128)
+  profileSnapshotId           String   @db.VarChar(128)
+  schemaVersion               String   @db.VarChar(64)
+  sourceKind                  String   @db.VarChar(16)
+  ttsProviderJobId            String?  @db.VarChar(128)
+  audioArtifactId             String   @db.VarChar(128)
+  alignmentEvidenceArtifactId String   @db.VarChar(128)
+  durationMs                  Int
+  locale                      String   @db.VarChar(35)
+  wordsHash                   String   @db.Char(64)
+  masterJson                  String   @db.Text
+  masterHash                  String   @db.Char(64)
+  requestFingerprint          String   @db.Char(64)
+  idempotencyKey              String   @db.VarChar(128)
+  createdByClientId           String   @db.VarChar(80)
+  actorCredentialId           String?  @db.VarChar(128)
+  actorEnvironment            String?  @db.VarChar(16)
+  actorAuthenticationKind     String?  @db.VarChar(16)
+  actorContextHash            String?  @db.Char(64)
+  delegatedUserId             String?  @db.VarChar(128)
+  delegatedIdentityId         String?  @db.VarChar(128)
+  workspaceRole               String?  @db.VarChar(32)
+  createdAt                   DateTime @db.Timestamptz(3)
+
+  workspace         V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion    V2ProjectVersion             @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  profileSnapshot   V2SyntheticPresenterProfile  @relation(fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  audioArtifact     V2MediaArtifact               @relation("SyntheticAudioArtifact", fields: [audioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  alignmentEvidence V2MediaArtifact               @relation("SyntheticAlignmentArtifact", fields: [alignmentEvidenceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  ttsProviderJob    V2ProviderJob?                 @relation("SyntheticAudioTtsJob", fields: [ttsProviderJobId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy         V2ApiClient                   @relation("SyntheticAudioMasterCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_audio_masters_workspace_project_actor_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "synthetic_audio_masters_workspace_project_created_idx")
+  @@index([workspaceId, projectVersionId], map: "synthetic_audio_masters_workspace_version_idx")
+  @@index([workspaceId, profileSnapshotId], map: "synthetic_audio_masters_workspace_profile_idx")
+  @@index([workspaceId, audioArtifactId], map: "synthetic_audio_masters_workspace_audio_idx")
+  @@index([workspaceId, masterHash], map: "synthetic_audio_masters_workspace_hash_idx")
+  @@map("synthetic_audio_masters")
 }
 
 model V2SyntheticProductionRun {
@@ -3524,6 +3581,8 @@ model V2ProviderJob {
   resultArtifact       V2MediaArtifact?  @relation(fields: [resultArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy            V2ApiClient       @relation("ProviderJobCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   transitions          V2ProviderJobTransition[]
+  audioMasters         V2SyntheticAudioMaster[] @relation("SyntheticAudioTtsJob")
+  resultArtifacts      V2ProviderResultArtifact[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -3558,6 +3617,44 @@ model V2ProviderJobTransition {
   @@index([workspaceId, projectId, occurredAt(sort: Desc)])
   @@index([workspaceId, jobId, occurredAt])
   @@map("provider_job_transitions")
+}
+
+model V2ProviderResultArtifact {
+  id                     String   @id @db.VarChar(128)
+  workspaceId            String   @db.VarChar(128)
+  projectId              String   @db.VarChar(128)
+  jobId                  String   @db.VarChar(128)
+  schemaVersion          String   @db.VarChar(64)
+  role                   String   @db.VarChar(32)
+  providerJobRef         String   @db.VarChar(256)
+  artifactId             String   @db.VarChar(128)
+  artifactSha256         String   @db.Char(64)
+  byteSize               BigInt
+  mediaType              String   @db.VarChar(16)
+  container              String   @db.VarChar(16)
+  adapterId              String   @db.VarChar(128)
+  adapterVersion         String   @db.VarChar(128)
+  modelRef               String?  @db.VarChar(128)
+  adapterConfigHash      String   @db.Char(64)
+  inputHash              String   @db.Char(64)
+  authorizationHash      String   @db.Char(64)
+  scriptHash             String?  @db.Char(64)
+  observedCostCurrency   String?  @db.Char(3)
+  observedCostMinorUnits Int?
+  completedAt            DateTime @db.Timestamptz(3)
+  createdAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  job       V2ProviderJob   @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  artifact  V2MediaArtifact @relation("ProviderResultArtifactMedia", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([jobId, role])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, artifactId])
+  @@index([workspaceId, adapterId, providerJobRef])
+  @@map("provider_result_artifacts")
 }
 
 model V2ExportMatrixCell {

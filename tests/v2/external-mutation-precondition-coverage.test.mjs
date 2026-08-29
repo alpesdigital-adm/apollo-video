@@ -340,6 +340,9 @@ const coverage = Object.freeze({
   'apollo.synthetic-presenters.register': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the next immutable profile version, actor context, consent scope and exact evidence artifact digest; serializable persistence rechecks all of them',
   },
+  'apollo.projects.synthetic-audio-masters.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter profile, approved audio and alignment artifact digests, exact word timing, critic evidence, actor context and rights; serializable persistence rechecks all immutable identities before commit',
+  },
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
   },
@@ -604,7 +607,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 59,
+    'idempotent-create': 60,
     'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,
