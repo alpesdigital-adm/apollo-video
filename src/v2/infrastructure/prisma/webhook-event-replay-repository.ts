@@ -178,6 +178,8 @@ export class PrismaWebhookEventReplayRepository implements WebhookEventReplayRep
           targetType: 'webhook-event',
           targetId: command.eventId,
           action: 'webhook-event.replay',
+          idempotencyKey: command.idempotencyKey,
+          requestFingerprint: command.requestFingerprint,
         },
       })
       assertWebhookAdministrationReplay(auditCommand, administration)
