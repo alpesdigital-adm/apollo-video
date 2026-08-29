@@ -144,6 +144,10 @@ Terminais adicionais: failed, canceled, expired, superseded.
 - Status regressivo do provider não regride estado Apollo.
 - Job sem heartbeat acima do SLA vira `suspected-stalled`, não `failed` imediato.
 
+### 8.1 Conclusão síncrona
+
+Capabilities declaram `completion: 'synchronous' | 'polling' | 'webhook' | 'both'` e `supportsCancellation` de forma verdadeira por adapter. Um provider síncrono (ElevenLabs TTS) devolve o resultado dentro da própria submissão como `{ kind: 'completed', bundle }` — o bundle carrega `providerJobRef` (o identificador do próprio provider para aquele efeito, nunca inventado pela Apollo), o resultado e custo observado quando existir. O ProviderJob durável continua registrando cada transição; o worker curto-circuita polling e retrieval porque ambos seriam fabricação. No tick `planned` o worker falha fechado quando a capability declarada não tem o método correspondente (polling sem `getStatus`/`retrieve`, cancelamento sem `cancel`, webhook sem `verifyWebhook`) — capability falsa nunca alcança efeito pago.
+
 ## 9. TTS
 
 Input:
@@ -160,6 +164,29 @@ Output bruto e normalizado incluem checksum, duration, sample rate e alignment q
 ### 9.1 Gate de texto
 
 Antes do TTS validar claims, números, pronunciation terms e script hash aprovado. Provider não pode reescrever texto silenciosamente; transcript do output é comparado ao script.
+
+### 9.2 ElevenLabs — fatos oficiais (consultados em 2026-08-27)
+
+Fonte: `https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps` e `https://elevenlabs.io/docs/api-reference/authentication`.
+
+- Endpoint: `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps`; autenticação via header `xi-api-key`.
+- Resposta é JSON **síncrono**: `audio_base64` + `alignment` (timestamps por caractere do texto ORIGINAL: `characters`, `character_start_times_seconds`, `character_end_times_seconds`) + `normalized_alignment` (texto normalizado pelo provider). Não existe job durável do lado do provider para esse endpoint — o adapter declara `completion: 'synchronous'` e não inventa polling.
+- `output_format` é enum de query (mp3_*/wav_*/pcm_*/opus_*/ulaw/alaw); o adapter usa `mp3_44100_128` e `wav_44100`. WAV em 44.1kHz exige tier pago.
+- `seed` (0..4294967295) é determinismo de melhor esforço, não garantido.
+- **Não há header de idempotência** nesse endpoint (`supportsIdempotency: false`); o identificador do provider para uma geração concluída é o header de resposta `request-id` — o mesmo id consumido pelos campos de stitching `previous_request_ids`/`next_request_ids`. O adapter falha fechado (`PROVIDER_REFERENCE_MISSING`) quando a resposta não traz esse header.
+- Erros: 401/403 → `PROVIDER_AUTHENTICATION_FAILED` (não retryable); 429 → `PROVIDER_RATE_LIMITED` + Retry-After; 5xx → `PROVIDER_UNAVAILABLE`; 422 → `PROVIDER_REQUEST_REJECTED`. Corpo malformado, contêiner divergente da assinatura binária (RIFF/WAVE, ID3/frame-sync) e payload acima do teto configurado falham fechado.
+- O adapter re-verifica `sha256(text) === scriptHash` antes da chamada paga e rejeita alignment cujos caracteres não reconstroem o texto aprovado (`PROVIDER_ALIGNMENT_MISMATCH`); monotonicidade dos timestamps é obrigatória.
+
+### 9.3 HeyGen — fatos oficiais (consultados em 2026-08-27)
+
+Fonte: `https://developers.heygen.com/reference/create-video.md`, `.../upload-asset.md`, `.../get-video.md`.
+
+- `POST /v3/assets` (multipart, máx 32MB, mp3/wav) → `data.asset_id`; `POST /v3/videos` (`type: 'avatar'` + `audio_asset_id`, mutuamente exclusivo com `script`) → `data.video_id`; `GET /v3/videos/{id}` → `data.status` + `data.video_url`. Autenticação `X-Api-Key`.
+- Header oficial `Idempotency-Key` existe nas duas mutações (`supportsIdempotency: true`).
+- `VideoStatus` oficial é exatamente `pending | processing | completed | failed`; qualquer outro valor falha fechado (`PROVIDER_STATUS_UNKNOWN`).
+- Não há cancelamento documentado de vídeo em processamento (Delete Video destrói artefatos prontos) → `supportsCancellation: false`, sem método `cancel`.
+- Webhooks existem upstream, mas o adapter não implementa verificação → `completion: 'polling'` apenas.
+- Lip-sync é produto separado (Create Lipsync); o adapter implementa somente `audio-avatar` e as capabilities dizem exatamente isso.
 
 ## 10. Avatar/lip-sync
 
