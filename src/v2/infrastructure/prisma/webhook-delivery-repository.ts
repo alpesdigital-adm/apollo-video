@@ -472,6 +472,8 @@ export class PrismaWebhookDeliveryRepository
           targetType: 'webhook-delivery',
           targetId: command.deliveryId,
           action: 'webhook-delivery.replay',
+          idempotencyKey: command.idempotencyKey,
+          requestFingerprint: command.requestFingerprint,
         },
       })
       assertWebhookAdministrationReplay(auditCommand, administration)
