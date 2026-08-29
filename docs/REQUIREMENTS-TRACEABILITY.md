@@ -385,7 +385,7 @@ Evidência integrada F0.031/FR-242 — o ADR-142 seleciona OIDC Authorization Co
 | FR-093 | Hybrid | S1,S2,S6 | D1,D2,D3,D5 | real+sintético+prova coexistem | e2e |
 | FR-100 | Audio-first | S6 | D1,D3 | áudio governa alignment/timeline | integration |
 | FR-101 | Adapters | S6 | D4 | provider mock substituível | contract |
-| FR-102 | Geração por blocos | S6 | D2,D4 | retry/reuse por block | integration |
+| FR-102 | Geração por blocos | S6 | D2,D4 | retry/reuse por block | integration+e2e |
 | FR-103 | SyntheticPresenterProfile | S6 | D0,D7 | profiles/version/consent | policy |
 | FR-104 | SyntheticMasterAsset | S3,S6 | D1,D4 | bruto+áudio+config salvos | integration |
 | FR-105 | Cache | S6 | D1,D4,D7 | hash reutiliza artifact válido | integration |
