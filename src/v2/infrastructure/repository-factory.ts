@@ -730,8 +730,10 @@ const audioToolsRequire = createRequire(import.meta.url)
 export function createSyntheticBlockAudioCompilationService(environment: NodeJS.ProcessEnv = process.env) {
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires APOLLO_V2_RENDER_WORK_ROOT')
-  const ffmpegPath = ((audioToolsRequire('ffmpeg-static') as string | null) ?? '').trim()
-  const ffprobePath = ((audioToolsRequire('ffprobe-static') as { path?: string }).path ?? '').trim()
+  // Explicit env paths win: inside a bundled Next server the *-static
+  // packages resolve to paths that do not exist on disk.
+  const ffmpegPath = (environment.FFMPEG_PATH?.trim() || ((audioToolsRequire('ffmpeg-static') as string | null) ?? '')).trim()
+  const ffprobePath = (environment.FFPROBE_PATH?.trim() || ((audioToolsRequire('ffprobe-static') as { path?: string }).path ?? '')).trim()
   if (!ffmpegPath || !ffprobePath) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires bundled ffmpeg and ffprobe')
   const artifacts = new PrismaMediaArtifactRepository(resolveV2Client())
   const plans = createSyntheticScriptPlanRepository()
@@ -1049,6 +1051,7 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
             environment.APOLLO_V2_ELEVENLABS_COST_MINOR_UNITS_PER_THOUSAND_CHARACTERS,
             'ElevenLabs cost per thousand characters',
           ),
+          ...(environment.APOLLO_V2_ELEVENLABS_BASE_URL?.trim() ? { baseUrl: environment.APOLLO_V2_ELEVENLABS_BASE_URL.trim() } : {}),
           ...(environment.APOLLO_V2_ELEVENLABS_TIMEOUT_MS ? { requestTimeoutMs: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_TIMEOUT_MS, 'ElevenLabs timeout') } : {}),
           ...(environment.APOLLO_V2_ELEVENLABS_MAX_AUDIO_BYTES ? { maxAudioBytes: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_AUDIO_BYTES, 'ElevenLabs audio limit') } : {}),
           ...(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS ? { maxCharacters: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS, 'ElevenLabs text limit') } : {}),

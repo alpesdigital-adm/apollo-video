@@ -137,6 +137,7 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
   }
 
   async create(input: Parameters<ProviderJobRepository['create']>[0]) {
+    for (let attempt = 1; ; attempt += 1) {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         await assertAuthority(transaction, input.job, new Date(input.job.createdAt))
@@ -179,6 +180,9 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         return Object.freeze({ persisted: parseJob(row), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
+      // Serializable write conflicts against a concurrently polling worker
+      // are transient: retry the create instead of surfacing them.
+      if (isPrismaCode(error, 'P2034') && attempt < 4) continue
       if (!isPrismaCode(error, 'P2002')) throw error
       const replay = await this.findReplay({
         workspaceId: input.job.workspaceId,
@@ -190,6 +194,7 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         throw new DomainError('VERSION_CONFLICT', 'Provider job identity or idempotency key already exists')
       }
       return Object.freeze({ persisted: replay, replayed: true })
+    }
     }
   }
 
