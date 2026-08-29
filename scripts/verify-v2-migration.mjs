@@ -808,10 +808,31 @@ const requiredChecks = [
   'contamination_overlaps_hash_check',
   'long_form_index_workflows_actor_audit_check',
   'source_cleanup_plans_actor_audit_check',
+  'provider_result_artifacts_schema_check',
+  'provider_result_artifacts_role_check',
+  'provider_result_artifacts_media_check',
+  'provider_result_artifacts_sha_check',
+  'provider_result_artifacts_size_check',
+  'provider_result_artifacts_cost_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
 }
+
+const providerResultArtifactModel = schema.match(/model V2ProviderResultArtifact \{([\s\S]*?)\n\}/)?.[1] ?? ''
+for (const field of [
+  'workspaceId', 'projectId', 'jobId', 'role', 'providerJobRef', 'artifactId',
+  'artifactSha256', 'byteSize', 'mediaType', 'container', 'adapterId',
+  'adapterVersion', 'adapterConfigHash', 'inputHash', 'authorizationHash',
+  'completedAt',
+]) {
+  assert.match(providerResultArtifactModel, new RegExp(`\\b${field}\\b`), `ProviderResultArtifact must persist ${field}`)
+}
+assert.match(
+  committed,
+  /CREATE TABLE "provider_result_artifacts"[\s\S]*FOREIGN KEY \("jobId", "workspaceId", "projectId"\) REFERENCES "provider_jobs"[\s\S]*FOREIGN KEY \("artifactId", "workspaceId"\) REFERENCES "media_artifacts"/,
+  'provider result artifacts must be linked to their durable job and media artifact inside the same workspace',
+)
 
 console.log(
   `V2 migration verified: ${names(generated, /CREATE TABLE "([^"]+)"/g).size} tables, ` +

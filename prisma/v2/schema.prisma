@@ -188,6 +188,7 @@ model V2Workspace {
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
+  providerResultArtifacts                V2ProviderResultArtifact[]
 
   @@map("workspaces")
 }
@@ -660,6 +661,7 @@ model V2Project {
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
+  providerResultArtifacts                V2ProviderResultArtifact[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1491,6 +1493,7 @@ model V2MediaArtifact {
   syntheticAudioMasters        V2SyntheticAudioMaster[] @relation("SyntheticAudioArtifact")
   syntheticAlignmentMasters    V2SyntheticAudioMaster[] @relation("SyntheticAlignmentArtifact")
   providerJobResults           V2ProviderJob[]
+  providerResultArtifacts      V2ProviderResultArtifact[] @relation("ProviderResultArtifactMedia")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3579,6 +3582,7 @@ model V2ProviderJob {
   createdBy            V2ApiClient       @relation("ProviderJobCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   transitions          V2ProviderJobTransition[]
   audioMasters         V2SyntheticAudioMaster[] @relation("SyntheticAudioTtsJob")
+  resultArtifacts      V2ProviderResultArtifact[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -3613,6 +3617,44 @@ model V2ProviderJobTransition {
   @@index([workspaceId, projectId, occurredAt(sort: Desc)])
   @@index([workspaceId, jobId, occurredAt])
   @@map("provider_job_transitions")
+}
+
+model V2ProviderResultArtifact {
+  id                     String   @id @db.VarChar(128)
+  workspaceId            String   @db.VarChar(128)
+  projectId              String   @db.VarChar(128)
+  jobId                  String   @db.VarChar(128)
+  schemaVersion          String   @db.VarChar(64)
+  role                   String   @db.VarChar(32)
+  providerJobRef         String   @db.VarChar(256)
+  artifactId             String   @db.VarChar(128)
+  artifactSha256         String   @db.Char(64)
+  byteSize               BigInt
+  mediaType              String   @db.VarChar(16)
+  container              String   @db.VarChar(16)
+  adapterId              String   @db.VarChar(128)
+  adapterVersion         String   @db.VarChar(128)
+  modelRef               String?  @db.VarChar(128)
+  adapterConfigHash      String   @db.Char(64)
+  inputHash              String   @db.Char(64)
+  authorizationHash      String   @db.Char(64)
+  scriptHash             String?  @db.Char(64)
+  observedCostCurrency   String?  @db.Char(3)
+  observedCostMinorUnits Int?
+  completedAt            DateTime @db.Timestamptz(3)
+  createdAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  job       V2ProviderJob   @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+  artifact  V2MediaArtifact @relation("ProviderResultArtifactMedia", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([jobId, role])
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([workspaceId, artifactId])
+  @@index([workspaceId, adapterId, providerJobRef])
+  @@map("provider_result_artifacts")
 }
 
 model V2ExportMatrixCell {

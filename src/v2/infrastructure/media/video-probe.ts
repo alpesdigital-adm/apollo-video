@@ -174,6 +174,44 @@ function describeProducer(binary: string) {
   return pending
 }
 
+/**
+ * Measures the duration of an audio-only file with real ffprobe. Fails
+ * closed when the file has no audio stream or no positive duration.
+ */
+export async function probeAudioDurationSeconds(
+  filePath: string,
+  options: { timeoutMs?: number; signal?: AbortSignal; environment?: NodeJS.ProcessEnv } = {},
+): Promise<number> {
+  if (!isAbsolute(filePath)) {
+    throw new DomainError('INVALID_ARGUMENT', 'Audio probe path must be absolute')
+  }
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const binary = resolveBinary(options.environment ?? process.env)
+  let stdout: string
+  try {
+    ({ stdout } = await execFileAsync(binary, [
+      '-v', 'error',
+      '-show_entries', 'format=duration:stream=codec_type,codec_name,duration',
+      '-of', 'json',
+      filePath,
+    ], { windowsHide: true, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, signal: options.signal, encoding: 'utf8' }))
+  } catch {
+    throw new DomainError('RENDER_OUTPUT_INVALID', 'Audio probe failed')
+  }
+  let payload: { streams?: Array<Record<string, unknown>>; format?: Record<string, unknown> }
+  try {
+    payload = JSON.parse(stdout) as typeof payload
+  } catch {
+    throw new DomainError('RENDER_OUTPUT_INVALID', 'Audio probe returned invalid JSON')
+  }
+  const audio = payload.streams?.find((stream) => stream.codec_type === 'audio')
+  const duration = positiveNumber(payload.format?.duration) || positiveNumber(audio?.duration)
+  if (!audio || !duration) {
+    throw new DomainError('RENDER_OUTPUT_INVALID', 'Audio probe found no measurable audio stream')
+  }
+  return duration
+}
+
 export async function probeVideo(
   filePath: string,
   options: {

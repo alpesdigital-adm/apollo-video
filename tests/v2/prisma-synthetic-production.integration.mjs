@@ -76,6 +76,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
   const credentialId = 'synthetic-production-integration-credential'
 
   const cleanup = async () => {
+    await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
@@ -469,6 +470,45 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
     assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 8)
     assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
+
+    const { PrismaProviderResultArtifactRepository } = await import(
+      '../../src/v2/infrastructure/prisma/provider-result-artifact-repository.ts'
+    )
+    const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
+    const ledgerBase = {
+      workspaceId,
+      projectId: project.project.id,
+      jobId: enqueued.persisted.job.id,
+      schemaVersion: 'provider-result-artifact/v1',
+      providerJobRef: completedProvider.job.providerJobId,
+      adapterId: 'controlled-avatar',
+      adapterVersion: 'version-1',
+      adapterConfigHash: hash('a'),
+      inputHash: completedProvider.job.inputHash,
+      authorizationHash: completedProvider.job.authorization.authorizationHash,
+      completedAt: now,
+      createdAt: now,
+    }
+    const ledgerRecords = [
+      { ...ledgerBase, id: 'provider-result-ledger-video', role: 'primary-video', artifactId: 'synthetic-provider-output', artifactSha256: hash('8'), byteSize: 8_192, mediaType: 'video', container: 'mp4', observedCost: { currency: 'USD', costMinorUnits: 12 } },
+      { ...ledgerBase, id: 'provider-result-ledger-alignment', role: 'alignment-evidence', artifactId: 'synthetic-audio-alignment', artifactSha256: hash('6'), byteSize: 512, mediaType: 'data', container: 'json' },
+    ]
+    const ledgerFirst = await resultArtifactRepository.persistOrReplay({ records: ledgerRecords })
+    assert.equal(ledgerFirst.replayed, false)
+    assert.equal(ledgerFirst.records.length, 2)
+    const ledgerReplay = await resultArtifactRepository.persistOrReplay({ records: ledgerRecords })
+    assert.equal(ledgerReplay.replayed, true)
+    assert.equal(await client.v2ProviderResultArtifact.count({ where: { workspaceId } }), 2)
+    await assert.rejects(
+      resultArtifactRepository.persistOrReplay({
+        records: [{ ...ledgerRecords[0], artifactSha256: hash('9') }, ledgerRecords[1]],
+      }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+    )
+    const ledgerRows = await resultArtifactRepository.listByJob({ workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id })
+    assert.deepEqual(ledgerRows.map(({ role }) => role), ['alignment-evidence', 'primary-video'])
+    assert.equal(ledgerRows[1].observedCost.costMinorUnits, 12)
+    assert.equal(ledgerRows[1].providerJobRef, completedProvider.job.providerJobId)
 
     const original = await client.v2SyntheticProductionRun.findUniqueOrThrow({
       where: { id: created.run.plan.id },

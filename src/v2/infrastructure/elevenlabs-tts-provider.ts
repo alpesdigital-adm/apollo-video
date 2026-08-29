@@ -48,6 +48,7 @@ export interface ElevenLabsAlignment {
 export interface ElevenLabsTtsProviderResult {
   requestId: string
   modelId: string
+  adapterConfigHash: string
   scriptHash: string
   audioBytes: Uint8Array
   audioSha256: string
@@ -252,6 +253,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
     const result: ElevenLabsTtsProviderResult = Object.freeze({
       requestId,
       modelId: value.modelId,
+      adapterConfigHash: this.configHash,
       scriptHash: value.scriptHash,
       audioBytes: new Uint8Array(audioBytes),
       audioSha256: createHash('sha256').update(audioBytes).digest('hex'),
