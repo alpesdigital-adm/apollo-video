@@ -13492,6 +13492,16 @@ const syntheticPresenterProfileSchema: JsonSchema = {
         expiresAt: dateTimeSchema, revokedAt: dateTimeSchema,
       },
     },
+    pronunciationDictionaryRef: idSchema,
+    visualContinuity: {
+      type: 'object', additionalProperties: false, minProperties: 1,
+      properties: {
+        wardrobe: { type: 'string', minLength: 1, maxLength: 200 },
+        background: { type: 'string', minLength: 1, maxLength: 200 },
+        framing: { type: 'string', minLength: 1, maxLength: 200 },
+      },
+    },
+    restrictions: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 3, maxLength: 300 } },
     createdAt: dateTimeSchema,
   },
 }
@@ -22633,6 +22643,144 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('synthetic-presenter-registered', 1, 'Persisted synthetic presenter profile response',
     successSchema({ type: 'object', additionalProperties: false, required: ['profile', 'replayed'], properties: { profile: syntheticPresenterProfileSchema, replayed: { type: 'boolean' } } }),
   ),
+  defineSchema('synthetic-presenter-list', 1, 'Logical presenter profiles with their current lifecycle state', successSchema({
+    type: 'object', additionalProperties: false, required: ['presenters'],
+    properties: {
+      presenters: {
+        type: 'array', maxItems: 500,
+        items: {
+          type: 'object', additionalProperties: false,
+          required: ['profileId', 'currentVersion', 'status', 'defaultLocale', 'disclosure', 'voice', 'avatarAdapterId', 'consent', 'updatedAt'],
+          properties: {
+            profileId: idSchema,
+            currentVersion: { type: 'integer', minimum: 1 },
+            status: { enum: ['active', 'disabled', 'expired'] },
+            defaultLocale: { type: 'string', minLength: 2, maxLength: 35 },
+            disclosure: { type: 'string', minLength: 3, maxLength: 500 },
+            voice: {
+              type: 'object', additionalProperties: false, required: ['adapterId', 'adapterVersion', 'version'],
+              properties: { adapterId: idSchema, adapterVersion: idSchema, version: { type: 'integer', minimum: 1 } },
+            },
+            avatarAdapterId: idSchema,
+            consent: {
+              type: 'object', additionalProperties: false, required: ['granted', 'expiresAt'],
+              properties: { granted: { type: 'boolean' }, expiresAt: dateTimeSchema, revokedAt: dateTimeSchema },
+            },
+            updatedAt: dateTimeSchema,
+          },
+        },
+      },
+    },
+  })),
+  defineSchema('synthetic-presenter-detail', 1, 'One logical presenter with its full readable version history', successSchema({
+    type: 'object', additionalProperties: false, required: ['profileId', 'head', 'current', 'versions'],
+    properties: {
+      profileId: idSchema,
+      head: {
+        type: 'object', additionalProperties: false, required: ['currentVersion', 'currentSnapshotId', 'updatedAt'],
+        properties: {
+          currentVersion: { type: 'integer', minimum: 1 },
+          currentSnapshotId: idSchema,
+          updatedAt: dateTimeSchema,
+        },
+      },
+      current: syntheticPresenterProfileSchema,
+      versions: { type: 'array', minItems: 1, maxItems: 1000, items: syntheticPresenterProfileSchema },
+    },
+  })),
+  defineSchema('create-synthetic-presenter-version-request', 1, 'Append the next immutable presenter version with explicit changes', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision', 'changes'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1 },
+      changes: {
+        type: 'object', additionalProperties: false, minProperties: 1,
+        properties: {
+          avatar: { type: 'object', additionalProperties: false, required: ['adapterId', 'adapterVersion', 'identityRef'], properties: { adapterId: idSchema, adapterVersion: idSchema, identityRef: idSchema } },
+          voice: { type: 'object', additionalProperties: false, required: ['id', 'version', 'adapterId', 'adapterVersion'], properties: { id: idSchema, version: { type: 'integer', minimum: 1 }, adapterId: idSchema, adapterVersion: idSchema } },
+          defaultLocale: { type: 'string', minLength: 2, maxLength: 35 },
+          disclosure: { type: 'string', minLength: 3, maxLength: 500 },
+          consent: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'evidenceArtifactId', 'granted', 'allowedUses', 'allowedMarkets', 'allowedLocales', 'allowedOperations', 'expiresAt'],
+            properties: {
+              id: idSchema, evidenceArtifactId: idSchema, granted: { type: 'boolean' },
+              allowedUses: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema },
+              allowedMarkets: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string' } },
+              allowedLocales: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string' } },
+              allowedOperations: { type: 'array', minItems: 1, maxItems: 2, uniqueItems: true, items: { enum: ['tts', 'audio-avatar'] } },
+              expiresAt: dateTimeSchema, revokedAt: dateTimeSchema,
+            },
+          },
+          pronunciationDictionaryRef: idSchema,
+          visualContinuity: {
+            type: 'object', additionalProperties: false, minProperties: 1,
+            properties: {
+              wardrobe: { type: 'string', minLength: 1, maxLength: 200 },
+              background: { type: 'string', minLength: 1, maxLength: 200 },
+              framing: { type: 'string', minLength: 1, maxLength: 200 },
+            },
+          },
+          restrictions: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string', minLength: 3, maxLength: 300 } },
+        },
+      },
+    },
+  }),
+  defineSchema('set-synthetic-presenter-status-request', 1, 'Activate or deactivate a presenter as an auditable version', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision'],
+    properties: { baseRevision: { type: 'integer', minimum: 1 } },
+  }),
+  defineSchema('attach-synthetic-presenter-consent-request', 1, 'Attach a fresh consent proof as its own immutable version', {
+    type: 'object', additionalProperties: false,
+    required: ['baseRevision', 'consent'],
+    properties: {
+      baseRevision: { type: 'integer', minimum: 1 },
+      consent: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'evidenceArtifactId', 'granted', 'allowedUses', 'allowedMarkets', 'allowedLocales', 'allowedOperations', 'expiresAt'],
+        properties: {
+          id: idSchema, evidenceArtifactId: idSchema, granted: { type: 'boolean' },
+          allowedUses: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: idSchema },
+          allowedMarkets: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string' } },
+          allowedLocales: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: { type: 'string' } },
+          allowedOperations: { type: 'array', minItems: 1, maxItems: 2, uniqueItems: true, items: { enum: ['tts', 'audio-avatar'] } },
+          expiresAt: dateTimeSchema, revokedAt: dateTimeSchema,
+        },
+      },
+    },
+  }),
+  defineSchema('evaluate-synthetic-presenter-eligibility-request', 1, 'Deterministically evaluate presenter eligibility for one operation', {
+    type: 'object', additionalProperties: false,
+    required: ['operation', 'use', 'market', 'locale'],
+    properties: {
+      operation: { type: 'string', minLength: 2, maxLength: 64 },
+      use: idSchema,
+      market: { type: 'string', minLength: 2, maxLength: 64 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      profileVersion: { type: 'integer', minimum: 1 },
+      requireActiveVersion: { type: 'boolean' },
+    },
+  }),
+  defineSchema('synthetic-presenter-eligibility', 1, 'Deterministic policy verdict with one auditable reason per denial', successSchema({
+    type: 'object', additionalProperties: false,
+    required: ['policyVersion', 'allowed', 'reasons', 'profileVersion'],
+    properties: {
+      policyVersion: { const: 'synthetic-presenter-eligibility-policy/v1' },
+      allowed: { type: 'boolean' },
+      reasons: {
+        type: 'array', maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['code', 'message'],
+          properties: {
+            code: { type: 'string', minLength: 3, maxLength: 64 },
+            message: { type: 'string', minLength: 3, maxLength: 300 },
+          },
+        },
+      },
+      profileVersion: { type: 'integer', minimum: 1 },
+    },
+  })),
   defineSchema('create-synthetic-production-run-request', 1, 'Compile approved synthetic media into one immutable EditPlan', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId', 'profileSnapshotId', 'audio', 'blocks', 'captions', 'use', 'market'],

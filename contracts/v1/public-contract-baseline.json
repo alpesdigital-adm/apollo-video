@@ -7610,6 +7610,181 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.synthetic-presenters.activate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-synthetic-presenter-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/activation"
+      },
+      "toolName": "apollo.synthetic-presenters.activate",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.attach-consent-proof": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/attach-synthetic-presenter-consent-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/consent-proofs"
+      },
+      "toolName": "apollo.synthetic-presenters.attach-consent-proof",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.create-version": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-synthetic-presenter-version-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/versions"
+      },
+      "toolName": "apollo.synthetic-presenters.create-version",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.deactivate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-synthetic-presenter-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/deactivation"
+      },
+      "toolName": "apollo.synthetic-presenters.deactivate",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.evaluate-eligibility": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "preflight",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "inputSchemaRef": "apollo://schemas/evaluate-synthetic-presenter-eligibility-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-eligibility/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/eligibility-evaluations"
+      },
+      "toolName": "apollo.synthetic-presenters.evaluate-eligibility",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.get": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-detail/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}"
+      },
+      "toolName": "apollo.synthetic-presenters.get",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.synthetic-presenters.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-presenters"
+      },
+      "toolName": "apollo.synthetic-presenters.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.synthetic-presenters.register": {
       "version": "1.0.0",
       "exposure": "public",
@@ -15188,6 +15363,98 @@
           "properties": {
             "apiVersion": {
               "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/attach-synthetic-presenter-consent-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "consent"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "consent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "evidenceArtifactId",
+            "granted",
+            "allowedUses",
+            "allowedMarkets",
+            "allowedLocales",
+            "allowedOperations",
+            "expiresAt"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "evidenceArtifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "granted": {
+              "type": "boolean"
+            },
+            "allowedUses": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              }
+            },
+            "allowedMarkets": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowedLocales": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowedOperations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "tts",
+                  "audio-avatar"
+                ]
+              }
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "revokedAt": {
+              "type": "string",
+              "format": "date-time"
             }
           }
         }
@@ -37461,6 +37728,210 @@
         }
       }
     },
+    "apollo://schemas/create-synthetic-presenter-version-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision",
+        "changes"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "changes": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "avatar": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "adapterId",
+                "adapterVersion",
+                "identityRef"
+              ],
+              "properties": {
+                "adapterId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "adapterVersion": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "identityRef": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "voice": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "adapterId",
+                "adapterVersion"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "adapterId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "adapterVersion": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            },
+            "defaultLocale": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 35
+            },
+            "disclosure": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 500
+            },
+            "consent": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "evidenceArtifactId",
+                "granted",
+                "allowedUses",
+                "allowedMarkets",
+                "allowedLocales",
+                "allowedOperations",
+                "expiresAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "evidenceArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "granted": {
+                  "type": "boolean"
+                },
+                "allowedUses": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "allowedMarkets": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "allowedLocales": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "allowedOperations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "tts",
+                      "audio-avatar"
+                    ]
+                  }
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "revokedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "pronunciationDictionaryRef": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "visualContinuity": {
+              "type": "object",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "wardrobe": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "background": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "framing": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              }
+            },
+            "restrictions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 300
+              }
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/create-synthetic-production-run-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -47952,6 +48423,45 @@
               }
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/evaluate-synthetic-presenter-eligibility-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "use",
+        "market",
+        "locale"
+      ],
+      "properties": {
+        "operation": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "profileVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requireActiveVersion": {
+          "type": "boolean"
         }
       }
     },
@@ -166452,6 +166962,19 @@
         }
       }
     },
+    "apollo://schemas/set-synthetic-presenter-status-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseRevision"
+      ],
+      "properties": {
+        "baseRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "apollo://schemas/set-synthetic-script-plan-profile-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -184487,6 +185010,757 @@
         }
       }
     },
+    "apollo://schemas/synthetic-presenter-detail/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profileId",
+            "head",
+            "current",
+            "versions"
+          ],
+          "properties": {
+            "profileId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "head": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "currentVersion",
+                "currentSnapshotId",
+                "updatedAt"
+              ],
+              "properties": {
+                "currentVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "currentSnapshotId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "current": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version",
+                "snapshotHash",
+                "actorIdentityId",
+                "avatar",
+                "voice",
+                "defaultLocale",
+                "status",
+                "disclosure",
+                "consent",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "snapshotHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "actorIdentityId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "avatar": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "adapterId",
+                    "adapterVersion",
+                    "identityRef"
+                  ],
+                  "properties": {
+                    "adapterId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "adapterVersion": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "identityRef": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "voice": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "version",
+                    "adapterId",
+                    "adapterVersion"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "adapterId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "adapterVersion": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "defaultLocale": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 35
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "disabled",
+                    "expired"
+                  ]
+                },
+                "disclosure": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 500
+                },
+                "consent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "evidenceArtifactId",
+                    "evidenceSha256",
+                    "snapshotHash",
+                    "granted",
+                    "allowedUses",
+                    "allowedMarkets",
+                    "allowedLocales",
+                    "allowedOperations",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "evidenceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "evidenceSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "snapshotHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "granted": {
+                      "type": "boolean"
+                    },
+                    "allowedUses": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "allowedMarkets": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowedLocales": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowedOperations": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 2,
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "tts",
+                          "audio-avatar"
+                        ]
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "pronunciationDictionaryRef": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "visualContinuity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "wardrobe": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "background": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "framing": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "restrictions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 300
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "versions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "version",
+                  "snapshotHash",
+                  "actorIdentityId",
+                  "avatar",
+                  "voice",
+                  "defaultLocale",
+                  "status",
+                  "disclosure",
+                  "consent",
+                  "createdAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "snapshotHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "actorIdentityId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "avatar": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "adapterId",
+                      "adapterVersion",
+                      "identityRef"
+                    ],
+                    "properties": {
+                      "adapterId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "adapterVersion": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "identityRef": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "voice": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "version",
+                      "adapterId",
+                      "adapterVersion"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "adapterId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "adapterVersion": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "defaultLocale": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 35
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "disabled",
+                      "expired"
+                    ]
+                  },
+                  "disclosure": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "consent": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "evidenceArtifactId",
+                      "evidenceSha256",
+                      "snapshotHash",
+                      "granted",
+                      "allowedUses",
+                      "allowedMarkets",
+                      "allowedLocales",
+                      "allowedOperations",
+                      "expiresAt"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "evidenceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "evidenceSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "snapshotHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "granted": {
+                        "type": "boolean"
+                      },
+                      "allowedUses": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "allowedMarkets": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedLocales": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedOperations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 2,
+                        "uniqueItems": true,
+                        "items": {
+                          "enum": [
+                            "tts",
+                            "audio-avatar"
+                          ]
+                        }
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "revokedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  },
+                  "pronunciationDictionaryRef": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "visualContinuity": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "properties": {
+                      "wardrobe": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "background": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "framing": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    }
+                  },
+                  "restrictions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 300
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-presenter-eligibility/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policyVersion",
+            "allowed",
+            "reasons",
+            "profileVersion"
+          ],
+          "properties": {
+            "policyVersion": {
+              "const": "synthetic-presenter-eligibility-policy/v1"
+            },
+            "allowed": {
+              "type": "boolean"
+            },
+            "reasons": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 64
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 300
+                  }
+                }
+              }
+            },
+            "profileVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-presenter-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "presenters"
+          ],
+          "properties": {
+            "presenters": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "profileId",
+                  "currentVersion",
+                  "status",
+                  "defaultLocale",
+                  "disclosure",
+                  "voice",
+                  "avatarAdapterId",
+                  "consent",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "profileId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "currentVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "enum": [
+                      "active",
+                      "disabled",
+                      "expired"
+                    ]
+                  },
+                  "defaultLocale": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 35
+                  },
+                  "disclosure": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "voice": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "adapterId",
+                      "adapterVersion",
+                      "version"
+                    ],
+                    "properties": {
+                      "adapterId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "adapterVersion": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "avatarAdapterId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "consent": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "granted",
+                      "expiresAt"
+                    ],
+                    "properties": {
+                      "granted": {
+                        "type": "boolean"
+                      },
+                      "expiresAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "revokedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/synthetic-presenter-registered/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -184698,6 +185972,44 @@
                       "type": "string",
                       "format": "date-time"
                     }
+                  }
+                },
+                "pronunciationDictionaryRef": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "visualContinuity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "minProperties": 1,
+                  "properties": {
+                    "wardrobe": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "background": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "framing": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "restrictions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 300
                   }
                 },
                 "createdAt": {
