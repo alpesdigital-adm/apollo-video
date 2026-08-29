@@ -261,7 +261,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     // A compile before every block is approved must fail closed.
     await assert.rejects(
       compile({
-        workspaceId, projectId, projectVersionId, planId, baseVersionId: created.plan.version.id,
+        workspaceId, projectId, projectVersionId, planId, baseVersionId: created.plan.version.id, baseHash: created.plan.version.planVersionHash,
         settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
         idempotencyKey: 'compile-early',
       }),
@@ -274,7 +274,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const currentPlan = await plans.readPlan({ workspaceId, projectId, planId })
 
     const compiled = await compile({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: currentPlan.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: currentPlan.version.id, baseHash: currentPlan.version.planVersionHash,
       settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
       idempotencyKey: 'compile-final',
     })
@@ -307,7 +307,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
 
     // The compile is idempotent: same key replays byte-identically.
     const replayed = await compile({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: currentPlan.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: currentPlan.version.id, baseHash: currentPlan.version.planVersionHash,
       settings: { gapMs: 200, outputFormat: 'mp3' }, use: 'ads', market: 'BRA', actor,
       idempotencyKey: 'compile-final',
     })

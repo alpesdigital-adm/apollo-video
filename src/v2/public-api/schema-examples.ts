@@ -5426,8 +5426,107 @@ const syntheticAudioMasterExample = {
   wordsHash: '3'.repeat(64), approvedAt: createdAt, approvalCriticHash: '4'.repeat(64), createdAt, masterHash: '5'.repeat(64),
 }
 
+const scriptBlockExample = {
+  schemaVersion: 'synthetic-script-block/v1',
+  id: 'script-block-example-1', workspaceId: 'workspace-example-1', projectId: 'project-example-1', planId: 'script-plan-example-1',
+  exactText: 'Primeira ideia completa.', normalizedText: 'Primeira ideia completa.', normalizedTextHash: '6'.repeat(64),
+  locale: 'pt-BR', occurrence: 1, createdInVersionId: 'script-plan-version-example-1',
+  origin: { kind: 'initial-segmentation' }, blockHash: '7'.repeat(64), createdAt,
+}
+
+const scriptBlockPlanExample = {
+  head: {
+    schemaVersion: 'synthetic-script-plan/v1', id: 'script-plan-example-1', workspaceId: 'workspace-example-1',
+    projectId: 'project-example-1', currentVersionId: 'script-plan-version-example-1', createdAt,
+  },
+  version: {
+    schemaVersion: 'synthetic-script-plan-version/v1', id: 'script-plan-version-example-1', planId: 'script-plan-example-1',
+    workspaceId: 'workspace-example-1', projectId: 'project-example-1', sequence: 1,
+    projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', locale: 'pt-BR',
+    segmentationVersion: 'synthetic-script-segmentation/v1', scriptHash: '8'.repeat(64),
+    commandType: 'create-plan', blockSequence: ['script-block-example-1'],
+    impact: {
+      schemaVersion: 'synthetic-script-plan-impact/v1', commandType: 'create-plan', baseVersionId: null,
+      resultVersionId: 'script-plan-version-example-1', createdBlockIds: ['script-block-example-1'],
+      reusedBlockIds: [], retiredBlockIds: [], invalidatedArtifactIds: [],
+      renderSemantics: 'deferred-to-compile',
+      cacheDecisions: [{ blockId: 'script-block-example-1', decision: 'pending', reason: 'new block without an approved generation for its cache key' }],
+      impactHash: '9'.repeat(64),
+    },
+    planVersionHash: 'a'.repeat(64), createdAt,
+  },
+  blocks: [scriptBlockExample],
+}
+
+const scriptPlanCommandContextExample = {
+  projectVersionId: 'project-version-example-1', baseVersionId: 'script-plan-version-example-1', baseHash: 'a'.repeat(64), use: 'ads', market: 'BRA',
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/create-synthetic-script-plan-request/v1': [{
+      projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
+      locale: 'pt-BR', scriptText: 'Primeira ideia completa. Segunda ideia forte!', use: 'ads', market: 'BRA',
+    }],
+    'apollo://schemas/insert-synthetic-script-block-request/v1': [{
+      ...scriptPlanCommandContextExample, position: 1, text: 'Ideia inserida no meio.',
+    }],
+    'apollo://schemas/update-synthetic-script-block-request/v1': [{
+      ...scriptPlanCommandContextExample, text: 'Primeira ideia reescrita do zero.',
+    }],
+    'apollo://schemas/remove-synthetic-script-block-request/v1': [{ ...scriptPlanCommandContextExample }],
+    'apollo://schemas/reorder-synthetic-script-blocks-request/v1': [{
+      ...scriptPlanCommandContextExample, order: ['script-block-example-1'],
+    }],
+    'apollo://schemas/set-synthetic-script-plan-profile-request/v1': [{
+      ...scriptPlanCommandContextExample, profileSnapshotId: 'presenter-example-2',
+    }],
+    'apollo://schemas/regenerate-synthetic-script-block-request/v1': [{ ...scriptPlanCommandContextExample }],
+    'apollo://schemas/compile-synthetic-block-audio-request/v1': [{
+      ...scriptPlanCommandContextExample, settings: { gapMs: 200, outputFormat: 'mp3' },
+    }],
+    'apollo://schemas/synthetic-script-plan-mutated/v1': [{
+      data: {
+        plan: scriptBlockPlanExample,
+        generations: [{
+          blockId: 'script-block-example-1', generationId: 'sbg-example-1', action: 'enqueued',
+          reason: 'cache miss: no approved generation carries this exact cache key',
+        }],
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-script-plan-read/v1': [{
+      data: {
+        plan: scriptBlockPlanExample,
+        generations: [{
+          id: 'sbg-example-1', blockId: 'script-block-example-1', attempt: 1, status: 'approved',
+          cacheDecision: 'miss-generate', decisionReason: 'cache miss: no approved generation carries this exact cache key',
+          cacheKey: 'b'.repeat(64), providerJobId: 'provider-job-example-1',
+          audioArtifactId: 'artifact-audio-example-1', alignmentArtifactId: 'artifact-alignment-example-1',
+          updatedAt: createdAt,
+        }],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-block-audio-compiled/v1': [{
+      data: {
+        concatenation: {
+          id: 'sbc-example-1', planId: 'script-plan-example-1', planVersionId: 'script-plan-version-example-2',
+          container: 'mp3', codec: 'mp3', sampleRate: 44100, channels: 1, gapMs: 200, durationMs: 4226,
+          entries: [{
+            blockId: 'script-block-example-1', generationId: 'sbg-example-1', artifactSha256: '1'.repeat(64),
+            sourceDurationMs: 2009, outputInMs: 0, outputOutMs: 2009, gapAfterMs: 208, processing: 'copy', alignmentOffsetMs: 0,
+          }],
+          concatHash: 'c'.repeat(64), audioArtifactId: 'artifact-concat-audio-example-1',
+          alignmentArtifactId: 'artifact-concat-alignment-example-1', finalAudioSha256: 'd'.repeat(64),
+          audioMasterId: 'synthetic-audio-master-example-1', createdAt,
+        },
+        audioMasterId: 'synthetic-audio-master-example-1',
+        replayed: false,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/register-synthetic-presenter-request/v1': [{
       profileId: 'presenter-example-1', version: 1, actorIdentityId: 'identity-example-1',
       avatar: syntheticProfileExample.avatar, voice: syntheticProfileExample.voice,

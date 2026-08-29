@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 
 import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
@@ -25,7 +26,7 @@ import { runNextProjectFinalExportOperationService } from '../application/run-pr
 import { catalogApprovedOutputService } from '../application/catalog-approved-output.ts'
 import { runNextSourceCleanupOperationService } from '../application/run-source-cleanup-worker.ts'
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
-import { runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
+import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
@@ -91,6 +92,9 @@ import type { ProofIntegrityRepository } from '../application/ports/proof-integr
 import type { ProofModeRepository } from '../application/ports/proof-mode-repository.ts'
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
 import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
+import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
+import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
+import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -165,6 +169,18 @@ import type {
   WebhookReplayReceiptRepository,
 } from '../application/ports/webhook-security-repository.ts'
 import { DomainError } from '../domain/errors.ts'
+import { compileSyntheticBlockAudioService } from '../application/synthetic-block-audio-compilation.ts'
+import {
+  createSyntheticScriptPlanService,
+  mutateSyntheticScriptPlanService,
+  readSyntheticScriptPlanService,
+} from '../application/synthetic-script-plans.ts'
+import {
+  ensureSyntheticBlockGenerationsService,
+  settleSyntheticBlockGenerationsService,
+} from '../application/synthetic-block-generations.ts'
+import { createSyntheticAudioMasterService } from '../application/synthetic-audio-masters.ts'
+import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
 import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
@@ -235,6 +251,9 @@ import { PrismaProofIntegrityRepository } from './prisma/proof-integrity-reposit
 import { PrismaProofModeRepository } from './prisma/proof-mode-repository.ts'
 import { PrismaSyntheticProductionRepository } from './prisma/synthetic-production-repository.ts'
 import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
+import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
+import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
+import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
 import { ElevenLabsTtsProviderAdapter } from './elevenlabs-tts-provider.ts'
@@ -642,6 +661,110 @@ export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepo
 
 export function createProviderJobRepository(): ProviderJobRepository {
   return new PrismaProviderJobRepository(resolveV2Client())
+}
+
+export function createSyntheticScriptPlanRepository(): SyntheticScriptPlanRepository {
+  return new PrismaSyntheticScriptPlanRepository(resolveV2Client())
+}
+
+export function createSyntheticBlockGenerationRepository(): SyntheticBlockGenerationRepository {
+  return new PrismaSyntheticBlockGenerationRepository(resolveV2Client())
+}
+
+export function createSyntheticBlockConcatenationRepository(): SyntheticBlockConcatenationRepository {
+  return new PrismaSyntheticBlockConcatenationRepository(resolveV2Client())
+}
+
+export function createProviderResultArtifactRepository() {
+  return new PrismaProviderResultArtifactRepository(resolveV2Client())
+}
+
+/** One wiring for every synthetic-script-plan route: plan commands plus the
+ * per-block generation ensure/settle pipeline over the same repositories. */
+export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv = process.env) {
+  const plans = createSyntheticScriptPlanRepository()
+  const projects = createProjectWorkspaceQueryRepository()
+  const profiles = createSyntheticProductionRepository()
+  const generations = createSyntheticBlockGenerationRepository()
+  const artifacts = createMediaArtifactQueryRepository()
+  const rights = createAssetRightsRepository()
+  const providerJobs = createProviderJobRepository()
+  const planDependencies = {
+    plans, projects, profiles,
+    clock: () => new Date(),
+    createId: (kind: 'script-plan' | 'script-plan-version' | 'script-block') => `${kind}-${randomUUID()}`,
+  }
+  return {
+    plans,
+    generations,
+    createPlan: createSyntheticScriptPlanService(planDependencies),
+    mutatePlan: mutateSyntheticScriptPlanService(planDependencies),
+    readPlan: readSyntheticScriptPlanService({ plans }),
+    ensure: ensureSyntheticBlockGenerationsService({
+      plans, generations, profiles, artifacts, rights,
+      enqueueProviderJob: enqueueProviderJobService({
+        jobs: providerJobs,
+        adapters: createProviderAdapterRegistry(environment),
+        profiles,
+        audioMasters: createSyntheticAudioMasterRepository(),
+        projects,
+        artifacts,
+        rights,
+        clock: () => new Date(),
+        createJobId: () => `provider-job-${randomUUID()}`,
+        createTransitionId: () => `provider-transition-${randomUUID()}`,
+      }),
+      clock: () => new Date(),
+    }),
+    settle: settleSyntheticBlockGenerationsService({
+      generations,
+      providerJobs,
+      resultArtifacts: createProviderResultArtifactRepository(),
+      clock: () => new Date(),
+    }),
+  }
+}
+
+const audioToolsRequire = createRequire(import.meta.url)
+
+export function createSyntheticBlockAudioCompilationService(environment: NodeJS.ProcessEnv = process.env) {
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires APOLLO_V2_RENDER_WORK_ROOT')
+  const ffmpegPath = ((audioToolsRequire('ffmpeg-static') as string | null) ?? '').trim()
+  const ffprobePath = ((audioToolsRequire('ffprobe-static') as { path?: string }).path ?? '').trim()
+  if (!ffmpegPath || !ffprobePath) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires bundled ffmpeg and ffprobe')
+  const artifacts = new PrismaMediaArtifactRepository(resolveV2Client())
+  const plans = createSyntheticScriptPlanRepository()
+  const projects = createProjectWorkspaceQueryRepository()
+  const profiles = createSyntheticProductionRepository()
+  return compileSyntheticBlockAudioService({
+    plans,
+    generations: createSyntheticBlockGenerationRepository(),
+    profiles,
+    artifacts,
+    artifactPersistence: artifacts,
+    rights: createAssetRightsRepository(),
+    concatenations: createSyntheticBlockConcatenationRepository(),
+    sources: createArtifactSourceMaterializer(environment),
+    storage: createVerifiedMediaStorage(environment),
+    mutatePlan: mutateSyntheticScriptPlanService({
+      plans, projects, profiles, clock: () => new Date(),
+      createId: (kind) => `${kind}-${randomUUID()}`,
+    }),
+    createAudioMaster: createSyntheticAudioMasterService({
+      repository: createSyntheticAudioMasterRepository(),
+      projects,
+      profiles,
+      providerJobs: createProviderJobRepository(),
+      artifacts,
+      rights: createAssetRightsRepository(),
+      clock: () => new Date(),
+      createId: () => `synthetic-audio-master-${randomUUID()}`,
+    }),
+    concatenate: (input) => concatenateBlockAudio({ ...input, ffmpegPath, ffprobePath }),
+    workRoot: join(workRoot, 'block-audio-compilation'),
+    clock: () => new Date(),
+  })
 }
 
 export function createLongFormIndexWorkflowRepository():

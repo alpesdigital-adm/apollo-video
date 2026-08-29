@@ -30,7 +30,7 @@ import type { SyntheticScriptPlanRepository, PersistedSyntheticScriptPlan } from
 import type {
   AudioConcatenationBlockInput,
   AudioConcatenationResult,
-} from '../infrastructure/media/audio-concatenation.ts'
+} from '../domain/synthetic-block-concatenation.ts'
 
 const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 
@@ -110,11 +110,12 @@ export function compileSyntheticBlockAudioService(dependencies: {
     projectVersionId: string
     planId: string
     baseVersionId: string
+    baseHash: string
     mutation: SyntheticScriptPlanMutation
     actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) => Promise<Readonly<{ plan: Readonly<PersistedSyntheticScriptPlan>; replayed: boolean }>>
-  createAudioMaster: (request: Record<string, unknown>) => Promise<Readonly<{ value: Readonly<{ master: Readonly<{ id: string }> }>; replayed: boolean }>>
+  createAudioMaster: ReturnType<typeof import('./synthetic-audio-masters.ts')['createSyntheticAudioMasterService']>
   concatenate: (input: {
     blocks: readonly Readonly<AudioConcatenationBlockInput>[]
     gapMs: number
@@ -129,6 +130,8 @@ export function compileSyntheticBlockAudioService(dependencies: {
     projectVersionId: string
     planId: string
     baseVersionId: string
+    /** Immutable hash of the base plan version — a stale hash fails closed. */
+    baseHash: string
     settings: Readonly<CompileBlockAudioSettings>
     use: string
     market: string
@@ -147,6 +150,7 @@ export function compileSyntheticBlockAudioService(dependencies: {
       projectVersionId: request.projectVersionId,
       planId: request.planId,
       baseVersionId: request.baseVersionId,
+      baseHash: request.baseHash,
       settings,
       use: request.use,
       market: request.market,
@@ -177,6 +181,7 @@ export function compileSyntheticBlockAudioService(dependencies: {
     if (!current) throw new DomainError('PROJECT_NOT_FOUND', 'Synthetic script plan was not found')
     if (!versionReplay) {
       assertDomain(current.head.currentVersionId === request.baseVersionId, 'VERSION_CONFLICT', 'Audio compilation must target the current plan version')
+      assertDomain(current.version.planVersionHash === request.baseHash, 'VERSION_CONFLICT', 'Audio compilation base hash is stale')
     }
     const plan = current
     const profile = await dependencies.profiles.readProfile({ workspaceId: request.workspaceId, snapshotId: plan.version.profileSnapshotId })
@@ -217,6 +222,7 @@ export function compileSyntheticBlockAudioService(dependencies: {
       projectVersionId: request.projectVersionId,
       planId: request.planId,
       baseVersionId: request.baseVersionId,
+      baseHash: request.baseHash,
       mutation: { kind: 'compile-audio', settingsHash },
       actor: request.actor,
       idempotencyKey: `${request.idempotencyKey}.v`,

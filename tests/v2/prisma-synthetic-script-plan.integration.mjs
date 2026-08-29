@@ -144,7 +144,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
 
     // 2. insert-block creates only the inserted block.
     const inserted = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v1,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v1, baseHash: created.plan.version.planVersionHash,
       mutation: { kind: 'insert-block', position: 1, text: 'Ideia inserida no meio.' },
       actor, idempotencyKey: 'plan-insert-key',
     })
@@ -163,7 +163,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     // 3. update-block retires only the edited block and records lineage.
     const editedTarget = idsV1[0]
     const updated = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v2,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v2, baseHash: inserted.plan.version.planVersionHash,
       mutation: { kind: 'update-block', blockId: editedTarget, text: 'Primeira ideia reescrita do zero.' },
       actor, idempotencyKey: 'plan-update-key',
     })
@@ -179,7 +179,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
 
     // 4. remove-block retires exactly the removed block.
     const removed = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v3,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v3, baseHash: updated.plan.version.planVersionHash,
       mutation: { kind: 'remove-block', blockId: insertedBlockId },
       actor, idempotencyKey: 'plan-remove-key',
     })
@@ -192,7 +192,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     const orderV4 = removed.plan.version.blockSequence
     const reorderedOrder = [orderV4[1], orderV4[0], ...orderV4.slice(2)]
     const reordered = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v4,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v4, baseHash: removed.plan.version.planVersionHash,
       mutation: { kind: 'reorder-blocks', order: reorderedOrder },
       actor, idempotencyKey: 'plan-reorder-key',
     })
@@ -205,7 +205,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     // Optimistic concurrency: a stale base version is rejected.
     await assert.rejects(
       mutatePlan({
-        workspaceId, projectId, projectVersionId, planId, baseVersionId: v4,
+        workspaceId, projectId, projectVersionId, planId, baseVersionId: v4, baseHash: removed.plan.version.planVersionHash,
         mutation: { kind: 'remove-block', blockId: orderV4[2] },
         actor, idempotencyKey: 'plan-stale-key',
       }),
@@ -214,7 +214,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     // A stale project version is rejected as well.
     await assert.rejects(
       mutatePlan({
-        workspaceId, projectId, projectVersionId: 'project-version-inexistente', planId, baseVersionId: v5,
+        workspaceId, projectId, projectVersionId: 'project-version-inexistente', planId, baseVersionId: v5, baseHash: reordered.plan.version.planVersionHash,
         mutation: { kind: 'remove-block', blockId: orderV4[2] },
         actor, idempotencyKey: 'plan-stale-project-key',
       }),
@@ -224,7 +224,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     // 6. set-profile switches the presenter snapshot and keeps every block.
     const profileV2 = await registerProfile(profileInput(2, 'voice_plan_b', 'script-plan-profile-v2'))
     const reprofiled = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v5,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v5, baseHash: reordered.plan.version.planVersionHash,
       mutation: { kind: 'set-profile', profileSnapshotId: profileV2.profile.profileSnapshotId },
       actor, idempotencyKey: 'plan-profile-key',
     })
@@ -235,7 +235,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
 
     // 7. Mutation replay returns the same persisted version, byte-identical.
     const mutationReplay = await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: v5,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: v5, baseHash: reordered.plan.version.planVersionHash,
       mutation: { kind: 'set-profile', profileSnapshotId: profileV2.profile.profileSnapshotId },
       actor, idempotencyKey: 'plan-profile-key',
     })

@@ -290,7 +290,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     // 2. Editing one block regenerates exactly that block.
     const editedTarget = head.version.blockSequence[1]
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'update-block', blockId: editedTarget, text: 'Segunda ideia totalmente reescrita.' },
       actor, idempotencyKey: 'blockgen-update',
     })).plan
@@ -304,7 +304,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     //    only after rights and consent hold — zero new provider calls.
     await grantRightsForApprovedAudio()
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'insert-block', position: 3, text: 'Primeira ideia do roteiro.' },
       actor, idempotencyKey: 'blockgen-insert-dup',
     })).plan
@@ -322,7 +322,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     //    profile version keeping the SAME voice regenerates none.
     const profileV2 = await registerProfile(profileInput(2, 'voice_block_b', 'blockgen-profile-v2'))
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'set-profile', profileSnapshotId: profileV2.profile.profileSnapshotId },
       actor, idempotencyKey: 'blockgen-profile-b',
     })).plan
@@ -339,7 +339,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     assert.equal(providerCalls.length, 7)
     const profileV3 = await registerProfile(profileInput(3, 'voice_block_b', 'blockgen-profile-v3'))
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'set-profile', profileSnapshotId: profileV3.profile.profileSnapshotId },
       actor, idempotencyKey: 'blockgen-profile-same-voice',
     })).plan
@@ -351,7 +351,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const forcedTarget = head.version.blockSequence[0]
     const beforeForce = await generations.findEffective({ workspaceId, blockId: forcedTarget })
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'regenerate-block', blockId: forcedTarget },
       actor, idempotencyKey: 'blockgen-force',
     })).plan
@@ -371,7 +371,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
 
     // 6. A failing block fails alone; an explicit retry touches only it.
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'update-block', blockId: head.version.blockSequence[2], text: 'Bloco que FALHE de propósito.' },
       actor, idempotencyKey: 'blockgen-fail-edit',
     })).plan
@@ -408,7 +408,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const generationsBefore = await client.v2SyntheticBlockGeneration.count({ where: { workspaceId } })
     const profileV4 = await registerProfile(profileInput(4, 'voice_block_b', 'blockgen-profile-v4', { revokedAt: '2029-01-01T00:00:00.000Z' }))
     head = (await mutatePlan({
-      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id,
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
       mutation: { kind: 'set-profile', profileSnapshotId: profileV4.profile.profileSnapshotId },
       actor, idempotencyKey: 'blockgen-profile-revoked',
     })).plan

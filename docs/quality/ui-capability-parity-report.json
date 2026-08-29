@@ -4,9 +4,9 @@
     "uiActions": 105,
     "capabilities": 94,
     "endpoints": 94,
-    "registeredCapabilities": 258,
-    "operableCapabilities": 258,
-    "publicContractCapabilities": 258,
+    "registeredCapabilities": 267,
+    "operableCapabilities": 267,
+    "publicContractCapabilities": 267,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -4856,6 +4856,105 @@
       "endpoint": "GET /v1/projects/{projectId}/synthetic-audio-masters/{audioMasterId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/synthetic-audio-master-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans",
+      "inputSchemaRef": "apollo://schemas/create-synthetic-script-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-script-plans/{planId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.insert-block",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks",
+      "inputSchemaRef": "apollo://schemas/insert-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.update-block",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}/edits",
+      "inputSchemaRef": "apollo://schemas/update-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.remove-block",
+      "exposure": "public",
+      "endpoint": "DELETE /v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}",
+      "inputSchemaRef": "apollo://schemas/remove-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.reorder-blocks",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/block-order",
+      "inputSchemaRef": "apollo://schemas/reorder-synthetic-script-blocks-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.set-profile",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/presenter-profile",
+      "inputSchemaRef": "apollo://schemas/set-synthetic-script-plan-profile-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.regenerate-block",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}/regenerations",
+      "inputSchemaRef": "apollo://schemas/regenerate-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-script-plans.compile-audio",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/audio-compilations",
+      "inputSchemaRef": "apollo://schemas/compile-synthetic-block-audio-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-block-audio-compiled/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

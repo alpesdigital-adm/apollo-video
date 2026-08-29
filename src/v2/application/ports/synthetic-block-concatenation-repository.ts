@@ -1,5 +1,5 @@
 import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
-import type { AudioConcatenationManifestEntry } from '../../infrastructure/media/audio-concatenation.ts'
+import type { AudioConcatenationManifestEntry } from '../../domain/synthetic-block-concatenation.ts'
 
 export interface PersistedSyntheticBlockConcatenation {
   id: string

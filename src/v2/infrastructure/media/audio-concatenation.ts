@@ -5,45 +5,18 @@ import { promisify } from 'node:util'
 
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { assertDomain, DomainError } from '../../domain/errors.ts'
+import {
+  AUDIO_CONCATENATION_SCHEMA_VERSION,
+  type AudioConcatenationBlockInput,
+  type AudioConcatenationManifestEntry,
+  type AudioConcatenationResult,
+} from '../../domain/synthetic-block-concatenation.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 
 const run = promisify(execFile)
 
-export const AUDIO_CONCATENATION_SCHEMA_VERSION = 'synthetic-block-concatenation/v1' as const
-
 /** Samples per MPEG-1 Layer III frame — constant for 32-48 kHz MP3. */
 const MP3_SAMPLES_PER_FRAME = 1_152
-
-export interface AudioConcatenationBlockInput {
-  blockId: string
-  generationId: string
-  path: string
-  sha256: string
-}
-
-export interface AudioConcatenationManifestEntry {
-  blockId: string
-  generationId: string
-  artifactSha256: string
-  sourceDurationMs: number
-  outputInMs: number
-  outputOutMs: number
-  gapAfterMs: number
-  processing: 'copy' | 'reencode'
-  alignmentOffsetMs: number
-}
-
-export interface AudioConcatenationResult {
-  outputPath: string
-  container: 'mp3' | 'wav'
-  codec: string
-  sampleRate: number
-  channels: number
-  durationMs: number
-  finalAudioSha256: string
-  entries: readonly Readonly<AudioConcatenationManifestEntry>[]
-  concatHash: string
-}
 
 interface ProbedAudio {
   codec: string

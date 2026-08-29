@@ -323,6 +323,38 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to estimate and submit one paid TTS or avatar provider job after exact project, consent and source-rights checks.',
     },
+    'apollo.projects.synthetic-script-plans.create': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Segments an approved script into an immutable block plan and enqueues one paid TTS job per uncached block after consent, rights and cache checks.',
+    },
+    'apollo.projects.synthetic-script-plans.insert-block': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Appends an immutable plan version and may enqueue one paid TTS job for each newly inserted uncached block; untouched blocks keep their cache.',
+    },
+    'apollo.projects.synthetic-script-plans.update-block': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Retires exactly the edited block and may enqueue one paid TTS job for its replacement; every other block keeps its cache.',
+    },
+    'apollo.projects.synthetic-script-plans.remove-block': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Retires exactly the removed block from the sequence without regenerating or paying for any surviving block.',
+    },
+    'apollo.projects.synthetic-script-plans.reorder-blocks': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Permutes the plan sequence without touching block identities, cache keys, approved generations or provider spend.',
+    },
+    'apollo.projects.synthetic-script-plans.set-profile': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Switches the presenter snapshot and may enqueue paid TTS jobs only for blocks whose voice identity actually changed.',
+    },
+    'apollo.projects.synthetic-script-plans.regenerate-block': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Deliberately bypasses the cache to enqueue one paid TTS job for exactly one block, superseding its previous attempt within the persisted retry budget.',
+    },
+    'apollo.projects.synthetic-script-plans.compile-audio': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Concatenates already approved block audio deterministically and materializes one consolidated immutable audio master without any provider call.',
+    },
     'apollo.projects.policy-overrides.set': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates one project-scoped EditCommand and immutable Policy Snapshot from an exact base version; rendering stays blocked until a new DirectorRun.',

@@ -202,6 +202,8 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
     projectVersionId: string
     planId: string
     baseVersionId: string
+    /** Immutable hash of the base plan version — a stale hash fails closed. */
+    baseHash: string
     mutation: SyntheticScriptPlanMutation
     actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
@@ -212,6 +214,7 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
     const projectVersionId = identity(request.projectVersionId, 'projectVersionId')
     const planId = identity(request.planId, 'planId')
     const baseVersionId = identity(request.baseVersionId, 'baseVersionId')
+    assertDomain(/^[a-f0-9]{64}$/.test(request.baseHash), 'INVALID_ARGUMENT', 'baseHash must be a lowercase SHA-256')
     const audit = materializeActorAuditContext(request.actor)
     assertDomain(audit.workspaceId === workspaceId, 'AUTH_INVALID', 'Synthetic script plan actor does not belong to workspace')
     const now = dependencies.clock()
@@ -222,6 +225,7 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
       projectVersionId,
       planId,
       baseVersionId,
+      baseHash: request.baseHash,
       mutation: request.mutation,
       actorContextHash: audit.contextHash,
     })
@@ -246,6 +250,11 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
       current.head.currentVersionId === baseVersionId && current.version.id === baseVersionId,
       'VERSION_CONFLICT',
       'Synthetic script plan command must target the current plan version',
+    )
+    assertDomain(
+      current.version.planVersionHash === request.baseHash,
+      'VERSION_CONFLICT',
+      'Synthetic script plan base hash is stale',
     )
     await requireCurrentProjectVersion(dependencies.projects, { workspaceId, projectId, projectVersionId })
 
