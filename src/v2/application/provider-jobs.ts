@@ -290,7 +290,8 @@ export function runProviderJobWorkerOnce(dependencies: {
       leaseExpiresAt: new Date(now.getTime() + leaseMs),
     })
     if (!claimed) return null
-    const job = claimed.job
+    let activeClaim = claimed
+    let job = claimed.job
     let next
     try {
       const adapter = dependencies.adapters.get({ adapterId: job.adapterId, adapterVersion: job.adapterVersion })
@@ -315,6 +316,14 @@ export function runProviderJobWorkerOnce(dependencies: {
         next = transitionProviderJob(job, { status: 'estimated', occurredAt: now.toISOString(), estimate: await adapter.estimate(job.input) })
       } else if (job.status === 'estimated') {
         const submissionInput = await dependencies.materializer.materialize({ job, signal })
+        const intent = transitionProviderJob(job, { status: 'submitting', occurredAt: now.toISOString() })
+        activeClaim = await dependencies.jobs.beginSubmission({
+          current: activeClaim,
+          next: intent,
+          transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
+          occurredAt: now,
+        })
+        job = activeClaim.job
         const submission = await adapter.submit(submissionInput, {
           workspaceId: job.workspaceId,
           projectVersionId: job.originProjectVersionId,
@@ -329,6 +338,16 @@ export function runProviderJobWorkerOnce(dependencies: {
         } else {
           next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.providerJobId })
         }
+      } else if (job.status === 'submitting') {
+        next = transitionProviderJob(job, {
+          status: 'failed',
+          occurredAt: now.toISOString(),
+          normalizedError: {
+            code: 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN',
+            message: 'Provider submission outcome requires reconciliation',
+            retryable: false,
+          },
+        })
       } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
         if (job.providerStatus === 'completed') {
           assertDomain(Boolean(job.resultArtifact), 'PERSISTENCE_CONFLICT', 'Synchronously completed provider job lost its ingested result artifact')
@@ -362,7 +381,7 @@ export function runProviderJobWorkerOnce(dependencies: {
       next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: normalizedFailure(error) })
     }
     return dependencies.jobs.advance({
-      current: claimed,
+      current: activeClaim,
       next,
       transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
       occurredAt: now,

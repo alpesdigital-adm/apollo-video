@@ -38,16 +38,17 @@ function planned() {
 test('T-FR-101 ProviderJob persists every paid and trust boundary before approval', () => {
   let job = planned()
   job = transitionProviderJob(job, { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 } })
-  job = transitionProviderJob(job, { status: 'submitted', occurredAt: at(2), providerJobId: 'controlled-job-one' })
-  job = transitionProviderJob(job, { status: 'queued', occurredAt: at(3), providerStatus: 'queued' })
-  job = transitionProviderJob(job, { status: 'processing', occurredAt: at(4), providerStatus: 'processing' })
-  job = transitionProviderJob(job, { status: normalizeProviderStatus('completed'), occurredAt: at(5), providerStatus: 'completed' })
-  job = transitionProviderJob(job, { status: 'evaluating', occurredAt: at(6), resultArtifact: { artifactId: 'ingested-avatar-one', artifactSha256: hash('c'), mediaType: 'video', byteSize: 12_345 } })
-  job = transitionProviderJob(job, { status: 'approved', occurredAt: at(7), criticResultHash: hash('d') })
+  job = transitionProviderJob(job, { status: 'submitting', occurredAt: at(2) })
+  job = transitionProviderJob(job, { status: 'submitted', occurredAt: at(3), providerJobId: 'controlled-job-one' })
+  job = transitionProviderJob(job, { status: 'queued', occurredAt: at(4), providerStatus: 'queued' })
+  job = transitionProviderJob(job, { status: 'processing', occurredAt: at(5), providerStatus: 'processing' })
+  job = transitionProviderJob(job, { status: normalizeProviderStatus('completed'), occurredAt: at(6), providerStatus: 'completed' })
+  job = transitionProviderJob(job, { status: 'evaluating', occurredAt: at(7), resultArtifact: { artifactId: 'ingested-avatar-one', artifactSha256: hash('c'), mediaType: 'video', byteSize: 12_345 } })
+  job = transitionProviderJob(job, { status: 'approved', occurredAt: at(8), criticResultHash: hash('d') })
   assert.equal(job.status, 'approved')
   assert.equal(job.attempt, 1)
   assert.equal(job.resultArtifact.artifactId, 'ingested-avatar-one')
-  assert.equal(job.completedAt, at(7))
+  assert.equal(job.completedAt, at(8))
   assertProviderJob(job)
   assert.throws(() => transitionProviderJob(job, { status: 'processing', occurredAt: at(8) }), /cannot transition/)
 })
@@ -65,9 +66,10 @@ test('T-FR-101 ProviderJob fails closed on secrets, authorization drift and pre-
     idempotencyKey: 'provider-forged-key', authorization: forged, createdAt: at(0),
   }), /authorization hash/)
   const estimated = transitionProviderJob(planned(), { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 1, estimatedLatencyMs: 1 } })
-  const submitted = transitionProviderJob(estimated, { status: 'submitted', occurredAt: at(2), providerJobId: 'controlled-job-two' })
-  const retrieving = transitionProviderJob(submitted, { status: 'retrieving', occurredAt: at(3), providerStatus: 'completed' })
-  assert.throws(() => transitionProviderJob(retrieving, { status: 'approved', occurredAt: at(4), criticResultHash: hash('a') }), /cannot transition/)
+  const submitting = transitionProviderJob(estimated, { status: 'submitting', occurredAt: at(2) })
+  const submitted = transitionProviderJob(submitting, { status: 'submitted', occurredAt: at(3), providerJobId: 'controlled-job-two' })
+  const retrieving = transitionProviderJob(submitted, { status: 'retrieving', occurredAt: at(4), providerStatus: 'completed' })
+  assert.throws(() => transitionProviderJob(retrieving, { status: 'approved', occurredAt: at(5), criticResultHash: hash('a') }), /cannot transition/)
 })
 
 test('T-FR-101 controlled adapter survives stage restarts and ingests before critic', async () => {
@@ -87,6 +89,13 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
       history.push(input.next.status)
       lease = undefined
       return stored
+    },
+    async beginSubmission(input) {
+      assert.equal(input.current.job.jobHash, stored.job.jobHash)
+      assert.equal(input.current.lease.token, lease.token)
+      stored = { ...stored, job: input.next }
+      history.push(input.next.status)
+      return { ...stored, lease }
     },
   }
   const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
@@ -113,7 +122,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
     createTransitionId: () => `provider-transition-${++transition}`,
   })
   for (let stage = 0; stage < 7; stage += 1) await runOnce('provider-worker-one')
-  assert.deepEqual(history, ['planned', 'estimated', 'submitted', 'queued', 'processing', 'retrieving', 'evaluating', 'approved'])
+  assert.deepEqual(history, ['planned', 'estimated', 'submitting', 'submitted', 'queued', 'processing', 'retrieving', 'evaluating', 'approved'])
   assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
   assert.equal(stored.job.resultArtifact.artifactSha256, hash('c'))
   assert.equal(JSON.stringify(stored).includes('ephemeral-only'), false)
@@ -135,6 +144,12 @@ test('T-FR-101 synchronous provider completes through the durable job without po
       history.push(input.next.status)
       lease = undefined
       return stored
+    },
+    async beginSubmission(input) {
+      assert.equal(input.current.job.jobHash, stored.job.jobHash)
+      stored = { ...stored, job: input.next }
+      history.push(input.next.status)
+      return { ...stored, lease }
     },
   }
   const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
@@ -162,7 +177,7 @@ test('T-FR-101 synchronous provider completes through the durable job without po
     createTransitionId: () => `provider-transition-sync-${tick}`,
   })
   for (let stage = 0; stage < 5; stage += 1) await runOnce('provider-worker-sync')
-  assert.deepEqual(history, ['planned', 'estimated', 'submitted', 'retrieving', 'evaluating', 'approved'])
+  assert.deepEqual(history, ['planned', 'estimated', 'submitting', 'submitted', 'retrieving', 'evaluating', 'approved'])
   assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit'])
   assert.equal(stored.job.providerJobId, 'controlled-avatar:provider-job-key')
   assert.equal(stored.job.providerStatus, 'completed')
@@ -174,6 +189,7 @@ test('T-FR-101 provider failure is normalized without persisting upstream diagno
   let stored = { job: transitionProviderJob(planned(), { status: 'estimated', occurredAt: at(1), estimate: { currency: 'USD', costMinorUnits: 1, estimatedLatencyMs: 1 } }), requestFingerprint: hash('e') }
   const jobs = {
     async claimNext(input) { return { ...stored, lease: { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() } } },
+    async beginSubmission(input) { stored = { ...stored, job: input.next }; return { ...stored, lease: input.current.lease } },
     async advance(input) { stored = { ...stored, job: input.next }; return stored },
   }
   const runOnce = runProviderJobWorkerOnce({
@@ -190,6 +206,68 @@ test('T-FR-101 provider failure is normalized without persisting upstream diagno
   await runOnce('provider-worker-redaction')
   assert.deepEqual(stored.job.normalizedError, { code: 'UPSTREAM_DENIED', message: 'Provider operation failed', retryable: true })
   assert.equal(JSON.stringify(stored).includes('secret upstream'), false)
+})
+
+test('T-FR-101 ambiguous non-idempotent submission is never repeated after a worker crash', async () => {
+  let stored = {
+    job: transitionProviderJob(planned(), {
+      status: 'estimated', occurredAt: at(1),
+      estimate: { currency: 'USD', costMinorUnits: 9, estimatedLatencyMs: 800 },
+    }),
+    requestFingerprint: hash('e'),
+  }
+  let lease
+  let loseFirstOutcome = true
+  const jobs = {
+    async claimNext(input) {
+      lease = { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() }
+      return { ...stored, lease }
+    },
+    async beginSubmission(input) {
+      stored = { ...stored, job: input.next }
+      return { ...stored, lease: input.current.lease }
+    },
+    async advance(input) {
+      if (loseFirstOutcome && input.next.status === 'submitted') {
+        loseFirstOutcome = false
+        lease = undefined
+        throw new Error('simulated process loss after provider response')
+      }
+      stored = { ...stored, job: input.next }
+      lease = undefined
+      return stored
+    },
+  }
+  const adapter = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
+    capabilities: {
+      operations: ['audio-avatar'], inputFormats: ['wav'], outputFormats: ['mp4'], locales: ['pt-BR'],
+      duration: { minSeconds: 1, maxSeconds: 60 }, identityReference: 'profile-id', supportsSeed: false,
+      supportsIdempotency: false, supportsCancellation: false, completion: 'synchronous', fetchedAt: at(0), expiresAt: '2030-01-01T00:00:00.000Z',
+    },
+    estimate: { currency: 'USD', costMinorUnits: 9, estimatedLatencyMs: 800 },
+    statuses: [], result: { bytes: 'immediate-video', mediaType: 'video' }, completedAt: at(2),
+  })
+  let tick = 1
+  const runOnce = runProviderJobWorkerOnce({
+    jobs,
+    adapters: { get: () => adapter },
+    materializer: { async materialize({ job }) { return job.input } },
+    ingestor: { async ingest() { return { artifactId: 'ambiguous-result', artifactSha256: hash('c'), mediaType: 'video', byteSize: 777 } } },
+    critic: { async evaluate() { throw new Error('unreachable') } },
+    clock: () => new Date(at(++tick)),
+    createLeaseToken: () => `ambiguous-lease-${tick}`,
+    createTransitionId: () => `ambiguous-transition-${tick}`,
+  })
+
+  await assert.rejects(runOnce('provider-worker-before-crash'), /simulated process loss/)
+  assert.equal(stored.job.status, 'submitting')
+  assert.equal(adapter.calls.filter((call) => call === 'submit').length, 1)
+
+  await runOnce('provider-worker-after-crash')
+  assert.equal(stored.job.status, 'failed')
+  assert.equal(stored.job.normalizedError.code, 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN')
+  assert.equal(stored.job.normalizedError.retryable, false)
+  assert.equal(adapter.calls.filter((call) => call === 'submit').length, 1)
 })
 
 test('T-FR-101 supervised provider loop stays idle, isolates iteration failure and stops on abort', async () => {

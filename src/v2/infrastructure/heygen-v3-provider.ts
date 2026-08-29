@@ -20,8 +20,10 @@ import { ProviderAdapterError } from '../domain/provider-contract.ts'
  *   POST /v3/videos (type avatar + audio_asset_id for lip-synced speech,
  *   mutually exclusive with script) → data.video_id; GET /v3/videos/{id} →
  *   data.status + data.video_url. Auth: X-Api-Key header.
- * - The official Idempotency-Key request header exists on both mutations,
- *   so supportsIdempotency: true is truthful.
+ * - The official reference does not document Idempotency-Key for either
+ *   mutation. Apollo therefore treats both effects as non-idempotent and
+ *   relies on its persisted effect ledger instead of claiming an upstream
+ *   guarantee that the provider has not published.
  * - VideoStatus is exactly pending | processing | completed | failed; any
  *   other value fails closed as PROVIDER_STATUS_UNKNOWN.
  * - There is no documented cancellation of a processing video (Delete Video
@@ -127,10 +129,6 @@ function materializedInput(value: Readonly<Record<string, unknown>>) {
   return Object.freeze({ avatarId, audioBytes: value.audioBytes, audioSha256: value.audioSha256, audioByteSize, audioContainer: value.audioContainer, durationMs, aspectRatio })
 }
 
-function mutationKey(value: string, stage: 'asset' | 'video'): string {
-  return `apollo:${stage}:${createHash('sha256').update(value).digest('hex')}`
-}
-
 export class HeyGenV3AsyncMediaProviderAdapter
 implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3ProviderResult> {
   readonly id = ADAPTER_ID
@@ -186,7 +184,7 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
       duration: Object.freeze({ minSeconds: 1, maxSeconds: 1_800 }),
       identityReference: 'profile-id' as const,
       supportsSeed: false,
-      supportsIdempotency: true,
+      supportsIdempotency: false,
       supportsCancellation: false,
       completion: 'polling' as const,
       fetchedAt: fetchedAt.toISOString(),
@@ -217,13 +215,12 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, HeyGenV3
     form.append('file', new Blob([new Uint8Array(bytes)], { type: mediaType }), `apollo-${value.audioSha256}.${value.audioContainer}`)
     const uploaded = await this.request('/v3/assets', {
       method: 'POST',
-      headers: { 'idempotency-key': mutationKey(context.idempotencyKey, 'asset') },
       body: form,
     }, context.signal)
     const assetId = identifier(object(uploaded.data, 'data').asset_id, 'asset_id')
     const response = await this.request('/v3/videos', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': mutationKey(context.idempotencyKey, 'video') },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         type: 'avatar', avatar_id: value.avatarId, audio_asset_id: assetId,
         aspect_ratio: value.aspectRatio, output_format: 'mp4',
