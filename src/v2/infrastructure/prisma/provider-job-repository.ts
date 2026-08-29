@@ -263,4 +263,42 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
       return parseJob(updated)
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
+
+  async beginSubmission(input: Parameters<ProviderJobRepository['beginSubmission']>[0]) {
+    if (input.current.job.status !== 'estimated' || input.next.status !== 'submitting') {
+      throw new DomainError('VERSION_CONFLICT', 'Provider submission intent has invalid states')
+    }
+    return this.prisma.$transaction(async (transaction) => {
+      const row = await transaction.v2ProviderJob.findUnique({ where: { id: input.current.job.id } })
+      if (!row || row.jobHash !== input.current.job.jobHash || row.status !== input.current.job.status ||
+        row.leaseToken !== input.current.lease.token || row.leaseOwner !== input.current.lease.owner ||
+        !row.leaseExpiresAt || row.leaseExpiresAt.getTime() < input.occurredAt.getTime()) {
+        throw new DomainError('VERSION_CONFLICT', 'Provider job lease or version was lost before submission')
+      }
+      await assertAuthority(transaction, input.next, input.occurredAt)
+      const sequence = await transaction.v2ProviderJobTransition.count({ where: { jobId: row.id } }) + 1
+      const updated = await transaction.v2ProviderJob.update({
+        where: { id: row.id },
+        data: projection(input.next),
+      })
+      await transaction.v2ProviderJobTransition.create({
+        data: {
+          id: input.transitionId,
+          workspaceId: row.workspaceId,
+          projectId: row.projectId,
+          jobId: row.id,
+          sequence,
+          fromStatus: row.status,
+          toStatus: input.next.status,
+          jobHash: input.next.jobHash,
+          leaseToken: input.current.lease.token,
+          occurredAt: input.occurredAt,
+        },
+      })
+      return Object.freeze({
+        ...parseJob(updated),
+        lease: input.current.lease,
+      }) as Readonly<ClaimedProviderJob>
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  }
 }

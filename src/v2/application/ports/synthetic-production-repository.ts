@@ -7,6 +7,13 @@ import type {
 
 export interface PersistedSyntheticPresenterProfile {
   snapshot: Readonly<SyntheticPresenterProfileSnapshot>
+  /**
+   * Versioned physical identity of the persisted snapshot row
+   * (`${profileId}:v${version}`). This is the identity foreign keys to
+   * `synthetic_presenter_profiles(id)` must reference; the logical
+   * `snapshot.id` alone does not identify a persisted version.
+   */
+  profileSnapshotId: string
   requestFingerprint: string
   idempotencyKey: string
   createdAt: string

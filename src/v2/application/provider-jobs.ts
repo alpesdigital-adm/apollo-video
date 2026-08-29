@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { ProviderAdapterError } from '../domain/provider-contract.ts'
 import {
   createProviderJob,
   normalizeProviderStatus,
@@ -115,7 +116,7 @@ export function enqueueProviderJobService(dependencies: {
     if (request.operation === 'audio-avatar') {
       assertDomain(Boolean(persistedAudioMaster && request.audioRange), 'PRECONDITION_REQUIRED', 'Audio-avatar requires a persisted audio master and word range')
       const master = persistedAudioMaster!.master
-      assertDomain(master.projectVersionId === projectVersionId && master.profileSnapshotId === profile.snapshot.id, 'VERSION_CONFLICT', 'Audio master does not belong to the exact project version and profile')
+      assertDomain(master.projectVersionId === projectVersionId && master.profileSnapshotId === profile.profileSnapshotId, 'VERSION_CONFLICT', 'Audio master does not belong to the exact project version and profile')
       const range = createSyntheticAvatarAudioRange({ master, startWordIndex: request.audioRange!.startWordIndex, endWordIndex: request.audioRange!.endWordIndex })
       assertDomain(range.durationMs >= 1_000, 'INVALID_ARGUMENT', 'Audio-avatar range is shorter than the provider-safe minimum')
       assertDomain(request.sourceArtifactIds.length === 1 && request.sourceArtifactIds[0] === master.audio.artifactId, 'INVALID_ARGUMENT', 'Audio-avatar source must be the exact canonical audio master artifact')
@@ -162,7 +163,7 @@ export function enqueueProviderJobService(dependencies: {
     const validUntil = [consent.expiresAt, ...decisions.flatMap((decision) => decision.validUntil ? [decision.validUntil] : [])].toSorted()[0]!
     const authorizationBody = Object.freeze({
       id: `provider-authorization-${requestFingerprint.slice(0, 24)}`,
-      profileSnapshotId: profile.snapshot.id,
+      profileSnapshotId: profile.profileSnapshotId,
       profileSnapshotHash: profile.snapshot.snapshotHash,
       artifactDecisions: Object.freeze(decisions.map((decision) => {
         assertDomain(decision.rightsSnapshotId && decision.rightsSnapshotHash && decision.validUntil, 'ASSET_RIGHTS_BLOCKED', 'Provider source authorization is incomplete')
@@ -212,6 +213,14 @@ export function readProviderJobService(dependencies: { jobs: ProviderJobReposito
 }
 
 function normalizedFailure(error: unknown) {
+  if (error instanceof ProviderAdapterError) {
+    return Object.freeze({
+      code: error.code,
+      message: 'Provider operation failed',
+      retryable: error.retryable === true,
+      ...(Number.isSafeInteger(error.retryAfterMs) ? { retryAfterMs: error.retryAfterMs } : {}),
+    })
+  }
   if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
     return Object.freeze({
       code: error.code,
@@ -281,7 +290,8 @@ export function runProviderJobWorkerOnce(dependencies: {
       leaseExpiresAt: new Date(now.getTime() + leaseMs),
     })
     if (!claimed) return null
-    const job = claimed.job
+    let activeClaim = claimed
+    let job = claimed.job
     let next
     try {
       const adapter = dependencies.adapters.get({ adapterId: job.adapterId, adapterVersion: job.adapterVersion })
@@ -294,28 +304,71 @@ export function runProviderJobWorkerOnce(dependencies: {
         assertDomain(capabilities.operations.includes(job.operation), 'PRECONDITION_REQUIRED', 'Provider operation is unsupported')
         assertDomain(!locale || !capabilities.locales || capabilities.locales.includes(locale), 'PRECONDITION_REQUIRED', 'Provider locale is unsupported')
         assertDomain(!durationMs || durationMs / 1_000 >= capabilities.duration.minSeconds && durationMs / 1_000 <= capabilities.duration.maxSeconds, 'PRECONDITION_REQUIRED', 'Provider duration is unsupported')
+        if (capabilities.completion !== 'synchronous') {
+          assertDomain(typeof adapter.getStatus === 'function' && typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Asynchronous provider adapter must implement polling and retrieval')
+        }
+        if (capabilities.supportsCancellation) {
+          assertDomain(typeof adapter.cancel === 'function', 'PRECONDITION_REQUIRED', 'Provider declares cancellation support without an implementation')
+        }
+        if (capabilities.completion === 'webhook' || capabilities.completion === 'both') {
+          assertDomain(typeof adapter.verifyWebhook === 'function', 'PRECONDITION_REQUIRED', 'Provider declares webhook completion without verification')
+        }
         next = transitionProviderJob(job, { status: 'estimated', occurredAt: now.toISOString(), estimate: await adapter.estimate(job.input) })
       } else if (job.status === 'estimated') {
         const submissionInput = await dependencies.materializer.materialize({ job, signal })
-        const submitted = await adapter.submit(submissionInput, {
+        const intent = transitionProviderJob(job, { status: 'submitting', occurredAt: now.toISOString() })
+        activeClaim = await dependencies.jobs.beginSubmission({
+          current: activeClaim,
+          next: intent,
+          transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
+          occurredAt: now,
+        })
+        job = activeClaim.job
+        const submission = await adapter.submit(submissionInput, {
           workspaceId: job.workspaceId,
           projectVersionId: job.originProjectVersionId,
           operationId: job.id,
           idempotencyKey: job.idempotencyKey,
           signal,
         })
-        next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submitted.providerJobId })
-      } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
-        const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
-        const status = normalizeProviderStatus(providerStatus)
-        if (status === 'failed') {
-          next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus, normalizedError: { code: 'PROVIDER_REPORTED_FAILURE', message: 'Provider reported a terminal failure', retryable: false } })
+        if (submission.kind === 'completed') {
+          assertDomain(Number.isFinite(Date.parse(submission.bundle.completedAt)), 'INVALID_ARGUMENT', 'Provider result bundle completedAt is invalid')
+          const artifact = await dependencies.ingestor.ingest({ job, providerResult: submission.bundle.result, signal })
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.bundle.providerJobRef, providerStatus: 'completed', resultArtifact: artifact })
         } else {
-          next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus })
+          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.providerJobId })
+        }
+      } else if (job.status === 'submitting') {
+        next = transitionProviderJob(job, {
+          status: 'failed',
+          occurredAt: now.toISOString(),
+          normalizedError: {
+            code: 'PROVIDER_SUBMISSION_OUTCOME_UNKNOWN',
+            message: 'Provider submission outcome requires reconciliation',
+            retryable: false,
+          },
+        })
+      } else if (['submitted', 'queued', 'processing', 'suspected-stalled'].includes(job.status)) {
+        if (job.providerStatus === 'completed') {
+          assertDomain(Boolean(job.resultArtifact), 'PERSISTENCE_CONFLICT', 'Synchronously completed provider job lost its ingested result artifact')
+          next = transitionProviderJob(job, { status: 'retrieving', occurredAt: now.toISOString() })
+        } else {
+          assertDomain(typeof adapter.getStatus === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter cannot be polled')
+          const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
+          const status = normalizeProviderStatus(providerStatus)
+          if (status === 'failed') {
+            next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus, normalizedError: { code: 'PROVIDER_REPORTED_FAILURE', message: 'Provider reported a terminal failure', retryable: false } })
+          } else {
+            next = transitionProviderJob(job, { status, occurredAt: now.toISOString(), providerStatus })
+          }
         }
       } else if (job.status === 'retrieving') {
-        const providerResult = await adapter.retrieve(job.providerJobId!, signal)
-        const artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
+        let artifact = job.resultArtifact
+        if (!artifact) {
+          assertDomain(typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter has no retrieval path')
+          const providerResult = await adapter.retrieve(job.providerJobId!, signal)
+          artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
+        }
         next = transitionProviderJob(job, { status: 'evaluating', occurredAt: now.toISOString(), resultArtifact: artifact })
       } else if (job.status === 'evaluating') {
         const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact! })
@@ -328,7 +381,7 @@ export function runProviderJobWorkerOnce(dependencies: {
       next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: normalizedFailure(error) })
     }
     return dependencies.jobs.advance({
-      current: claimed,
+      current: activeClaim,
       next,
       transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
       occurredAt: now,

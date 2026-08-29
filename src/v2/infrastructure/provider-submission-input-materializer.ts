@@ -58,9 +58,10 @@ implements ProviderSubmissionInputMaterializer {
 
   async materialize(input: { job: Readonly<ProviderJob>; signal?: AbortSignal }): Promise<Readonly<Record<string, unknown>>> {
     const { job } = input
-    assertDomain(job.operation === 'audio-avatar', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
+    assertDomain(job.operation === 'audio-avatar' || job.operation === 'tts', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
     const now = (this.dependencies.clock ?? (() => new Date()))()
     assertDomain(Number.isFinite(now.getTime()) && Date.parse(job.authorization.expiresAt) > now.getTime(), 'ASSET_RIGHTS_BLOCKED', 'Provider authorization expired before submission')
+    if (job.operation === 'tts') return this.materializeTts(job, now)
 
     const profile = await this.dependencies.profiles.readProfile({
       workspaceId: job.workspaceId,
@@ -120,5 +121,49 @@ implements ProviderSubmissionInputMaterializer {
     } finally {
       await this.dependencies.sources.cleanup(job.id)
     }
+  }
+
+  /**
+   * Materializes the ElevenLabs TTS submission from the approved job input:
+   * the exact approved text (sealed by scriptHash inside the job's inputHash),
+   * the versioned voice identity from the authorized profile snapshot, and
+   * the requested output container. No rewriting happens here — the adapter
+   * re-verifies text against scriptHash before any paid call.
+   */
+  private async materializeTts(job: Readonly<ProviderJob>, now: Date): Promise<Readonly<Record<string, unknown>>> {
+    const profile = await this.dependencies.profiles.readProfile({
+      workspaceId: job.workspaceId,
+      snapshotId: job.authorization.profileSnapshotId,
+    })
+    if (!profile || profile.snapshot.snapshotHash !== job.authorization.profileSnapshotHash) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Synthetic presenter profile authorization drifted')
+    }
+    assertDomain(
+      profile.snapshot.status === 'active' &&
+      profile.snapshot.voice.adapterId === job.adapterId &&
+      profile.snapshot.voice.adapterVersion === job.adapterVersion,
+      'ASSET_RIGHTS_BLOCKED',
+      'Synthetic presenter voice is not eligible for the configured adapter',
+    )
+    assertDomain(Number.isFinite(now.getTime()), 'INVALID_ARGUMENT', 'clock returned an invalid date')
+    const text = job.input.text
+    assertDomain(typeof text === 'string' && text.trim().length > 0, 'INVALID_ARGUMENT', 'providerInput.text is invalid')
+    const scriptHash = job.input.scriptHash
+    assertDomain(typeof scriptHash === 'string' && /^[a-f0-9]{64}$/.test(scriptHash), 'INVALID_ARGUMENT', 'providerInput.scriptHash is invalid')
+    assertDomain(createHash('sha256').update(text as string, 'utf8').digest('hex') === scriptHash, 'PERSISTENCE_CONFLICT', 'Approved TTS text does not match its script hash')
+    const locale = job.input.locale
+    assertDomain(typeof locale === 'string' && /^[a-z]{2}(-[A-Z]{2})?$/.test(locale), 'INVALID_ARGUMENT', 'providerInput.locale is invalid')
+    const outputFormat = job.input.outputFormat ?? 'mp3'
+    assertDomain(outputFormat === 'mp3' || outputFormat === 'wav', 'INVALID_ARGUMENT', 'providerInput.outputFormat is invalid')
+    return Object.freeze({
+      text,
+      scriptHash,
+      voiceId: profile.snapshot.voice.id,
+      outputFormat,
+      // ElevenLabs documents language_code as ISO 639-1; the job locale is
+      // BCP-47, so only the primary language subtag travels upstream.
+      languageCode: (locale as string).slice(0, 2),
+      ...(Number.isSafeInteger(job.input.seed) ? { seed: Number(job.input.seed) } : {}),
+    })
   }
 }

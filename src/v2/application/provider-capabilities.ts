@@ -1,7 +1,9 @@
 import { assertDomain } from '../domain/errors.ts'
 import {
+  PROVIDER_COMPLETION_MODES,
   PROVIDER_OPERATIONS,
   type ProviderCapabilities,
+  type ProviderCompletionMode,
   type ProviderOperation,
 } from './ports/async-media-provider.ts'
 
@@ -20,7 +22,7 @@ function tokens(value: unknown, field: string): readonly string[] {
 export function validateProviderCapabilities(value: unknown): Readonly<ProviderCapabilities> {
   assertDomain(typeof value === 'object' && value !== null && !Array.isArray(value), 'INVALID_ARGUMENT', 'Provider capabilities must be an object')
   const input = value as Record<string, unknown>
-  const allowed = new Set(['operations', 'inputFormats', 'outputFormats', 'locales', 'aspectRatios', 'duration', 'identityReference', 'backgroundModes', 'supportsSeed', 'supportsIdempotency', 'completion', 'concurrencyLimit', 'regionRestrictions', 'fetchedAt', 'expiresAt'])
+  const allowed = new Set(['operations', 'inputFormats', 'outputFormats', 'locales', 'aspectRatios', 'duration', 'identityReference', 'backgroundModes', 'supportsSeed', 'supportsIdempotency', 'supportsCancellation', 'completion', 'concurrencyLimit', 'regionRestrictions', 'fetchedAt', 'expiresAt'])
   assertDomain(Object.keys(input).every((key) => allowed.has(key)), 'INVALID_ARGUMENT', 'Provider capabilities contain unsupported fields')
   const operations = tokens(input.operations, 'operations')
   assertDomain(operations.every((item) => PROVIDER_OPERATIONS.includes(item as ProviderOperation)), 'INVALID_ARGUMENT', 'Provider capabilities contain an unsupported operation')
@@ -30,8 +32,8 @@ export function validateProviderCapabilities(value: unknown): Readonly<ProviderC
   assertDomain(typeof duration.minSeconds === 'number' && Number.isFinite(duration.minSeconds) && duration.minSeconds >= 0, 'INVALID_ARGUMENT', 'Provider minimum duration is invalid')
   assertDomain(typeof duration.maxSeconds === 'number' && Number.isFinite(duration.maxSeconds) && duration.maxSeconds >= duration.minSeconds, 'INVALID_ARGUMENT', 'Provider maximum duration is invalid')
   assertDomain(['none', 'image', 'video', 'profile-id'].includes(String(input.identityReference)), 'INVALID_ARGUMENT', 'Provider identity reference is invalid')
-  assertDomain(typeof input.supportsSeed === 'boolean' && typeof input.supportsIdempotency === 'boolean', 'INVALID_ARGUMENT', 'Provider capability flags are invalid')
-  assertDomain(['polling', 'webhook', 'both'].includes(String(input.completion)), 'INVALID_ARGUMENT', 'Provider completion mode is invalid')
+  assertDomain(typeof input.supportsSeed === 'boolean' && typeof input.supportsIdempotency === 'boolean' && typeof input.supportsCancellation === 'boolean', 'INVALID_ARGUMENT', 'Provider capability flags are invalid')
+  assertDomain(PROVIDER_COMPLETION_MODES.includes(input.completion as ProviderCompletionMode), 'INVALID_ARGUMENT', 'Provider completion mode is invalid')
   if (input.concurrencyLimit !== undefined) assertDomain(Number.isSafeInteger(input.concurrencyLimit) && Number(input.concurrencyLimit) > 0, 'INVALID_ARGUMENT', 'Provider concurrency limit is invalid')
   const fetchedAt = Date.parse(String(input.fetchedAt))
   const expiresAt = Date.parse(String(input.expiresAt))

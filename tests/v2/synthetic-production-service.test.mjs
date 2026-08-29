@@ -90,6 +90,7 @@ class MemoryRepository {
   async createProfile(input) {
     const profile = Object.freeze({
       snapshot: input.snapshot,
+      profileSnapshotId: `${input.snapshot.id}:v${input.snapshot.version}`,
       requestFingerprint: input.requestFingerprint,
       idempotencyKey: input.idempotencyKey,
       createdAt: input.createdAt,
@@ -105,7 +106,7 @@ class MemoryRepository {
   async readProfile({ workspaceId: requestedWorkspaceId, snapshotId }) {
     return this.profiles.find((entry) =>
       entry.workspaceId === requestedWorkspaceId &&
-      entry.profile.snapshot.id === snapshotId)?.profile ?? null
+      (entry.profile.profileSnapshotId === snapshotId || entry.profile.snapshot.id === snapshotId))?.profile ?? null
   }
   async findRunReplay(input) {
     return this.runs.find((entry) =>
