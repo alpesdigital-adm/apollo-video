@@ -266,17 +266,19 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
       'content-type': 'application/json',
     }
     const api = async (method, path, key, payload) => {
-      for (let attempt = 0; ; attempt += 1) {
+      // A 404 with a null body is the dev server still lazily compiling the
+      // route (a real 404 carries the {error} envelope); replaying is safe
+      // because every mutation carries an idempotency key.
+      const deadline = Date.now() + 30_000
+      for (;;) {
         const response = await globalThis.fetch(`${baseUrl}${path}`, {
           method,
           headers: key ? { ...headers, 'idempotency-key': key } : headers,
           ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
         })
         const parsed = await response.json().catch(() => null)
-        // The dev server compiles routes lazily; a payload-less 404 on a
-        // fresh route is a compile hiccup, not an API answer — retry briefly.
-        if (response.status === 404 && parsed === null && attempt < 3) {
-          await new Promise((resolve) => setTimeout(resolve, 1_000))
+        if (response.status === 404 && parsed === null && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 500))
           continue
         }
         return { status: response.status, payload: parsed }

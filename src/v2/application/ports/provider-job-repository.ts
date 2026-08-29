@@ -34,6 +34,12 @@ export interface ProviderJobRepository {
     now: Date
     leaseExpiresAt: Date
   }): Promise<Readonly<ClaimedProviderJob> | null>
+  beginSubmission(input: {
+    current: Readonly<ClaimedProviderJob>
+    next: Readonly<ProviderJob>
+    transitionId: string
+    occurredAt: Date
+  }): Promise<Readonly<ClaimedProviderJob>>
   advance(input: {
     current: Readonly<ClaimedProviderJob>
     next: Readonly<ProviderJob>

@@ -467,9 +467,13 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     const completedProvider = await providerRepository.read({
       workspaceId, projectId: project.project.id, jobId: enqueued.persisted.job.id,
     })
-    assert.equal(completedProvider?.job.status, 'approved')
+    assert.equal(
+      completedProvider?.job.status,
+      'approved',
+      `provider job failed: ${JSON.stringify(completedProvider?.job.normalizedError ?? null)}`,
+    )
     assert.equal(completedProvider?.job.resultArtifact?.artifactId, 'synthetic-provider-output')
-    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 8)
+    assert.equal(await client.v2ProviderJobTransition.count({ where: { workspaceId } }), 9)
     assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
 
     const { PrismaProviderResultArtifactRepository } = await import(

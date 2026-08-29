@@ -100,6 +100,12 @@ jobs:
       - name: Apply database migrations
         run: npm run db:v2:migrate:deploy
 
+      - name: Run synthetic production persistence tests
+        run: npm run test:integration:synthetic-production-db
+
+      - name: Run durable TTS-to-avatar provider journey
+        run: npm run test:integration:provider-tts-avatar
+
       - name: Run vertical upload-to-proxy smoke
         run: npm run test:integration:vertical-smoke
         env:
@@ -156,9 +162,6 @@ jobs:
 
       - name: Run asset rights audit persistence tests
         run: npm run test:integration:asset-rights-audit
-
-      - name: Run synthetic production persistence tests
-        run: npm run test:integration:synthetic-production-db
 
       - name: Run synthetic script plan persistence tests
         run: npm run test:integration:synthetic-script-plan

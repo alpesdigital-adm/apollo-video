@@ -88,6 +88,11 @@ test('T-FR-092 controlled provider output becomes a person-free real MP4 with di
       lease = { owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() }
       return { ...stored, lease }
     },
+    async beginSubmission(input) {
+      assert.equal(input.current.job.jobHash, stored.job.jobHash)
+      stored = { ...stored, job: input.next }
+      return { ...stored, lease: input.current.lease }
+    },
     async advance(input) { assert.equal(input.current.job.jobHash, stored.job.jobHash); stored = { ...stored, job: input.next }; lease = undefined; return stored },
   }
   const provider = new ControlledAsyncMediaProviderAdapter('controlled-avatar', 'version-1', {
