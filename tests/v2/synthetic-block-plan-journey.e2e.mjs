@@ -212,7 +212,6 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     const profileV1 = await registerProfile(profileInput(1, 'voice_journey_a', 'avatar_journey_1', 'block-journey-profile-v1'))
     const profileV2 = await registerProfile(profileInput(2, 'voice_journey_b', 'avatar_journey_1', 'block-journey-profile-v2'))
     const profileV3 = await registerProfile(profileInput(3, 'voice_journey_b', 'avatar_journey_2', 'block-journey-profile-v3'))
-    const profileV4 = await registerProfile(profileInput(4, 'voice_journey_b', 'avatar_journey_2', 'block-journey-profile-v4', { revokedAt: '2026-01-01T00:00:00.000Z' }))
 
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
@@ -267,13 +266,21 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
       'content-type': 'application/json',
     }
     const api = async (method, path, key, payload) => {
-      const response = await globalThis.fetch(`${baseUrl}${path}`, {
-        method,
-        headers: key ? { ...headers, 'idempotency-key': key } : headers,
-        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-      })
-      const parsed = await response.json().catch(() => null)
-      return { status: response.status, payload: parsed }
+      for (let attempt = 0; ; attempt += 1) {
+        const response = await globalThis.fetch(`${baseUrl}${path}`, {
+          method,
+          headers: key ? { ...headers, 'idempotency-key': key } : headers,
+          ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+        })
+        const parsed = await response.json().catch(() => null)
+        // The dev server compiles routes lazily; a payload-less 404 on a
+        // fresh route is a compile hiccup, not an API answer — retry briefly.
+        if (response.status === 404 && parsed === null && attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000))
+          continue
+        }
+        return { status: response.status, payload: parsed }
+      }
     }
     const planPath = (suffix = '') => `/v1/projects/${projectId}/synthetic-script-plans${suffix}`
     const getPlan = async (planId) => {
@@ -485,6 +492,9 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     assert.ok(Math.abs(Number(probe.format.duration) * 1_000 - concatenation.durationMs) <= 120)
 
     // 11. Revoked consent: zero cache hits, zero paid calls, zero generations.
+    // Registering the revoked version IS the act of revocation — the actor's
+    // latest will — so it happens here, not in the setup.
+    const profileV4 = await registerProfile(profileInput(4, 'voice_journey_b', 'avatar_journey_2', 'block-journey-profile-v4', { revokedAt: '2026-01-01T00:00:00.000Z' }))
     state = await getPlan(planId)
     const generationCount = await client.v2SyntheticBlockGeneration.count({ where: { workspaceId } })
     const revokedSwitch = await api('POST', planPath(`/${planId}/presenter-profile`), 'bj-revoked', {

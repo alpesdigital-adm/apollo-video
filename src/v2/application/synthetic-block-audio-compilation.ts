@@ -186,7 +186,9 @@ export function compileSyntheticBlockAudioService(dependencies: {
     const plan = current
     const profile = await dependencies.profiles.readProfile({ workspaceId: request.workspaceId, snapshotId: plan.version.profileSnapshotId })
     if (!profile) throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic presenter profile was not found')
-    assertBlockGenerationConsent(profile.snapshot, { use: request.use, market: request.market, locale: plan.version.locale, now })
+    await assertBlockGenerationConsent(dependencies.profiles, profile.snapshot, {
+      workspaceId: request.workspaceId, operation: 'tts', use: request.use, market: request.market, locale: plan.version.locale, now,
+    })
     const voice = syntheticBlockVoiceKeyFromProfile(profile.snapshot, settings.outputFormat)
 
     // Every sequenced block must hold an approved generation for its CURRENT
