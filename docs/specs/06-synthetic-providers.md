@@ -221,6 +221,8 @@ interface SyntheticPresenterProfile {
 }
 ```
 
+> **Nota de implementação (F3.006).** O modelo persistido (`synthetic_presenter_profiles` + `synthetic_presenter_profile_heads`) realiza esta interface com três decisões deliberadas: (1) cada VERSÃO é uma linha imutável hash-verificada com UM avatar e UMA voz versionada e o consent EMBUTIDO — a lista `avatarRefs`/`voiceProfileIds` do esboço vira versões sucessivas, nunca mutação in-place; (2) a tabela de head (CAS em `currentVersion`, versões estritamente sequenciais) define qual versão representa a vontade ATUAL do ator — registrar uma versão com consent revogado É o ato de revogação; (3) `pronunciationDictionaryRef`, `visualContinuity` e `restrictions` são campos opcionais aditivos sob o mesmo `schemaVersion` v1: só entram no corpo hashado quando presentes, então snapshots antigos continuam verificáveis byte a byte. Vários profiles ativos por workspace são permitidos; expiração de consent é computada no gate (nunca por cron), então um profile "ativo" com consent vencido é bloqueado no instante da avaliação.
+
 ## 12. Consent gate
 
 Validar:
@@ -234,6 +236,8 @@ Validar:
 - disclosure.
 
 Revogação impede novos submits/reuse e sinaliza downstream; não apaga auditoria.
+
+> **Nota de implementação (F3.006).** O gate é o policy engine determinístico `synthetic-presenter-policy/v1` (`evaluateSyntheticPresenterPolicy`): mesma entrada ⇒ mesma decisão com TODAS as razões acumuladas (`PROFILE_NOT_ACTIVE`, `CONSENT_*`, `USE/MARKET/LOCALE_NOT_ALLOWED`, `OPERATION_NOT_CONSENTED`, `OPERATION_UNCLASSIFIED`, `VERSION_SUPERSEDED`, `CURRENT_*`, `WORKSPACE_MISMATCH`, `PAYLOAD_TAMPERED`), e falha fechado: snapshot corrompido, operação não classificada (clone/lip-sync hoje) ou workspace divergente negam sempre. Quando o head do profile é conhecido, a vontade mais recente do ator prevalece sobre snapshots antigos (`CURRENT_CONSENT_REVOKED`/`CURRENT_VERSION_NOT_ACTIVE`). `assertSyntheticPresenterPolicy` converte negação em `ASSET_RIGHTS_BLOCKED` e é executado ANTES de custo, cache hit, submit, reuse e consolidação de master — consent revogado ou profile desativado produz zero reserva, zero job e zero chamada de provider, comprovado por teste E2E de browser (`tests/v2/synthetic-presenter-profile.e2e.mjs`).
 
 ## 13. SyntheticMasterAsset
 
