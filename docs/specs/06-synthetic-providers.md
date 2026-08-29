@@ -179,10 +179,10 @@ Fonte: `https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-tim
 
 ### 9.3 HeyGen — fatos oficiais (consultados em 2026-08-27)
 
-Fonte: `https://developers.heygen.com/reference/create-video.md`, `.../upload-asset.md`, `.../get-video.md`.
+Fonte: `https://developers.heygen.com/reference/create-video`, `.../upload-asset`, `.../get-video` (revalidada em 2026-08-28).
 
 - `POST /v3/assets` (multipart, máx 32MB, mp3/wav) → `data.asset_id`; `POST /v3/videos` (`type: 'avatar'` + `audio_asset_id`, mutuamente exclusivo com `script`) → `data.video_id`; `GET /v3/videos/{id}` → `data.status` + `data.video_url`. Autenticação `X-Api-Key`.
-- Header oficial `Idempotency-Key` existe nas duas mutações (`supportsIdempotency: true`).
+- As referências oficiais de `POST /v3/assets` e `POST /v3/videos` não documentam `Idempotency-Key`, embora outros endpoints HeyGen o façam explicitamente. O adapter declara `supportsIdempotency: false`, não envia o header e o Apollo depende do effect ledger durável sem prometer deduplicação upstream.
 - `VideoStatus` oficial é exatamente `pending | processing | completed | failed`; qualquer outro valor falha fechado (`PROVIDER_STATUS_UNKNOWN`).
 - Não há cancelamento documentado de vídeo em processamento (Delete Video destrói artefatos prontos) → `supportsCancellation: false`, sem método `cancel`.
 - Webhooks existem upstream, mas o adapter não implementa verificação → `completion: 'polling'` apenas.
@@ -439,4 +439,3 @@ Cada código define retryable, userAction e provider fallback eligibility.
 - Modelos/thresholds de critic.
 - Política de artifact rejeitado.
 - Disclosure de synthetic media por mercado.
-
