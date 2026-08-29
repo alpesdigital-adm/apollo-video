@@ -83,7 +83,9 @@ export function createSyntheticAudioMasterService(dependencies: {
     )
     assertDomain(audio?.status === 'available' && audio.mediaType === 'audio', 'ASSET_NOT_USABLE', 'Synthetic audio artifact is unavailable')
     assertDomain(alignmentEvidence?.status === 'available' && alignmentEvidence.mediaType === 'data', 'ASSET_NOT_USABLE', 'Word alignment evidence artifact is unavailable')
-    const requiredOperations = request.source.kind === 'tts' ? ['tts', 'audio-avatar'] as const : ['audio-avatar'] as const
+    // Uploaded audio never involved a TTS effect; TTS and concatenated block
+    // audio both require the full audio-first consent scope.
+    const requiredOperations = request.source.kind === 'uploaded' ? ['audio-avatar'] as const : ['tts', 'audio-avatar'] as const
     const consent = profile.snapshot.consent
     assertDomain(profile.snapshot.status === 'active' && consent.granted && !consent.revokedAt && Date.parse(consent.expiresAt) > now.getTime() && consent.allowedUses.includes(request.use) && consent.allowedMarkets.includes(request.market) && consent.allowedLocales.includes(request.locale) && requiredOperations.every((operation) => consent.allowedOperations.includes(operation)), 'ASSET_RIGHTS_BLOCKED', 'Synthetic presenter consent does not authorize the audio-first workflow')
     if (request.source.kind === 'tts') {

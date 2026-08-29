@@ -839,6 +839,12 @@ const requiredChecks = [
   'synthetic_block_generations_source_check',
   'synthetic_block_generations_approved_check',
   'synthetic_block_generations_hash_check',
+  'synthetic_block_concatenations_schema_check',
+  'synthetic_block_concatenations_container_check',
+  'synthetic_block_concatenations_stream_check',
+  'synthetic_block_concatenations_hash_check',
+  'synthetic_block_concatenations_manifest_check',
+  'synthetic_block_concatenations_settings_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
@@ -898,6 +904,11 @@ assert.match(
   committed,
   /CREATE TABLE "synthetic_block_generations"[\s\S]*FOREIGN KEY \("blockId", "workspaceId"\) REFERENCES "synthetic_script_blocks"[\s\S]*FOREIGN KEY \("providerJobId", "workspaceId"\) REFERENCES "provider_jobs"/,
   'synthetic block generations must bind their block and provider job inside the same workspace',
+)
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_block_concatenations"[\s\S]*FOREIGN KEY \("planVersionId", "planId", "workspaceId"\) REFERENCES "synthetic_script_plan_versions"[\s\S]*FOREIGN KEY \("audioArtifactId", "workspaceId"\) REFERENCES "media_artifacts"[\s\S]*FOREIGN KEY \("audioMasterId", "workspaceId"\) REFERENCES "synthetic_audio_masters"/,
+  'synthetic block concatenations must bind their plan version, audio artifact and consolidated master inside the same workspace',
 )
 
 console.log(

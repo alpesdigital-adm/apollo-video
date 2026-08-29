@@ -13,6 +13,7 @@ export interface SyntheticAudioWord {
 export type SyntheticAudioSource = Readonly<
   | { kind: 'tts'; text: string; providerJobId: string }
   | { kind: 'uploaded' }
+  | { kind: 'concatenated'; planId: string; planVersionId: string; concatenationId: string }
 >
 
 export interface SyntheticAudioMaster {
@@ -105,6 +106,13 @@ export function createSyntheticAudioMaster(input: Omit<SyntheticAudioMaster, 'sc
     const text = input.source.text.normalize('NFC').trim()
     assertDomain(text.length > 0 && text.length <= 100_000, 'INVALID_ARGUMENT', 'source.text is invalid')
     assertDomain(JSON.stringify(lexicalWords(text)) === JSON.stringify(words.flatMap(({ word }) => lexicalWords(word))), 'INVALID_ARGUMENT', 'TTS text does not match word alignment')
+  }
+  if (input.source.kind === 'concatenated') {
+    assertDomain(
+      ID.test(input.source.planId) && ID.test(input.source.planVersionId) && ID.test(input.source.concatenationId),
+      'INVALID_ARGUMENT',
+      'Concatenated source lineage is invalid',
+    )
   }
   const approvedAt = iso(input.approvedAt, 'approvedAt')
   const createdAt = iso(input.createdAt, 'createdAt')

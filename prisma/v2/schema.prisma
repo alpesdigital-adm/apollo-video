@@ -193,6 +193,7 @@ model V2Workspace {
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
+  syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
 
   @@map("workspaces")
 }
@@ -291,6 +292,7 @@ model V2ApiClient {
   createdSyntheticAudioMasters          V2SyntheticAudioMaster[]             @relation("SyntheticAudioMasterCreator")
   createdSyntheticScriptPlans           V2SyntheticScriptPlan[]              @relation("SyntheticScriptPlanCreator")
   createdSyntheticScriptPlanVersions    V2SyntheticScriptPlanVersion[]       @relation("SyntheticScriptPlanVersionCreator")
+  createdBlockConcatenations            V2SyntheticBlockConcatenation[]      @relation("BlockConcatenationCreator")
   createdSyntheticProductionRuns        V2SyntheticProductionRun[]           @relation("SyntheticProductionRunCreator")
   createdProviderJobs                   V2ProviderJob[]                       @relation("ProviderJobCreator")
 
@@ -672,6 +674,7 @@ model V2Project {
   syntheticScriptPlanVersions            V2SyntheticScriptPlanVersion[]
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
+  syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1505,6 +1508,8 @@ model V2MediaArtifact {
   syntheticAlignmentMasters    V2SyntheticAudioMaster[] @relation("SyntheticAlignmentArtifact")
   blockGenerationAudio         V2SyntheticBlockGeneration[] @relation("BlockGenerationAudio")
   blockGenerationAlignments    V2SyntheticBlockGeneration[] @relation("BlockGenerationAlignment")
+  blockConcatenationAudio      V2SyntheticBlockConcatenation[] @relation("BlockConcatenationAudio")
+  blockConcatenationAlignments V2SyntheticBlockConcatenation[] @relation("BlockConcatenationAlignment")
   providerJobResults           V2ProviderJob[]
   providerResultArtifacts      V2ProviderResultArtifact[] @relation("ProviderResultArtifactMedia")
 
@@ -3459,6 +3464,7 @@ model V2SyntheticAudioMaster {
   alignmentEvidence V2MediaArtifact               @relation("SyntheticAlignmentArtifact", fields: [alignmentEvidenceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   ttsProviderJob    V2ProviderJob?                 @relation("SyntheticAudioTtsJob", fields: [ttsProviderJobId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   createdBy         V2ApiClient                   @relation("SyntheticAudioMasterCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  blockConcatenations V2SyntheticBlockConcatenation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_audio_masters_workspace_project_actor_key")
@@ -3469,6 +3475,8 @@ model V2SyntheticAudioMaster {
   @@index([workspaceId, masterHash], map: "synthetic_audio_masters_workspace_hash_idx")
   @@map("synthetic_audio_masters")
 }
+
+
 
 model V2SyntheticScriptPlan {
   id                      String   @id @db.VarChar(128)
@@ -3496,6 +3504,7 @@ model V2SyntheticScriptPlan {
   versions       V2SyntheticScriptPlanVersion[] @relation("SyntheticScriptPlanVersions")
   blocks         V2SyntheticScriptBlock[]
   generations    V2SyntheticBlockGeneration[]
+  concatenations V2SyntheticBlockConcatenation[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_script_plans_workspace_actor_key")
@@ -3544,6 +3553,7 @@ model V2SyntheticScriptPlanVersion {
   headOf          V2SyntheticScriptPlan[]        @relation("CurrentSyntheticScriptPlanVersion")
   createdBlocks   V2SyntheticScriptBlock[]       @relation("SyntheticScriptBlockCreatedIn")
   retiredBlocks   V2SyntheticScriptBlock[]       @relation("SyntheticScriptBlockRetiredIn")
+  concatenations  V2SyntheticBlockConcatenation[]
 
   @@unique([id, workspaceId])
   @@unique([id, planId, workspaceId])
@@ -3637,6 +3647,53 @@ model V2SyntheticBlockGeneration {
   @@index([workspaceId, planId, status], map: "synthetic_block_generations_plan_status_idx")
   @@index([workspaceId, providerJobId], map: "synthetic_block_generations_job_idx")
   @@map("synthetic_block_generations")
+}
+model V2SyntheticBlockConcatenation {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  planId                  String   @db.VarChar(128)
+  planVersionId           String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  container               String   @db.VarChar(8)
+  codec                   String   @db.VarChar(16)
+  sampleRate              Int
+  channels                Int
+  gapMs                   Int
+  durationMs              Int
+  settingsJson            String   @db.Text
+  manifestJson            String   @db.Text
+  concatHash              String   @db.Char(64)
+  audioArtifactId         String   @db.VarChar(128)
+  alignmentArtifactId     String   @db.VarChar(128)
+  finalAudioSha256        String   @db.Char(64)
+  audioMasterId           String?  @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace         V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  plan              V2SyntheticScriptPlan        @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  planVersion       V2SyntheticScriptPlanVersion @relation(fields: [planVersionId, planId, workspaceId], references: [id, planId, workspaceId], onDelete: Restrict)
+  audioArtifact     V2MediaArtifact              @relation("BlockConcatenationAudio", fields: [audioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  alignmentArtifact V2MediaArtifact              @relation("BlockConcatenationAlignment", fields: [alignmentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  audioMaster       V2SyntheticAudioMaster?      @relation(fields: [audioMasterId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy         V2ApiClient                  @relation("BlockConcatenationCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_block_concatenations_actor_key")
+  @@index([workspaceId, planId, createdAt(sort: Desc)], map: "synthetic_block_concatenations_plan_created_idx")
+  @@index([workspaceId, planVersionId], map: "synthetic_block_concatenations_version_idx")
+  @@map("synthetic_block_concatenations")
 }
 
 

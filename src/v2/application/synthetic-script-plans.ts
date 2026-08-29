@@ -50,6 +50,7 @@ export type SyntheticScriptPlanMutation =
   | Readonly<{ kind: 'reorder-blocks'; order: readonly string[] }>
   | Readonly<{ kind: 'set-profile'; profileSnapshotId: string }>
   | Readonly<{ kind: 'regenerate-block'; blockId: string }>
+  | Readonly<{ kind: 'compile-audio'; settingsHash: string }>
 
 interface PlanServiceDependencies {
   plans: SyntheticScriptPlanRepository
@@ -336,6 +337,10 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
       assertDomain(currentSequence.includes(target), 'INVALID_ARGUMENT', 'Regenerated block is not part of the current plan version')
       commandType = 'regenerate-block'
       sequence = [...currentSequence]
+    } else if (mutation.kind === 'compile-audio') {
+      assertDomain(/^[a-f0-9]{64}$/.test(mutation.settingsHash), 'INVALID_ARGUMENT', 'Compilation settings hash is invalid')
+      commandType = 'compile-audio'
+      sequence = [...currentSequence]
     } else if (mutation.kind === 'set-profile') {
       const profile = await dependencies.profiles.readProfile({
         workspaceId,
@@ -401,7 +406,9 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
       reusedBlockIds,
       retiredBlockIds,
       invalidatedArtifactIds: [],
-      renderSemantics: 'deferred-to-compile',
+      // Compiling consolidates audio without rendering a timeline; every
+      // other mutation defers its render impact to a later compile.
+      renderSemantics: commandType === 'compile-audio' ? 'no-render' : 'deferred-to-compile',
       cacheDecisions,
     })
     const version = createSyntheticScriptPlanVersion({
