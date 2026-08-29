@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +21,7 @@ const at = (second) => new Date(Date.parse('2029-01-01T00:00:00.000Z') + second 
 
 const SCRIPT = 'Olá mundo'
 const SCRIPT_HASH = createHash('sha256').update(SCRIPT, 'utf8').digest('hex')
+const storageDriver = (process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER ?? 'local').trim().toLowerCase()
 
 function ttsAlignment() {
   const characters = [...SCRIPT]
@@ -41,6 +42,8 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
   const workRoot = join(root, 'work')
   await mkdir(artifactRoot, { recursive: true })
   await mkdir(workRoot, { recursive: true })
+
+  let objectStore = null
 
   const cleanup = async () => {
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
@@ -85,6 +88,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
+    const { S3ArtifactSourceMaterializer, S3VerifiedMediaStorage, createArtifactS3ClientFromEnvironment } = await import('../../src/v2/infrastructure/media/s3-artifact-storage.ts')
     const { probeAudioDurationSeconds, probeVideo } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
     const { HeyGenV3AsyncMediaProviderAdapter } = await import('../../src/v2/infrastructure/heygen-v3-provider.ts')
@@ -182,7 +186,41 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
       },
     }
 
-    const storage = new LocalMediaUploadStorage(artifactRoot)
+    // Storage of record: the content-addressed local root by default, or real
+    // versioned MinIO/S3 when the runtime driver env selects it (CI Compose).
+    assert.ok(['local', 's3'].includes(storageDriver), `unknown artifact storage driver: ${storageDriver}`)
+    if (storageDriver === 's3') {
+      const aws = await import('@aws-sdk/client-s3')
+      const { bucket, client: s3Client } = createArtifactS3ClientFromEnvironment()
+      // Exclusive clean bucket per run: creating it must succeed — an existing
+      // bucket would mean shared or inherited state, which is forbidden here.
+      await s3Client.send(new aws.CreateBucketCommand({ Bucket: bucket }))
+      await s3Client.send(new aws.PutBucketVersioningCommand({ Bucket: bucket, VersioningConfiguration: { Status: 'Enabled' } }))
+      objectStore = { aws, bucket, client: s3Client }
+    }
+    const localStaging = new LocalMediaUploadStorage(artifactRoot)
+    const storage = objectStore
+      ? new S3VerifiedMediaStorage(localStaging, { bucket: objectStore.bucket, client: objectStore.client })
+      : localStaging
+    const materializeRoot = join(root, 'materialize')
+    await mkdir(materializeRoot, { recursive: true })
+    const sourceMaterializer = objectStore
+      ? new S3ArtifactSourceMaterializer(materializeRoot, { bucket: objectStore.bucket, client: objectStore.client })
+      : new LocalArtifactSourceMaterializer(artifactRoot)
+    const readbackRoot = join(root, 'readback')
+    await mkdir(readbackRoot, { recursive: true })
+    let readbackSequence = 0
+    // Local path whose bytes ARE the stored artifact: a version-bound GET from
+    // MinIO in s3 mode, or the content-addressed path in local mode.
+    const storedArtifactPath = async (artifactKey) => {
+      if (!objectStore) return join(artifactRoot, ...artifactKey.split('/'))
+      const head = await objectStore.client.send(new objectStore.aws.HeadObjectCommand({ Bucket: objectStore.bucket, Key: artifactKey }))
+      assert.ok(head.VersionId && head.VersionId !== 'null', 'stored artifact object must be version-bound')
+      const object = await objectStore.client.send(new objectStore.aws.GetObjectCommand({ Bucket: objectStore.bucket, Key: artifactKey, VersionId: head.VersionId }))
+      const target = join(readbackRoot, `${readbackSequence += 1}-${artifactKey.split('/').at(-1)}`)
+      await writeFile(target, Buffer.from(await object.Body.transformToByteArray()))
+      return target
+    }
     const providerRepository = new PrismaProviderJobRepository(client)
     const resultArtifactRepository = new PrismaProviderResultArtifactRepository(client)
     const rightsRepository = new PrismaAssetRightsRepository(client)
@@ -212,7 +250,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
 
     const materializer = new AuthorizedProviderSubmissionInputMaterializer({
       profiles: syntheticRepository, artifacts: artifactRepository,
-      sources: new LocalArtifactSourceMaterializer(artifactRoot), clock: () => new Date(at(2)),
+      sources: sourceMaterializer, clock: () => new Date(at(2)),
     })
     const ttsIngestor = new VerifiedTtsResultIngestor({
       workRoot, storage, artifacts: artifactRepository, artifactQuery: artifactRepository,
@@ -252,13 +290,14 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.equal(audioEntry.scriptHash, SCRIPT_HASH)
     assert.equal(audioEntry.providerJobRef, 'elevenlabs_journey_req_1')
     const audioRow = await artifactRepository.findById(workspaceId, audioEntry.artifactId)
-    const storedAudioPath = join(artifactRoot, ...audioRow.artifactKey.split('/'))
+    const storedAudioPath = await storedArtifactPath(audioRow.artifactKey)
     assert.equal(await calculateFileSha256(storedAudioPath), audioEntry.artifactSha256)
+    assert.equal((await stat(storedAudioPath)).size, Number(audioEntry.byteSize))
     const audioProbe = JSON.parse(execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name', '-of', 'json', storedAudioPath], { encoding: 'utf8', windowsHide: true }))
     assert.equal(audioProbe.streams[0].codec_name, 'mp3')
     assert.ok(Math.abs(Number(audioProbe.format.duration) - 2) <= 0.2)
     const alignmentRow = await artifactRepository.findById(workspaceId, alignmentEntry.artifactId)
-    const storedAlignment = JSON.parse(await readFile(join(artifactRoot, ...alignmentRow.artifactKey.split('/')), 'utf8'))
+    const storedAlignment = JSON.parse(await readFile(await storedArtifactPath(alignmentRow.artifactKey), 'utf8'))
     assert.equal(storedAlignment.characters.join(''), SCRIPT)
     assert.equal(storedAlignment.audioSha256, audioEntry.artifactSha256)
 
@@ -267,7 +306,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.equal(ttsReplayed.replayed, true)
     assert.equal(elevenLabsRequests.length, 1)
     assert.equal(await client.v2ProviderResultArtifact.count({ where: { workspaceId } }), 2)
-    assert.equal(await calculateFileSha256(storedAudioPath), audioEntry.artifactSha256)
+    assert.equal(await calculateFileSha256(await storedArtifactPath(audioRow.artifactKey)), audioEntry.artifactSha256)
 
     // Rights for the produced artifacts before they may feed the audio master.
     for (const [index, artifactId] of [audioEntry.artifactId, alignmentEntry.artifactId].entries()) {
@@ -364,12 +403,26 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     assert.deepEqual(heygenRequests.map(({ method }) => method), ['POST', 'POST', 'GET', 'GET', 'GET', 'GET'])
 
     const avatarRow = await artifactRepository.findById(workspaceId, avatarDone.job.resultArtifact.artifactId)
-    const storedAvatarPath = join(artifactRoot, ...avatarRow.artifactKey.split('/'))
+    const storedAvatarPath = await storedArtifactPath(avatarRow.artifactKey)
     assert.equal(await calculateFileSha256(storedAvatarPath), avatarDone.job.resultArtifact.artifactSha256)
+    assert.equal((await stat(storedAvatarPath)).size, Number(avatarRow.byteSize))
     const videoProbe = JSON.parse(execFileSync(ffprobePath, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height', '-of', 'json', storedAvatarPath], { encoding: 'utf8', windowsHide: true }))
     const videoStream = videoProbe.streams.find((stream) => stream.codec_type === 'video')
     assert.deepEqual([videoStream.codec_name, videoStream.width, videoStream.height], ['h264', 540, 960])
     assert.ok(videoProbe.streams.some((stream) => stream.codec_type === 'audio'))
+
+    if (objectStore) {
+      // MinIO is the storage of record: the bucket holds exactly the three
+      // promoted artifacts and the local staging root kept none of their bytes.
+      const listing = await objectStore.client.send(new objectStore.aws.ListObjectVersionsCommand({ Bucket: objectStore.bucket }))
+      assert.equal(listing.IsTruncated ?? false, false)
+      assert.equal((listing.DeleteMarkers ?? []).length, 0)
+      assert.deepEqual(
+        (listing.Versions ?? []).map(({ Key }) => Key).sort(),
+        [alignmentRow.artifactKey, audioRow.artifactKey, avatarRow.artifactKey].sort(),
+      )
+      assert.deepEqual(await readdir(artifactRoot), [], 'local staging root must hold no promoted bytes in s3 mode')
+    }
 
     // Tampering with the immutable master fails closed on the next read.
     const originalMasterHash = (await client.v2SyntheticAudioMaster.findUniqueOrThrow({ where: { id: masterCreated.value.master.id }, select: { masterHash: true } })).masterHash
@@ -405,9 +458,24 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
   } finally {
     await cleanup()
     await client.$disconnect()
-    // Zero orphans: the provider work root must be empty after every journey.
+    if (objectStore) {
+      // Zero orphan objects: delete every version, prove the empty listing,
+      // then remove the run-exclusive bucket itself.
+      const versions = await objectStore.client.send(new objectStore.aws.ListObjectVersionsCommand({ Bucket: objectStore.bucket }))
+      const stored = [...(versions.Versions ?? []), ...(versions.DeleteMarkers ?? [])].map(({ Key, VersionId }) => ({ Key, VersionId }))
+      if (stored.length > 0) {
+        await objectStore.client.send(new objectStore.aws.DeleteObjectsCommand({ Bucket: objectStore.bucket, Delete: { Objects: stored, Quiet: true } }))
+      }
+      const after = await objectStore.client.send(new objectStore.aws.ListObjectVersionsCommand({ Bucket: objectStore.bucket }))
+      assert.deepEqual([...(after.Versions ?? []), ...(after.DeleteMarkers ?? [])], [], 'object storage must hold zero orphan objects after cleanup')
+      await objectStore.client.send(new objectStore.aws.DeleteBucketCommand({ Bucket: objectStore.bucket }))
+      objectStore.client.destroy()
+    }
+    // Zero orphans: every provider-side scratch root must be empty afterwards.
     const leftoverWork = await readdir(workRoot).catch(() => [])
     assert.deepEqual(leftoverWork, [], 'provider work root must not keep orphan files')
+    const leftoverMaterialize = await readdir(join(root, 'materialize')).catch(() => [])
+    assert.deepEqual(leftoverMaterialize, [], 'artifact materialization root must not keep orphan files')
     await rm(root, { recursive: true, force: true })
   }
 })
