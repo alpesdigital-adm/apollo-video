@@ -160,6 +160,9 @@ jobs:
       - name: Run synthetic production persistence tests
         run: npm run test:integration:synthetic-production-db
 
+      - name: Run synthetic script plan persistence tests
+        run: npm run test:integration:synthetic-script-plan
+
       - name: Run durable operation persistence tests
         run: npm run test:integration:operations
 
