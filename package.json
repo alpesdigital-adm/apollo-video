@@ -46,6 +46,7 @@
     "test:integration:synthetic-script-plan": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-script-plan.integration.mjs",
     "test:integration:synthetic-block-generation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-block-generation.integration.mjs",
     "test:integration:synthetic-block-compilation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-block-compilation.integration.mjs",
+    "test:integration:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-presenter-lifecycle.integration.mjs",
     "test:integration:media-library": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-media-library.integration.mjs",
     "test:integration:media-segment": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/media-segment-materialization.integration.mjs",
     "test:integration:image-analysis": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/image-analysis-tesseract.integration.mjs tests/v2/media-input-runtime.integration.mjs",

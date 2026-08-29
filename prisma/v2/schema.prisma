@@ -194,6 +194,7 @@ model V2Workspace {
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
   syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
+  syntheticPresenterProfileHeads         V2SyntheticPresenterProfileHead[]
 
   @@map("workspaces")
 }
@@ -3418,6 +3419,7 @@ model V2SyntheticPresenterProfile {
   audioMasters V2SyntheticAudioMaster[]
   scriptPlanVersions V2SyntheticScriptPlanVersion[]
   blockGenerations V2SyntheticBlockGeneration[]
+  headOf    V2SyntheticPresenterProfileHead[] @relation("CurrentPresenterSnapshot")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, profileId, version])
@@ -3426,6 +3428,22 @@ model V2SyntheticPresenterProfile {
   @@index([workspaceId, status, defaultLocale])
   @@index([workspaceId, consentSnapshotHash])
   @@map("synthetic_presenter_profiles")
+}
+
+model V2SyntheticPresenterProfileHead {
+  workspaceId       String   @db.VarChar(128)
+  profileId         String   @db.VarChar(128)
+  currentVersion    Int
+  currentSnapshotId String   @db.VarChar(128)
+  createdAt         DateTime @db.Timestamptz(3)
+  updatedAt         DateTime @db.Timestamptz(3)
+
+  workspace       V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  currentSnapshot V2SyntheticPresenterProfile @relation("CurrentPresenterSnapshot", fields: [currentSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([workspaceId, profileId])
+  @@index([workspaceId, updatedAt(sort: Desc)], map: "synthetic_presenter_profile_heads_updated_idx")
+  @@map("synthetic_presenter_profile_heads")
 }
 
 model V2SyntheticAudioMaster {

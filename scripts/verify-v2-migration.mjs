@@ -845,6 +845,7 @@ const requiredChecks = [
   'synthetic_block_concatenations_hash_check',
   'synthetic_block_concatenations_manifest_check',
   'synthetic_block_concatenations_settings_check',
+  'synthetic_presenter_profile_heads_version_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))

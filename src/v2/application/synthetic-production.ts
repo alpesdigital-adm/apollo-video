@@ -87,6 +87,9 @@ export function registerSyntheticPresenterProfileService(dependencies: {
     status: SyntheticPresenterProfileSnapshot['status']
     disclosure: string
     consent: Omit<SyntheticPresenterProfileSnapshot['consent'], 'snapshotHash' | 'evidenceSha256'>
+    pronunciationDictionaryRef?: string
+    visualContinuity?: SyntheticPresenterProfileSnapshot['visualContinuity']
+    restrictions?: readonly string[]
     actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
@@ -115,6 +118,9 @@ export function registerSyntheticPresenterProfileService(dependencies: {
         ...request.consent,
         evidenceSha256: evidence.sha256,
       },
+      ...(request.pronunciationDictionaryRef ? { pronunciationDictionaryRef: request.pronunciationDictionaryRef } : {}),
+      ...(request.visualContinuity ? { visualContinuity: request.visualContinuity } : {}),
+      ...(request.restrictions ? { restrictions: request.restrictions } : {}),
     })
     const requestFingerprint = calculateCanonicalHash({
       schemaVersion: 'register-synthetic-presenter-profile-request/v1',

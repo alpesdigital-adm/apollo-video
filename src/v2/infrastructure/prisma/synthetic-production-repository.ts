@@ -91,6 +91,9 @@ function hydrateProfile(
       expiresAt: stored.consent.expiresAt,
       ...(stored.consent.revokedAt ? { revokedAt: stored.consent.revokedAt } : {}),
     },
+    ...(stored.pronunciationDictionaryRef ? { pronunciationDictionaryRef: stored.pronunciationDictionaryRef } : {}),
+    ...(stored.visualContinuity ? { visualContinuity: stored.visualContinuity } : {}),
+    ...(stored.restrictions ? { restrictions: stored.restrictions } : {}),
   })
   if (
     stableSerialize(recreated) !== row.profileJson ||
@@ -303,6 +306,36 @@ implements SyntheticProductionRepository {
             createdAt: new Date(input.createdAt),
           },
         })
+        // The head always points at the newest immutable version. Strict
+        // sequencing above makes the guarded update a real compare-and-swap.
+        if (input.snapshot.version === 1) {
+          await transaction.v2SyntheticPresenterProfileHead.create({
+            data: {
+              workspaceId: input.workspaceId,
+              profileId: input.snapshot.id,
+              currentVersion: 1,
+              currentSnapshotId: row.id,
+              createdAt: new Date(input.createdAt),
+              updatedAt: new Date(input.createdAt),
+            },
+          })
+        } else {
+          const advanced = await transaction.v2SyntheticPresenterProfileHead.updateMany({
+            where: {
+              workspaceId: input.workspaceId,
+              profileId: input.snapshot.id,
+              currentVersion: input.snapshot.version - 1,
+            },
+            data: {
+              currentVersion: input.snapshot.version,
+              currentSnapshotId: row.id,
+              updatedAt: new Date(input.createdAt),
+            },
+          })
+          if (advanced.count !== 1) {
+            throw new DomainError('VERSION_CONFLICT', 'Synthetic presenter head advanced concurrently')
+          }
+        }
         return Object.freeze({ profile: hydrateProfile(row), replayed: false })
       })
     } catch (error) {
@@ -332,6 +365,53 @@ implements SyntheticProductionRepository {
       orderBy: { version: 'desc' },
     })
     return row ? hydrateProfile(row) : null
+  }
+
+  private hydrateHead(row: {
+    workspaceId: string
+    profileId: string
+    currentVersion: number
+    currentSnapshotId: string
+    createdAt: Date
+    updatedAt: Date
+    currentSnapshot: V2SyntheticPresenterProfile
+  }) {
+    return Object.freeze({
+      head: Object.freeze({
+        workspaceId: row.workspaceId,
+        profileId: row.profileId,
+        currentVersion: row.currentVersion,
+        currentSnapshotId: row.currentSnapshotId,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      }),
+      current: hydrateProfile(row.currentSnapshot),
+    })
+  }
+
+  async listProfileHeads(input: { workspaceId: string }) {
+    const rows = await this.prisma.v2SyntheticPresenterProfileHead.findMany({
+      where: { workspaceId: input.workspaceId },
+      include: { currentSnapshot: true },
+      orderBy: [{ updatedAt: 'desc' }, { profileId: 'asc' }],
+    })
+    return Object.freeze(rows.map((row) => this.hydrateHead(row)))
+  }
+
+  async readProfileHead(input: { workspaceId: string; profileId: string }) {
+    const row = await this.prisma.v2SyntheticPresenterProfileHead.findUnique({
+      where: { workspaceId_profileId: { workspaceId: input.workspaceId, profileId: input.profileId } },
+      include: { currentSnapshot: true },
+    })
+    return row ? this.hydrateHead(row) : null
+  }
+
+  async listProfileVersions(input: { workspaceId: string; profileId: string }) {
+    const rows = await this.prisma.v2SyntheticPresenterProfile.findMany({
+      where: { workspaceId: input.workspaceId, profileId: input.profileId },
+      orderBy: { version: 'asc' },
+    })
+    return Object.freeze(rows.map(hydrateProfile))
   }
 
   async findRunReplay(input: {
