@@ -163,6 +163,9 @@ jobs:
       - name: Run synthetic script plan persistence tests
         run: npm run test:integration:synthetic-script-plan
 
+      - name: Run per-block generation cache and retry tests
+        run: npm run test:integration:synthetic-block-generation
+
       - name: Run durable operation persistence tests
         run: npm run test:integration:operations
 

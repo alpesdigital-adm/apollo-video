@@ -49,6 +49,7 @@ export type SyntheticScriptPlanMutation =
   | Readonly<{ kind: 'remove-block'; blockId: string }>
   | Readonly<{ kind: 'reorder-blocks'; order: readonly string[] }>
   | Readonly<{ kind: 'set-profile'; profileSnapshotId: string }>
+  | Readonly<{ kind: 'regenerate-block'; blockId: string }>
 
 interface PlanServiceDependencies {
   plans: SyntheticScriptPlanRepository
@@ -330,6 +331,11 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
       )
       commandType = 'reorder-blocks'
       sequence = [...mutation.order]
+    } else if (mutation.kind === 'regenerate-block') {
+      const target = identity(mutation.blockId, 'mutation.blockId')
+      assertDomain(currentSequence.includes(target), 'INVALID_ARGUMENT', 'Regenerated block is not part of the current plan version')
+      commandType = 'regenerate-block'
+      sequence = [...currentSequence]
     } else if (mutation.kind === 'set-profile') {
       const profile = await dependencies.profiles.readProfile({
         workspaceId,
@@ -380,6 +386,13 @@ export function mutateSyntheticScriptPlanService(dependencies: PlanServiceDepend
     const reusedBlockIds = sequence.filter((blockId) => byId.has(blockId))
     const cacheDecisions: SyntheticScriptPlanCacheDecision[] =
       createdBlocks.map(({ id }) => ({ blockId: id, decision: 'pending' as const, reason: PENDING_REASON }))
+    if (mutation.kind === 'regenerate-block') {
+      cacheDecisions.push({
+        blockId: mutation.blockId,
+        decision: 'regenerate',
+        reason: 'explicit regenerate command: the cache must be bypassed for this block',
+      })
+    }
     const impact = createSyntheticScriptPlanImpact({
       commandType,
       baseVersionId,

@@ -830,6 +830,15 @@ const requiredChecks = [
   'synthetic_script_blocks_origin_kind_check',
   'synthetic_script_blocks_origin_check',
   'synthetic_script_blocks_hash_check',
+  'synthetic_block_generations_schema_check',
+  'synthetic_block_generations_status_check',
+  'synthetic_block_generations_decision_check',
+  'synthetic_block_generations_attempt_check',
+  'synthetic_block_generations_budget_check',
+  'synthetic_block_generations_format_check',
+  'synthetic_block_generations_source_check',
+  'synthetic_block_generations_approved_check',
+  'synthetic_block_generations_hash_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
@@ -875,6 +884,20 @@ assert.match(
   committed,
   /CREATE TABLE "synthetic_script_blocks"[\s\S]*FOREIGN KEY \("createdInVersionId", "workspaceId"\) REFERENCES "synthetic_script_plan_versions"/,
   'synthetic script blocks must record the plan version that created them inside the same workspace',
+)
+const blockGenerationModel = schema.match(/model V2SyntheticBlockGeneration \{([\s\S]*?)\n\}/)?.[1] ?? ''
+for (const field of [
+  'planId', 'blockId', 'attempt', 'status', 'cacheKey', 'cacheDecision', 'decisionReason',
+  'providerJobId', 'sourceGenerationId', 'profileSnapshotId', 'voiceId', 'voiceVersion',
+  'outputFormat', 'synthesisConfigHash', 'scriptHash', 'audioArtifactId', 'alignmentArtifactId',
+  'supersededByGenerationId', 'attemptBudget', 'deadlineAt',
+]) {
+  assert.match(blockGenerationModel, new RegExp(`\\b${field}\\b`), `SyntheticBlockGeneration must persist ${field}`)
+}
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_block_generations"[\s\S]*FOREIGN KEY \("blockId", "workspaceId"\) REFERENCES "synthetic_script_blocks"[\s\S]*FOREIGN KEY \("providerJobId", "workspaceId"\) REFERENCES "provider_jobs"/,
+  'synthetic block generations must bind their block and provider job inside the same workspace',
 )
 
 console.log(
