@@ -31,6 +31,7 @@ const forbiddenLegacyPaths = [
   'src/components/ApolloEditorWorkspace.tsx',
   'src/components/RemotionProjectPlayer.tsx',
   'src/lib',
+  'src/v2/infrastructure/synthetic-providers.ts',
 ]
 
 async function files(directory) {
