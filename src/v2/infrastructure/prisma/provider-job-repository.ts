@@ -273,7 +273,9 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
     if (input.current.job.status !== 'estimated' || input.next.status !== 'submitting') {
       throw new DomainError('VERSION_CONFLICT', 'Provider submission intent has invalid states')
     }
-    return this.prisma.$transaction(async (transaction) => {
+    for (let attempt = 1; ; attempt += 1) {
+    try {
+    return await this.prisma.$transaction(async (transaction) => {
       const row = await transaction.v2ProviderJob.findUnique({ where: { id: input.current.job.id } })
       if (!row || row.jobHash !== input.current.job.jobHash || row.status !== input.current.job.status ||
         row.leaseToken !== input.current.lease.token || row.leaseOwner !== input.current.lease.owner ||
@@ -305,5 +307,14 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         lease: input.current.lease,
       }) as Readonly<ClaimedProviderJob>
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      // Serializable write conflicts against a concurrently settling reader
+      // are transient; surfacing them would mark the job failed with an
+      // ambiguous-submission error even though nothing was submitted yet.
+      // The in-transaction lease/status/hash guard revalidates on retry.
+      if (isPrismaCode(error, 'P2034') && attempt < 4) continue
+      throw error
+    }
+    }
   }
 }
