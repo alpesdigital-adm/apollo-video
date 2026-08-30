@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
+import { listSyntheticPresenterProfilesService } from '@/v2/application/synthetic-presenter-lifecycle'
 import { registerSyntheticPresenterProfileService } from '@/v2/application/synthetic-production'
 import { DomainError } from '@/v2/domain/errors'
+import { presentPresenterSummary } from '@/v2/public-api/synthetic-presenter-lifecycle-contract'
 import {
   createMediaArtifactQueryRepository,
   createSyntheticProductionRepository,
@@ -59,6 +61,23 @@ export async function POST(
         status: result.replayed ? 200 : 201,
         headers: publicApiHeaders(requestId),
       },
+    )
+  } catch (error) {
+    return respondPublicError(error, requestId)
+  }
+}
+
+export async function GET(request: NextRequest, context: { params: Promise<{ workspaceId: string }> }) {
+  const requestId = resolveRequestId(request)
+  try {
+    const actor = await authenticateExternalRequest(request)
+    const { workspaceId } = await context.params
+    const presenters = await listSyntheticPresenterProfilesService({
+      repository: createSyntheticProductionRepository(),
+    })({ workspaceId, actor })
+    return NextResponse.json(
+      presentSuccess({ presenters: presenters.map(presentPresenterSummary) }),
+      { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {
     return respondPublicError(error, requestId)

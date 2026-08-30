@@ -82,6 +82,7 @@ test('T-FR-092 persists one consent-bound synthetic EditPlan atomically in Postg
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionAsset.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticProductionRun.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.updateMany({
       where: { workspaceId },

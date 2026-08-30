@@ -338,6 +338,21 @@ const coverage = Object.freeze({
   'apollo.synthetic-presenters.register': {
     mode: 'durable-covered', evidence: 'serializable next-version recheck, exact consent-evidence digest, actor-bound idempotency and immutable content-addressed profile snapshot',
   },
+  'apollo.synthetic-presenters.create-version': {
+    mode: 'durable-covered', evidence: 'replay-first idempotency, head compare-and-swap on the strictly sequential version and serializable next-version recheck inside the shared register path',
+  },
+  'apollo.synthetic-presenters.activate': {
+    mode: 'durable-covered', evidence: 'consent-validity gate before the head compare-and-swap; the activation itself is an immutable appended version with actor-bound replay',
+  },
+  'apollo.synthetic-presenters.deactivate': {
+    mode: 'durable-covered', evidence: 'head compare-and-swap on the strictly sequential version; the deactivation is an immutable appended version with actor-bound replay',
+  },
+  'apollo.synthetic-presenters.attach-consent-proof': {
+    mode: 'durable-covered', evidence: 'exact consent-evidence digest recheck inside the serializable register path plus head compare-and-swap and actor-bound replay',
+  },
+  'apollo.synthetic-presenters.evaluate-eligibility': {
+    mode: 'read-only-deterministic', evidence: 'deterministic presenter policy engine over persisted immutable snapshots with no persistence',
+  },
   'apollo.projects.synthetic-audio-masters.create': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent create with a unique replay key, exact current ProjectVersion/profile/artifact/rights rechecks and immutable content-addressed audio plus alignment persistence',
   },
@@ -440,10 +455,10 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    127,
+    131,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
-    4,
+    5,
   )
 })

@@ -311,6 +311,22 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Registers one versioned actor identity, avatar and voice consent scope that can authorize later paid synthetic generation, while preserving the evidence artifact and immutable audit.',
     },
+    'apollo.synthetic-presenters.create-version': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Appends the next immutable presenter version — voice, avatar, disclosure or consent scope changes directly steer later paid generation.',
+    },
+    'apollo.synthetic-presenters.activate': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Reactivates a synthetic identity for generation; blocked fail-closed while the current consent is missing, revoked or expired.',
+    },
+    'apollo.synthetic-presenters.deactivate': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Deactivates a synthetic identity as an auditable version, stopping generation for every snapshot of it immediately.',
+    },
+    'apollo.synthetic-presenters.attach-consent-proof': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Binds a fresh consent evidence artifact digest as an immutable version — the only path back from a revoked or expired consent.',
+    },
     'apollo.projects.synthetic-audio-masters.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Approves one immutable audio and word-alignment master that can authorize later paid avatar generation, after exact consent, rights, project-version and critic evidence checks.',

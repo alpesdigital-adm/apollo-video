@@ -150,6 +150,24 @@ export interface SyntheticPresenterProfileSnapshot {
   status: 'active' | 'disabled' | 'expired'
   disclosure: string
   consent: Readonly<SyntheticConsentSnapshot>
+  /** Reserved reference; participates in block cache keys once dictionaries exist. */
+  pronunciationDictionaryRef?: string
+  visualContinuity?: Readonly<{ wardrobe?: string; background?: string; framing?: string }>
+  restrictions?: readonly string[]
+}
+
+/**
+ * Mutable head of a logical presenter: the row lifecycle commands
+ * compare-and-swap against. Every version stays an immutable snapshot row;
+ * the head only points at the current one.
+ */
+export interface SyntheticPresenterProfileHead {
+  workspaceId: string
+  profileId: string
+  currentVersion: number
+  currentSnapshotId: string
+  createdAt: string
+  updatedAt: string
 }
 
 export function createSyntheticPresenterProfileSnapshot(input: {
@@ -162,6 +180,9 @@ export function createSyntheticPresenterProfileSnapshot(input: {
   status: SyntheticPresenterProfileSnapshot['status']
   disclosure: string
   consent: Omit<SyntheticConsentSnapshot, 'snapshotHash'>
+  pronunciationDictionaryRef?: string
+  visualContinuity?: Readonly<{ wardrobe?: string; background?: string; framing?: string }>
+  restrictions?: readonly string[]
 }): Readonly<SyntheticPresenterProfileSnapshot> {
   assertDomain(
     Number.isSafeInteger(input.version) && input.version >= 1 &&
@@ -232,6 +253,40 @@ export function createSyntheticPresenterProfileSnapshot(input: {
     status: input.status,
     disclosure: input.disclosure.trim(),
     consent,
+    // Optional fields enter the hashed body only when present, so every
+    // previously persisted snapshot keeps verifying byte-identically.
+    ...(input.pronunciationDictionaryRef
+      ? { pronunciationDictionaryRef: canonicalId(input.pronunciationDictionaryRef, 'profile.pronunciationDictionaryRef') }
+      : {}),
+    ...(input.visualContinuity && Object.values(input.visualContinuity).some(Boolean)
+      ? {
+          visualContinuity: Object.freeze(Object.fromEntries(
+            (['wardrobe', 'background', 'framing'] as const)
+              .filter((key) => {
+                const value = input.visualContinuity?.[key]
+                assertDomain(
+                  value === undefined || (typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= 200),
+                  'INVALID_ARGUMENT',
+                  `profile.visualContinuity.${key} is invalid`,
+                )
+                return Boolean(value)
+              })
+              .map((key) => [key, input.visualContinuity![key]!.trim()]),
+          )),
+        }
+      : {}),
+    ...(input.restrictions && input.restrictions.length > 0
+      ? {
+          restrictions: Object.freeze([...new Set(input.restrictions.map((value, index) => {
+            assertDomain(
+              typeof value === 'string' && value.trim().length >= 3 && value.trim().length <= 300,
+              'INVALID_ARGUMENT',
+              `profile.restrictions[${index}] is invalid`,
+            )
+            return value.trim()
+          }))].toSorted()),
+        }
+      : {}),
   })
   return Object.freeze({ ...body, snapshotHash: calculateCanonicalHash(body) })
 }
@@ -519,6 +574,11 @@ export function createSyntheticPresenterEditPlan(input: {
         ? { revokedAt: input.profile.consent.revokedAt }
         : {}),
     },
+    ...(input.profile.pronunciationDictionaryRef
+      ? { pronunciationDictionaryRef: input.profile.pronunciationDictionaryRef }
+      : {}),
+    ...(input.profile.visualContinuity ? { visualContinuity: input.profile.visualContinuity } : {}),
+    ...(input.profile.restrictions ? { restrictions: input.profile.restrictions } : {}),
   })
   assertDomain(
     verifiedProfile.snapshotHash === input.profile.snapshotHash &&

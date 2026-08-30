@@ -50,6 +50,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticAudioMaster.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
     await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })

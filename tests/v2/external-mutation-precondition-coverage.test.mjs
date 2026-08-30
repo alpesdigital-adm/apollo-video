@@ -340,6 +340,21 @@ const coverage = Object.freeze({
   'apollo.synthetic-presenters.register': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds the next immutable profile version, actor context, consent scope and exact evidence artifact digest; serializable persistence rechecks all of them',
   },
+  'apollo.synthetic-presenters.create-version': {
+    mode: 'revision-bound-action', evidence: 'request requires the exact baseRevision of the head; the head compare-and-swap plus strict version sequencing reject any concurrent advance',
+  },
+  'apollo.synthetic-presenters.activate': {
+    mode: 'revision-bound-action', evidence: 'request requires the exact baseRevision; reactivation additionally revalidates the current consent before the head compare-and-swap',
+  },
+  'apollo.synthetic-presenters.deactivate': {
+    mode: 'revision-bound-action', evidence: 'request requires the exact baseRevision of the head; the deactivation version commits only through the compare-and-swap',
+  },
+  'apollo.synthetic-presenters.attach-consent-proof': {
+    mode: 'revision-bound-action', evidence: 'request requires the exact baseRevision and the fresh evidence artifact digest is rechecked inside the serializable register path',
+  },
+  'apollo.synthetic-presenters.evaluate-eligibility': {
+    mode: 'read-only-preflight', evidence: 'deterministic policy evaluation over immutable snapshots with no persistence',
+  },
   'apollo.projects.synthetic-audio-masters.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter profile, approved audio and alignment artifact digests, exact word timing, critic evidence, actor context and rights; serializable persistence rechecks all immutable identities before commit',
   },
@@ -629,13 +644,13 @@ test('the current public surface has no unguarded state replacement', () => {
     return result
   }, {})
   assert.deepEqual(counts, {
-    'read-only-preflight': 4,
+    'read-only-preflight': 5,
     'explicit-precondition': 10,
     'idempotent-create': 61,
     'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,
-    'revision-bound-action': 12,
+    'revision-bound-action': 16,
     'base-version-bound-action': 16,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,

@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 105,
-    "capabilities": 94,
-    "endpoints": 94,
-    "registeredCapabilities": 267,
-    "operableCapabilities": 267,
-    "publicContractCapabilities": 267,
+    "uiActions": 113,
+    "capabilities": 101,
+    "endpoints": 101,
+    "registeredCapabilities": 274,
+    "operableCapabilities": 274,
+    "publicContractCapabilities": 274,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1573,6 +1573,161 @@
       "applicationServices": [
         "admitGovernedCapabilityService",
         "attachMediaLibraryItemService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:143",
+      "capabilityId": "apollo.synthetic-presenters.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listSyntheticPresenterProfilesService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:153",
+      "capabilityId": "apollo.sessions.read",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "GET /v1/session",
+      "applicationServices": [
+        "authenticateUiSessionService",
+        "listSelectableWorkspacesService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:182",
+      "capabilityId": "apollo.synthetic-presenters.get",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readSyntheticPresenterProfileService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:223",
+      "capabilityId": "apollo.synthetic-presenters.register",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "registerSyntheticPresenterProfileService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:258",
+      "capabilityId": "apollo.synthetic-presenters.attach-consent-proof",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/consent-proofs",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "attachSyntheticPresenterConsentProofService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createSyntheticPresenterProfileVersionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "registerSyntheticPresenterProfileService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:285",
+      "capabilityId": "apollo.synthetic-presenters.activate",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/activation",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createSyntheticPresenterProfileVersionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "registerSyntheticPresenterProfileService",
+        "setSyntheticPresenterProfileStatusService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:296",
+      "capabilityId": "apollo.synthetic-presenters.deactivate",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/deactivation",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createSyntheticPresenterProfileVersionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "registerSyntheticPresenterProfileService",
+        "setSyntheticPresenterProfileStatusService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/components/SyntheticPresentersManager.tsx:311",
+      "capabilityId": "apollo.synthetic-presenters.evaluate-eligibility",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/eligibility-evaluations",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
         "authenticateApiClientService",
         "authenticateUiSessionService",
         "governanceAnomalyPolicyFromEnvironment",
@@ -4834,6 +4989,83 @@
       "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters",
       "inputSchemaRef": "apollo://schemas/register-synthetic-presenter-request/v1",
       "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-detail/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.create-version",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/versions",
+      "inputSchemaRef": "apollo://schemas/create-synthetic-presenter-version-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.activate",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/activation",
+      "inputSchemaRef": "apollo://schemas/set-synthetic-presenter-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.deactivate",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/deactivation",
+      "inputSchemaRef": "apollo://schemas/set-synthetic-presenter-status-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.attach-consent-proof",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/consent-proofs",
+      "inputSchemaRef": "apollo://schemas/attach-synthetic-presenter-consent-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-registered/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.synthetic-presenters.evaluate-eligibility",
+      "exposure": "public",
+      "endpoint": "POST /v1/workspaces/{workspaceId}/synthetic-presenters/{presenterId}/eligibility-evaluations",
+      "inputSchemaRef": "apollo://schemas/evaluate-synthetic-presenter-eligibility-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-presenter-eligibility/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
+import { assertSyntheticPresenterPolicy } from '../domain/synthetic-presenter-policy-engine.ts'
 import {
   calculateSyntheticBlockCacheKey,
   createSyntheticBlockGeneration,
@@ -34,27 +35,32 @@ function generationId(blockId: string, attempt: number): string {
 }
 
 /**
- * The identity- and voice-consent gate. It runs BEFORE any cache lookup and
- * before any cost reservation, and again before every reuse: a revoked,
- * expired or out-of-scope consent must produce zero cache hits and zero paid
- * calls, never a stale reuse.
+ * The identity- and voice-consent gate, delegated to the deterministic
+ * presenter policy engine. It runs BEFORE any cache lookup and before any
+ * cost reservation, and again before every reuse: a revoked, expired or
+ * out-of-scope consent — on the snapshot in use OR on the profile's current
+ * head version, which expresses the actor's latest will — must produce zero
+ * cache hits and zero paid calls, never a stale reuse.
  */
-export function assertBlockGenerationConsent(
+export async function assertBlockGenerationConsent(
+  profiles: SyntheticProductionRepository,
   snapshot: Readonly<SyntheticPresenterProfileSnapshot>,
-  context: Readonly<{ use: string; market: string; locale: string; now: Date }>,
-): void {
-  const consent = snapshot.consent
-  assertDomain(
-    snapshot.status === 'active' && consent.granted &&
-      (!consent.revokedAt || Date.parse(consent.revokedAt) > context.now.getTime()) &&
-      Date.parse(consent.expiresAt) > context.now.getTime() &&
-      consent.allowedUses.includes(context.use) &&
-      consent.allowedMarkets.includes(context.market) &&
-      consent.allowedLocales.includes(context.locale) &&
-      consent.allowedOperations.includes('tts'),
-    'ASSET_RIGHTS_BLOCKED',
-    'Synthetic presenter consent does not authorize block generation',
-  )
+  context: Readonly<{ workspaceId: string; operation: 'tts' | 'audio-avatar'; use: string; market: string; locale: string; now: Date }>,
+): Promise<void> {
+  const head = await profiles.readProfileHead({ workspaceId: context.workspaceId, profileId: snapshot.id })
+  assertSyntheticPresenterPolicy({
+    snapshot,
+    snapshotWorkspaceId: context.workspaceId,
+    ...(head ? { head: { currentVersion: head.head.currentVersion, current: head.current.snapshot } } : {}),
+    context: {
+      operation: context.operation,
+      use: context.use,
+      market: context.market,
+      locale: context.locale,
+      workspaceId: context.workspaceId,
+      now: context.now,
+    },
+  })
 }
 
 export function syntheticBlockVoiceKeyFromProfile(
@@ -131,8 +137,11 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
     })
     if (!profile) throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic presenter profile was not found')
     const locale = plan.version.locale
-    // Gate order is binding: consent first, then cache, then cost.
-    assertBlockGenerationConsent(profile.snapshot, { use: request.use, market: request.market, locale, now })
+    // Gate order is binding: policy (identity, voice, consent) first, then
+    // cache, then cost.
+    await assertBlockGenerationConsent(dependencies.profiles, profile.snapshot, {
+      workspaceId: request.workspaceId, operation: 'tts', use: request.use, market: request.market, locale, now,
+    })
     const outputFormat = request.outputFormat ?? 'mp3'
     const voice = syntheticBlockVoiceKeyFromProfile(profile.snapshot, outputFormat)
     const force = new Set(request.forceBlockIds ?? [])

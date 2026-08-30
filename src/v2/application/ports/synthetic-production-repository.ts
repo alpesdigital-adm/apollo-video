@@ -2,6 +2,7 @@ import type { ApiAccessAuditContext } from '../../domain/api-access-control.ts'
 import type { ProjectSnapshot } from '../../domain/project-snapshot.ts'
 import type {
   SyntheticPresenterEditPlan,
+  SyntheticPresenterProfileHead,
   SyntheticPresenterProfileSnapshot,
 } from '../../domain/synthetic-production.ts'
 
@@ -49,6 +50,23 @@ export interface SyntheticProductionRepository {
     workspaceId: string
     snapshotId: string
   }): Promise<Readonly<PersistedSyntheticPresenterProfile> | null>
+  listProfileHeads(input: {
+    workspaceId: string
+  }): Promise<readonly Readonly<{
+    head: Readonly<SyntheticPresenterProfileHead>
+    current: Readonly<PersistedSyntheticPresenterProfile>
+  }>[]>
+  readProfileHead(input: {
+    workspaceId: string
+    profileId: string
+  }): Promise<Readonly<{
+    head: Readonly<SyntheticPresenterProfileHead>
+    current: Readonly<PersistedSyntheticPresenterProfile>
+  }> | null>
+  listProfileVersions(input: {
+    workspaceId: string
+    profileId: string
+  }): Promise<readonly Readonly<PersistedSyntheticPresenterProfile>[]>
   findRunReplay(input: {
     workspaceId: string
     projectId: string

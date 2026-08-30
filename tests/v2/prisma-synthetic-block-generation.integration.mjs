@@ -38,6 +38,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJobTransition.deleteMany({ where: { workspaceId } })
     await client.v2ProviderJob.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.updateMany({ where: { workspaceId }, data: { currentRightsSnapshotId: null, rightsRevision: 0 } })
     await client.v2AssetRightsChange.deleteMany({ where: { workspaceId } })

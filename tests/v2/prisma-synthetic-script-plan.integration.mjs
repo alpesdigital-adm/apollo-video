@@ -21,6 +21,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticPresenterProfileHead.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticPresenterProfile.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
     await client.v2PublicEventOutbox.deleteMany({ where: { workspaceId } })

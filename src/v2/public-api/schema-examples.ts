@@ -5539,6 +5539,56 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/synthetic-presenter-registered/v1': [{
       data: { profile: syntheticProfileExample, replayed: false }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/synthetic-presenter-list/v1': [{
+      data: {
+        presenters: [{
+          profileId: 'presenter-example-1', currentVersion: 1, status: 'active', defaultLocale: 'pt-BR',
+          disclosure: 'Conteúdo gerado com IA',
+          voice: { adapterId: syntheticProfileExample.voice.adapterId, adapterVersion: syntheticProfileExample.voice.adapterVersion, version: 1 },
+          avatarAdapterId: syntheticProfileExample.avatar.adapterId,
+          consent: { granted: true, expiresAt: '2030-01-01T00:00:00.000Z' },
+          updatedAt: createdAt,
+        }],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-presenter-detail/v1': [{
+      data: {
+        profileId: 'presenter-example-1',
+        head: { currentVersion: 1, currentSnapshotId: 'presenter-example-1:v1', updatedAt: createdAt },
+        current: syntheticProfileExample,
+        versions: [syntheticProfileExample],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/create-synthetic-presenter-version-request/v1': [{
+      baseRevision: 1,
+      changes: {
+        voice: { id: 'voice-example-2', version: 1, adapterId: syntheticProfileExample.voice.adapterId, adapterVersion: syntheticProfileExample.voice.adapterVersion },
+        restrictions: ['nunca conteúdo político'],
+      },
+    }],
+    'apollo://schemas/set-synthetic-presenter-status-request/v1': [{ baseRevision: 2 }],
+    'apollo://schemas/attach-synthetic-presenter-consent-request/v1': [{
+      baseRevision: 3,
+      consent: {
+        id: 'consent-example-2', evidenceArtifactId: 'artifact-consent-example-2', granted: true,
+        allowedUses: ['ads'], allowedMarkets: ['BRA'], allowedLocales: ['pt-BR'],
+        allowedOperations: ['tts', 'audio-avatar'], expiresAt: '2031-01-01T00:00:00.000Z',
+      },
+    }],
+    'apollo://schemas/evaluate-synthetic-presenter-eligibility-request/v1': [{
+      operation: 'tts', use: 'ads', market: 'BRA', locale: 'pt-BR',
+    }],
+    'apollo://schemas/synthetic-presenter-eligibility/v1': [{
+      data: {
+        policyVersion: 'synthetic-presenter-eligibility-policy/v1',
+        allowed: false,
+        reasons: [{ code: 'CONSENT_REVOKED', message: 'consent was revoked at 2026-06-01T00:00:00.000Z' }],
+        profileVersion: 5,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/create-synthetic-audio-master-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1', source: { kind: 'uploaded' },
       audioArtifactId: 'artifact-audio-example-1', alignmentEvidenceArtifactId: 'artifact-alignment-example-1', durationMs: 2000, locale: 'pt-BR',
