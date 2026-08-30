@@ -166,7 +166,16 @@ implements AsyncMediaProviderAdapter<Readonly<Record<string, unknown>>, ElevenLa
     const maxCharacters = input.maxCharacters ?? 5_000
     assertDomain(Number.isSafeInteger(maxCharacters) && maxCharacters >= 1 && maxCharacters <= 40_000, 'PERSISTENCE_NOT_CONFIGURED', 'ElevenLabs text limit configuration is invalid')
     const baseUrl = new URL(input.baseUrl ?? 'https://api.elevenlabs.io')
-    assertDomain(baseUrl.protocol === 'https:' && !baseUrl.username && !baseUrl.password && !baseUrl.search && !baseUrl.hash, 'PERSISTENCE_NOT_CONFIGURED', 'ElevenLabs API base URL is invalid')
+    // Plain HTTP is admitted only toward loopback — the same policy the S3
+    // endpoint follows — so controlled local stubs work without ever allowing
+    // an unencrypted remote provider endpoint.
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(baseUrl.hostname)
+    assertDomain(
+      (baseUrl.protocol === 'https:' || (baseUrl.protocol === 'http:' && loopback)) &&
+        !baseUrl.username && !baseUrl.password && !baseUrl.search && !baseUrl.hash,
+      'PERSISTENCE_NOT_CONFIGURED',
+      'ElevenLabs API base URL is invalid',
+    )
     this.apiKey = input.apiKey.trim()
     this.baseUrl = baseUrl.toString().replace(/\/$/, '')
     this.fetch = input.fetch ?? globalThis.fetch

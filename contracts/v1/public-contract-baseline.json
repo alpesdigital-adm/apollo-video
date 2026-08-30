@@ -6645,6 +6645,234 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.synthetic-script-plans.compile-audio": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/compile-synthetic-block-audio-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-block-audio-compiled/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/audio-compilations"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.compile-audio",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-synthetic-script-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.create",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.get": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.get",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.insert-block": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/insert-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.insert-block",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.regenerate-block": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/regenerate-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}/regenerations"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.regenerate-block",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.remove-block": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/remove-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "DELETE",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.remove-block",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.reorder-blocks": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/reorder-synthetic-script-blocks-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/block-order"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.reorder-blocks",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.set-profile": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/set-synthetic-script-plan-profile-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/presenter-profile"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.set-profile",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-script-plans.update-block": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/update-synthetic-script-block-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-script-plan-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/synthetic-script-plans/{planId}/blocks/{blockId}/edits"
+      },
+      "toolName": "apollo.projects.synthetic-script-plans.update-block",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.timeline.read": {
       "version": "2.0.0",
       "exposure": "public",
@@ -27312,6 +27540,65 @@
         }
       }
     },
+    "apollo://schemas/compile-synthetic-block-audio-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "settings",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gapMs",
+            "outputFormat"
+          ],
+          "properties": {
+            "gapMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "outputFormat": {
+              "enum": [
+                "mp3",
+                "wav"
+              ]
+            }
+          }
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        }
+      }
+    },
     "apollo://schemas/contamination-diagnostics-read/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -37411,6 +37698,50 @@
         },
         "captions": {
           "type": "boolean"
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        }
+      }
+    },
+    "apollo://schemas/create-synthetic-script-plan-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "profileSnapshotId",
+        "locale",
+        "scriptText",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "profileSnapshotId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "scriptText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
         },
         "use": {
           "type": "string",
@@ -56397,6 +56728,55 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/insert-synthetic-script-block-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "position",
+        "text",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
         }
       }
     },
@@ -149878,6 +150258,43 @@
         }
       }
     },
+    "apollo://schemas/regenerate-synthetic-script-block-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        }
+      }
+    },
     "apollo://schemas/register-synthetic-presenter-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -150058,6 +150475,43 @@
               "format": "date-time"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/remove-synthetic-script-block-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
         }
       }
     },
@@ -150794,6 +151248,55 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/reorder-synthetic-script-blocks-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "order",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
         }
       }
     },
@@ -165946,6 +166449,49 @@
         },
         "confirmed": {
           "const": true
+        }
+      }
+    },
+    "apollo://schemas/set-synthetic-script-plan-profile-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "profileSnapshotId",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "profileSnapshotId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
         }
       }
     },
@@ -183736,6 +184282,211 @@
         }
       }
     },
+    "apollo://schemas/synthetic-block-audio-compiled/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "concatenation",
+            "audioMasterId",
+            "replayed"
+          ],
+          "properties": {
+            "concatenation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "planId",
+                "planVersionId",
+                "container",
+                "codec",
+                "sampleRate",
+                "channels",
+                "gapMs",
+                "durationMs",
+                "entries",
+                "concatHash",
+                "audioArtifactId",
+                "alignmentArtifactId",
+                "finalAudioSha256",
+                "audioMasterId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "planId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "planVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "container": {
+                  "enum": [
+                    "mp3",
+                    "wav"
+                  ]
+                },
+                "codec": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 16
+                },
+                "sampleRate": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "channels": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2
+                },
+                "gapMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10000
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "entries": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "blockId",
+                      "generationId",
+                      "artifactSha256",
+                      "sourceDurationMs",
+                      "outputInMs",
+                      "outputOutMs",
+                      "gapAfterMs",
+                      "processing",
+                      "alignmentOffsetMs"
+                    ],
+                    "properties": {
+                      "blockId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "generationId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "artifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceDurationMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "outputInMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "outputOutMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "gapAfterMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "processing": {
+                        "enum": [
+                          "copy",
+                          "reencode"
+                        ]
+                      },
+                      "alignmentOffsetMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "concatHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "audioArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "alignmentArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "finalAudioSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "audioMasterId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "audioMasterId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/synthetic-presenter-registered/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -184338,6 +185089,1003 @@
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
                     }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-script-plan-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan",
+            "generations",
+            "replayed"
+          ],
+          "properties": {
+            "plan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "head",
+                "version",
+                "blocks"
+              ],
+              "properties": {
+                "head": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "currentVersionId",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "synthetic-script-plan/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "currentVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "version": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "planId",
+                    "workspaceId",
+                    "projectId",
+                    "sequence",
+                    "projectVersionId",
+                    "profileSnapshotId",
+                    "locale",
+                    "segmentationVersion",
+                    "scriptHash",
+                    "commandType",
+                    "blockSequence",
+                    "impact",
+                    "planVersionHash",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "synthetic-script-plan-version/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "planId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "parentVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "profileSnapshotId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "segmentationVersion": {
+                      "const": "synthetic-script-segmentation/v1"
+                    },
+                    "scriptHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "commandType": {
+                      "enum": [
+                        "create-plan",
+                        "insert-block",
+                        "update-block",
+                        "remove-block",
+                        "reorder-blocks",
+                        "set-profile",
+                        "regenerate-block",
+                        "compile-audio"
+                      ]
+                    },
+                    "blockSequence": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 500,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "impact": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "commandType",
+                        "baseVersionId",
+                        "resultVersionId",
+                        "createdBlockIds",
+                        "reusedBlockIds",
+                        "retiredBlockIds",
+                        "invalidatedArtifactIds",
+                        "renderSemantics",
+                        "cacheDecisions",
+                        "impactHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "synthetic-script-plan-impact/v1"
+                        },
+                        "commandType": {
+                          "enum": [
+                            "create-plan",
+                            "insert-block",
+                            "update-block",
+                            "remove-block",
+                            "reorder-blocks",
+                            "set-profile",
+                            "regenerate-block",
+                            "compile-audio"
+                          ]
+                        },
+                        "baseVersionId": {
+                          "oneOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "resultVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "createdBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "reusedBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "retiredBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "invalidatedArtifactIds": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "renderSemantics": {
+                          "enum": [
+                            "no-render",
+                            "deferred-to-compile"
+                          ]
+                        },
+                        "cacheDecisions": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "blockId",
+                              "decision",
+                              "reason"
+                            ],
+                            "properties": {
+                              "blockId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "decision": {
+                                "enum": [
+                                  "reuse",
+                                  "regenerate",
+                                  "pending"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 500
+                              }
+                            }
+                          }
+                        },
+                        "impactHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "planVersionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "blocks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "planId",
+                      "exactText",
+                      "normalizedText",
+                      "normalizedTextHash",
+                      "locale",
+                      "occurrence",
+                      "createdInVersionId",
+                      "origin",
+                      "blockHash",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "synthetic-script-block/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "planId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "exactText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 10000
+                      },
+                      "normalizedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 10000
+                      },
+                      "normalizedTextHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "locale": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 35
+                      },
+                      "occurrence": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "createdInVersionId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "origin": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "initial-segmentation",
+                              "inserted",
+                              "edited"
+                            ]
+                          },
+                          "originBlockId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "blockHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generations": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "blockId",
+                  "generationId",
+                  "action",
+                  "reason"
+                ],
+                "properties": {
+                  "blockId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "generationId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "action": {
+                    "enum": [
+                      "up-to-date",
+                      "failed-awaiting-retry",
+                      "reused",
+                      "enqueued",
+                      "deferred-duplicate",
+                      "budget-exhausted"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-script-plan-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan",
+            "generations"
+          ],
+          "properties": {
+            "plan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "head",
+                "version",
+                "blocks"
+              ],
+              "properties": {
+                "head": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "currentVersionId",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "synthetic-script-plan/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "currentVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "version": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "planId",
+                    "workspaceId",
+                    "projectId",
+                    "sequence",
+                    "projectVersionId",
+                    "profileSnapshotId",
+                    "locale",
+                    "segmentationVersion",
+                    "scriptHash",
+                    "commandType",
+                    "blockSequence",
+                    "impact",
+                    "planVersionHash",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "synthetic-script-plan-version/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "planId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "parentVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectVersionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "profileSnapshotId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 35
+                    },
+                    "segmentationVersion": {
+                      "const": "synthetic-script-segmentation/v1"
+                    },
+                    "scriptHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "commandType": {
+                      "enum": [
+                        "create-plan",
+                        "insert-block",
+                        "update-block",
+                        "remove-block",
+                        "reorder-blocks",
+                        "set-profile",
+                        "regenerate-block",
+                        "compile-audio"
+                      ]
+                    },
+                    "blockSequence": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 500,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "impact": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "commandType",
+                        "baseVersionId",
+                        "resultVersionId",
+                        "createdBlockIds",
+                        "reusedBlockIds",
+                        "retiredBlockIds",
+                        "invalidatedArtifactIds",
+                        "renderSemantics",
+                        "cacheDecisions",
+                        "impactHash"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "const": "synthetic-script-plan-impact/v1"
+                        },
+                        "commandType": {
+                          "enum": [
+                            "create-plan",
+                            "insert-block",
+                            "update-block",
+                            "remove-block",
+                            "reorder-blocks",
+                            "set-profile",
+                            "regenerate-block",
+                            "compile-audio"
+                          ]
+                        },
+                        "baseVersionId": {
+                          "oneOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "resultVersionId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "createdBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "reusedBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "retiredBlockIds": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "invalidatedArtifactIds": {
+                          "type": "array",
+                          "maxItems": 1000,
+                          "items": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        },
+                        "renderSemantics": {
+                          "enum": [
+                            "no-render",
+                            "deferred-to-compile"
+                          ]
+                        },
+                        "cacheDecisions": {
+                          "type": "array",
+                          "maxItems": 500,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "blockId",
+                              "decision",
+                              "reason"
+                            ],
+                            "properties": {
+                              "blockId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "decision": {
+                                "enum": [
+                                  "reuse",
+                                  "regenerate",
+                                  "pending"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 500
+                              }
+                            }
+                          }
+                        },
+                        "impactHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      }
+                    },
+                    "planVersionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "blocks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 500,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "planId",
+                      "exactText",
+                      "normalizedText",
+                      "normalizedTextHash",
+                      "locale",
+                      "occurrence",
+                      "createdInVersionId",
+                      "origin",
+                      "blockHash",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "synthetic-script-block/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "planId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "exactText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 10000
+                      },
+                      "normalizedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 10000
+                      },
+                      "normalizedTextHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "locale": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 35
+                      },
+                      "occurrence": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "createdInVersionId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "origin": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "kind"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "enum": [
+                              "initial-segmentation",
+                              "inserted",
+                              "edited"
+                            ]
+                          },
+                          "originBlockId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "blockHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generations": {
+              "type": "array",
+              "maxItems": 5000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "blockId",
+                  "attempt",
+                  "status",
+                  "cacheDecision",
+                  "decisionReason",
+                  "cacheKey",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "blockId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "approved",
+                      "failed",
+                      "superseded"
+                    ]
+                  },
+                  "cacheDecision": {
+                    "enum": [
+                      "miss-generate",
+                      "hit-reuse",
+                      "forced-regenerate"
+                    ]
+                  },
+                  "decisionReason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "cacheKey": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "providerJobId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceGenerationId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "audioArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "alignmentArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "failureReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 }
               }
@@ -187603,6 +189351,49 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/update-synthetic-script-block-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "baseVersionId",
+        "baseHash",
+        "text",
+        "use",
+        "market"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
         }
       }
     },

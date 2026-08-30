@@ -347,6 +347,30 @@ const coverage = Object.freeze({
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent creation, immutable authorization, serializable project/profile/rights rechecks, leased stage claims and job-hash compare-and-swap transition history',
   },
+  'apollo.projects.synthetic-script-plans.create': {
+    mode: 'durable-covered', evidence: 'actor-bound idempotent create, serializable current ProjectVersion recheck, immutable plan version with hash-verified blocks and deterministic per-block generation ids',
+  },
+  'apollo.projects.synthetic-script-plans.insert-block': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId inside a serializable transaction, immutable appended version and actor-bound replay by fingerprint',
+  },
+  'apollo.projects.synthetic-script-plans.update-block': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId, retired-block guard against concurrent retirement and actor-bound replay by fingerprint',
+  },
+  'apollo.projects.synthetic-script-plans.remove-block': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId, retired-block guard against concurrent retirement and actor-bound replay by fingerprint',
+  },
+  'apollo.projects.synthetic-script-plans.reorder-blocks': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId with exact-permutation validation and actor-bound replay by fingerprint',
+  },
+  'apollo.projects.synthetic-script-plans.set-profile': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId, persisted presenter snapshot recheck and actor-bound replay by fingerprint',
+  },
+  'apollo.projects.synthetic-script-plans.regenerate-block': {
+    mode: 'durable-covered', evidence: 'plan head compare-and-swap against baseVersionId plus atomic attempt supersession so a late provider result can never win over the current attempt',
+  },
+  'apollo.projects.synthetic-script-plans.compile-audio': {
+    mode: 'durable-covered', evidence: 'approval preconditions checked before the compile command version, plan head compare-and-swap, idempotent concatenation row and crash recovery through the command replay key',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'durable-covered', evidence: 'serializable exact ProjectVersion, inherited policy and output-set recheck, immutable Policy Snapshot, typed EditCommand, CAS head update and actor-bound replay',
   },
@@ -416,7 +440,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    119,
+    127,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

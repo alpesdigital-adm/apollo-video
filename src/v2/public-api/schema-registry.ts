@@ -13344,6 +13344,96 @@ const syntheticAudioWordSchema: JsonSchema = {
     confidence: { type: 'number', minimum: 0, maximum: 1 },
   },
 }
+const syntheticScriptPlanSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['head', 'version', 'blocks'],
+  properties: {
+    head: {
+      type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'currentVersionId', 'createdAt'],
+      properties: {
+        schemaVersion: { const: 'synthetic-script-plan/v1' },
+        id: PUBLIC_ID_SCHEMA, workspaceId: PUBLIC_ID_SCHEMA, projectId: PUBLIC_ID_SCHEMA,
+        currentVersionId: PUBLIC_ID_SCHEMA, createdAt: PUBLIC_DATE_TIME_SCHEMA,
+      },
+    },
+    version: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'schemaVersion', 'id', 'planId', 'workspaceId', 'projectId', 'sequence', 'projectVersionId',
+        'profileSnapshotId', 'locale', 'segmentationVersion', 'scriptHash', 'commandType',
+        'blockSequence', 'impact', 'planVersionHash', 'createdAt',
+      ],
+      properties: {
+        schemaVersion: { const: 'synthetic-script-plan-version/v1' },
+        id: PUBLIC_ID_SCHEMA, planId: PUBLIC_ID_SCHEMA, workspaceId: PUBLIC_ID_SCHEMA, projectId: PUBLIC_ID_SCHEMA,
+        sequence: { type: 'integer', minimum: 1 }, parentVersionId: PUBLIC_ID_SCHEMA,
+        projectVersionId: PUBLIC_ID_SCHEMA, profileSnapshotId: PUBLIC_ID_SCHEMA,
+        locale: { type: 'string', minLength: 2, maxLength: 35 },
+        segmentationVersion: { const: 'synthetic-script-segmentation/v1' },
+        scriptHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        commandType: { enum: ['create-plan', 'insert-block', 'update-block', 'remove-block', 'reorder-blocks', 'set-profile', 'regenerate-block', 'compile-audio'] },
+        blockSequence: { type: 'array', minItems: 1, maxItems: 500, uniqueItems: true, items: PUBLIC_ID_SCHEMA },
+        impact: {
+          type: 'object', additionalProperties: false,
+          required: ['schemaVersion', 'commandType', 'baseVersionId', 'resultVersionId', 'createdBlockIds', 'reusedBlockIds', 'retiredBlockIds', 'invalidatedArtifactIds', 'renderSemantics', 'cacheDecisions', 'impactHash'],
+          properties: {
+            schemaVersion: { const: 'synthetic-script-plan-impact/v1' },
+            commandType: { enum: ['create-plan', 'insert-block', 'update-block', 'remove-block', 'reorder-blocks', 'set-profile', 'regenerate-block', 'compile-audio'] },
+            baseVersionId: { oneOf: [PUBLIC_ID_SCHEMA, { type: 'null' }] },
+            resultVersionId: PUBLIC_ID_SCHEMA,
+            createdBlockIds: { type: 'array', maxItems: 500, items: PUBLIC_ID_SCHEMA },
+            reusedBlockIds: { type: 'array', maxItems: 500, items: PUBLIC_ID_SCHEMA },
+            retiredBlockIds: { type: 'array', maxItems: 500, items: PUBLIC_ID_SCHEMA },
+            invalidatedArtifactIds: { type: 'array', maxItems: 1000, items: PUBLIC_ID_SCHEMA },
+            renderSemantics: { enum: ['no-render', 'deferred-to-compile'] },
+            cacheDecisions: {
+              type: 'array', maxItems: 500,
+              items: {
+                type: 'object', additionalProperties: false, required: ['blockId', 'decision', 'reason'],
+                properties: {
+                  blockId: PUBLIC_ID_SCHEMA,
+                  decision: { enum: ['reuse', 'regenerate', 'pending'] },
+                  reason: { type: 'string', minLength: 3, maxLength: 500 },
+                },
+              },
+            },
+            impactHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          },
+        },
+        planVersionHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        createdAt: PUBLIC_DATE_TIME_SCHEMA,
+      },
+    },
+    blocks: {
+      type: 'array', minItems: 1, maxItems: 500,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['schemaVersion', 'id', 'workspaceId', 'projectId', 'planId', 'exactText', 'normalizedText', 'normalizedTextHash', 'locale', 'occurrence', 'createdInVersionId', 'origin', 'blockHash', 'createdAt'],
+        properties: {
+          schemaVersion: { const: 'synthetic-script-block/v1' },
+          id: PUBLIC_ID_SCHEMA, workspaceId: PUBLIC_ID_SCHEMA, projectId: PUBLIC_ID_SCHEMA, planId: PUBLIC_ID_SCHEMA,
+          exactText: { type: 'string', minLength: 1, maxLength: 10000 },
+          normalizedText: { type: 'string', minLength: 1, maxLength: 10000 },
+          normalizedTextHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          locale: { type: 'string', minLength: 2, maxLength: 35 },
+          occurrence: { type: 'integer', minimum: 1 },
+          createdInVersionId: PUBLIC_ID_SCHEMA,
+          origin: {
+            type: 'object', additionalProperties: false, required: ['kind'],
+            properties: {
+              kind: { enum: ['initial-segmentation', 'inserted', 'edited'] },
+              originBlockId: PUBLIC_ID_SCHEMA,
+            },
+          },
+          blockHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          createdAt: PUBLIC_DATE_TIME_SCHEMA,
+        },
+      },
+    },
+  },
+}
+
 const syntheticAudioMasterSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -22598,6 +22688,164 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   ),
   defineSchema('synthetic-audio-master-read', 1, 'Read one immutable synthetic audio master',
     successSchema({ type: 'object', additionalProperties: false, required: ['audioMaster'], properties: { audioMaster: syntheticAudioMasterSchema } }),
+  ),
+  defineSchema('create-synthetic-script-plan-request', 1, 'Segment an approved script into one immutable block plan', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'profileSnapshotId', 'locale', 'scriptText', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, profileSnapshotId: idSchema,
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      scriptText: { type: 'string', minLength: 1, maxLength: 100000 },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('insert-synthetic-script-block-request', 1, 'Insert newly segmented blocks at one plan position', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'position', 'text', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      position: { type: 'integer', minimum: 0, maximum: 500 },
+      text: { type: 'string', minLength: 1, maxLength: 100000 },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('update-synthetic-script-block-request', 1, 'Retire one block in favour of its edited replacement', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'text', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      text: { type: 'string', minLength: 1, maxLength: 100000 },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('remove-synthetic-script-block-request', 1, 'Retire exactly one block from the plan sequence', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('reorder-synthetic-script-blocks-request', 1, 'Permute the plan sequence without touching block identities', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'order', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      order: { type: 'array', minItems: 1, maxItems: 500, uniqueItems: true, items: idSchema },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('set-synthetic-script-plan-profile-request', 1, 'Switch the presenter snapshot behind a block plan', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'profileSnapshotId', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema, profileSnapshotId: idSchema,
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('regenerate-synthetic-script-block-request', 1, 'Force a fresh provider generation for exactly one block', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('compile-synthetic-block-audio-request', 1, 'Concatenate every approved block into one consolidated master', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId', 'baseVersionId', 'baseHash', 'settings', 'use', 'market'],
+    properties: {
+      projectVersionId: idSchema, baseVersionId: idSchema, baseHash: sha256Schema,
+      settings: {
+        type: 'object', additionalProperties: false, required: ['gapMs', 'outputFormat'],
+        properties: { gapMs: { type: 'integer', minimum: 0, maximum: 10000 }, outputFormat: { enum: ['mp3', 'wav'] } },
+      },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+    },
+  }),
+  defineSchema('synthetic-script-plan-mutated', 1, 'Plan state and per-block generation outcomes after one command',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['plan', 'generations', 'replayed'],
+      properties: {
+        plan: syntheticScriptPlanSchema,
+        generations: {
+          type: 'array', maxItems: 500,
+          items: {
+            type: 'object', additionalProperties: false, required: ['blockId', 'generationId', 'action', 'reason'],
+            properties: {
+              blockId: idSchema,
+              generationId: { oneOf: [idSchema, { type: 'null' }] },
+              action: { enum: ['up-to-date', 'failed-awaiting-retry', 'reused', 'enqueued', 'deferred-duplicate', 'budget-exhausted'] },
+              reason: { type: 'string', minLength: 3, maxLength: 500 },
+            },
+          },
+        },
+        replayed: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('synthetic-script-plan-read', 1, 'Plan state with the settled per-block generation trail',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['plan', 'generations'],
+      properties: {
+        plan: syntheticScriptPlanSchema,
+        generations: {
+          type: 'array', maxItems: 5000,
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['id', 'blockId', 'attempt', 'status', 'cacheDecision', 'decisionReason', 'cacheKey', 'updatedAt'],
+            properties: {
+              id: idSchema, blockId: idSchema, attempt: { type: 'integer', minimum: 1 },
+              status: { enum: ['pending', 'approved', 'failed', 'superseded'] },
+              cacheDecision: { enum: ['miss-generate', 'hit-reuse', 'forced-regenerate'] },
+              decisionReason: { type: 'string', minLength: 3, maxLength: 500 },
+              cacheKey: sha256Schema,
+              providerJobId: idSchema, sourceGenerationId: idSchema,
+              audioArtifactId: idSchema, alignmentArtifactId: idSchema,
+              failureReason: { type: 'string', minLength: 1, maxLength: 500 },
+              updatedAt: dateTimeSchema,
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema('synthetic-block-audio-compiled', 1, 'Deterministic concatenation manifest and its consolidated master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['concatenation', 'audioMasterId', 'replayed'],
+      properties: {
+        concatenation: {
+          type: 'object', additionalProperties: false,
+          required: ['id', 'planId', 'planVersionId', 'container', 'codec', 'sampleRate', 'channels', 'gapMs', 'durationMs', 'entries', 'concatHash', 'audioArtifactId', 'alignmentArtifactId', 'finalAudioSha256', 'audioMasterId', 'createdAt'],
+          properties: {
+            id: idSchema, planId: idSchema, planVersionId: idSchema,
+            container: { enum: ['mp3', 'wav'] }, codec: { type: 'string', minLength: 2, maxLength: 16 },
+            sampleRate: { type: 'integer', minimum: 1 }, channels: { type: 'integer', minimum: 1, maximum: 2 },
+            gapMs: { type: 'integer', minimum: 0, maximum: 10000 }, durationMs: { type: 'integer', minimum: 1 },
+            entries: {
+              type: 'array', minItems: 1, maxItems: 500,
+              items: {
+                type: 'object', additionalProperties: false,
+                required: ['blockId', 'generationId', 'artifactSha256', 'sourceDurationMs', 'outputInMs', 'outputOutMs', 'gapAfterMs', 'processing', 'alignmentOffsetMs'],
+                properties: {
+                  blockId: idSchema, generationId: idSchema, artifactSha256: sha256Schema,
+                  sourceDurationMs: { type: 'integer', minimum: 1 },
+                  outputInMs: { type: 'integer', minimum: 0 }, outputOutMs: { type: 'integer', minimum: 1 },
+                  gapAfterMs: { type: 'integer', minimum: 0 }, processing: { enum: ['copy', 'reencode'] },
+                  alignmentOffsetMs: { type: 'integer', minimum: 0 },
+                },
+              },
+            },
+            concatHash: sha256Schema, audioArtifactId: idSchema, alignmentArtifactId: idSchema,
+            finalAudioSha256: sha256Schema,
+            audioMasterId: { oneOf: [idSchema, { type: 'null' }] },
+            createdAt: dateTimeSchema,
+          },
+        },
+        audioMasterId: idSchema,
+        replayed: { type: 'boolean' },
+      },
+    }),
   ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
     type: 'object', additionalProperties: false,

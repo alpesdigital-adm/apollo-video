@@ -814,6 +814,37 @@ const requiredChecks = [
   'provider_result_artifacts_sha_check',
   'provider_result_artifacts_size_check',
   'provider_result_artifacts_cost_check',
+  'synthetic_script_plans_schema_check',
+  'synthetic_script_plans_fingerprint_check',
+  'synthetic_script_plan_versions_schema_check',
+  'synthetic_script_plan_versions_segmentation_check',
+  'synthetic_script_plan_versions_sequence_check',
+  'synthetic_script_plan_versions_command_check',
+  'synthetic_script_plan_versions_lineage_check',
+  'synthetic_script_plan_versions_hash_check',
+  'synthetic_script_plan_versions_sequence_json_check',
+  'synthetic_script_plan_versions_impact_json_check',
+  'synthetic_script_blocks_schema_check',
+  'synthetic_script_blocks_text_check',
+  'synthetic_script_blocks_occurrence_check',
+  'synthetic_script_blocks_origin_kind_check',
+  'synthetic_script_blocks_origin_check',
+  'synthetic_script_blocks_hash_check',
+  'synthetic_block_generations_schema_check',
+  'synthetic_block_generations_status_check',
+  'synthetic_block_generations_decision_check',
+  'synthetic_block_generations_attempt_check',
+  'synthetic_block_generations_budget_check',
+  'synthetic_block_generations_format_check',
+  'synthetic_block_generations_source_check',
+  'synthetic_block_generations_approved_check',
+  'synthetic_block_generations_hash_check',
+  'synthetic_block_concatenations_schema_check',
+  'synthetic_block_concatenations_container_check',
+  'synthetic_block_concatenations_stream_check',
+  'synthetic_block_concatenations_hash_check',
+  'synthetic_block_concatenations_manifest_check',
+  'synthetic_block_concatenations_settings_check',
 ]
 for (const constraint of requiredChecks) {
   assert.match(committed, new RegExp(`CONSTRAINT "${constraint}"`))
@@ -832,6 +863,52 @@ assert.match(
   committed,
   /CREATE TABLE "provider_result_artifacts"[\s\S]*FOREIGN KEY \("jobId", "workspaceId", "projectId"\) REFERENCES "provider_jobs"[\s\S]*FOREIGN KEY \("artifactId", "workspaceId"\) REFERENCES "media_artifacts"/,
   'provider result artifacts must be linked to their durable job and media artifact inside the same workspace',
+)
+
+const scriptPlanVersionModel = schema.match(/model V2SyntheticScriptPlanVersion \{([\s\S]*?)\n\}/)?.[1] ?? ''
+for (const field of [
+  'planId', 'workspaceId', 'projectId', 'sequence', 'parentVersionId',
+  'projectVersionId', 'profileSnapshotId', 'locale', 'segmentationVersion',
+  'scriptHash', 'commandType', 'blockSequenceJson', 'impactJson',
+  'commandImpactHash', 'planVersionHash', 'idempotencyKey',
+]) {
+  assert.match(scriptPlanVersionModel, new RegExp(`\\b${field}\\b`), `SyntheticScriptPlanVersion must persist ${field}`)
+}
+const scriptBlockModel = schema.match(/model V2SyntheticScriptBlock \{([\s\S]*?)\n\}/)?.[1] ?? ''
+for (const field of [
+  'planId', 'exactText', 'normalizedTextHash', 'locale', 'occurrence',
+  'createdInVersionId', 'retiredInVersionId', 'originKind', 'originBlockId', 'blockHash',
+]) {
+  assert.match(scriptBlockModel, new RegExp(`\\b${field}\\b`), `SyntheticScriptBlock must persist ${field}`)
+}
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_script_plan_versions"[\s\S]*FOREIGN KEY \("planId", "workspaceId"\) REFERENCES "synthetic_script_plans"[\s\S]*FOREIGN KEY \("projectVersionId", "projectId", "workspaceId"\) REFERENCES "project_versions"[\s\S]*FOREIGN KEY \("profileSnapshotId", "workspaceId"\) REFERENCES "synthetic_presenter_profiles"/,
+  'synthetic script plan versions must bind their plan, project version and presenter snapshot inside the same workspace',
+)
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_script_blocks"[\s\S]*FOREIGN KEY \("createdInVersionId", "workspaceId"\) REFERENCES "synthetic_script_plan_versions"/,
+  'synthetic script blocks must record the plan version that created them inside the same workspace',
+)
+const blockGenerationModel = schema.match(/model V2SyntheticBlockGeneration \{([\s\S]*?)\n\}/)?.[1] ?? ''
+for (const field of [
+  'planId', 'blockId', 'attempt', 'status', 'cacheKey', 'cacheDecision', 'decisionReason',
+  'providerJobId', 'sourceGenerationId', 'profileSnapshotId', 'voiceId', 'voiceVersion',
+  'outputFormat', 'synthesisConfigHash', 'scriptHash', 'audioArtifactId', 'alignmentArtifactId',
+  'supersededByGenerationId', 'attemptBudget', 'deadlineAt',
+]) {
+  assert.match(blockGenerationModel, new RegExp(`\\b${field}\\b`), `SyntheticBlockGeneration must persist ${field}`)
+}
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_block_generations"[\s\S]*FOREIGN KEY \("blockId", "workspaceId"\) REFERENCES "synthetic_script_blocks"[\s\S]*FOREIGN KEY \("providerJobId", "workspaceId"\) REFERENCES "provider_jobs"/,
+  'synthetic block generations must bind their block and provider job inside the same workspace',
+)
+assert.match(
+  committed,
+  /CREATE TABLE "synthetic_block_concatenations"[\s\S]*FOREIGN KEY \("planVersionId", "planId", "workspaceId"\) REFERENCES "synthetic_script_plan_versions"[\s\S]*FOREIGN KEY \("audioArtifactId", "workspaceId"\) REFERENCES "media_artifacts"[\s\S]*FOREIGN KEY \("audioMasterId", "workspaceId"\) REFERENCES "synthetic_audio_masters"/,
+  'synthetic block concatenations must bind their plan version, audio artifact and consolidated master inside the same workspace',
 )
 
 console.log(

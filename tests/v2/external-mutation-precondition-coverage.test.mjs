@@ -349,6 +349,30 @@ const coverage = Object.freeze({
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter profile, adapter identity, portable input and exact source authorization; submit rechecks consent and current rights under the durable lease',
   },
+  'apollo.projects.synthetic-script-plans.create': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter snapshot, locale and the exact script text; serializable persistence rechecks the current project version before commit',
+  },
+  'apollo.projects.synthetic-script-plans.insert-block': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId and the plan head compare-and-swap rejects any concurrently advanced plan or stale project version',
+  },
+  'apollo.projects.synthetic-script-plans.update-block': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId; the transaction rechecks the edited block is still unretired before retiring it in favour of its replacement',
+  },
+  'apollo.projects.synthetic-script-plans.remove-block': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId; the transaction rechecks the removed block is still unretired and the plan never becomes empty',
+  },
+  'apollo.projects.synthetic-script-plans.reorder-blocks': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId and the new order must be an exact permutation of the current block sequence',
+  },
+  'apollo.projects.synthetic-script-plans.set-profile': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId and the persisted presenter snapshot is re-read before the switch commits',
+  },
+  'apollo.projects.synthetic-script-plans.regenerate-block': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId; regeneration atomically supersedes the previous attempt within the persisted retry budget and deadline',
+  },
+  'apollo.projects.synthetic-script-plans.compile-audio': {
+    mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId; every block must hold an approved generation for its current cache key before the compile version, concatenation and master are persisted',
+  },
   'apollo.projects.policy-overrides.set': {
     mode: 'base-version-bound-action', evidence: 'request requires exact baseVersionId/baseHash and serializable persistence rechecks the current ProjectVersion, inherited policy values and completed output set',
   },
@@ -607,12 +631,12 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 4,
     'explicit-precondition': 10,
-    'idempotent-create': 60,
+    'idempotent-create': 61,
     'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,
     'revision-bound-action': 12,
-    'base-version-bound-action': 9,
+    'base-version-bound-action': 16,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
