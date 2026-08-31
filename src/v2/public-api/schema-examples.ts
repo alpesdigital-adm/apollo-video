@@ -5527,7 +5527,7 @@ const syntheticSpeechSegmentExample = {
     emotion: null, wardrobe: null, background: null, framing: null,
   },
   consentSnapshotHash: 'c'.repeat(64), rightsSnapshotId: null,
-  criticReportId: 'provider-job-example-1:critic', criticReportHash: '6'.repeat(64),
+  criticReportId: 'synthetic-critic-report-example-1', criticReportHash: '6'.repeat(64),
   createdAt, segmentHash: 'b'.repeat(64),
 }
 
@@ -5556,8 +5556,86 @@ const syntheticCacheDecisionBlockedExample = {
   subjectHash: 'd'.repeat(64), decidedAt: createdAt, decisionHash: 'f'.repeat(64),
 }
 
+/**
+ * F3.009 — one approved verdict. The evaluators carry their `kind` and `scope`
+ * so a reader can see that lip-sync and identity came from a controlled
+ * deterministic stand-in, not from a deployed perceptual model, and the five
+ * dimensions with no instrument say so instead of reporting a passing score.
+ */
+const syntheticCriticEvaluatorsExample = [
+  { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact itself' },
+  { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+  { id: 'controlled-deterministic-probe', version: '1.0.0', kind: 'controlled', scope: 'deterministic stand-in, not production visual validation' },
+]
+const criticMeasured = (
+  dimension: string, evaluatorId: string, value: number, unit: string, threshold: number,
+) => ({
+  dimension, status: 'measured', evaluatorId, value, unit, threshold,
+  confidence: 1, evidenceRefs: ['artifact://media-artifact-example-1'], range: null,
+  note: null as string | null,
+})
+const criticUnavailable = (dimension: string, note: string) => ({
+  dimension, status: 'unavailable', evaluatorId: null as string | null,
+  value: null as number | null, unit: null as string | null,
+  threshold: null as number | null, confidence: null as number | null,
+  evidenceRefs: [] as string[], range: null, note,
+})
+const syntheticCriticMeasurementsExample = [
+  criticMeasured('lip-sync', 'controlled-deterministic-probe', 0, 'ms-av-offset', 34),
+  criticMeasured('identity', 'controlled-deterministic-probe', 1, 'identity-ref-match', 1),
+  criticMeasured('pronunciation', 'alignment-pronunciation', 0, 'word-deviations', 0),
+  criticUnavailable('visual-artifacts', 'no visual artifact detector is deployed, so the take was not inspected for warping, ghosting or banding'),
+  criticUnavailable('framing', 'no framing model is deployed, so the take was not inspected for headroom, crop or camera position'),
+  criticUnavailable('continuity', 'this is the first approved block of the take, so there is no baseline to compare against'),
+  criticUnavailable('eyes', 'no eye model is deployed, so the take was not inspected for gaze, blinking or pupil rendering'),
+  criticUnavailable('teeth', 'no teeth model is deployed, so the take was not inspected for dental rendering'),
+  criticUnavailable('hands', 'no hand model is deployed, so the take was not inspected for finger count or hand geometry'),
+  criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
+  criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
+]
+const syntheticCriticReportExample = {
+  schemaVersion: 'synthetic-critic-report/v1', id: 'synthetic-critic-report-example-1',
+  workspaceId, projectId, blockId: 'script-block-example-1',
+  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+  artifactId: 'media-artifact-example-1', artifactSha256: 'a'.repeat(64),
+  audioArtifactId: 'media-artifact-example-2', alignmentArtifactId: 'media-artifact-example-3',
+  scriptHash: '7'.repeat(64), profileSnapshotId: 'presenter-example-1',
+  expectedIdentityRef: 'avatar-identity-example-1',
+  evaluators: syntheticCriticEvaluatorsExample,
+  measurements: syntheticCriticMeasurementsExample,
+  issues: [],
+  decision: 'approved', recommendedAction: 'none',
+  thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
+  decidedAt: createdAt, reportHash: '6'.repeat(64),
+}
+/** A rejection localizes its cause on the block and says what to do about it. */
+const syntheticCriticRejectedReportExample = {
+  ...syntheticCriticReportExample,
+  id: 'synthetic-critic-report-example-2',
+  artifactId: 'media-artifact-example-4', artifactSha256: 'b'.repeat(64),
+  measurements: syntheticCriticMeasurementsExample.map((measurement) =>
+    measurement.dimension === 'pronunciation' ? { ...measurement, value: 2 } : measurement),
+  issues: [{
+    blockId: 'script-block-example-1', dimension: 'pronunciation', severity: 'blocking',
+    range: { startMs: 1200, endMs: 1850 },
+    evidence: 'two words of the approved script were not spoken in the aligned take',
+    action: 'retry',
+  }],
+  decision: 'rejected', recommendedAction: 'retry', reportHash: '5'.repeat(64),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/synthetic-critic-report-list/v1': [{
+      data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-report-read/v1': [{
+      data: { report: syntheticCriticReportExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-block-evidence/v1': [{
+      data: { report: syntheticCriticRejectedReportExample }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/synthetic-cache-decision-list/v1': [{
       data: { decisions: [syntheticCacheDecisionHitExample, syntheticCacheDecisionBlockedExample] },
       meta: { apiVersion: 'v1' },

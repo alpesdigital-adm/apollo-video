@@ -97,6 +97,7 @@ import type { SyntheticBlockGenerationRepository } from '../application/ports/sy
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
 import type { SyntheticCacheSubmissionClaimRepository } from '../application/ports/synthetic-cache-submission-claim-repository.ts'
+import type { SyntheticCriticReportRepository } from '../application/ports/synthetic-critic-report-repository.ts'
 import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
 import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
@@ -196,6 +197,11 @@ import {
   summarizeSyntheticCacheDecisionsService,
   traceSyntheticCacheDecisionsService,
 } from '../application/synthetic-cache-decision-queries.ts'
+import {
+  listSyntheticCriticReportsService,
+  readSyntheticCriticBlockEvidenceService,
+  readSyntheticCriticReportService,
+} from '../application/synthetic-critic-report-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
@@ -271,6 +277,7 @@ import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-p
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
+import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic-report-repository.ts'
 import { PrismaSyntheticCacheSubmissionClaimRepository } from './prisma/synthetic-cache-submission-claim-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
@@ -732,6 +739,7 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
       plans, generations, profiles, artifacts, rights, providerJobs,
       cacheDecisions: createSyntheticCacheDecisionRepository(),
       resultArtifacts: createProviderResultArtifactRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
       submissionClaims: createSyntheticCacheSubmissionClaimRepository(),
       enqueueProviderJob: enqueueProviderJobService({
         jobs: providerJobs,
@@ -766,6 +774,22 @@ export function createSyntheticCacheSubmissionClaimRepository(): SyntheticCacheS
 
 export function createSyntheticCacheDecisionRepository(): SyntheticCacheDecisionRepository {
   return new PrismaSyntheticCacheDecisionRepository(resolveV2Client())
+}
+
+export function createSyntheticCriticReportRepository(): SyntheticCriticReportRepository {
+  return new PrismaSyntheticCriticReportRepository(resolveV2Client())
+}
+
+/** Read-only wiring for the critic evidence routes: the verdicts themselves,
+ * their per-dimension measurements and the issues they localized. */
+export function createSyntheticCriticReportQueryServices() {
+  const reports = createSyntheticCriticReportRepository()
+  return {
+    reports,
+    list: listSyntheticCriticReportsService({ reports }),
+    read: readSyntheticCriticReportService({ reports }),
+    readBlockEvidence: readSyntheticCriticBlockEvidenceService({ reports }),
+  }
 }
 
 export function createSyntheticSpeechSegmentRepository(): SyntheticSpeechSegmentRepository {
@@ -807,6 +831,7 @@ export function createSyntheticMasterAssetServices(environment: NodeJS.ProcessEn
           return current?.snapshot ?? null
         },
       },
+      criticReports: createSyntheticCriticReportRepository(),
       bytes: new ArtifactContentSyntheticMasterByteVerifier(createArtifactContentStorage(environment)),
       durations: new FfprobeSyntheticMasterDurationProber(
         createArtifactSourceMaterializer(environment),

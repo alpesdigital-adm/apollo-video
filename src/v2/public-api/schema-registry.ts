@@ -13664,6 +13664,105 @@ const syntheticCacheDecisionSchema: JsonSchema = {
     decidedAt: dateTimeSchema, decisionHash: sha256Schema,
   },
 }
+/**
+ * F3.009 — one immutable critic verdict.
+ *
+ * `evaluators[].kind` and `evaluators[].scope` are required on purpose: they
+ * are what separates a number an instrument measured from a deterministic
+ * stand-in for a model nobody deployed, and a report without them would read as
+ * production visual validation it is not. Every dimension appears exactly once
+ * with its status, and a dimension that was not measured carries a null value
+ * and a note saying why. The approved script text and the consent evidence
+ * never appear — only `scriptHash` and `profileSnapshotId`.
+ */
+const syntheticCriticRangeSchema: JsonSchema = {
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false, required: ['startMs', 'endMs'],
+      properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } },
+    },
+    { type: 'null' },
+  ],
+}
+const syntheticCriticDimensionSchema: JsonSchema = {
+  enum: [
+    'lip-sync', 'identity', 'pronunciation', 'visual-artifacts', 'framing', 'continuity',
+    'eyes', 'teeth', 'hands', 'temporal-integrity', 'audiovisual-integrity',
+  ],
+}
+const syntheticCriticReportSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'blockId', 'capability', 'adapterId',
+    'adapterVersion', 'artifactId', 'artifactSha256', 'audioArtifactId', 'alignmentArtifactId',
+    'scriptHash', 'profileSnapshotId', 'expectedIdentityRef', 'evaluators', 'measurements',
+    'issues', 'decision', 'recommendedAction', 'thresholdsVersion', 'decidedAt', 'reportHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-critic-report/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, blockId: idSchema,
+    capability: idSchema, adapterId: idSchema, adapterVersion: idSchema,
+    artifactId: idSchema, artifactSha256: sha256Schema,
+    audioArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    alignmentArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    scriptHash: sha256Schema, profileSnapshotId: idSchema,
+    expectedIdentityRef: { type: 'string', minLength: 1, maxLength: 256 },
+    evaluators: {
+      type: 'array', minItems: 1, maxItems: 32,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'version', 'kind', 'scope'],
+        properties: {
+          id: idSchema,
+          version: { type: 'string', minLength: 1, maxLength: 64 },
+          kind: { enum: ['measured', 'controlled'] },
+          scope: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    measurements: {
+      type: 'array', minItems: 11, maxItems: 11,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: [
+          'dimension', 'status', 'evaluatorId', 'value', 'unit', 'threshold',
+          'confidence', 'evidenceRefs', 'range', 'note',
+        ],
+        properties: {
+          dimension: syntheticCriticDimensionSchema,
+          status: { enum: ['measured', 'not-applicable', 'unavailable'] },
+          evaluatorId: { oneOf: [idSchema, { type: 'null' }] },
+          value: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          unit: { oneOf: [{ type: 'string', minLength: 1, maxLength: 64 }, { type: 'null' }] },
+          threshold: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          confidence: { oneOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] },
+          evidenceRefs: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 512 } },
+          range: syntheticCriticRangeSchema,
+          note: { oneOf: [{ type: 'string', minLength: 1, maxLength: 500 }, { type: 'null' }] },
+        },
+      },
+    },
+    issues: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['blockId', 'dimension', 'severity', 'range', 'evidence', 'action'],
+        properties: {
+          blockId: idSchema,
+          dimension: syntheticCriticDimensionSchema,
+          severity: { enum: ['blocking', 'major', 'minor'] },
+          range: syntheticCriticRangeSchema,
+          evidence: { type: 'string', minLength: 1, maxLength: 500 },
+          action: { enum: ['retry', 'fallback', 'manual-review'] },
+        },
+      },
+    },
+    decision: { enum: ['approved', 'rejected', 'needs-review', 'evidence-unavailable'] },
+    recommendedAction: { enum: ['retry', 'fallback', 'manual-review', 'none'] },
+    thresholdsVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    decidedAt: dateTimeSchema, reportHash: sha256Schema,
+  },
+}
 const syntheticCacheDecisionSummarySchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: ['byOutcome', 'byCurrency'],
@@ -23305,6 +23404,24 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         cacheKey: sha256Schema,
         decisions: { type: 'array', maxItems: 100, items: syntheticCacheDecisionSchema },
       },
+    }),
+  ),
+  defineSchema('synthetic-critic-report-list', 1, 'Critic verdicts recorded for one project, newest first',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['reports'],
+      properties: { reports: { type: 'array', maxItems: 100, items: syntheticCriticReportSchema } },
+    }),
+  ),
+  defineSchema('synthetic-critic-report-read', 1, 'One immutable synthetic critic verdict with its evidence',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['report'],
+      properties: { report: syntheticCriticReportSchema },
+    }),
+  ),
+  defineSchema('synthetic-critic-block-evidence', 1, 'The critic verdict currently in force for one script block',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['report'],
+      properties: { report: syntheticCriticReportSchema },
     }),
   ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
