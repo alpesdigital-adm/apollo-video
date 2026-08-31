@@ -184,6 +184,8 @@ model V2Workspace {
   exportMatrixCells                      V2ExportMatrixCell[]
   syntheticPresenterProfiles             V2SyntheticPresenterProfile[]
   syntheticAudioMasters                  V2SyntheticAudioMaster[]
+  syntheticMasterAssets                  V2SyntheticMasterAsset[]
+  syntheticMasterArtifacts               V2SyntheticMasterArtifact[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
@@ -291,6 +293,7 @@ model V2ApiClient {
   authoredDirectorBudgetEvents          V2DirectorBudgetEvent[]
   createdSyntheticPresenterProfiles     V2SyntheticPresenterProfile[]        @relation("SyntheticPresenterProfileCreator")
   createdSyntheticAudioMasters          V2SyntheticAudioMaster[]             @relation("SyntheticAudioMasterCreator")
+  syntheticMasterAssets           V2SyntheticMasterAsset[]              @relation("SyntheticMasterCreator")
   createdSyntheticScriptPlans           V2SyntheticScriptPlan[]              @relation("SyntheticScriptPlanCreator")
   createdSyntheticScriptPlanVersions    V2SyntheticScriptPlanVersion[]       @relation("SyntheticScriptPlanVersionCreator")
   createdBlockConcatenations            V2SyntheticBlockConcatenation[]      @relation("BlockConcatenationCreator")
@@ -667,6 +670,7 @@ model V2Project {
   perceptionTimelines                    V2PerceptionTimeline[]
   syntheticProductionRuns                V2SyntheticProductionRun[]
   syntheticAudioMasters                  V2SyntheticAudioMaster[]
+  syntheticMasterAssets                  V2SyntheticMasterAsset[]
   syntheticProductionAssets              V2SyntheticProductionAsset[]
   providerJobs                            V2ProviderJob[]
   providerJobTransitions                 V2ProviderJobTransition[]
@@ -877,6 +881,7 @@ model V2ProjectVersion {
   proxyReusesAsBase               V2ProjectProxyRenderOperation[]  @relation("ProjectProxyReuseBaseVersion")
   syntheticProductionRuns         V2SyntheticProductionRun[]
   syntheticAudioMasters           V2SyntheticAudioMaster[]
+  syntheticMasterAssets           V2SyntheticMasterAsset[]
   syntheticScriptPlanVersions     V2SyntheticScriptPlanVersion[]
   providerJobs                    V2ProviderJob[]
 
@@ -1505,6 +1510,7 @@ model V2MediaArtifact {
   imageReuseSources            V2ImageReuseReference[]                   @relation("ImageReuseSourceArtifact")
   automaticCatalogRecords      V2AutomaticCatalogRecord[]
   syntheticProductionAssets    V2SyntheticProductionAsset[]
+  syntheticMasterArtifacts     V2SyntheticMasterArtifact[] @relation("SyntheticMasterArtifactMedia")
   syntheticAudioMasters        V2SyntheticAudioMaster[] @relation("SyntheticAudioArtifact")
   syntheticAlignmentMasters    V2SyntheticAudioMaster[] @relation("SyntheticAlignmentArtifact")
   blockGenerationAudio         V2SyntheticBlockGeneration[] @relation("BlockGenerationAudio")
@@ -3417,6 +3423,7 @@ model V2SyntheticPresenterProfile {
   createdBy V2ApiClient                @relation("SyntheticPresenterProfileCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   runs      V2SyntheticProductionRun[]
   audioMasters V2SyntheticAudioMaster[]
+  masterAssets       V2SyntheticMasterAsset[]
   scriptPlanVersions V2SyntheticScriptPlanVersion[]
   blockGenerations V2SyntheticBlockGeneration[]
   headOf    V2SyntheticPresenterProfileHead[] @relation("CurrentPresenterSnapshot")
@@ -3444,6 +3451,93 @@ model V2SyntheticPresenterProfileHead {
   @@id([workspaceId, profileId])
   @@index([workspaceId, updatedAt(sort: Desc)], map: "synthetic_presenter_profile_heads_updated_idx")
   @@map("synthetic_presenter_profile_heads")
+}
+
+model V2SyntheticMasterAsset {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  profileId               String   @db.VarChar(128)
+  profileSnapshotId       String   @db.VarChar(128)
+  profileVersion          Int
+  consentSnapshotHash     String   @db.Char(64)
+  authorizationHash       String   @db.Char(64)
+  rightsSnapshotId        String?  @db.VarChar(128)
+  scriptText              String   @db.Text
+  scriptHash              String   @db.Char(64)
+  alignmentHash           String   @db.Char(64)
+  locale                  String   @db.VarChar(35)
+  durationMs              Int
+  audioDurationMs         Int
+  videoDurationMs         Int
+  adapterId               String   @db.VarChar(128)
+  adapterVersion          String   @db.VarChar(128)
+  capability              String   @db.VarChar(64)
+  modelRef                String?  @db.VarChar(128)
+  adapterConfigHash       String   @db.Char(64)
+  providerJobId           String   @db.VarChar(128)
+  providerJobRef          String   @db.VarChar(256)
+  costCurrency            String   @db.Char(3)
+  costMinorUnits          Int
+  latencyMs               Int
+  criticReportId          String   @db.VarChar(128)
+  criticReportHash        String   @db.Char(64)
+  lineageJson             String   @db.Text
+  masterJson              String   @db.Text
+  masterHash              String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(32)
+  actorAuthenticationKind String?  @db.VarChar(32)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace       V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project         V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion  V2ProjectVersion            @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  profileSnapshot V2SyntheticPresenterProfile @relation(fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  providerJob     V2ProviderJob               @relation("SyntheticMasterProviderJob", fields: [providerJobId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy       V2ApiClient                 @relation("SyntheticMasterCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  artifacts       V2SyntheticMasterArtifact[]
+
+  @@unique([id, workspaceId], map: "synthetic_master_assets_id_workspace_key")
+  @@unique([workspaceId, masterHash], map: "synthetic_master_assets_workspace_hash_key")
+  @@unique([workspaceId, providerJobId], map: "synthetic_master_assets_workspace_job_key")
+  @@unique([workspaceId, projectId, createdByClientId, actorContextHash, idempotencyKey], map: "synthetic_master_assets_workspace_actor_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "synthetic_master_assets_workspace_project_created_idx")
+  @@index([workspaceId, profileId, createdAt(sort: Desc)], map: "synthetic_master_assets_workspace_profile_idx")
+  @@index([workspaceId, profileSnapshotId], map: "synthetic_master_assets_workspace_snapshot_idx")
+  @@index([workspaceId, criticReportId], map: "synthetic_master_assets_workspace_critic_idx")
+  @@index([workspaceId, scriptHash], map: "synthetic_master_assets_workspace_script_idx")
+  @@map("synthetic_master_assets")
+}
+
+model V2SyntheticMasterArtifact {
+  masterId    String   @db.VarChar(128)
+  workspaceId String   @db.VarChar(128)
+  role        String   @db.VarChar(32)
+  artifactId  String   @db.VarChar(128)
+  sha256      String   @db.Char(64)
+  byteSize    BigInt
+  mediaType   String   @db.VarChar(16)
+  container   String   @db.VarChar(32)
+  createdAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  master    V2SyntheticMasterAsset @relation(fields: [masterId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact  V2MediaArtifact        @relation("SyntheticMasterArtifactMedia", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@id([masterId, role])
+  @@index([workspaceId, artifactId], map: "synthetic_master_artifacts_workspace_artifact_idx")
+  @@index([workspaceId, sha256], map: "synthetic_master_artifacts_workspace_sha_idx")
+  @@map("synthetic_master_artifacts")
 }
 
 model V2SyntheticAudioMaster {
@@ -3843,6 +3937,7 @@ model V2ProviderJob {
   transitions          V2ProviderJobTransition[]
   audioMasters         V2SyntheticAudioMaster[] @relation("SyntheticAudioTtsJob")
   blockGenerations     V2SyntheticBlockGeneration[] @relation("BlockGenerationProviderJob")
+  syntheticMasters     V2SyntheticMasterAsset[]     @relation("SyntheticMasterProviderJob")
   resultArtifacts      V2ProviderResultArtifact[]
 
   @@unique([id, workspaceId])

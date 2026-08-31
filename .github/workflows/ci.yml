@@ -172,6 +172,9 @@ jobs:
       - name: Run block audio concatenation and consolidated master tests
         run: npm run test:integration:synthetic-block-compilation
 
+      - name: Run synthetic master asset persistence tests
+        run: npm run test:integration:synthetic-master-asset
+
       - name: Run presenter profile lifecycle tests
         run: npm run test:integration:presenter-lifecycle
 

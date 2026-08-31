@@ -46,6 +46,7 @@
     "test:integration:synthetic-script-plan": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-script-plan.integration.mjs",
     "test:integration:synthetic-block-generation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-block-generation.integration.mjs",
     "test:integration:synthetic-block-compilation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-block-compilation.integration.mjs",
+    "test:integration:synthetic-master-asset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-master-asset.integration.mjs",
     "test:integration:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-presenter-lifecycle.integration.mjs",
     "test:integration:provider-tts-avatar": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/provider-tts-avatar-journey.e2e.mjs",
     "test:integration:media-library": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-media-library.integration.mjs",

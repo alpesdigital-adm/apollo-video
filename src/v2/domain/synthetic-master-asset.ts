@@ -354,6 +354,6 @@ export function findSyntheticMasterArtifact(
   role: SyntheticMasterArtifactRole,
 ): Readonly<SyntheticMasterArtifactRef> {
   const artifact = master.artifacts.find((entry) => entry.role === role)
-  assertDomain(Boolean(artifact), 'NOT_FOUND', `master has no ${role} artifact`)
+  assertDomain(Boolean(artifact), 'ASSET_NOT_FOUND', `master has no ${role} artifact`)
   return artifact!
 }
