@@ -17,6 +17,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
   const cleanupWorkspace = async (id) => {
+    await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
     await client.v2ProviderResultArtifact.deleteMany({ where: { workspaceId: id } })
@@ -53,6 +54,8 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
+    const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
+    const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
 
     const workspaces = new PrismaWorkspaceRepository(client)
     await workspaces.create(createWorkspace({ id: workspaceId, slug: workspaceId, name: 'Master asset integration', status: 'active', createdAt: at(0) }))
@@ -239,6 +242,54 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       where: { masterId_role: { masterId: 'master-1', role: 'final-audio' } },
       data: { sha256: artifactShas['final-audio'] },
     })
+
+    // 8. Catalogued segments are deterministic, reuse the master's own
+    //    artifacts and are searchable through the workspace catalog.
+    const segmentRepository = new PrismaSyntheticSpeechSegmentRepository(client)
+    const catalogSegments = catalogSyntheticSpeechSegmentsService({
+      masters: repository,
+      segments: segmentRepository,
+      profiles: new PrismaSyntheticProductionRepository(client),
+      alignment: {
+        readWords: async () => [
+          { word: 'Primeira', startMs: 0, endMs: 700 },
+          { word: 'ideia', startMs: 700, endMs: 1_100 },
+          { word: 'do', startMs: 1_100, endMs: 1_300 },
+          { word: 'roteiro.', startMs: 1_300, endMs: 1_900 },
+          { word: 'Segunda', startMs: 2_300, endMs: 2_900 },
+          { word: 'ideia', startMs: 2_900, endMs: 3_300 },
+          { word: 'bem', startMs: 3_300, endMs: 3_500 },
+          { word: 'forte.', startMs: 3_500, endMs: 3_900 },
+        ],
+      },
+      createId: ({ blockId, occurrence }) => `segment-${blockId}-${occurrence}`,
+    })
+    const blocks = [
+      { blockId: 'block-1', exactText: 'Primeira ideia do roteiro.', occurrence: 1 },
+      { blockId: 'block-2', exactText: 'Segunda ideia bem forte.', occurrence: 1 },
+    ]
+    const catalogued = await catalogSegments({ workspaceId, masterId: 'master-1', blocks, actor })
+    assert.equal(catalogued.replayed, false)
+    assert.equal(catalogued.segments.length, 2)
+    assert.deepEqual(catalogued.segments.map((segment) => [segment.startMs, segment.endMs]), [[0, 1_900], [2_300, 3_900]])
+    assert.equal(catalogued.segments[0].audioArtifactId, 'master-audio')
+    assert.equal(catalogued.segments[0].videoArtifactId, 'master-normalized')
+    assert.equal(catalogued.segments[0].identity.profileVersion, 1)
+    assert.equal(catalogued.segments[0].masterHash, created.value.master.masterHash)
+
+    // Re-cataloguing the same master returns the stored rows, never duplicates.
+    const recatalogued = await catalogSegments({ workspaceId, masterId: 'master-1', blocks, actor })
+    assert.equal(recatalogued.replayed, true)
+    assert.deepEqual(recatalogued.segments, catalogued.segments)
+    assert.equal(await client.v2SyntheticSpeechSegment.count({ where: { workspaceId } }), 2)
+
+    assert.equal((await segmentRepository.search({ workspaceId, text: 'segunda ideia', limit: 10 })).length, 1)
+    assert.equal((await segmentRepository.search({ workspaceId, locale: 'pt-BR', limit: 10 })).length, 2)
+    assert.equal((await segmentRepository.search({ workspaceId: foreignWorkspaceId, limit: 10 })).length, 0)
+
+    // A segment row edited behind the application fails closed.
+    await client.v2SyntheticSpeechSegment.update({ where: { id: 'segment-block-1-1' }, data: { endMs: 2_100 } })
+    await assert.rejects(segmentRepository.read({ workspaceId, segmentId: 'segment-block-1-1' }), /hash does not match/)
 
     await client.v2SyntheticMasterAsset.update({ where: { id: 'master-1' }, data: { masterJson: '{not json' } })
     await assert.rejects(repository.read({ workspaceId, masterId: 'master-1' }), /JSON is invalid/)
