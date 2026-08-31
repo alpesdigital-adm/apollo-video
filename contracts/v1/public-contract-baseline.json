@@ -6596,6 +6596,89 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.projects.synthetic-cache-decisions.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/synthetic-cache-decisions"
+      },
+      "toolName": "apollo.projects.synthetic-cache-decisions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "outcome",
+          "description": "Restrict to one decided outcome, applied over the newest 100 decisions in scope.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "hit",
+              "miss",
+              "forced-regenerate",
+              "blocked"
+            ]
+          }
+        },
+        {
+          "name": "cacheKey",
+          "description": "Restrict to the decisions taken about one cache content address.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum decisions to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.synthetic-cache-decisions.summarize": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-summary/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/synthetic-cache-decisions/summary"
+      },
+      "toolName": "apollo.projects.synthetic-cache-decisions.summarize",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.synthetic-masters.get": {
       "version": "1.0.0",
       "exposure": "public",
@@ -8903,6 +8986,52 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.workspaces.synthetic-cache-decisions.trace": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-trace/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/workspaces/{workspaceId}/synthetic-cache-decisions"
+      },
+      "toolName": "apollo.workspaces.synthetic-cache-decisions.trace",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "cacheKey",
+          "description": "The cache content address whose decision trail is read.",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum decisions to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
       "responseMediaType": "application/json"
     },
     "apollo.workspaces.synthetic-speech-segments.search": {
@@ -185335,6 +185464,486 @@
             },
             "replayed": {
               "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-cache-decision-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisions"
+          ],
+          "properties": {
+            "decisions": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "operation",
+                  "cacheKey",
+                  "cacheKeyVersion",
+                  "outcome",
+                  "reasonCode",
+                  "reason",
+                  "candidateGenerationId",
+                  "candidateMasterId",
+                  "policyVersion",
+                  "criticReportHash",
+                  "estimatedSavingMinorUnits",
+                  "avoidedCostMinorUnits",
+                  "currency",
+                  "subjectHash",
+                  "decidedAt",
+                  "decisionHash"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "synthetic-cache-decision/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "operation": {
+                    "enum": [
+                      "tts",
+                      "audio-avatar"
+                    ]
+                  },
+                  "cacheKey": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "cacheKeyVersion": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "outcome": {
+                    "enum": [
+                      "hit",
+                      "miss",
+                      "forced-regenerate",
+                      "blocked"
+                    ]
+                  },
+                  "reasonCode": {
+                    "enum": [
+                      "CACHE_HIT_ELIGIBLE",
+                      "CACHE_MISS_NO_CANDIDATE",
+                      "CANDIDATE_BLOB_UNAVAILABLE",
+                      "CANDIDATE_CHECKSUM_DRIFT",
+                      "CANDIDATE_OUTPUT_MISMATCH",
+                      "CANDIDATE_CRITIC_REJECTED",
+                      "CANDIDATE_RIGHTS_BLOCKED",
+                      "CONSENT_REVOKED",
+                      "MUST_REGENERATE",
+                      "IN_FLIGHT_TWIN"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "candidateGenerationId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "candidateMasterId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "policyVersion": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "criticReportHash": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "estimatedSavingMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "avoidedCostMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  "subjectHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "decisionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-cache-decision-summary/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "summary"
+          ],
+          "properties": {
+            "summary": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "byOutcome",
+                "byCurrency"
+              ],
+              "properties": {
+                "byOutcome": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "hit",
+                    "miss",
+                    "forced-regenerate",
+                    "blocked"
+                  ],
+                  "properties": {
+                    "hit": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "miss": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "forced-regenerate": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "blocked": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "byCurrency": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "currency",
+                      "decisions",
+                      "avoidedCostMinorUnits",
+                      "estimatedSavingMinorUnits"
+                    ],
+                    "properties": {
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[A-Z]{3}$"
+                      },
+                      "decisions": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "avoidedCostMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "estimatedSavingMinorUnits": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/synthetic-cache-decision-trace/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cacheKey",
+            "decisions"
+          ],
+          "properties": {
+            "cacheKey": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "decisions": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "operation",
+                  "cacheKey",
+                  "cacheKeyVersion",
+                  "outcome",
+                  "reasonCode",
+                  "reason",
+                  "candidateGenerationId",
+                  "candidateMasterId",
+                  "policyVersion",
+                  "criticReportHash",
+                  "estimatedSavingMinorUnits",
+                  "avoidedCostMinorUnits",
+                  "currency",
+                  "subjectHash",
+                  "decidedAt",
+                  "decisionHash"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "synthetic-cache-decision/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "operation": {
+                    "enum": [
+                      "tts",
+                      "audio-avatar"
+                    ]
+                  },
+                  "cacheKey": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "cacheKeyVersion": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "outcome": {
+                    "enum": [
+                      "hit",
+                      "miss",
+                      "forced-regenerate",
+                      "blocked"
+                    ]
+                  },
+                  "reasonCode": {
+                    "enum": [
+                      "CACHE_HIT_ELIGIBLE",
+                      "CACHE_MISS_NO_CANDIDATE",
+                      "CANDIDATE_BLOB_UNAVAILABLE",
+                      "CANDIDATE_CHECKSUM_DRIFT",
+                      "CANDIDATE_OUTPUT_MISMATCH",
+                      "CANDIDATE_CRITIC_REJECTED",
+                      "CANDIDATE_RIGHTS_BLOCKED",
+                      "CONSENT_REVOKED",
+                      "MUST_REGENERATE",
+                      "IN_FLIGHT_TWIN"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "candidateGenerationId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "candidateMasterId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "policyVersion": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "criticReportHash": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "estimatedSavingMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "avoidedCostMinorUnits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$"
+                  },
+                  "subjectHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "decisionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
             }
           }
         },

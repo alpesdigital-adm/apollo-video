@@ -13625,6 +13625,76 @@ const syntheticSpeechSegmentSchema: JsonSchema = {
     createdAt: dateTimeSchema, segmentHash: sha256Schema,
   },
 }
+/**
+ * F3.008 — one entry of the cache decision ledger. Every field is a digest, an
+ * identifier, an enumerated outcome or an amount: the script the subject was
+ * derived from never appears, only `subjectHash` and `cacheKey`.
+ */
+const syntheticCacheDecisionSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'operation', 'cacheKey', 'cacheKeyVersion',
+    'outcome', 'reasonCode', 'reason', 'candidateGenerationId', 'candidateMasterId',
+    'policyVersion', 'criticReportHash', 'estimatedSavingMinorUnits', 'avoidedCostMinorUnits',
+    'currency', 'subjectHash', 'decidedAt', 'decisionHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-cache-decision/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    operation: { enum: ['tts', 'audio-avatar'] },
+    cacheKey: sha256Schema,
+    cacheKeyVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    outcome: { enum: ['hit', 'miss', 'forced-regenerate', 'blocked'] },
+    reasonCode: {
+      enum: [
+        'CACHE_HIT_ELIGIBLE', 'CACHE_MISS_NO_CANDIDATE', 'CANDIDATE_BLOB_UNAVAILABLE',
+        'CANDIDATE_CHECKSUM_DRIFT', 'CANDIDATE_OUTPUT_MISMATCH', 'CANDIDATE_CRITIC_REJECTED',
+        'CANDIDATE_RIGHTS_BLOCKED', 'CONSENT_REVOKED', 'MUST_REGENERATE', 'IN_FLIGHT_TWIN',
+      ],
+    },
+    reason: { type: 'string', minLength: 3, maxLength: 500 },
+    candidateGenerationId: { oneOf: [idSchema, { type: 'null' }] },
+    candidateMasterId: { oneOf: [idSchema, { type: 'null' }] },
+    policyVersion: idSchema,
+    criticReportHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    estimatedSavingMinorUnits: { type: 'integer', minimum: 0 },
+    avoidedCostMinorUnits: { type: 'integer', minimum: 0 },
+    currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+    subjectHash: sha256Schema,
+    decidedAt: dateTimeSchema, decisionHash: sha256Schema,
+  },
+}
+const syntheticCacheDecisionSummarySchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['byOutcome', 'byCurrency'],
+  properties: {
+    byOutcome: {
+      type: 'object', additionalProperties: false,
+      required: ['hit', 'miss', 'forced-regenerate', 'blocked'],
+      properties: {
+        hit: { type: 'integer', minimum: 0 },
+        miss: { type: 'integer', minimum: 0 },
+        'forced-regenerate': { type: 'integer', minimum: 0 },
+        blocked: { type: 'integer', minimum: 0 },
+      },
+    },
+    // Never a single total: summing minor units across currencies would
+    // fabricate an exchange rate the caller cannot reproduce.
+    byCurrency: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['currency', 'decisions', 'avoidedCostMinorUnits', 'estimatedSavingMinorUnits'],
+        properties: {
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          decisions: { type: 'integer', minimum: 0 },
+          avoidedCostMinorUnits: { type: 'integer', minimum: 0 },
+          estimatedSavingMinorUnits: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  },
+}
 const syntheticPresenterProfileSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -23214,6 +23284,27 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false, required: ['segments'],
       properties: { segments: { type: 'array', maxItems: 100, items: syntheticSpeechSegmentSchema } },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-list', 1, 'Cache decisions taken for one project, newest first',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['decisions'],
+      properties: { decisions: { type: 'array', maxItems: 100, items: syntheticCacheDecisionSchema } },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-summary', 1, 'Cache decision counts by outcome and avoided cost per currency',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['summary'],
+      properties: { summary: syntheticCacheDecisionSummarySchema },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-trace', 1, 'Every decision taken about one cache address in the workspace',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['cacheKey', 'decisions'],
+      properties: {
+        cacheKey: sha256Schema,
+        decisions: { type: 'array', maxItems: 100, items: syntheticCacheDecisionSchema },
+      },
     }),
   ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {

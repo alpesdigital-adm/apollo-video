@@ -4,9 +4,9 @@
     "uiActions": 113,
     "capabilities": 101,
     "endpoints": 101,
-    "registeredCapabilities": 280,
-    "operableCapabilities": 280,
-    "publicContractCapabilities": 280,
+    "registeredCapabilities": 283,
+    "operableCapabilities": 283,
+    "publicContractCapabilities": 283,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5253,6 +5253,39 @@
       "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-speech-segments",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/synthetic-speech-segment-search/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-cache-decisions.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-cache-decisions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-cache-decisions.summarize",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-cache-decisions/summary",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-summary/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.workspaces.synthetic-cache-decisions.trace",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-cache-decisions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-trace/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

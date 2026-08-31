@@ -191,6 +191,11 @@ import {
   listSyntheticSpeechSegmentsService,
   readSyntheticMasterAssetService,
 } from '../application/synthetic-master-asset-queries.ts'
+import {
+  listSyntheticCacheDecisionsService,
+  summarizeSyntheticCacheDecisionsService,
+  traceSyntheticCacheDecisionsService,
+} from '../application/synthetic-cache-decision-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
@@ -765,6 +770,18 @@ export function createSyntheticCacheDecisionRepository(): SyntheticCacheDecision
 
 export function createSyntheticSpeechSegmentRepository(): SyntheticSpeechSegmentRepository {
   return new PrismaSyntheticSpeechSegmentRepository(resolveV2Client())
+}
+
+/** Read-only wiring for the cache decision ledger routes: the evidence of what
+ * the cache reused, regenerated or blocked, and what that avoided paying. */
+export function createSyntheticCacheDecisionQueryServices() {
+  const decisions = createSyntheticCacheDecisionRepository()
+  return {
+    decisions,
+    list: listSyntheticCacheDecisionsService({ decisions }),
+    summarize: summarizeSyntheticCacheDecisionsService({ decisions }),
+    trace: traceSyntheticCacheDecisionsService({ decisions }),
+  }
 }
 
 /** One wiring for every synthetic-master route: the promotion gate plus the

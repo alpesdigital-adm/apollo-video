@@ -5531,8 +5531,56 @@ const syntheticSpeechSegmentExample = {
   createdAt, segmentHash: 'b'.repeat(64),
 }
 
+/** F3.008 — one ledger entry: a reuse that avoided paying for the work again. */
+const syntheticCacheDecisionHitExample = {
+  schemaVersion: 'synthetic-cache-decision/v1', id: 'synthetic-cache-decision-example-1',
+  workspaceId, projectId, operation: 'tts',
+  cacheKey: 'a'.repeat(64), cacheKeyVersion: 'synthetic-block-cache-key/v1',
+  outcome: 'hit', reasonCode: 'CACHE_HIT_ELIGIBLE',
+  reason: 'Identical voice identity, locale and script content address with an approved critic report.',
+  candidateGenerationId: 'sbg-example-1', candidateMasterId: null,
+  policyVersion: 'synthetic-presenter-eligibility-policy/v1', criticReportHash: '6'.repeat(64),
+  estimatedSavingMinorUnits: 1240, avoidedCostMinorUnits: 1240, currency: 'BRL',
+  subjectHash: 'd'.repeat(64), decidedAt: createdAt, decisionHash: 'e'.repeat(64),
+}
+/** A block: nothing reused, nothing generated, and therefore nothing avoided. */
+const syntheticCacheDecisionBlockedExample = {
+  schemaVersion: 'synthetic-cache-decision/v1', id: 'synthetic-cache-decision-example-2',
+  workspaceId, projectId, operation: 'audio-avatar',
+  cacheKey: 'a'.repeat(64), cacheKeyVersion: 'synthetic-avatar-cache-key/v1',
+  outcome: 'blocked', reasonCode: 'CONSENT_REVOKED',
+  reason: 'Presenter consent was revoked before the reuse could be authorized.',
+  candidateGenerationId: null, candidateMasterId: null,
+  policyVersion: 'synthetic-presenter-eligibility-policy/v1', criticReportHash: null,
+  estimatedSavingMinorUnits: 0, avoidedCostMinorUnits: 0, currency: 'BRL',
+  subjectHash: 'd'.repeat(64), decidedAt: createdAt, decisionHash: 'f'.repeat(64),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/synthetic-cache-decision-list/v1': [{
+      data: { decisions: [syntheticCacheDecisionHitExample, syntheticCacheDecisionBlockedExample] },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-cache-decision-summary/v1': [{
+      data: {
+        summary: {
+          byOutcome: { hit: 41, miss: 12, 'forced-regenerate': 2, blocked: 3 },
+          byCurrency: [
+            { currency: 'BRL', decisions: 52, avoidedCostMinorUnits: 50_840, estimatedSavingMinorUnits: 64_480 },
+            { currency: 'USD', decisions: 6, avoidedCostMinorUnits: 1_180, estimatedSavingMinorUnits: 1_490 },
+          ],
+        },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-cache-decision-trace/v1': [{
+      data: {
+        cacheKey: 'a'.repeat(64),
+        decisions: [syntheticCacheDecisionBlockedExample, syntheticCacheDecisionHitExample],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/promote-synthetic-master-request/v1': [{
       providerJobId: 'provider-job-example-1', profileSnapshotId: 'presenter-example-1',
       scriptText: 'Primeira ideia completa. Segunda ideia forte!', locale: 'pt-BR',
