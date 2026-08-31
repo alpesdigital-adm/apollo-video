@@ -389,7 +389,7 @@ Evidência integrada F0.031/FR-242 — o ADR-142 seleciona OIDC Authorization Co
 | FR-103 | SyntheticPresenterProfile | S6 | D0,D7 | profiles/version/consent | policy+e2e |
 | FR-104 | SyntheticMasterAsset | S3,S6 | D1,D4 | bruto+áudio+config salvos | unit+integration |
 | FR-105 | Cache | S6 | D1,D4,D7 | hash reutiliza artifact válido | unit+integration |
-| FR-106 | Crítico sintético | S1,S6 | D2,D4 | lips/identity/pronunciation gates | eval |
+| FR-106 | Crítico sintético | S1,S6 | D2,D4 | lips/identity/pronunciation gates | eval+integration |
 | FR-110 | TransformationBrief | S1,S6 | D2,D4 | intent/preserve/fallback estruturados | contract |
 | FR-111 | Modos | S6 | D4 | 6 modos no capability registry | contract |
 | FR-112 | Provider Registry | S6 | D4 | routing por capability/custo | integration |

@@ -1602,6 +1602,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.009 — Crítico sintético [FR-106]
 
+> Estado parcial (2026-08-31, branch `claude/f3009-synthetic-critic`, não mesclada): relatório versionado com evidência por dimensão, thresholds por capability, ação derivada da causa e eval set de 14 casos — ver ADR-147 e `docs/quality/synthetic-critic-v1.md`. Lip-sync/identidade/continuidade são detector CONTROLADO; artefatos, enquadramento, olhos, dentes e mãos estão `unavailable`. Nenhuma caixa fecha: falta integração final, deploy e aceite.
+
 - [ ] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade. Evidência T-FR-106.
 - [ ] Definir hard gates e thresholds por capability/provider. Evidência T-FR-106.
 - [ ] Localizar issue por bloco/range e escolher retry, fallback ou revisão. Evidência T-FR-106.

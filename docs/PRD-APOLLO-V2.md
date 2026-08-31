@@ -1020,6 +1020,8 @@ Hash de script + áudio + perfil + provider + config evita regeneração.
 
 Lip-sync, identidade, olhos, dentes, mãos, pronúncia, omissões, continuidade e artefatos.
 
+> Implementação: relatório versionado `synthetic-critic-report/v1` que responde por TODAS as dimensões com `measured`/`not-applicable`/`unavailable`, declara se cada evaluator mediu ou é detector controlado, e trata `evidence-unavailable` como decisão distinta de aprovação (ADR-147, spec 06 §17). Olhos, dentes, mãos, artefatos e enquadramento estão hoje `unavailable` por ausência de modelo implantado.
+
 ---
 
 ## 7.12 Transformação generativa de cenas

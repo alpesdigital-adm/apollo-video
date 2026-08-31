@@ -348,6 +348,8 @@ Fala: “gestão de tráfego medieval”.
 
 Hard gate falho → rejected, não compensado por estética.
 
+> **Nota de implementação (F3.009).** O crítico é o relatório versionado, imutável e content-addressed `synthetic-critic-report/v1` (ADR-147), localizado por bloco e range. Ele **responde por todas as dimensões** desta seção com `measured`, `not-applicable` ou `unavailable` — silêncio é recusado no domínio e por CHECK do PostgreSQL. Cada evaluator declara seu `kind`: `measured` quando um instrumento leu do artifact (ffprobe/ffmpeg para duração, codecs, frames, presença de áudio e freeze; comparação alignment×roteiro para omissões e adições) e `controlled` quando é um detector determinístico nomeado substituindo modelo não implantado (hoje: lip-sync, identidade e continuidade). Dimensões sem modelo — artefatos visuais, enquadramento, olhos, dentes e mãos — ficam `unavailable` com nota escrita, e uma capability que as exija falha fechado com decisão `evidence-unavailable`, que **nunca** equivale a aprovação. A ação (`retry`/`fallback`/`manual-review`) deriva da CAUSA registrada na issue, jamais de score agregado. Thresholds são versionados por capability (§19 continua sendo a autoridade dos valores-alvo; os limites implementados hoje — 34 ms de deriva e 40 ms de offset — são política declarada, não calibração empírica). Só relatório aprovado e persistido sela master ou torna um candidato elegível a cache.
+
 ## 19. Thresholds iniciais
 
 - Transcript match TTS: ≥98% tokens normalizados; qualquer número/nome divergente bloqueia.
