@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertProfileEligible, assertSyntheticPresenterEditPlan, catalogSyntheticMaster, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, createSyntheticPresenterProfileSnapshot, evaluateSyntheticBlock, prepareAudio, reuseSyntheticBlock, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
+import { assertProfileEligible, assertSyntheticPresenterEditPlan, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, createSyntheticPresenterProfileSnapshot, evaluateSyntheticBlock, prepareAudio, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
 import { ElevenLabsTtsProviderAdapter } from '../../src/v2/infrastructure/elevenlabs-tts-provider.ts';
 import { HeyGenV3AsyncMediaProviderAdapter } from '../../src/v2/infrastructure/heygen-v3-provider.ts';
 import { validateProviderCapabilities } from '../../src/v2/application/provider-capabilities.ts';
@@ -27,7 +27,9 @@ test('T-FR-101 real provider adapters expose one canonical versioned contract wi
 });
 test('T-FR-102 stable sentence blocks preserve cache through reorder and isolate failure', () => { const original = splitSyntheticBlocks('Primeira ideia. Segunda ideia.', { audio, profile, providerCapability: 'avatar' }); const reordered = splitSyntheticBlocks('Segunda ideia. Primeira ideia.', { audio, profile, providerCapability: 'avatar' }); assert.deepEqual(new Set(original.map(x => x.cacheKey)), new Set(reordered.map(x => x.cacheKey))); });
 test('T-FR-103 blocks expired or incompatible identity and voice cloning', () => { assert.equal(assertProfileEligible(profile, { locale: 'pt-BR', use: 'ads', now: '2029-01-01' }), true); assert.throws(() => assertProfileEligible({ ...profile, consent: { ...profile.consent, granted: false } }, { locale: 'pt-BR', use: 'ads' }), /ineligible/); });
-test('T-FR-104 catalogs raw master sentences and reuses without paid regeneration', () => { const blocks = splitSyntheticBlocks('Uma frase completa. Outra reflexão.', { audio, profile, providerCapability: 'avatar' }).map(block => ({ ...block, status: 'ready', artifact: `${block.id}.mp4` })); const asset = { id: 'master', rawVideo: 'raw.mp4', finalAudio: audio, blocks, providerConfig: {}, lineage: ['job'], metadata: { identity: 'ana', outfit: 'blue', scene: 'studio', emotion: 'calm', quality: .95, rights: true } }; assert.equal(catalogSyntheticMaster(asset).length, 2); assert.equal(reuseSyntheticBlock(asset, blocks[0].cacheKey).regenerated, false); });
+// T-FR-104 moved to tests/v2/synthetic-master-asset.test.mjs, where it
+// exercises the persisted, content-addressed master aggregate instead of the
+// in-memory catalog that no service ever called.
 
 const digest = (value) => value.repeat(64)
 const artifact = (id, kind, value) => ({

@@ -91,15 +91,11 @@ export function validateHybridStory(blocks: StoryBlock[]) {
   return { allowed: issues.length === 0, issues, sequence: blocks.map(block => block.kind).join('>') };
 }
 
-export type SyntheticMasterAsset = { id: string; rawVideo: string; finalAudio: AudioMaster; blocks: SyntheticBlock[]; providerConfig: object; lineage: string[]; metadata: { identity: string; outfit: string; scene: string; emotion: string; quality: number; rights: boolean } };
-export function catalogSyntheticMaster(asset: SyntheticMasterAsset) {
-  return asset.blocks.map(block => ({ id: `${asset.id}:${block.id}`, assetId: asset.id, exactText: block.text, rangeMs: block.rangeMs, identity: asset.metadata.identity, outfit: asset.metadata.outfit, atmosphere: asset.metadata.scene, emotion: asset.metadata.emotion, quality: asset.metadata.quality, rights: asset.metadata.rights, raw: true }));
-}
-
-export function reuseSyntheticBlock(asset: SyntheticMasterAsset, cacheKey: string) {
-  const block = asset.blocks.find(item => item.cacheKey === cacheKey && item.status === 'ready' && item.artifact);
-  return block ? { block, regenerated: false, estimatedSavings: 1 } : undefined;
-}
+// The in-memory master, its catalog and its reuse lookup lived here as a
+// second, unpersisted implementation of F3.007/F3.008. They were never called
+// by any service, worker or route. The canonical master aggregate now lives in
+// `synthetic-master-asset.ts`, is persisted, content-addressed and gated by
+// consent, rights and criticism; `synthetic-master-assets.ts` promotes it.
 
 export function evaluateSyntheticBlock(input: { blockId: string; rangeMs: [number, number]; lipSync: number; identity: number; pronunciation: number; artifacts: number; framing: number; continuity: number }) {
   const hardFailure = input.identity < .9 || input.pronunciation < .8 || input.artifacts > .2;
