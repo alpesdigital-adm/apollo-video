@@ -150,8 +150,12 @@ test('T-FR-105 a reason code can only justify the outcomes it belongs to', () =>
   assert.deepEqual(syntheticCacheDecisionReasonsFor('hit'), ['CACHE_HIT_ELIGIBLE'])
   assert.deepEqual(syntheticCacheDecisionReasonsFor('forced-regenerate'), ['MUST_REGENERATE'])
   assert.deepEqual(syntheticCacheDecisionReasonsFor('blocked'), ['CONSENT_REVOKED', 'IN_FLIGHT_TWIN'])
+  // A candidate can be refused for its absence, its blob, its bytes, its
+  // output shape, its critic report or its rights: six different truths, all
+  // ending in the same paid regeneration.
   assert.deepEqual(syntheticCacheDecisionReasonsFor('miss'), [
     'CACHE_MISS_NO_CANDIDATE', 'CANDIDATE_BLOB_UNAVAILABLE',
+    'CANDIDATE_CHECKSUM_DRIFT', 'CANDIDATE_OUTPUT_MISMATCH',
     'CANDIDATE_CRITIC_REJECTED', 'CANDIDATE_RIGHTS_BLOCKED',
   ])
   // Every canonical code justifies at least one outcome and no more than it should.

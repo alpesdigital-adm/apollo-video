@@ -34,6 +34,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockConcatenation.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
@@ -89,6 +90,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
     const { PrismaSyntheticBlockConcatenationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-concatenation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
+    const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { concatenateBlockAudio } = await import('../../src/v2/infrastructure/media/audio-concatenation.ts')
@@ -230,7 +232,9 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const ensure = ensureSyntheticBlockGenerationsService({
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions: new PrismaSyntheticCacheDecisionRepository(client),
-      providerJobs: providerRepository, enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
+      providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
+      submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
+      enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,

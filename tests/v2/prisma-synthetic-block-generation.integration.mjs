@@ -31,6 +31,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
@@ -87,6 +88,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
+    const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
@@ -239,8 +241,13 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const ensure = ensureSyntheticBlockGenerationsService({
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
+      resultArtifacts: resultArtifactRepository,
+      submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
+    // Every forced regeneration states why the cache is being bypassed; the
+    // service refuses an unmotivated order outright.
+    const mustRegenerate = (blockIds, reason) => ({ mustRegenerate: { blockIds, reason } })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
       clock: () => new Date(at(9)),
@@ -360,7 +367,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       mutation: { kind: 'regenerate-block', blockId: forcedTarget },
       actor, idempotencyKey: 'blockgen-force',
     })).plan
-    const afterForce = await ensure({ ...ensureArguments(), forceBlockIds: [forcedTarget] })
+    const afterForce = await ensure({ ...ensureArguments(), ...mustRegenerate([forcedTarget], 'operator asked for a fresh take of the opening line') })
     assert.equal(afterForce.find(({ blockId }) => blockId === forcedTarget)?.action, 'enqueued')
     assert.equal(afterForce.filter(({ action }) => action === 'enqueued').length, 1)
     await drainWorkers()
@@ -437,17 +444,17 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     assert.equal(afterFailure.find(({ blockId }) => blockId === failingBlockId)?.action, 'failed-awaiting-retry')
     assert.equal(providerCalls.length, 9)
     // The explicit retry regenerates only the failed block.
-    const retry = await ensure({ ...ensureArguments(), forceBlockIds: [failingBlockId] })
+    const retry = await ensure({ ...ensureArguments(), ...mustRegenerate([failingBlockId], 'explicit retry of the block whose provider call failed') })
     assert.equal(retry.filter(({ action }) => action === 'enqueued').length, 1)
     await drainWorkers()
     await settle({ workspaceId, projectId, planId, actor })
     assert.equal(providerCalls.length, 10)
     assert.equal((await generations.findEffective({ workspaceId, blockId: failingBlockId })).status, 'failed')
     // The persisted attempt budget eventually exhausts for that block only.
-    await ensure({ ...ensureArguments(), forceBlockIds: [failingBlockId] })
+    await ensure({ ...ensureArguments(), ...mustRegenerate([failingBlockId], 'second explicit retry of the failing block') })
     await drainWorkers()
     await settle({ workspaceId, projectId, planId, actor })
-    const exhausted = await ensure({ ...ensureArguments(), forceBlockIds: [failingBlockId] })
+    const exhausted = await ensure({ ...ensureArguments(), ...mustRegenerate([failingBlockId], 'third explicit retry of the failing block') })
     assert.equal(exhausted.find(({ blockId }) => blockId === failingBlockId)?.action, 'budget-exhausted')
     assert.equal(providerCalls.length, 11)
 

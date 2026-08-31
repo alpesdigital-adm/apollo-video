@@ -400,6 +400,14 @@ jobs:
           APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-master-reuse-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Run synthetic cache eligibility and invalidation against PostgreSQL
+        run: npm run test:integration:synthetic-cache-invalidation
+        env:
+          # Local artifact storage on purpose: this suite measures provider
+          # traffic and cache decisions, not object store round trips.
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-cache-invalidation-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
       - name: Verify zero orphan synthetic master reuse backends
         if: always()
         run: |
