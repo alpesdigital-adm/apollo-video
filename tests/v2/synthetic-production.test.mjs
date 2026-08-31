@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertProfileEligible, assertSyntheticPresenterEditPlan, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, createSyntheticPresenterProfileSnapshot, evaluateSyntheticBlock, prepareAudio, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
+import { assertProfileEligible, assertSyntheticPresenterEditPlan, compileSyntheticEditPlan, createSyntheticPresenterEditPlan, createSyntheticPresenterProfileSnapshot, prepareAudio, splitSyntheticBlocks, validateHybridStory } from '../../src/v2/domain/synthetic-production.ts';
 import { ElevenLabsTtsProviderAdapter } from '../../src/v2/infrastructure/elevenlabs-tts-provider.ts';
 import { HeyGenV3AsyncMediaProviderAdapter } from '../../src/v2/infrastructure/heygen-v3-provider.ts';
 import { validateProviderCapabilities } from '../../src/v2/application/provider-capabilities.ts';
@@ -230,4 +230,6 @@ test('T-FR-092 fails closed before render on consent, rights, critic or timeline
 // T-FR-105 moved to tests/v2/synthetic-cache-identity.test.mjs, where it
 // exercises the one canonical cache identity instead of a locally invented
 // key that no persisted generation was ever addressed by.
-test('T-FR-106 critic localizes known failures and chooses retry or fallback', () => { const failure = evaluateSyntheticBlock({ blockId: 'b1', rangeMs: [0, 2000], lipSync: .9, identity: .6, pronunciation: .9, artifacts: .1, framing: .9, continuity: .9 }); assert.equal(failure.passed, false); assert.equal(failure.issue.action, 'fallback'); });
+// T-FR-106 moved to tests/v2/synthetic-critic-report.test.mjs, where it
+// exercises the versioned, evidence-bearing critic instead of an averaged
+// score no service ever consumed.

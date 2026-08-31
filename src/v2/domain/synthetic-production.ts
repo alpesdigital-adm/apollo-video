@@ -100,11 +100,13 @@ export function validateHybridStory(blocks: StoryBlock[]) {
 // `synthetic-master-asset.ts`, is persisted, content-addressed and gated by
 // consent, rights and criticism; `synthetic-master-assets.ts` promotes it.
 
-export function evaluateSyntheticBlock(input: { blockId: string; rangeMs: [number, number]; lipSync: number; identity: number; pronunciation: number; artifacts: number; framing: number; continuity: number }) {
-  const hardFailure = input.identity < .9 || input.pronunciation < .8 || input.artifacts > .2;
-  const score = (input.lipSync + input.identity + input.pronunciation + input.framing + input.continuity + (1 - input.artifacts)) / 6;
-  return { passed: !hardFailure && score >= .82, score, issue: hardFailure ? { blockId: input.blockId, rangeMs: input.rangeMs, action: input.identity < .9 ? 'fallback' : 'retry' } : undefined };
-}
+// The in-memory block critic lived here as a second, unpersisted
+// implementation of F3.009: six invented ratios averaged into a score, with no
+// evidence, no thresholds per capability and no record of what was actually
+// measured. It had zero call sites in src/. The canonical critic now lives in
+// `synthetic-critic-report.ts`, states measured / not-applicable / unavailable
+// per dimension, localizes issues by block and range, and never turns missing
+// evidence into approval.
 
 export interface SyntheticArtifactRef {
   id: string
