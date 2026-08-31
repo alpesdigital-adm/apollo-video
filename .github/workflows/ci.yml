@@ -400,6 +400,27 @@ jobs:
           APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-master-reuse-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Run synthetic production, criticism and cache reuse journey against /v1, durable workers and PostgreSQL
+        run: npm run test:e2e:synthetic-production-journey
+        env:
+          # Local artifact storage on purpose: this journey rewrites stored
+          # bytes to prove a tampered blob is never reused, and reads them back
+          # with ffprobe through the real critic adapters.
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: local
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-production-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan synthetic production journey backends
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-production-journey-ci'")"
+            if test "$backends" = 0; then break; fi
+            sleep 1
+          done
+          test "$backends" = 0
+
       - name: Run synthetic cache eligibility and invalidation against PostgreSQL
         run: npm run test:integration:synthetic-cache-invalidation
         env:
