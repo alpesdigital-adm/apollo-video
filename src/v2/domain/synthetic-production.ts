@@ -58,7 +58,11 @@ export function prepareAudio(input: { text?: string; uploaded?: AudioMaster; loc
   return { id: `audio-${createHash('sha256').update(`${input.locale}:${input.text}`).digest('hex').slice(0, 12)}`, source: 'tts', uri: 'pending://tts', durationMs: words.length * 420, locale: input.locale, alignment, approved: false };
 }
 
-export type SyntheticBlock = { id: string; text: string; audioId: string; rangeMs: [number, number]; cacheKey: string; status: 'planned' | 'ready' | 'failed'; artifact?: string };
+// Blocks carry no cache key of their own: the canonical synthetic cache
+// identity (`synthetic-cache-identity.ts`) is the single address of synthetic
+// work. A second, locally invented key here would answer the same question
+// differently and silently duplicate paid generations.
+export type SyntheticBlock = { id: string; text: string; audioId: string; rangeMs: [number, number]; status: 'planned' | 'ready' | 'failed'; artifact?: string };
 export function splitSyntheticBlocks(text: string, input: { audio: AudioMaster; profile: SyntheticPresenterProfile; providerCapability: string; settings?: object }) {
   const sentences = text.match(/[^.!?]+[.!?]?/g)?.map(value => value.trim()).filter(Boolean) ?? [];
   let cursor = 0;
@@ -67,8 +71,7 @@ export function splitSyntheticBlocks(text: string, input: { audio: AudioMaster; 
     const duration = Math.max(420, wordCount * 420);
     const rangeMs: [number, number] = [cursor, Math.min(input.audio.durationMs, cursor + duration)];
     cursor = rangeMs[1];
-    const canonical = JSON.stringify({ sentence: sentence.normalize('NFC').trim(), profile: `${input.profile.id}@${input.profile.version}`, capability: input.providerCapability, locale: input.audio.locale, settings: input.settings ?? {} });
-    return { id: `block-${index + 1}`, text: sentence, audioId: input.audio.id, rangeMs, cacheKey: createHash('sha256').update(canonical).digest('hex'), status: 'planned' };
+    return { id: `block-${index + 1}`, text: sentence, audioId: input.audio.id, rangeMs, status: 'planned' };
   });
 }
 
