@@ -5462,8 +5462,101 @@ const scriptPlanCommandContextExample = {
   projectVersionId: 'project-version-example-1', baseVersionId: 'script-plan-version-example-1', baseHash: 'a'.repeat(64), use: 'ads', market: 'BRA',
 }
 
+/** F3.007 — one sealed performance: four ingested roles, sanitized provenance and its cost. */
+const syntheticMasterProvenanceExample = {
+  adapterId: 'heygen-v3', adapterVersion: '3.0.0', capability: 'audio-avatar', modelRef: null,
+  adapterConfigHash: '5'.repeat(64), providerJobId: 'provider-job-example-1',
+  providerJobRef: 'heygen-run-example-1',
+}
+const syntheticMasterCostExample = { currency: 'BRL', minorUnits: 1240, latencyMs: 48210 }
+const syntheticMasterCriticExample = {
+  reportId: 'provider-job-example-1:critic', reportHash: '6'.repeat(64), decision: 'approved',
+}
+const syntheticMasterArtifactsExample = {
+  'provider-original': { artifactId: 'artifact-provider-original-example-1', sha256: '1'.repeat(64), byteSize: 4_194_304, mediaType: 'video', container: 'mp4' },
+  'normalized-video': { artifactId: 'artifact-normalized-video-example-1', sha256: '2'.repeat(64), byteSize: 3_145_728, mediaType: 'video', container: 'mp4' },
+  'final-audio': { artifactId: 'artifact-final-audio-example-1', sha256: '3'.repeat(64), byteSize: 262_144, mediaType: 'audio', container: 'wav' },
+  alignment: { artifactId: 'artifact-master-alignment-example-1', sha256: '4'.repeat(64), byteSize: 2048, mediaType: 'data', container: 'json' },
+}
+const syntheticMasterExample = {
+  schemaVersion: 'synthetic-master-asset/v1', id: 'synthetic-master-example-1',
+  workspaceId, projectId, projectVersionId: 'project-version-example-1',
+  profileId: 'presenter-example-1', profileSnapshotId: 'presenter-example-1', profileVersion: 1,
+  consentSnapshotHash: 'c'.repeat(64), authorizationHash: '7'.repeat(64), rightsSnapshotId: null,
+  artifacts: [
+    { role: 'provider-original', ...syntheticMasterArtifactsExample['provider-original'] },
+    { role: 'normalized-video', ...syntheticMasterArtifactsExample['normalized-video'] },
+    { role: 'final-audio', ...syntheticMasterArtifactsExample['final-audio'] },
+    { role: 'alignment', ...syntheticMasterArtifactsExample.alignment },
+  ],
+  scriptText: 'Primeira ideia completa. Segunda ideia forte!', scriptHash: '8'.repeat(64),
+  alignmentHash: '4'.repeat(64), locale: 'pt-BR',
+  durationMs: 4226, audioDurationMs: 4226, videoDurationMs: 4240,
+  provenance: syntheticMasterProvenanceExample, cost: syntheticMasterCostExample,
+  critic: syntheticMasterCriticExample, lineage: ['sbg-example-1', 'sbg-example-2'],
+  createdAt, masterHash: '9'.repeat(64),
+}
+const syntheticMasterLineageExample = {
+  masterId: syntheticMasterExample.id, masterHash: syntheticMasterExample.masterHash,
+  projectId, projectVersionId: 'project-version-example-1', profileId: 'presenter-example-1',
+  profileSnapshotId: 'presenter-example-1', profileVersion: 1, locale: 'pt-BR', durationMs: 4226,
+  scriptHash: '8'.repeat(64), alignmentHash: '4'.repeat(64), consentSnapshotHash: 'c'.repeat(64),
+  authorizationHash: '7'.repeat(64), rightsSnapshotId: null,
+  artifacts: syntheticMasterArtifactsExample,
+  lineage: ['sbg-example-1', 'sbg-example-2'], provenance: syntheticMasterProvenanceExample,
+  cost: syntheticMasterCostExample, critic: syntheticMasterCriticExample, createdAt,
+}
+const syntheticSpeechSegmentExample = {
+  schemaVersion: 'synthetic-speech-segment/v1', id: 'synthetic-speech-segment-example-1',
+  workspaceId, projectId, masterId: 'synthetic-master-example-1', masterHash: '9'.repeat(64),
+  blockId: 'script-block-example-1', occurrence: 1, sequence: 0,
+  audioArtifactId: 'artifact-final-audio-example-1',
+  videoArtifactId: 'artifact-normalized-video-example-1',
+  alignmentArtifactId: 'artifact-master-alignment-example-1',
+  exactText: 'Primeira ideia completa.', normalizedText: 'primeira ideia completa',
+  scriptHash: '8'.repeat(64),
+  words: [
+    { word: 'Primeira', startMs: 0, endMs: 620 },
+    { word: 'ideia', startMs: 640, endMs: 1180 },
+    { word: 'completa', startMs: 1200, endMs: 2009 },
+  ],
+  startMs: 0, endMs: 2009, locale: 'pt-BR',
+  identity: {
+    actorIdentityId: 'identity-example-1', profileId: 'presenter-example-1', profileVersion: 1,
+    voiceId: 'voice-example-1', voiceVersion: 1, avatarIdentityRef: 'avatar-identity-example-1',
+    emotion: null, wardrobe: null, background: null, framing: null,
+  },
+  consentSnapshotHash: 'c'.repeat(64), rightsSnapshotId: null,
+  criticReportId: 'provider-job-example-1:critic', criticReportHash: '6'.repeat(64),
+  createdAt, segmentHash: 'b'.repeat(64),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/promote-synthetic-master-request/v1': [{
+      providerJobId: 'provider-job-example-1', profileSnapshotId: 'presenter-example-1',
+      scriptText: 'Primeira ideia completa. Segunda ideia forte!', locale: 'pt-BR',
+      use: 'ads', market: 'BRA', lineage: ['sbg-example-1', 'sbg-example-2'],
+      cost: { currency: 'BRL', minorUnits: 1240 },
+    }],
+    'apollo://schemas/synthetic-master-promoted/v1': [{
+      data: { master: syntheticMasterExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-read/v1': [{
+      data: { master: syntheticMasterExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-list/v1': [{
+      data: { masters: [syntheticMasterExample] }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-lineage-read/v1': [{
+      data: { lineage: syntheticMasterLineageExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-speech-segment-list/v1': [{
+      data: { segments: [syntheticSpeechSegmentExample] }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-speech-segment-search/v1': [{
+      data: { segments: [syntheticSpeechSegmentExample] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/create-synthetic-script-plan-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
       locale: 'pt-BR', scriptText: 'Primeira ideia completa. Segunda ideia forte!', use: 'ads', market: 'BRA',

@@ -361,6 +361,9 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
   },
+  'apollo.projects.synthetic-masters.promote': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the approved provider job, presenter snapshot, exact script hash, locale, use, market, lineage and cost; the sealing transaction rechecks the job critic hash and profile snapshot hash, and a job already promoted returns its master instead of sealing a second one',
+  },
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter profile, adapter identity, portable input and exact source authorization; submit rechecks consent and current rights under the durable lease',
   },
@@ -646,7 +649,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 61,
+    'idempotent-create': 62,
     'natural-idempotent-create': 4,
     'state-machine-action': 16,
     'single-flight-action': 1,

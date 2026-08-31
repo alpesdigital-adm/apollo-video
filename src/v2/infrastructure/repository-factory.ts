@@ -95,6 +95,8 @@ import type { SyntheticAudioMasterRepository } from '../application/ports/synthe
 import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
+import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
+import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -180,6 +182,13 @@ import {
   settleSyntheticBlockGenerationsService,
 } from '../application/synthetic-block-generations.ts'
 import { createSyntheticAudioMasterService } from '../application/synthetic-audio-masters.ts'
+import { promoteSyntheticMasterAssetService } from '../application/synthetic-master-assets.ts'
+import { searchSyntheticSpeechSegmentsService } from '../application/synthetic-speech-segments.ts'
+import {
+  listSyntheticMasterAssetsService,
+  listSyntheticSpeechSegmentsService,
+  readSyntheticMasterAssetService,
+} from '../application/synthetic-master-asset-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
@@ -254,6 +263,12 @@ import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-m
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
+import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
+import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
+import {
+  PrismaPromotableProviderJobReader,
+  PrismaStoredArtifactIdentityReader,
+} from './prisma/synthetic-master-promotion-readers.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
 import { ElevenLabsTtsProviderAdapter } from './elevenlabs-tts-provider.ts'
@@ -361,6 +376,10 @@ import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extrac
 import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
 import { createConfiguredImageVisionProvider } from './image/composite-image-vision-provider.ts'
 import { inspectUploadedMedia, probeAudioDurationSeconds, probeVideo } from './media/video-probe.ts'
+import {
+  ArtifactContentSyntheticMasterByteVerifier,
+  FfprobeSyntheticMasterDurationProber,
+} from './media/synthetic-master-media.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
@@ -722,6 +741,53 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
       resultArtifacts: createProviderResultArtifactRepository(),
       clock: () => new Date(),
     }),
+  }
+}
+
+export function createSyntheticMasterAssetRepository(): SyntheticMasterAssetRepository {
+  return new PrismaSyntheticMasterAssetRepository(resolveV2Client())
+}
+
+export function createSyntheticSpeechSegmentRepository(): SyntheticSpeechSegmentRepository {
+  return new PrismaSyntheticSpeechSegmentRepository(resolveV2Client())
+}
+
+/** One wiring for every synthetic-master route: the promotion gate plus the
+ * read side over the same immutable master and speech-segment catalog. */
+export function createSyntheticMasterAssetServices(environment: NodeJS.ProcessEnv = process.env) {
+  const masters = createSyntheticMasterAssetRepository()
+  const segments = createSyntheticSpeechSegmentRepository()
+  const artifacts = createMediaArtifactQueryRepository()
+  const profiles = createSyntheticProductionRepository()
+  const assetRights = createAssetRightsRepository()
+  return {
+    masters,
+    segments,
+    promote: promoteSyntheticMasterAssetService({
+      masters,
+      jobs: new PrismaPromotableProviderJobReader(resolveV2Client()),
+      resultArtifacts: createProviderResultArtifactRepository(),
+      artifacts,
+      profiles,
+      rights: {
+        async currentSnapshot(input: { workspaceId: string; artifactId: string }) {
+          const current = await assetRights.findCurrent(input.workspaceId, input.artifactId)
+          return current?.snapshot ?? null
+        },
+      },
+      bytes: new ArtifactContentSyntheticMasterByteVerifier(createArtifactContentStorage(environment)),
+      durations: new FfprobeSyntheticMasterDurationProber(
+        createArtifactSourceMaterializer(environment),
+        new PrismaStoredArtifactIdentityReader(resolveV2Client()),
+        environment,
+      ),
+      clock: () => new Date(),
+      createId: () => `synthetic-master-${randomUUID()}`,
+    }),
+    readMaster: readSyntheticMasterAssetService({ masters }),
+    listMasters: listSyntheticMasterAssetsService({ masters }),
+    listSpeechSegments: listSyntheticSpeechSegmentsService({ masters, segments }),
+    searchSpeechSegments: searchSyntheticSpeechSegmentsService({ segments }),
   }
 }
 

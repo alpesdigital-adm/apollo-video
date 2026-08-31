@@ -4,9 +4,9 @@
     "uiActions": 113,
     "capabilities": 101,
     "endpoints": 101,
-    "registeredCapabilities": 274,
-    "operableCapabilities": 274,
-    "publicContractCapabilities": 274,
+    "registeredCapabilities": 280,
+    "operableCapabilities": 280,
+    "publicContractCapabilities": 280,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5187,6 +5187,72 @@
       "endpoint": "POST /v1/projects/{projectId}/synthetic-script-plans/{planId}/audio-compilations",
       "inputSchemaRef": "apollo://schemas/compile-synthetic-block-audio-request/v1",
       "outputSchemaRef": "apollo://schemas/synthetic-block-audio-compiled/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.promote",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-masters",
+      "inputSchemaRef": "apollo://schemas/promote-synthetic-master-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-master-promoted/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.read-lineage",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}/lineage",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-lineage-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.list-speech-segments",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}/speech-segments",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-speech-segment-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.workspaces.synthetic-speech-segments.search",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-speech-segments",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-speech-segment-search/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -13458,6 +13458,173 @@ const syntheticAudioMasterSchema: JsonSchema = {
     createdAt: dateTimeSchema, masterHash: sha256Schema,
   },
 }
+const syntheticMasterArtifactRefProperties = {
+  artifactId: idSchema, sha256: sha256Schema,
+  byteSize: { type: 'integer', minimum: 1 },
+  mediaType: { enum: ['audio', 'video', 'data'] },
+  container: { type: 'string', minLength: 1, maxLength: 32 },
+}
+const syntheticMasterArtifactRefSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['artifactId', 'sha256', 'byteSize', 'mediaType', 'container'],
+  properties: syntheticMasterArtifactRefProperties,
+}
+const syntheticMasterProvenanceSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['adapterId', 'adapterVersion', 'capability', 'modelRef', 'adapterConfigHash', 'providerJobId', 'providerJobRef'],
+  properties: {
+    adapterId: idSchema, adapterVersion: idSchema,
+    capability: { type: 'string', minLength: 2, maxLength: 64 },
+    modelRef: { oneOf: [idSchema, { type: 'null' }] },
+    adapterConfigHash: sha256Schema, providerJobId: idSchema,
+    providerJobRef: { type: 'string', minLength: 1, maxLength: 256 },
+  },
+}
+const syntheticMasterCostSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['currency', 'minorUnits', 'latencyMs'],
+  properties: {
+    currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+    minorUnits: { type: 'integer', minimum: 0 },
+    latencyMs: { type: 'integer', minimum: 0 },
+  },
+}
+const syntheticMasterCriticSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['reportId', 'reportHash', 'decision'],
+  properties: { reportId: idSchema, reportHash: sha256Schema, decision: { const: 'approved' } },
+}
+const syntheticMasterLineageListSchema: JsonSchema = {
+  type: 'array', minItems: 1, maxItems: 500, uniqueItems: true, items: idSchema,
+}
+const syntheticMasterAssetSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId', 'profileId',
+    'profileSnapshotId', 'profileVersion', 'consentSnapshotHash', 'authorizationHash',
+    'rightsSnapshotId', 'artifacts', 'scriptText', 'scriptHash', 'alignmentHash', 'locale',
+    'durationMs', 'audioDurationMs', 'videoDurationMs', 'provenance', 'cost', 'critic',
+    'lineage', 'createdAt', 'masterHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-master-asset/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    profileId: idSchema, profileSnapshotId: idSchema,
+    profileVersion: { type: 'integer', minimum: 1 },
+    consentSnapshotHash: sha256Schema, authorizationHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    artifacts: {
+      type: 'array', minItems: 4, maxItems: 4,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['role', 'artifactId', 'sha256', 'byteSize', 'mediaType', 'container'],
+        properties: {
+          role: { enum: ['provider-original', 'normalized-video', 'final-audio', 'alignment'] },
+          ...syntheticMasterArtifactRefProperties,
+        },
+      },
+    },
+    scriptText: { type: 'string', minLength: 1, maxLength: 100000 },
+    scriptHash: sha256Schema, alignmentHash: sha256Schema,
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    audioDurationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    videoDurationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    provenance: syntheticMasterProvenanceSchema,
+    cost: syntheticMasterCostSchema,
+    critic: syntheticMasterCriticSchema,
+    lineage: syntheticMasterLineageListSchema,
+    createdAt: dateTimeSchema, masterHash: sha256Schema,
+  },
+}
+const syntheticMasterLineageSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'masterId', 'masterHash', 'projectId', 'projectVersionId', 'profileId', 'profileSnapshotId',
+    'profileVersion', 'locale', 'durationMs', 'scriptHash', 'alignmentHash', 'consentSnapshotHash',
+    'authorizationHash', 'rightsSnapshotId', 'artifacts', 'lineage', 'provenance', 'cost',
+    'critic', 'createdAt',
+  ],
+  properties: {
+    masterId: idSchema, masterHash: sha256Schema, projectId: idSchema, projectVersionId: idSchema,
+    profileId: idSchema, profileSnapshotId: idSchema,
+    profileVersion: { type: 'integer', minimum: 1 },
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    scriptHash: sha256Schema, alignmentHash: sha256Schema,
+    consentSnapshotHash: sha256Schema, authorizationHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    artifacts: {
+      type: 'object', additionalProperties: false,
+      required: ['provider-original', 'normalized-video', 'final-audio', 'alignment'],
+      properties: {
+        'provider-original': syntheticMasterArtifactRefSchema,
+        'normalized-video': syntheticMasterArtifactRefSchema,
+        'final-audio': syntheticMasterArtifactRefSchema,
+        alignment: syntheticMasterArtifactRefSchema,
+      },
+    },
+    lineage: syntheticMasterLineageListSchema,
+    provenance: syntheticMasterProvenanceSchema,
+    cost: syntheticMasterCostSchema,
+    critic: syntheticMasterCriticSchema,
+    createdAt: dateTimeSchema,
+  },
+}
+const syntheticSpeechSegmentSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'masterId', 'masterHash', 'blockId',
+    'occurrence', 'sequence', 'audioArtifactId', 'videoArtifactId', 'alignmentArtifactId',
+    'exactText', 'normalizedText', 'scriptHash', 'words', 'startMs', 'endMs', 'locale',
+    'identity', 'consentSnapshotHash', 'rightsSnapshotId', 'criticReportId', 'criticReportHash',
+    'createdAt', 'segmentHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-speech-segment/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, masterId: idSchema,
+    masterHash: sha256Schema, blockId: idSchema,
+    occurrence: { type: 'integer', minimum: 1 },
+    sequence: { type: 'integer', minimum: 0 },
+    audioArtifactId: idSchema, videoArtifactId: idSchema, alignmentArtifactId: idSchema,
+    exactText: { type: 'string', minLength: 1, maxLength: 10000 },
+    normalizedText: { type: 'string', minLength: 1, maxLength: 10000 },
+    scriptHash: sha256Schema,
+    words: {
+      type: 'array', minItems: 1, maxItems: 10000,
+      items: {
+        type: 'object', additionalProperties: false, required: ['word', 'startMs', 'endMs'],
+        properties: {
+          word: { type: 'string', minLength: 1, maxLength: 128 },
+          startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+    startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 },
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    identity: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'actorIdentityId', 'profileId', 'profileVersion', 'voiceId', 'voiceVersion',
+        'avatarIdentityRef', 'emotion', 'wardrobe', 'background', 'framing',
+      ],
+      properties: {
+        actorIdentityId: idSchema, profileId: idSchema,
+        profileVersion: { type: 'integer', minimum: 1 },
+        voiceId: idSchema, voiceVersion: { type: 'integer', minimum: 1 },
+        avatarIdentityRef: idSchema,
+        emotion: { oneOf: [{ type: 'string', minLength: 1, maxLength: 64 }, { type: 'null' }] },
+        wardrobe: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+        background: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+        framing: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+      },
+    },
+    consentSnapshotHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    criticReportId: idSchema, criticReportHash: sha256Schema,
+    createdAt: dateTimeSchema, segmentHash: sha256Schema,
+  },
+}
 const syntheticPresenterProfileSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -22993,6 +23160,60 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         audioMasterId: idSchema,
         replayed: { type: 'boolean' },
       },
+    }),
+  ),
+  defineSchema('promote-synthetic-master-request', 1, 'Promote one approved provider result into an immutable synthetic master', {
+    type: 'object', additionalProperties: false,
+    required: ['providerJobId', 'profileSnapshotId', 'scriptText', 'locale', 'use', 'market', 'lineage', 'cost'],
+    properties: {
+      providerJobId: idSchema, profileSnapshotId: idSchema,
+      scriptText: { type: 'string', minLength: 1, maxLength: 100000 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+      lineage: syntheticMasterLineageListSchema,
+      cost: {
+        type: 'object', additionalProperties: false, required: ['currency', 'minorUnits'],
+        properties: {
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          minorUnits: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  }),
+  defineSchema('synthetic-master-promoted', 1, 'Sealed or replayed immutable synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['master', 'replayed'],
+      properties: { master: syntheticMasterAssetSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('synthetic-master-read', 1, 'Read one immutable synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['master'],
+      properties: { master: syntheticMasterAssetSchema },
+    }),
+  ),
+  defineSchema('synthetic-master-list', 1, 'List the immutable synthetic masters of one project',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['masters'],
+      properties: { masters: { type: 'array', maxItems: 100, items: syntheticMasterAssetSchema } },
+    }),
+  ),
+  defineSchema('synthetic-master-lineage-read', 1, 'Artifacts by role, generation lineage and provenance of one master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['lineage'],
+      properties: { lineage: syntheticMasterLineageSchema },
+    }),
+  ),
+  defineSchema('synthetic-speech-segment-list', 1, 'Catalogued reusable sentences of one synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['segments'],
+      properties: { segments: { type: 'array', maxItems: 500, items: syntheticSpeechSegmentSchema } },
+    }),
+  ),
+  defineSchema('synthetic-speech-segment-search', 1, 'Workspace-wide reuse search over catalogued synthetic sentences',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['segments'],
+      properties: { segments: { type: 'array', maxItems: 100, items: syntheticSpeechSegmentSchema } },
     }),
   ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {

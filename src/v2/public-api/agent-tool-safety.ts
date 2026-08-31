@@ -331,6 +331,10 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Approves one immutable audio and word-alignment master that can authorize later paid avatar generation, after exact consent, rights, project-version and critic evidence checks.',
     },
+    'apollo.projects.synthetic-masters.promote': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Seals one immutable, reusable synthetic performance that later projects can reuse without paying again, after exact byte, consent, rights, critic and duration checks.',
+    },
     'apollo.projects.synthetic-production-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles already ingested, critic-approved and rights-authorized synthetic media into one immutable EditPlan without submitting provider work or starting a render.',
