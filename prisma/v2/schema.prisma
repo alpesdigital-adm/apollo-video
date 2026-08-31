@@ -200,6 +200,7 @@ model V2Workspace {
   syntheticPresenterProfileHeads         V2SyntheticPresenterProfileHead[]
   syntheticCacheDecisions                V2SyntheticCacheDecision[]
   syntheticCacheSubmissionClaims         V2SyntheticCacheSubmissionClaim[]
+  syntheticCriticReports                 V2SyntheticCriticReport[]
 
   @@map("workspaces")
 }
@@ -685,6 +686,7 @@ model V2Project {
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
   syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
   syntheticCacheDecisions                V2SyntheticCacheDecision[]
+  syntheticCriticReports                 V2SyntheticCriticReport[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -1526,6 +1528,9 @@ model V2MediaArtifact {
   blockConcatenationAlignments V2SyntheticBlockConcatenation[] @relation("BlockConcatenationAlignment")
   providerJobResults           V2ProviderJob[]
   providerResultArtifacts      V2ProviderResultArtifact[] @relation("ProviderResultArtifactMedia")
+  criticJudgedArtifacts        V2SyntheticCriticReport[] @relation("SyntheticCriticArtifact")
+  criticAudioArtifacts         V2SyntheticCriticReport[] @relation("SyntheticCriticAudio")
+  criticAlignmentArtifacts     V2SyntheticCriticReport[] @relation("SyntheticCriticAlignment")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -3433,6 +3438,7 @@ model V2SyntheticPresenterProfile {
   masterAssets       V2SyntheticMasterAsset[]
   scriptPlanVersions V2SyntheticScriptPlanVersion[]
   blockGenerations V2SyntheticBlockGeneration[]
+  criticReports    V2SyntheticCriticReport[]         @relation("SyntheticCriticProfile")
   headOf    V2SyntheticPresenterProfileHead[] @relation("CurrentPresenterSnapshot")
 
   @@unique([id, workspaceId])
@@ -3768,6 +3774,8 @@ model V2SyntheticScriptBlock {
   originBlock      V2SyntheticScriptBlock?       @relation("SyntheticScriptBlockOrigin", fields: [originBlockId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   derivedBlocks    V2SyntheticScriptBlock[]      @relation("SyntheticScriptBlockOrigin")
   generations      V2SyntheticBlockGeneration[]
+  criticReports    V2SyntheticCriticReport[]     @relation("SyntheticCriticBlock")
+  criticIssues     V2SyntheticCriticIssue[]      @relation("SyntheticCriticIssueBlock")
 
   @@unique([id, workspaceId])
   @@index([workspaceId, planId, normalizedTextHash, occurrence], map: "synthetic_script_blocks_plan_text_idx")
@@ -7720,4 +7728,112 @@ model V2StoryPlan {
   @@unique([id, workspaceId, projectId, storyHash], map: "story_plans_id_workspace_project_hash_key")
   @@index([workspaceId, projectId, projectVersionId, createdAt(sort: Desc)], map: "story_plans_project_version_created_idx")
   @@map("story_plans")
+}
+
+model V2SyntheticCriticReport {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  blockId             String   @db.VarChar(128)
+  schemaVersion       String   @db.VarChar(64)
+  capability          String   @db.VarChar(64)
+  adapterId           String   @db.VarChar(128)
+  adapterVersion      String   @db.VarChar(128)
+  artifactId          String   @db.VarChar(128)
+  artifactSha256      String   @db.Char(64)
+  audioArtifactId     String?  @db.VarChar(128)
+  alignmentArtifactId String?  @db.VarChar(128)
+  scriptHash          String   @db.Char(64)
+  profileSnapshotId   String   @db.VarChar(128)
+  expectedIdentityRef String   @db.VarChar(256)
+  decision            String   @db.VarChar(24)
+  recommendedAction   String   @db.VarChar(16)
+  thresholdsVersion   String   @db.VarChar(128)
+  reportJson          String   @db.Text
+  reportHash          String   @db.Char(64)
+  decidedAt           DateTime @db.Timestamptz(3)
+
+  workspace         V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project           V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  block             V2SyntheticScriptBlock      @relation("SyntheticCriticBlock", fields: [blockId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  artifact          V2MediaArtifact             @relation("SyntheticCriticArtifact", fields: [artifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  audioArtifact     V2MediaArtifact?            @relation("SyntheticCriticAudio", fields: [audioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  alignmentArtifact V2MediaArtifact?            @relation("SyntheticCriticAlignment", fields: [alignmentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  profileSnapshot   V2SyntheticPresenterProfile @relation("SyntheticCriticProfile", fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evaluators        V2SyntheticCriticEvaluator[]
+  measurements      V2SyntheticCriticMeasurement[]
+  issues            V2SyntheticCriticIssue[]
+
+  @@unique([id, workspaceId], map: "synthetic_critic_reports_id_workspace_key")
+  // Lets the measurement rows carry the block they belong to without that copy
+  // ever being able to drift from the report's own block.
+  @@unique([id, workspaceId, blockId], map: "synthetic_critic_reports_id_workspace_block_key")
+  @@unique([workspaceId, reportHash], map: "synthetic_critic_reports_workspace_hash_key")
+  @@unique([workspaceId, blockId, artifactId, thresholdsVersion], map: "synthetic_critic_reports_workspace_take_key")
+  @@index([workspaceId, blockId], map: "synthetic_critic_reports_workspace_block_idx")
+  @@index([workspaceId, artifactId], map: "synthetic_critic_reports_workspace_artifact_idx")
+  @@index([workspaceId, decision], map: "synthetic_critic_reports_workspace_decision_idx")
+  @@index([workspaceId, decidedAt(sort: Desc)], map: "synthetic_critic_reports_workspace_decided_idx")
+  @@index([workspaceId, projectId, decidedAt(sort: Desc), id(sort: Desc)], map: "synthetic_critic_reports_workspace_project_idx")
+  @@map("synthetic_critic_reports")
+}
+
+model V2SyntheticCriticEvaluator {
+  reportId    String @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  evaluatorId String @db.VarChar(128)
+  version     String @db.VarChar(64)
+  kind        String @db.VarChar(16)
+  scope       String @db.Text
+
+  report V2SyntheticCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([reportId, evaluatorId])
+  @@index([workspaceId, kind], map: "synthetic_critic_evaluators_workspace_kind_idx")
+  @@map("synthetic_critic_evaluators")
+}
+
+model V2SyntheticCriticMeasurement {
+  reportId         String  @db.VarChar(128)
+  workspaceId      String  @db.VarChar(128)
+  blockId          String  @db.VarChar(128)
+  dimension        String  @db.VarChar(32)
+  status           String  @db.VarChar(16)
+  evaluatorId      String? @db.VarChar(128)
+  value            Float?
+  unit             String? @db.VarChar(32)
+  threshold        Float?
+  confidence       Float?
+  evidenceRefsJson String  @db.Text
+  startMs          Int?
+  endMs            Int?
+  note             String? @db.Text
+
+  report V2SyntheticCriticReport @relation(fields: [reportId, workspaceId, blockId], references: [id, workspaceId, blockId], onDelete: Cascade)
+
+  @@id([reportId, dimension])
+  @@index([workspaceId, dimension, status], map: "synthetic_critic_measurements_workspace_dimension_idx")
+  @@index([workspaceId, blockId, dimension], map: "synthetic_critic_measurements_workspace_block_idx")
+  @@map("synthetic_critic_measurements")
+}
+
+model V2SyntheticCriticIssue {
+  reportId    String  @db.VarChar(128)
+  workspaceId String  @db.VarChar(128)
+  ordinal     Int
+  blockId     String  @db.VarChar(128)
+  dimension   String  @db.VarChar(32)
+  severity    String  @db.VarChar(16)
+  startMs     Int?
+  endMs       Int?
+  evidence    String  @db.Text
+  action      String  @db.VarChar(16)
+
+  report V2SyntheticCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  block  V2SyntheticScriptBlock  @relation("SyntheticCriticIssueBlock", fields: [blockId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@id([reportId, ordinal])
+  @@index([workspaceId, blockId, dimension], map: "synthetic_critic_issues_workspace_block_idx")
+  @@index([workspaceId, dimension, severity], map: "synthetic_critic_issues_workspace_dimension_idx")
+  @@map("synthetic_critic_issues")
 }
