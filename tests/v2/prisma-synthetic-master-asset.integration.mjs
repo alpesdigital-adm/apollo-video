@@ -17,6 +17,14 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
   const client = new PrismaClient({ datasources: { db: { url: process.env.V2_DATABASE_URL } } })
 
   const cleanupWorkspace = async (id) => {
+    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId: id }, data: { currentVersionId: null } })
+    await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId: id } })
+    await client.v2SyntheticScriptPlan.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticSpeechSegment.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterArtifact.deleteMany({ where: { workspaceId: id } })
     await client.v2SyntheticMasterAsset.deleteMany({ where: { workspaceId: id } })
@@ -47,6 +55,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { registerSyntheticPresenterProfileService } = await import('../../src/v2/application/synthetic-production.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { createSyntheticMasterAsset } = await import('../../src/v2/domain/synthetic-master-asset.ts')
+    const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
@@ -54,6 +63,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     const { PrismaProjectCreationRepository } = await import('../../src/v2/infrastructure/prisma/project-creation-repository.ts')
     const { PrismaSyntheticProductionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-production-repository.ts')
     const { PrismaSyntheticMasterAssetRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-master-asset-repository.ts')
+    const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
     const { PrismaSyntheticSpeechSegmentRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-speech-segment-repository.ts')
     const { catalogSyntheticSpeechSegmentsService } = await import('../../src/v2/application/synthetic-speech-segments.ts')
 
@@ -144,6 +154,79 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       },
     })
 
+    // The critic's own verdict on the bytes this master seals. It is recorded
+    // through the real repository — transactional, hash-verified on read — so
+    // the master's `critic` ref points at a report that exists and can be
+    // opened, instead of at an id derived from the provider job.
+    await client.v2SyntheticScriptPlan.create({
+      data: {
+        id: 'master-plan', workspaceId, projectId, schemaVersion: 'synthetic-script-plan/v1',
+        requestFingerprint: hash('1'), idempotencyKey: 'master-plan-key', createdByClientId: clientId,
+        actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)), updatedAt: new Date(at(0)),
+      },
+    })
+    await client.v2SyntheticScriptPlanVersion.create({
+      data: {
+        id: 'master-plan-v1', planId: 'master-plan', workspaceId, projectId, sequence: 1,
+        projectVersionId, profileSnapshotId, schemaVersion: 'synthetic-script-plan-version/v1',
+        locale: 'pt-BR', segmentationVersion: 'synthetic-script-segmentation/v1',
+        scriptHash: hash('2'), commandType: 'create-plan', blockSequenceJson: '["master-block"]',
+        impactJson: '{}', commandImpactHash: hash('3'), planVersionHash: hash('4'),
+        requestFingerprint: hash('1'), idempotencyKey: 'master-plan-version-key',
+        createdByClientId: clientId, actorContextHash: auditContext.contextHash, createdAt: new Date(at(0)),
+      },
+    })
+    await client.v2SyntheticScriptBlock.create({
+      data: {
+        id: 'master-block', workspaceId, projectId, planId: 'master-plan',
+        schemaVersion: 'synthetic-script-block/v1', exactText: 'Primeira ideia do roteiro.',
+        normalizedTextHash: hash('5'), locale: 'pt-BR', occurrence: 1,
+        createdInVersionId: 'master-plan-v1', originKind: 'initial-segmentation',
+        blockHash: hash('6'), createdAt: new Date(at(0)),
+      },
+    })
+    const criticMeasured = (dimension, evaluatorId, value, unit, threshold) => ({
+      dimension, status: 'measured', evaluatorId, value, unit, threshold,
+      confidence: 1, evidenceRefs: ['artifact://master-original'], range: null, note: null,
+    })
+    const criticUnavailable = (dimension, note) => ({
+      dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
+      threshold: null, confidence: null, evidenceRefs: [], range: null, note,
+    })
+    const criticReport = createSyntheticCriticReport({
+      id: 'master-critic-report-1', workspaceId, projectId, blockId: 'master-block',
+      capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      artifactId: artifactIds['provider-original'], artifactSha256: artifactShas['provider-original'],
+      audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
+      scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_master',
+      evaluators: [
+        { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact' },
+        { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+        { id: 'controlled-deterministic-probe', version: '1.0.0', kind: 'controlled', scope: 'deterministic stand-in, not production visual validation' },
+      ],
+      measurements: [
+        criticMeasured('lip-sync', 'controlled-deterministic-probe', 0, 'ms-av-offset', 34),
+        criticMeasured('identity', 'controlled-deterministic-probe', 1, 'identity-ref-match', 1),
+        criticMeasured('pronunciation', 'alignment-pronunciation', 0, 'word-deviations', 0),
+        criticUnavailable('visual-artifacts', 'no visual artifact detector is deployed'),
+        criticUnavailable('framing', 'no framing model is deployed'),
+        criticUnavailable('continuity', 'this is the first approved block of the take'),
+        criticUnavailable('eyes', 'no eye model is deployed'),
+        criticUnavailable('teeth', 'no teeth model is deployed'),
+        criticUnavailable('hands', 'no hand model is deployed'),
+        criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
+        criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
+      ],
+      issues: [],
+      decision: 'approved', recommendedAction: 'none',
+      thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
+      decidedAt: at(3),
+    })
+    const recordedVerdict = await new PrismaSyntheticCriticReportRepository(client)
+      .record({ report: criticReport })
+    assert.equal(recordedVerdict.replayed, false)
+    assert.equal(recordedVerdict.value.decision, 'approved')
+
     const repository = new PrismaSyntheticMasterAssetRepository(client)
     const masterInput = (overrides = {}) => createSyntheticMasterAsset({
       id: 'master-1', workspaceId, projectId, projectVersionId,
@@ -161,7 +244,11 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
         adapterConfigHash: hash('7'), providerJobId, providerJobRef: 'heygen_job_master',
       },
       cost: { currency: 'USD', minorUnits: 150, latencyMs: 8_400 },
-      critic: { reportId: 'critic-report-1', reportHash: hash('8'), decision: 'approved' },
+      critic: {
+        reportId: recordedVerdict.value.id,
+        reportHash: recordedVerdict.value.reportHash,
+        decision: recordedVerdict.value.decision,
+      },
       lineage: ['generation-1', 'generation-2'],
       createdAt: at(10),
       ...overrides,

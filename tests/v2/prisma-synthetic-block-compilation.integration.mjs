@@ -91,6 +91,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     const { PrismaSyntheticBlockConcatenationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-concatenation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
+    const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { concatenateBlockAudio } = await import('../../src/v2/infrastructure/media/audio-concatenation.ts')
@@ -233,6 +234,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions: new PrismaSyntheticCacheDecisionRepository(client),
       providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
+      criticReports: new PrismaSyntheticCriticReportRepository(client),
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })

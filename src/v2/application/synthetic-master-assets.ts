@@ -9,6 +9,10 @@ import {
   type SyntheticMasterArtifactRole,
   type SyntheticMasterAsset,
 } from '../domain/synthetic-master-asset.ts'
+import {
+  isSyntheticCriticApproval,
+  type SyntheticCriticReport,
+} from '../domain/synthetic-critic-report.ts'
 import { assertSyntheticPresenterPolicy } from '../domain/synthetic-presenter-policy-engine.ts'
 import type { AuthenticatedExternalActor } from './authenticate-api-client.ts'
 import { materializeActorAuditContext, requireScope } from './authenticate-api-client.ts'
@@ -43,6 +47,22 @@ export interface PromotableProviderJobReader {
 
 export interface AssetRightsReader {
   currentSnapshot(input: { workspaceId: string; artifactId: string }): Promise<AssetRightsSnapshot | null>
+}
+
+/**
+ * The critic's durable verdicts on one set of bytes, newest first.
+ *
+ * Promotion reads them and nothing else: a verdict is only evidence when it was
+ * written down. The full report repository satisfies this shape, so the port is
+ * narrowed here to make plain that promotion never records a verdict, it only
+ * consults one.
+ */
+export interface PromotionCriticReportReader {
+  readByArtifact(input: {
+    workspaceId: string
+    artifactId: string
+    limit?: number
+  }): Promise<readonly Readonly<SyntheticCriticReport>[]>
 }
 
 /**
@@ -98,8 +118,9 @@ export interface PromoteSyntheticMasterRequest {
  * Nothing is published until every gate passes: the job must be terminal and
  * approved with a critic result, its artifacts must exist, their checksums and
  * byte sizes must match what storage actually holds, the presenter snapshot
- * must still be intact, consent and rights must still allow the use, and the
- * measured audio and video durations must agree. Any of them failing raises
+ * must still be intact, consent and rights must still allow the use, a
+ * persisted critic report must approve exactly the bytes being promoted, and
+ * the measured audio and video durations must agree. Any of them failing raises
  * before a master row exists, so a tampered blob, a revoked consent, a rejected
  * critic or an incoherent duration can never become a reusable master.
  */
@@ -110,6 +131,8 @@ export function promoteSyntheticMasterAssetService(dependencies: {
   artifacts: MediaArtifactQueryRepository
   profiles: SyntheticProductionRepository
   rights: AssetRightsReader
+  /** Where the approving evidence actually lives (F3.009). */
+  criticReports: PromotionCriticReportReader
   bytes: MasterArtifactByteVerifier
   durations: MasterDurationProber
   clock: () => Date
@@ -256,11 +279,45 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       )
     }
 
-    // 6. Audio and video must describe the same performance.
     const audio = catalogued.get('final-audio')!
     // The normalized track when a normalization stage produced one; otherwise
     // the provider's own video, which is what the master actually holds.
     const video = catalogued.get('normalized-video') ?? catalogued.get('provider-original')!
+
+    // 6. The critic must have approved these exact bytes, in writing.
+    //
+    // The provider job's `criticResultHash` says a critic ran; it does not say
+    // what it decided about which artifact. The durable report does, so it is
+    // the approving evidence from here on. The job hash is deliberately kept —
+    // it is re-checked inside the sealing transaction below, which is the only
+    // thing that can catch the job changing between this validation and the
+    // commit. The two answer different questions and both must hold.
+    const verdicts = await dependencies.criticReports.readByArtifact({
+      workspaceId: request.workspaceId,
+      artifactId: video.id,
+      limit: 1,
+    })
+    // Absence of a verdict is not approval: an unjudged take is unjudged.
+    assertDomain(
+      verdicts.length > 0,
+      'PRECONDITION_REQUIRED',
+      'No persisted critic report judges the artifact being promoted',
+    )
+    // Newest first, so this is the verdict currently in force. An older
+    // approval never survives a newer rejection of the same bytes.
+    const verdict = verdicts[0]!
+    assertDomain(
+      isSyntheticCriticApproval(verdict.decision),
+      'PRECONDITION_REQUIRED',
+      `The critic did not approve the artifact being promoted: its current verdict is ${verdict.decision}`,
+    )
+    assertDomain(
+      verdict.projectId === request.projectId && verdict.artifactSha256 === video.sha256,
+      'PERSISTENCE_CONFLICT',
+      'The approving critic report does not describe the artifact being promoted',
+    )
+
+    // 7. Audio and video must describe the same performance.
     const measured = await dependencies.durations.measure({
       audio: { artifactId: audio.id, artifactKey: audio.artifactKey },
       video: { artifactId: video.id, artifactKey: video.artifactKey },
@@ -312,11 +369,11 @@ export function promoteSyntheticMasterAssetService(dependencies: {
         ),
       },
       critic: {
-        // Until F3.009 persists its own report, the approving evidence is the
-        // provider job's critic result hash, which the repository re-checks
-        // inside the sealing transaction.
-        reportId: `${job!.id}:critic`,
-        reportHash: job!.criticResultHash!,
+        // The approving evidence is the persisted report itself, so the master
+        // points at a verdict a reader can open, re-hash and disagree with.
+        reportId: verdict.id,
+        reportHash: verdict.reportHash,
+        // Narrowed by the approval gate above, not by assumption.
         decision: 'approved',
       },
       lineage: request.lineage,

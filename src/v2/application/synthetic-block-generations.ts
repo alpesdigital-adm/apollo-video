@@ -19,6 +19,10 @@ import {
   type SyntheticCacheDecisionReasonCode,
 } from '../domain/synthetic-cache-decision.ts'
 import type { SyntheticTtsCacheSubject } from '../domain/synthetic-cache-identity.ts'
+import {
+  isSyntheticCriticApproval,
+  type SyntheticCriticReport,
+} from '../domain/synthetic-critic-report.ts'
 import type { SyntheticPresenterProfileSnapshot } from '../domain/synthetic-production.ts'
 import {
   materializeActorAuditContext,
@@ -117,6 +121,19 @@ export function syntheticBlockVoiceKeyFromProfile(
   })
 }
 
+/**
+ * The critic's durable verdicts on one set of bytes, newest first. The cache
+ * only ever reads them: a reuse candidate is not the place to decide anything
+ * about quality, only the place to obey what was already decided.
+ */
+export interface CacheCandidateCriticReportReader {
+  readByArtifact(input: {
+    workspaceId: string
+    artifactId: string
+    limit?: number
+  }): Promise<readonly Readonly<SyntheticCriticReport>[]>
+}
+
 export interface EnsureBlockGenerationOutcome {
   blockId: string
   generationId: string | null
@@ -146,6 +163,11 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
    * blob.
    */
   resultArtifacts: ProviderResultArtifactRepository
+  /**
+   * The critic's durable verdicts (F3.009). When a candidate's bytes carry one,
+   * it — not the paying job's status — says whether they may be reused.
+   */
+  criticReports: CacheCandidateCriticReportReader
   /**
    * Mutual exclusion over a cache address for the window between deciding to
    * pay and the pending generation becoming visible. Without it the in-flight
@@ -430,6 +452,8 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
 
         let reused: Readonly<SyntheticBlockGeneration> | null = null
         let reusedEvidence: Awaited<ReturnType<typeof paidJobEvidence>> = null
+        /** The critic report that approved the reused bytes, when one exists. */
+        let reusedVerdict: Readonly<SyntheticCriticReport> | null = null
         let approvedCandidates: readonly Readonly<SyntheticBlockGeneration>[] = []
         let missReasonCode: SyntheticCacheDecisionReasonCode = 'CACHE_MISS_NO_CANDIDATE'
         let rejectedCandidateId: string | null = null
@@ -453,6 +477,22 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
             // reached that state has not been shown to pass, so it is not reused.
             const evidence = await paidJobEvidence(candidate, approvedCandidates)
             if (!evidence || evidence.jobStatus !== 'approved') {
+              missReasonCode = 'CANDIDATE_CRITIC_REJECTED'
+              rejectedCandidateId = candidate.id
+              continue
+            }
+            // And when the critic wrote down what it thought of these exact
+            // bytes, that verdict overrules the job status: a job can be
+            // `approved` while the report on its output says rejected,
+            // needs-review or evidence-unavailable, and none of those three is
+            // approval. A block with no report yet falls back to the structural
+            // check above rather than blocking every pre-F3.009 candidate.
+            const [verdict] = await dependencies.criticReports.readByArtifact({
+              workspaceId: request.workspaceId,
+              artifactId: candidate.audioArtifactId,
+              limit: 1,
+            })
+            if (verdict && !isSyntheticCriticApproval(verdict.decision)) {
               missReasonCode = 'CANDIDATE_CRITIC_REJECTED'
               rejectedCandidateId = candidate.id
               continue
@@ -516,6 +556,7 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
             }
             reused = candidate
             reusedEvidence = evidence
+            reusedVerdict = verdict ?? null
             break
           }
         }
@@ -582,7 +623,10 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
             reasonCode: 'CACHE_HIT_ELIGIBLE',
             reason: decisionReason,
             candidateGenerationId: reused.id,
-            criticReportHash: evidence!.criticReportHash,
+            // The real report's content address when the critic wrote one;
+            // otherwise the paying job's critic result hash, which is all the
+            // evidence a pre-F3.009 reuse has.
+            criticReportHash: reusedVerdict?.reportHash ?? evidence!.criticReportHash,
             estimatedSavingMinorUnits: evidence!.costMinorUnits,
             avoidedCostMinorUnits: evidence!.costMinorUnits,
             currency: evidence!.currency,

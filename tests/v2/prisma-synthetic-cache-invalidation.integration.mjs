@@ -89,6 +89,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
+    const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
@@ -248,6 +249,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
       resultArtifacts: resultArtifactRepository,
+      criticReports: new PrismaSyntheticCriticReportRepository(client),
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: ensureClock,
     })

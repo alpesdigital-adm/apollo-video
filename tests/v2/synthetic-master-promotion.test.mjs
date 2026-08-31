@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { promoteSyntheticMasterAssetService } from '../../src/v2/application/synthetic-master-assets.ts'
 import { createAssetRightsSnapshot } from '../../src/v2/domain/asset-rights.ts'
+import { createSyntheticCriticReport } from '../../src/v2/domain/synthetic-critic-report.ts'
 import { createSyntheticPresenterProfileSnapshot } from '../../src/v2/domain/synthetic-production.ts'
 
 const digest = (character) => character.repeat(64)
@@ -35,6 +36,83 @@ const ROLES = {
   alignment: { providerRole: 'alignment-evidence', artifactId: 'artifact-alignment', sha256: digest('d'), mediaType: 'data', container: 'json' },
 }
 
+/**
+ * A real critic report, built by the aggregate itself — every dimension
+ * answered, the controlled evaluator declaring that it is a stand-in and not
+ * production visual validation, and the verdict hash calculated from the body.
+ * The promotion gate reads this, not a hash the provider job happened to carry.
+ */
+const criticEvaluators = [
+  { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact' },
+  { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+  { id: 'controlled-deterministic-probe', version: '1.0.0', kind: 'controlled', scope: 'deterministic stand-in, not production visual validation' },
+]
+const criticMeasured = (dimension, evaluatorId, value, unit, threshold) => ({
+  dimension, status: 'measured', evaluatorId, value, unit, threshold,
+  confidence: 1, evidenceRefs: ['artifact://artifact-original'], range: null, note: null,
+})
+const criticUnavailable = (dimension, note) => ({
+  dimension, status: 'unavailable', evaluatorId: null, value: null, unit: null,
+  threshold: null, confidence: null, evidenceRefs: [], range: null, note,
+})
+const criticMeasurements = [
+  criticMeasured('lip-sync', 'controlled-deterministic-probe', 0, 'ms-av-offset', 34),
+  criticMeasured('identity', 'controlled-deterministic-probe', 1, 'identity-ref-match', 1),
+  criticMeasured('pronunciation', 'alignment-pronunciation', 0, 'word-deviations', 0),
+  criticUnavailable('visual-artifacts', 'no visual artifact detector is deployed'),
+  criticUnavailable('framing', 'no framing model is deployed'),
+  criticUnavailable('continuity', 'this is the first approved block of the take'),
+  criticUnavailable('eyes', 'no eye model is deployed'),
+  criticUnavailable('teeth', 'no teeth model is deployed'),
+  criticUnavailable('hands', 'no hand model is deployed'),
+  criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
+  criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
+]
+
+function criticReport(overrides = {}) {
+  return createSyntheticCriticReport({
+    id: 'promotion-critic-report-1',
+    workspaceId,
+    projectId,
+    blockId: 'promotion-block-1',
+    capability: 'audio-avatar',
+    adapterId: 'heygen-v3',
+    adapterVersion: '3.0.0',
+    artifactId: 'artifact-original',
+    artifactSha256: digest('a'),
+    audioArtifactId: 'artifact-audio',
+    alignmentArtifactId: 'artifact-alignment',
+    scriptHash: digest('7'),
+    profileSnapshotId: 'promotion-presenter:v3',
+    expectedIdentityRef: 'avatar_promotion',
+    evaluators: criticEvaluators,
+    measurements: criticMeasurements,
+    issues: [],
+    decision: 'approved',
+    recommendedAction: 'none',
+    thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
+    decidedAt: '2029-04-30T23:59:00.000Z',
+    ...overrides,
+  })
+}
+
+/** The same take, judged and refused, with its cause localized on the block. */
+function rejectedCriticReport() {
+  return criticReport({
+    id: 'promotion-critic-report-rejected',
+    measurements: criticMeasurements.map((measurement) =>
+      measurement.dimension === 'pronunciation' ? { ...measurement, value: 2 } : measurement),
+    issues: [{
+      blockId: 'promotion-block-1', dimension: 'pronunciation', severity: 'blocking',
+      range: { startMs: 1_200, endMs: 1_850 },
+      evidence: 'two words of the approved script were not spoken in the aligned take',
+      action: 'retry',
+    }],
+    decision: 'rejected',
+    recommendedAction: 'retry',
+  })
+}
+
 const actor = Object.freeze({
   clientId: 'promotion-client',
   credentialId: 'promotion-credential',
@@ -57,7 +135,7 @@ const actor = Object.freeze({
 })
 
 function harness(overrides = {}) {
-  const calls = { verifiedKeys: [], sealed: [] }
+  const calls = { verifiedKeys: [], sealed: [], criticLookups: [] }
   const rightsSnapshot = createAssetRightsSnapshot({
     id: 'promotion-rights', workspaceId, artifactId: 'artifact-audio', sequence: 1,
     draft: {
@@ -122,6 +200,12 @@ function harness(overrides = {}) {
     rights: {
       currentSnapshot: async () => (overrides.rights === null ? null : { ...rightsSnapshot, ...overrides.rights }),
     },
+    criticReports: {
+      readByArtifact: async (input) => {
+        calls.criticLookups.push(input.artifactId)
+        return overrides.criticReports ?? [criticReport()]
+      },
+    },
     bytes: {
       verify: async (input) => {
         calls.verifiedKeys.push(input.artifactKey)
@@ -161,7 +245,15 @@ test('T-FR-104 promotion seals an approved result only after every gate passes',
   assert.equal(master.durationMs, 8_000)
   assert.equal(master.videoDurationMs, 8_012)
   assert.deepEqual([...master.lineage], ['generation-1', 'generation-2'])
-  assert.equal(master.critic.reportHash, digest('f'))
+  // The approving evidence is the persisted report, not the job's hash: the
+  // master points at a verdict a reader can open and re-hash.
+  const approving = criticReport()
+  assert.equal(master.critic.reportId, approving.id)
+  assert.equal(master.critic.reportHash, approving.reportHash)
+  assert.equal(master.critic.decision, 'approved')
+  assert.notEqual(master.critic.reportHash, digest('f'), 'the job hash must not be what approves')
+  // And the verdict consulted is the one about the bytes being promoted.
+  assert.deepEqual(calls.criticLookups, ['artifact-original'])
 
   // Every promoted artifact had its bytes verified against storage.
   assert.equal(calls.verifiedKeys.length, 3)
@@ -232,6 +324,59 @@ test('T-FR-104 promotion refuses revoked consent, blocked rights and incoherent 
   const incoherent = harness({ durations: { audioDurationMs: 8_000, videoDurationMs: 9_400 } })
   await assert.rejects(incoherent.promote(request), /disagree beyond one frame/)
   assert.equal(incoherent.calls.sealed.length, 0)
+})
+
+test('T-FR-106 promotion requires a persisted approval, never merely an unjudged take', async () => {
+  // No report at all: an unjudged take is unjudged, not approved.
+  const unjudged = harness({ criticReports: [] })
+  await assert.rejects(unjudged.promote(request), /No persisted critic report judges/)
+  assert.equal(unjudged.calls.sealed.length, 0)
+
+  // Every non-approval decision blocks, including "we could not tell".
+  for (const [report, expected] of [
+    [rejectedCriticReport(), /current verdict is rejected/],
+    [criticReport({
+      id: 'promotion-critic-report-review',
+      decision: 'needs-review',
+      recommendedAction: 'manual-review',
+    }), /current verdict is needs-review/],
+    [criticReport({
+      id: 'promotion-critic-report-unknown',
+      decision: 'evidence-unavailable',
+      recommendedAction: 'manual-review',
+    }), /current verdict is evidence-unavailable/],
+  ]) {
+    const blocked = harness({ criticReports: [report] })
+    await assert.rejects(blocked.promote(request), expected)
+    assert.equal(blocked.calls.sealed.length, 0, 'a refused take must never be sealed')
+  }
+
+  // A newer rejection supersedes an older approval on the same bytes.
+  const superseded = harness({ criticReports: [rejectedCriticReport(), criticReport()] })
+  await assert.rejects(superseded.promote(request), /current verdict is rejected/)
+  assert.equal(superseded.calls.sealed.length, 0)
+
+  // A report about other bytes or another project is not evidence about these.
+  const otherBytes = harness({
+    criticReports: [criticReport({ id: 'promotion-critic-report-other', artifactSha256: digest('9') })],
+  })
+  await assert.rejects(otherBytes.promote(request), /does not describe the artifact being promoted/)
+  assert.equal(otherBytes.calls.sealed.length, 0)
+})
+
+test('T-FR-106 the job critic hash stays as the seal transaction guard', async () => {
+  // Both defences hold at once: the report approves, and the hash the
+  // repository re-checks inside its transaction is still the job's own.
+  const { calls, promote } = harness()
+  await promote(request)
+  assert.equal(calls.sealed[0].criticResultHash, digest('f'))
+  assert.notEqual(calls.sealed[0].master.critic.reportHash, digest('f'))
+
+  // A job that lost its critic result is refused before the report is even
+  // consulted: the two gates are cumulative, never alternatives.
+  const withoutJobHash = harness({ job: { criticResultHash: null } })
+  await assert.rejects(withoutJobHash.promote(request), /no critic result to promote/)
+  assert.equal(withoutJobHash.calls.criticLookups.length, 0)
 })
 
 test('T-FR-104 promotion is idempotent and never seals a job twice', async () => {

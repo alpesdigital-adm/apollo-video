@@ -31,6 +31,10 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCriticIssue.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticMeasurement.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticEvaluator.deleteMany({ where: { workspaceId } })
+    await client.v2SyntheticCriticReport.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheSubmissionClaim.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
@@ -73,6 +77,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     } = await import('../../src/v2/application/synthetic-block-generations.ts')
     const { assetRightsRevision, createAssetRightsSnapshot } = await import('../../src/v2/domain/asset-rights.ts')
     const { createAssetRightsChangeIntent } = await import('../../src/v2/domain/asset-rights-change.ts')
+    const { createSyntheticCriticReport } = await import('../../src/v2/domain/synthetic-critic-report.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
     const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
@@ -89,6 +94,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
     const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { PrismaSyntheticCacheSubmissionClaimRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-submission-claim-repository.ts')
+    const { PrismaSyntheticCriticReportRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-critic-report-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
@@ -242,6 +248,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
       rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
       resultArtifacts: resultArtifactRepository,
+      criticReports: new PrismaSyntheticCriticReportRepository(client),
       submissionClaims: new PrismaSyntheticCacheSubmissionClaimRepository(client),
       enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
@@ -458,8 +465,106 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     assert.equal(exhausted.find(({ blockId }) => blockId === failingBlockId)?.action, 'budget-exhausted')
     assert.equal(providerCalls.length, 11)
 
+    // 6b. A candidate the critic rejected is not reusable, even though its
+    //     paying job is `approved`. The refusal is booked as
+    //     CANDIDATE_CRITIC_REJECTED, it costs this block one paid call and
+    //     nothing else, and every previously approved artifact stays exactly
+    //     where it is — a rejection is a reason not to reuse, never a licence
+    //     to delete.
+    const approvedBeforeRejection = await generations.listByPlan({ workspaceId, planId, statuses: ['approved'] })
+    const rejectedArtifactIds = [...new Set(approvedBeforeRejection
+      .filter(({ audioArtifactId }) => Boolean(audioArtifactId))
+      .map(({ audioArtifactId }) => audioArtifactId))]
+    assert.ok(rejectedArtifactIds.length > 0, 'the journey must have approved audio to reject')
+    const criticReports = new PrismaSyntheticCriticReportRepository(client)
+    let verdictOrdinal = 0
+    for (const generation of approvedBeforeRejection) {
+      if (!generation.audioArtifactId) continue
+      const artifactRow = await client.v2MediaArtifact.findUniqueOrThrow({
+        where: { id: generation.audioArtifactId },
+      })
+      await criticReports.record({
+        report: createSyntheticCriticReport({
+          id: `blockgen-critic-rejection-${++verdictOrdinal}`,
+          workspaceId, projectId, blockId: generation.blockId,
+          capability: 'tts', adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0',
+          artifactId: generation.audioArtifactId, artifactSha256: artifactRow.sha256,
+          audioArtifactId: generation.audioArtifactId,
+          alignmentArtifactId: generation.alignmentArtifactId ?? null,
+          scriptHash: generation.scriptHash,
+          profileSnapshotId: head.version.profileSnapshotId,
+          expectedIdentityRef: 'avatar_block',
+          evaluators: [
+            { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+          ],
+          measurements: [
+            {
+              dimension: 'pronunciation', status: 'measured', evaluatorId: 'alignment-pronunciation',
+              value: 2, unit: 'word-deviations', threshold: 0, confidence: 1,
+              evidenceRefs: [`artifact://${generation.audioArtifactId}`], range: null, note: null,
+            },
+            ...[
+              'lip-sync', 'identity', 'visual-artifacts', 'framing', 'continuity',
+              'eyes', 'teeth', 'hands', 'temporal-integrity', 'audiovisual-integrity',
+            ].map((dimension) => ({
+              dimension, status: 'not-applicable', evaluatorId: null, value: null, unit: null,
+              threshold: null, confidence: null, evidenceRefs: [], range: null,
+              note: 'a speech-only take produces no such signal, so the dimension does not apply',
+            })),
+          ],
+          issues: [{
+            blockId: generation.blockId, dimension: 'pronunciation', severity: 'blocking',
+            range: null, evidence: 'two words of the approved script were not spoken in the aligned take',
+            action: 'retry',
+          }],
+          decision: 'rejected', recommendedAction: 'retry',
+          thresholdsVersion: 'synthetic-critic-thresholds/tts/elevenlabs-tts/v1',
+          decidedAt: at(40),
+        }),
+      })
+    }
+    const artifactsBeforeRejection = await client.v2MediaArtifact.count({ where: { workspaceId } })
+    const callsBeforeRejection = providerCalls.length
+    head = (await mutatePlan({
+      workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
+      mutation: { kind: 'insert-block', position: 1, text: 'Primeira ideia do roteiro.' },
+      actor, idempotencyKey: 'blockgen-insert-after-rejection',
+    })).plan
+    const rejectedBlockId = head.version.impact.createdBlockIds[0]
+    const afterRejection = await ensure(ensureArguments())
+    assert.equal(
+      afterRejection.find(({ blockId }) => blockId === rejectedBlockId)?.action,
+      'enqueued',
+      'a rejected candidate must never be handed back as a cache hit',
+    )
+    assert.equal(
+      afterRejection.filter(({ action }) => action === 'enqueued').length,
+      1,
+      'the rejection must cost exactly the block that asked, never the whole plan',
+    )
+    const rejectionDecisions = (await cacheDecisions.listByProject({ workspaceId, projectId, limit: 200 }))
+      .filter(({ reasonCode }) => reasonCode === 'CANDIDATE_CRITIC_REJECTED')
+    assert.equal(rejectionDecisions.length, 1)
+    assert.equal(rejectionDecisions[0].outcome, 'miss')
+    assert.ok(rejectionDecisions[0].candidateGenerationId, 'the ledger must name the candidate it refused')
+    assert.equal(rejectionDecisions[0].avoidedCostMinorUnits, 0, 'a refusal avoids nothing')
+    // The previously approved bytes are untouched: nothing was deleted.
+    assert.equal(await client.v2MediaArtifact.count({ where: { workspaceId } }), artifactsBeforeRejection)
+    for (const artifactId of rejectedArtifactIds) {
+      assert.equal(
+        (await client.v2MediaArtifact.findUniqueOrThrow({ where: { id: artifactId } })).status,
+        'available',
+      )
+    }
+    await drainWorkers()
+    await settle({ workspaceId, projectId, planId, actor })
+    assert.equal(providerCalls.length, callsBeforeRejection + 1)
+
     // 7. Revoked consent blocks generation BEFORE cache and cost.
     const generationsBefore = await client.v2SyntheticBlockGeneration.count({ where: { workspaceId } })
+    // Pinned to what the journey has actually spent by now, so this still
+    // proves "zero NEW calls" rather than a number that drifts with the test.
+    const callsBeforeRevocation = providerCalls.length
     const profileV4 = await registerProfile(profileInput(4, 'voice_block_b', 'blockgen-profile-v4', { revokedAt: '2029-01-01T00:00:00.000Z' }))
     head = (await mutatePlan({
       workspaceId, projectId, projectVersionId, planId, baseVersionId: head.version.id, baseHash: head.version.planVersionHash,
@@ -470,7 +575,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
       ensure(ensureArguments()),
       (error) => error.code === 'ASSET_RIGHTS_BLOCKED',
     )
-    assert.equal(providerCalls.length, 11, 'revoked consent must cause zero provider calls')
+    assert.equal(providerCalls.length, callsBeforeRevocation, 'revoked consent must cause zero provider calls')
     assert.equal(await client.v2SyntheticBlockGeneration.count({ where: { workspaceId } }), generationsBefore, 'revoked consent must cause zero cache hits or new generations')
   } finally {
     await cleanup()
