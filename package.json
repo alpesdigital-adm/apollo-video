@@ -100,6 +100,7 @@
     "test:e2e:provider-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/provider-tts-avatar-journey.e2e.mjs",
     "test:e2e:block-plan-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-block-plan-journey.e2e.mjs",
     "test:e2e:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-presenter-profile.e2e.mjs",
+    "test:e2e:synthetic-master-reuse": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-master-reuse.e2e.mjs",
     "api:v1:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-public-contracts.mjs",
     "api:v1:docs:build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-public-api-documentation.mjs",
     "api:v1:baseline:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/update-public-contract-baseline.mjs",

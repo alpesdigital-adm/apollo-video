@@ -5,6 +5,7 @@ import { evaluateAssetUse, type AssetRightsSnapshot } from '../domain/asset-righ
 import {
   createSyntheticMasterAsset,
   SYNTHETIC_MASTER_ARTIFACT_ROLES,
+  SYNTHETIC_MASTER_REQUIRED_ARTIFACT_ROLES,
   type SyntheticMasterArtifactRole,
   type SyntheticMasterAsset,
 } from '../domain/synthetic-master-asset.ts'
@@ -176,14 +177,15 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       if (!role || byRole.has(role)) continue
       byRole.set(role, result)
     }
-    for (const role of SYNTHETIC_MASTER_ARTIFACT_ROLES) {
+    for (const role of SYNTHETIC_MASTER_REQUIRED_ARTIFACT_ROLES) {
       assertDomain(byRole.has(role), 'PRECONDITION_REQUIRED', `Provider job has no ${role} artifact to promote`)
     }
+    const promotedRoles = SYNTHETIC_MASTER_ARTIFACT_ROLES.filter((role) => byRole.has(role))
 
     // 3. Each artifact must exist in the catalog, be available, and its bytes
     //    must be the bytes storage holds.
     const catalogued = new Map<SyntheticMasterArtifactRole, Awaited<ReturnType<MediaArtifactQueryRepository['findById']>>>()
-    for (const role of SYNTHETIC_MASTER_ARTIFACT_ROLES) {
+    for (const role of promotedRoles) {
       const result = byRole.get(role)!
       const artifact = await dependencies.artifacts.findById(request.workspaceId, result.artifactId)
       assertDomain(Boolean(artifact), 'ASSET_NOT_FOUND', `Master ${role} artifact is missing from the catalog`)
@@ -236,7 +238,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
     })
 
     // 5. Asset rights must allow the use of every promoted artifact.
-    for (const role of SYNTHETIC_MASTER_ARTIFACT_ROLES) {
+    for (const role of promotedRoles) {
       const artifact = catalogued.get(role)!
       const snapshot = await dependencies.rights.currentSnapshot({
         workspaceId: request.workspaceId,
@@ -256,7 +258,9 @@ export function promoteSyntheticMasterAssetService(dependencies: {
 
     // 6. Audio and video must describe the same performance.
     const audio = catalogued.get('final-audio')!
-    const video = catalogued.get('normalized-video')!
+    // The normalized track when a normalization stage produced one; otherwise
+    // the provider's own video, which is what the master actually holds.
+    const video = catalogued.get('normalized-video') ?? catalogued.get('provider-original')!
     const measured = await dependencies.durations.measure({
       audio: { artifactId: audio.id, artifactKey: audio.artifactKey },
       video: { artifactId: video.id, artifactKey: video.artifactKey },
@@ -273,7 +277,7 @@ export function promoteSyntheticMasterAssetService(dependencies: {
       consentSnapshotHash: profile!.snapshot.consent.snapshotHash,
       authorizationHash: job!.authorizationHash,
       rightsSnapshotId: null,
-      artifacts: SYNTHETIC_MASTER_ARTIFACT_ROLES.map((role) => {
+      artifacts: promotedRoles.map((role) => {
         const artifact = catalogued.get(role)!
         return {
           role,

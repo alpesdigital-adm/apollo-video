@@ -119,6 +119,24 @@ test('T-FR-104 cataloguing fails closed when the alignment does not describe the
   assert.throws(() => catalog({ words: [] }), /carries no words/)
 })
 
+test('T-FR-104 a master without a normalization stage cuts segments from the provider video', () => {
+  // Masters normally carry three roles today, so the catalog must name the
+  // provider's own video instead of assuming a normalized track exists.
+  const unnormalized = createSyntheticMasterAsset({
+    ...master,
+    artifacts: master.artifacts.filter(({ role }) => role !== 'normalized-video'),
+  })
+  const segments = catalogSyntheticSpeechSegments({
+    master: unnormalized, blocks, words, identity,
+    createId: (block) => `segment-${block.blockId}`,
+  })
+  assert.equal(segments.length, 2)
+  assert.equal(segments[0].videoArtifactId, 'artifact-original')
+  assert.equal(segments[0].audioArtifactId, 'artifact-audio')
+  // A different master is a different segment address.
+  assert.notEqual(segments[0].segmentHash, catalog()[0].segmentHash)
+})
+
 test('T-FR-104 segment normalization is stable across punctuation, case and accents', () => {
   assert.equal(normalizeSyntheticSpeechText('  Olá,   MUNDO!  '), 'olá mundo')
   // Edge punctuation is stripped on both sides of the word-by-word match, so

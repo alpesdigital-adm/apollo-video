@@ -137,7 +137,12 @@ export function catalogSyntheticSpeechSegments(input: {
   }
 
   const audio = input.master.artifacts.find((artifact) => artifact.role === 'final-audio')!
-  const video = input.master.artifacts.find((artifact) => artifact.role === 'normalized-video')!
+  // `normalized-video` is optional on the master, so a segment points at the
+  // normalized track when a normalization stage produced one and at the
+  // provider's own video otherwise. This names the bytes the segment is cut
+  // from; it never relabels provider bytes as normalized.
+  const video = input.master.artifacts.find((artifact) => artifact.role === 'normalized-video')
+    ?? input.master.artifacts.find((artifact) => artifact.role === 'provider-original')!
   const alignment = input.master.artifacts.find((artifact) => artifact.role === 'alignment')!
 
   const segments: Readonly<SyntheticSpeechSegment>[] = []

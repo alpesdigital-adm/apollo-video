@@ -27,9 +27,10 @@ const snapshot = createSyntheticPresenterProfileSnapshot({
   },
 })
 
+// The provider result ledger admits exactly these three roles
+// (`provider_result_artifacts_media_check`), so a promotable job carries three.
 const ROLES = {
   'provider-original': { providerRole: 'primary-video', artifactId: 'artifact-original', sha256: digest('a'), mediaType: 'video', container: 'mp4' },
-  'normalized-video': { providerRole: 'normalized-video', artifactId: 'artifact-normalized', sha256: digest('b'), mediaType: 'video', container: 'mp4' },
   'final-audio': { providerRole: 'primary-audio', artifactId: 'artifact-audio', sha256: digest('c'), mediaType: 'audio', container: 'wav' },
   alignment: { providerRole: 'alignment-evidence', artifactId: 'artifact-alignment', sha256: digest('d'), mediaType: 'data', container: 'json' },
 }
@@ -163,11 +164,13 @@ test('T-FR-104 promotion seals an approved result only after every gate passes',
   assert.equal(master.critic.reportHash, digest('f'))
 
   // Every promoted artifact had its bytes verified against storage.
-  assert.equal(calls.verifiedKeys.length, 4)
+  assert.equal(calls.verifiedKeys.length, 3)
   assert.deepEqual(
     [...calls.verifiedKeys].sort(),
-    ['artifact-alignment', 'artifact-audio', 'artifact-normalized', 'artifact-original'].map((id) => `promotion/${id}`).sort(),
+    ['artifact-alignment', 'artifact-audio', 'artifact-original'].map((id) => `promotion/${id}`).sort(),
   )
+  // Without a normalization stage the master holds the provider's own video.
+  assert.deepEqual(master.artifacts.map(({ role }) => role), ['provider-original', 'final-audio', 'alignment'])
   // The repository re-checks the snapshot and critic inside its transaction.
   assert.equal(calls.sealed[0].profileSnapshotHash, snapshot.snapshotHash)
   assert.equal(calls.sealed[0].criticResultHash, digest('f'))
