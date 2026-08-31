@@ -1592,6 +1592,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.008 — Cache sintético [FR-105]
 
+> Estado parcial (2026-08-31, branch `claude/f3008-synthetic-cache`, não mesclada): identidade canônica única para TTS e avatar (compatível byte a byte com as chaves já persistidas), ledger durável de decisões com custo evitado derivado de evidência, e elegibilidade revalidada em ordem vinculante — ver ADR-146 e `docs/quality/synthetic-cache-v1.md`. Nenhuma caixa fecha: falta integração final, deploy e aceite do proprietário.
+
 - [ ] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes. Evidência T-FR-105.
 - [ ] Consultar cache após rights/consent e antes de reservar custo. Evidência T-FR-103/T-FR-104.
 - [ ] Invalidar somente por mudança que altere o resultado ou elegibilidade. Evidência T-FR-105.

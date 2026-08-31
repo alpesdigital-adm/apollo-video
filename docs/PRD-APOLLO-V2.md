@@ -1014,6 +1014,8 @@ Salvar sempre:
 
 Hash de script + áudio + perfil + provider + config evita regeneração.
 
+> Implementação: identidade canônica única em `synthetic-cache-identity.ts` cobrindo TTS e avatar, com elegibilidade revalidada a cada consulta e decisões persistidas em `synthetic_cache_decisions` (ADR-146, spec 06 §14).
+
 ### FR-106 — Crítico sintético
 
 Lip-sync, identidade, olhos, dentes, mãos, pronúncia, omissões, continuidade e artefatos.

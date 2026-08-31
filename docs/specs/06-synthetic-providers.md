@@ -273,6 +273,8 @@ Cache hit só é utilizável se:
 - output constraints atendidos;
 - nenhum mustRegenerate explícito.
 
+> **Nota de implementação (F3.008).** A fórmula acima continua sendo a autoridade de FORMA. A identidade é calculada por um único módulo (`synthetic-cache-identity.ts`, ADR-146) que cobre TTS e avatar: a chave de TTS é byte-idêntica à `synthetic-block-cache-key/v1` já persistida (congelada por sentinela), e a de avatar acrescenta checksum do áudio condutor, referência de identidade do avatar, versão do presenter, model, formato, hash de config de render, direção e background. Uma sentinela de forma proíbe que projeto, posição, bloco, plano, consent, custo, moeda, timeout, retry, tentativa, deadline, timestamps, workspace, actor ou idempotency key entrem no endereço — consent é elegibilidade, não identidade, senão renovar consent fabricaria regeneração paga e revogar deixaria endereço reutilizável. A elegibilidade é revalidada a cada consulta na ordem vinculante: request/workspace → snapshot → head (vontade atual) → rights/consent → identidade → candidato → critic → blob/checksum → output constraints → `mustRegenerate` → hit; custo só é reservado depois que um miss sobrevive a essa ordem. Toda decisão vira linha durável em `synthetic_cache_decisions` (hit/miss/forced-regenerate/blocked + reason code + candidato + política + critic + economia estimada + custo evitado + hash da decisão), com o assunto guardado apenas como hash domain-separated — nunca o texto, a evidência de consent ou segredo de provider. O custo evitado vem da estimativa persistida do provider job que pagou pelo candidato; sem essa evidência o reuso falha fechado em vez de alegar economia. Invalidação nunca apaga master ou histórico.
+
 ## 15. TransformationBrief
 
 ```ts
