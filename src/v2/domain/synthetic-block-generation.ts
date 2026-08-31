@@ -92,9 +92,15 @@ export function createSyntheticBlockGeneration(input: Omit<SyntheticBlockGenerat
     'generation.attemptBudget is invalid',
   )
   if (input.cacheDecision === 'hit-reuse') {
+    // A hit never owns a provider job and always reuses its source artifacts.
+    // Its status may later become `superseded` — a regeneration replacing the
+    // reuse does not retroactively make it a different kind of decision — so
+    // pinning it to `approved` would make the row unreadable forever once
+    // superseded, taking the whole plan with it.
     assertDomain(
       Boolean(input.sourceGenerationId) && !input.providerJobId &&
-        input.status === 'approved' && Boolean(input.audioArtifactId) && Boolean(input.alignmentArtifactId),
+        (input.status === 'approved' || input.status === 'superseded') &&
+        Boolean(input.audioArtifactId) && Boolean(input.alignmentArtifactId),
       'INVALID_ARGUMENT',
       'A cache hit must reference its source generation and reuse its artifacts without a provider job',
     )

@@ -349,6 +349,10 @@ export class PrismaSyntheticScriptPlanRepository implements SyntheticScriptPlanR
           if (replay && replay.requestFingerprint === input.requestFingerprint) {
             return Object.freeze({ plan: replay, replayed: true })
           }
+          // Not a replay: two commands raced for the same version sequence.
+          // That is a concurrency conflict the caller can act on, not an
+          // internal failure, so it must not escape as a raw driver error.
+          throw new DomainError('VERSION_CONFLICT', 'Synthetic script plan advanced concurrently')
         }
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' && attempt < 3) continue
         throw error
