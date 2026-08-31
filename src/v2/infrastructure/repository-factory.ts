@@ -94,6 +94,7 @@ import type { SyntheticProductionRepository } from '../application/ports/synthet
 import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
 import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
+import type { TransformationProviderRegistryRepository } from '../application/ports/transformation-provider-registry-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
@@ -253,6 +254,7 @@ import { PrismaSyntheticProductionRepository } from './prisma/synthetic-producti
 import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
+import { PrismaTransformationProviderRegistryRepository } from './prisma/transformation-provider-registry-repository.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
@@ -669,6 +671,10 @@ export function createSyntheticScriptPlanRepository(): SyntheticScriptPlanReposi
 
 export function createSyntheticBlockGenerationRepository(): SyntheticBlockGenerationRepository {
   return new PrismaSyntheticBlockGenerationRepository(resolveV2Client())
+}
+
+export function createTransformationProviderRegistryRepository(): TransformationProviderRegistryRepository {
+  return new PrismaTransformationProviderRegistryRepository(resolveV2Client())
 }
 
 export function createSyntheticBlockConcatenationRepository(): SyntheticBlockConcatenationRepository {

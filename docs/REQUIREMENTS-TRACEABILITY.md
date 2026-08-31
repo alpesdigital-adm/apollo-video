@@ -393,6 +393,8 @@ Evidência integrada F0.031/FR-242 — o ADR-142 seleciona OIDC Authorization Co
 | FR-110 | TransformationBrief | S1,S6 | D2,D4 | intent/preserve/fallback estruturados | contract |
 | FR-111 | Modos | S6 | D4 | 6 modos no capability registry | contract |
 | FR-112 | Provider Registry | S6 | D4 | routing por capability/custo | integration |
+
+Complemento local Wave 15 — `transformation-brief/v1` substitui o tipo solto anterior por um brief imutável, frame-first e content-addressed; a projeção de provider exclui identidades internas. `transformation-mode-registry/v1` declara seis modos exaustivos sem branches por provider. Definitions, capabilities, health e selections possuem schema PostgreSQL workspace-safe, hashes revalidados e decisões que registram todos os descartes. O teste PostgreSQL está ligado ao CI Compose; execução hospedada, API pública, vínculo real ao StoryPlan/rights, transformação por provider, deploy e aceite permanecem pendentes. Nenhuma caixa de F3.010–F3.012 é fechada por este slice.
 | FR-113 | Jobs duráveis | S6 | D4 | API/MCP resume | resilience |
 | FR-114 | Novelty budget | S1 | D2 | excesso bloqueado/penalizado | unit |
 | FR-115 | Fallback | S6 | D2,D4 | v2v→composite→cutaway | integration |
