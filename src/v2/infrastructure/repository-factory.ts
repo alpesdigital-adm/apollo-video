@@ -95,6 +95,7 @@ import type { SyntheticAudioMasterRepository } from '../application/ports/synthe
 import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
+import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
 import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
 import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
@@ -263,6 +264,7 @@ import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-m
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
+import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
 import {
@@ -720,7 +722,8 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
     mutatePlan: mutateSyntheticScriptPlanService(planDependencies),
     readPlan: readSyntheticScriptPlanService({ plans }),
     ensure: ensureSyntheticBlockGenerationsService({
-      plans, generations, profiles, artifacts, rights,
+      plans, generations, profiles, artifacts, rights, providerJobs,
+      cacheDecisions: createSyntheticCacheDecisionRepository(),
       enqueueProviderJob: enqueueProviderJobService({
         jobs: providerJobs,
         adapters: createProviderAdapterRegistry(environment),
@@ -746,6 +749,10 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
 
 export function createSyntheticMasterAssetRepository(): SyntheticMasterAssetRepository {
   return new PrismaSyntheticMasterAssetRepository(resolveV2Client())
+}
+
+export function createSyntheticCacheDecisionRepository(): SyntheticCacheDecisionRepository {
+  return new PrismaSyntheticCacheDecisionRepository(resolveV2Client())
 }
 
 export function createSyntheticSpeechSegmentRepository(): SyntheticSpeechSegmentRepository {

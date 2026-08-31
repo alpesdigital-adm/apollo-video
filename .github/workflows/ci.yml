@@ -172,6 +172,9 @@ jobs:
       - name: Run block audio concatenation and consolidated master tests
         run: npm run test:integration:synthetic-block-compilation
 
+      - name: Run synthetic cache decision ledger tests
+        run: npm run test:integration:synthetic-cache-decision
+
       - name: Run synthetic master asset persistence tests
         run: npm run test:integration:synthetic-master-asset
 

@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto'
 
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { assertSyntheticPresenterPolicy } from '../domain/synthetic-presenter-policy-engine.ts'
+import {
+  assertSyntheticPresenterPolicy,
+  SYNTHETIC_PRESENTER_ELIGIBILITY_POLICY_VERSION,
+} from '../domain/synthetic-presenter-policy-engine.ts'
 import {
   calculateSyntheticBlockCacheKey,
   createSyntheticBlockGeneration,
@@ -10,6 +13,12 @@ import {
   type SyntheticBlockGeneration,
   type SyntheticBlockVoiceKey,
 } from '../domain/synthetic-block-generation.ts'
+import {
+  createSyntheticCacheDecision,
+  type SyntheticCacheDecisionOutcome,
+  type SyntheticCacheDecisionReasonCode,
+} from '../domain/synthetic-cache-decision.ts'
+import type { SyntheticTtsCacheSubject } from '../domain/synthetic-cache-identity.ts'
 import type { SyntheticPresenterProfileSnapshot } from '../domain/synthetic-production.ts'
 import {
   materializeActorAuditContext,
@@ -21,11 +30,20 @@ import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-
 import type { ProviderJobRepository } from './ports/provider-job-repository.ts'
 import type { ProviderResultArtifactRepository } from './ports/provider-result-artifact-repository.ts'
 import type { SyntheticBlockGenerationRepository } from './ports/synthetic-block-generation-repository.ts'
+import type { SyntheticCacheDecisionRepository } from './ports/synthetic-cache-decision-repository.ts'
 import type { SyntheticProductionRepository } from './ports/synthetic-production-repository.ts'
 import type { SyntheticScriptPlanRepository } from './ports/synthetic-script-plan-repository.ts'
 
 const DEFAULT_ATTEMPT_BUDGET = 3
 const DEFAULT_DEADLINE_MS = 24 * 60 * 60 * 1_000
+
+/**
+ * Accounting unit for ledger entries that record no money at all. A zero
+ * amount still needs a currency, and every entry that does carry money always
+ * carries the currency of the real provider estimate it was drawn from — this
+ * default never prices anything.
+ */
+export const SYNTHETIC_CACHE_LEDGER_ZERO_AMOUNT_CURRENCY = 'USD'
 
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
 
@@ -91,6 +109,14 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
   profiles: SyntheticProductionRepository
   artifacts: MediaArtifactQueryRepository
   rights: AssetRightsRepository
+  /** Durable ledger of every cache decision, including the ones that pay nothing. */
+  cacheDecisions: SyntheticCacheDecisionRepository
+  /**
+   * Read-only access to the job that already paid for a reuse candidate. It is
+   * the only honest source of "what this reuse avoided": the estimate the
+   * provider adapter recorded when that work was priced.
+   */
+  providerJobs: ProviderJobRepository
   enqueueProviderJob: (request: {
     workspaceId: string
     projectId: string
@@ -137,12 +163,84 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
     })
     if (!profile) throw new DomainError('PRECONDITION_REQUIRED', 'Synthetic presenter profile was not found')
     const locale = plan.version.locale
+    const outputFormat = request.outputFormat ?? 'mp3'
+    const decidedAt = now.toISOString()
+    const subjectOf = (exactText: string): Readonly<SyntheticTtsCacheSubject> => Object.freeze({
+      operation: 'tts' as const,
+      exactText,
+      locale,
+      voice: syntheticBlockVoiceKeyFromProfile(profile.snapshot, outputFormat),
+    })
+    /**
+     * Appends one ledger entry. The id is derived from the decision's own
+     * material, so replaying an ensure pass at the same instant lands on the
+     * same content address and the repository refuses to book its economy
+     * twice.
+     */
+    const recordDecision = async (entry: {
+      blockId: string
+      attempt: number
+      exactText: string
+      outcome: SyntheticCacheDecisionOutcome
+      reasonCode: SyntheticCacheDecisionReasonCode
+      reason: string
+      candidateGenerationId?: string | null
+      criticReportHash?: string | null
+      estimatedSavingMinorUnits?: number
+      avoidedCostMinorUnits?: number
+      currency?: string
+    }) => {
+      const subject = subjectOf(entry.exactText)
+      const material = [
+        request.workspaceId, request.projectId, entry.blockId, String(entry.attempt),
+        calculateSyntheticBlockCacheKey({ exactText: entry.exactText, locale, voice: subject.voice }),
+        entry.outcome, entry.reasonCode, decidedAt,
+      ].join(':')
+      await dependencies.cacheDecisions.record(createSyntheticCacheDecision({
+        id: `scd-${sha256(material).slice(0, 48)}`,
+        workspaceId: request.workspaceId,
+        projectId: request.projectId,
+        subject,
+        outcome: entry.outcome,
+        reasonCode: entry.reasonCode,
+        reason: entry.reason,
+        candidateGenerationId: entry.candidateGenerationId ?? null,
+        candidateMasterId: null,
+        policyVersion: SYNTHETIC_PRESENTER_ELIGIBILITY_POLICY_VERSION,
+        criticReportHash: entry.criticReportHash ?? null,
+        estimatedSavingMinorUnits: entry.estimatedSavingMinorUnits ?? 0,
+        avoidedCostMinorUnits: entry.avoidedCostMinorUnits ?? 0,
+        currency: entry.currency ?? SYNTHETIC_CACHE_LEDGER_ZERO_AMOUNT_CURRENCY,
+        decidedAt,
+      }))
+    }
+
     // Gate order is binding: policy (identity, voice, consent) first, then
     // cache, then cost.
-    await assertBlockGenerationConsent(dependencies.profiles, profile.snapshot, {
-      workspaceId: request.workspaceId, operation: 'tts', use: request.use, market: request.market, locale, now,
-    })
-    const outputFormat = request.outputFormat ?? 'mp3'
+    try {
+      await assertBlockGenerationConsent(dependencies.profiles, profile.snapshot, {
+        workspaceId: request.workspaceId, operation: 'tts', use: request.use, market: request.market, locale, now,
+      })
+    } catch (error) {
+      // The stop itself is the outcome the operator must see, so it is always
+      // the error that propagates; the ledger entries are written afterwards
+      // and a ledger failure here can never turn a refusal into a paid call.
+      try {
+        for (const block of plan.blocks) {
+          await recordDecision({
+            blockId: block.id,
+            attempt: 0,
+            exactText: block.exactText,
+            outcome: 'blocked',
+            reasonCode: 'CONSENT_REVOKED',
+            reason: `presenter policy refused this operation before any cache lookup: ${error instanceof Error ? error.message : 'consent is not valid'}`,
+          })
+        }
+      } catch {
+        // Subordinate to the refusal above.
+      }
+      throw error
+    }
     const voice = syntheticBlockVoiceKeyFromProfile(profile.snapshot, outputFormat)
     const force = new Set(request.forceBlockIds ?? [])
     for (const forced of force) {
@@ -151,6 +249,40 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
         'INVALID_ARGUMENT',
         'Forced regeneration references a block outside the current plan version',
       )
+    }
+
+    /**
+     * The persisted price of the work a generation embodies. A reused row
+     * carries no job of its own, so the chain is walked back to the generation
+     * that actually paid, and the estimate that job recorded is the only cost
+     * evidence this flow has. When there is none, this returns null — the
+     * ledger then refuses to claim a saving instead of inventing one.
+     */
+    const paidJobEvidence = async (
+      candidate: Readonly<SyntheticBlockGeneration>,
+      pool: readonly Readonly<SyntheticBlockGeneration>[],
+    ): Promise<Readonly<{ currency: string; costMinorUnits: number; criticReportHash: string | null }> | null> => {
+      const byId = new Map(pool.map((entry) => [entry.id, entry]))
+      const seen = new Set<string>()
+      let current: Readonly<SyntheticBlockGeneration> | undefined = candidate
+      while (current && !current.providerJobId) {
+        if (seen.has(current.id) || !current.sourceGenerationId) return null
+        seen.add(current.id)
+        current = byId.get(current.sourceGenerationId)
+      }
+      if (!current?.providerJobId) return null
+      const persisted = await dependencies.providerJobs.read({
+        workspaceId: request.workspaceId,
+        projectId: current.projectId,
+        jobId: current.providerJobId,
+      })
+      const estimate = persisted?.job.estimate
+      if (!estimate) return null
+      return Object.freeze({
+        currency: estimate.currency,
+        costMinorUnits: estimate.costMinorUnits,
+        criticReportHash: persisted?.job.criticResultHash ?? null,
+      })
     }
 
     const outcomes: EnsureBlockGenerationOutcome[] = []
@@ -196,16 +328,28 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
       }
 
       let reused: Readonly<SyntheticBlockGeneration> | null = null
+      let approvedCandidates: readonly Readonly<SyntheticBlockGeneration>[] = []
+      let missReasonCode: SyntheticCacheDecisionReasonCode = 'CACHE_MISS_NO_CANDIDATE'
+      let rejectedCandidateId: string | null = null
       if (!forced) {
         // Cache lookup happens only after the consent gate above and before
         // any cost is reserved; a hit must still prove its blob and rights.
-        for (const candidate of await dependencies.generations.findByCacheKey({ workspaceId: request.workspaceId, cacheKey, statuses: ['approved'] })) {
-          if (!candidate.audioArtifactId || !candidate.alignmentArtifactId) continue
+        approvedCandidates = await dependencies.generations.findByCacheKey({ workspaceId: request.workspaceId, cacheKey, statuses: ['approved'] })
+        for (const candidate of approvedCandidates) {
+          if (!candidate.audioArtifactId || !candidate.alignmentArtifactId) {
+            missReasonCode = 'CANDIDATE_BLOB_UNAVAILABLE'
+            rejectedCandidateId = candidate.id
+            continue
+          }
           const [audio, alignment] = await Promise.all([
             dependencies.artifacts.findById(request.workspaceId, candidate.audioArtifactId),
             dependencies.artifacts.findById(request.workspaceId, candidate.alignmentArtifactId),
           ])
-          if (audio?.status !== 'available' || alignment?.status !== 'available') continue
+          if (audio?.status !== 'available' || alignment?.status !== 'available') {
+            missReasonCode = 'CANDIDATE_BLOB_UNAVAILABLE'
+            rejectedCandidateId = candidate.id
+            continue
+          }
           const currentRights = await dependencies.rights.findCurrentForArtifacts(request.workspaceId, [candidate.audioArtifactId])
           const decision = evaluateAssetUse(currentRights.get(candidate.audioArtifactId) ?? null, {
             workspaceId: request.workspaceId,
@@ -214,7 +358,11 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
             locale,
             syntheticOperations: ['tts'],
           }, now)
-          if (decision.outcome !== 'allow') continue
+          if (decision.outcome !== 'allow') {
+            missReasonCode = 'CANDIDATE_RIGHTS_BLOCKED'
+            rejectedCandidateId = candidate.id
+            continue
+          }
           reused = candidate
           break
         }
@@ -223,21 +371,59 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
       if (!reused && !forced) {
         // A duplicate must never pay while its twin is in flight: defer until
         // the sibling generation settles, then reuse it through the cache.
-        const pendingTwin = inFlightKeys.has(cacheKey) ||
-          (await dependencies.generations.findByCacheKey({ workspaceId: request.workspaceId, cacheKey, statuses: ['pending'] }))
-            .some((candidate) => candidate.blockId !== block.id)
-        if (pendingTwin) {
-          outcomes.push({ blockId: block.id, generationId: null, action: 'deferred-duplicate', reason: 'an in-flight generation already carries this exact cache key; waiting to reuse it instead of paying twice' })
+        const twinInThisPass = inFlightKeys.has(cacheKey)
+        const persistedTwins = twinInThisPass
+          ? []
+          : (await dependencies.generations.findByCacheKey({ workspaceId: request.workspaceId, cacheKey, statuses: ['pending'] }))
+            .filter((candidate) => candidate.blockId !== block.id)
+        if (twinInThisPass || persistedTwins.length > 0) {
+          const reason = 'an in-flight generation already carries this exact cache key; waiting to reuse it instead of paying twice'
+          // The twin has not settled, so nothing is avoided yet — only the
+          // price it was quoted, when the provider already quoted one.
+          const quoted = persistedTwins[0] ? await paidJobEvidence(persistedTwins[0], persistedTwins) : null
+          await recordDecision({
+            blockId: block.id,
+            attempt,
+            exactText: block.exactText,
+            outcome: 'blocked',
+            reasonCode: 'IN_FLIGHT_TWIN',
+            reason,
+            ...(quoted ? { estimatedSavingMinorUnits: quoted.costMinorUnits, currency: quoted.currency } : {}),
+          })
+          outcomes.push({ blockId: block.id, generationId: null, action: 'deferred-duplicate', reason })
           continue
         }
       }
 
       if (reused) {
+        // Cost is read only now, after the cache already decided: the reuse is
+        // priced by the estimate the paying job persisted, never by a number
+        // this pass makes up.
+        const evidence = await paidJobEvidence(reused, approvedCandidates)
+        assertDomain(
+          evidence !== null && evidence.costMinorUnits > 0,
+          'PRECONDITION_REQUIRED',
+          'Cache reuse cannot be booked: the reused generation carries no persisted provider estimate proving what it avoided',
+        )
+        const decisionReason = `cache hit: approved generation ${reused.id} shares this exact cache key with valid blob, rights and consent`
+        await recordDecision({
+          blockId: block.id,
+          attempt,
+          exactText: block.exactText,
+          outcome: 'hit',
+          reasonCode: 'CACHE_HIT_ELIGIBLE',
+          reason: decisionReason,
+          candidateGenerationId: reused.id,
+          criticReportHash: evidence!.criticReportHash,
+          estimatedSavingMinorUnits: evidence!.costMinorUnits,
+          avoidedCostMinorUnits: evidence!.costMinorUnits,
+          currency: evidence!.currency,
+        })
         const generation = createSyntheticBlockGeneration({
           ...base,
           status: 'approved',
           cacheDecision: 'hit-reuse',
-          decisionReason: `cache hit: approved generation ${reused.id} shares this exact cache key with valid blob, rights and consent`,
+          decisionReason,
           sourceGenerationId: reused.id,
           audioArtifactId: reused.audioArtifactId!,
           alignmentArtifactId: reused.alignmentArtifactId!,
@@ -247,6 +433,22 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
         continue
       }
 
+      const decisionReason = forced
+        ? 'explicit regenerate command: the cache was deliberately bypassed for this block'
+        : 'cache miss: no approved generation carries this exact cache key'
+      // The ledger entry is written before the paid call, so a ledger failure
+      // can never leave an orphan provider job nobody decided to pay for.
+      await recordDecision({
+        blockId: block.id,
+        attempt,
+        exactText: block.exactText,
+        outcome: forced ? 'forced-regenerate' : 'miss',
+        reasonCode: forced ? 'MUST_REGENERATE' : missReasonCode,
+        reason: forced || missReasonCode === 'CACHE_MISS_NO_CANDIDATE'
+          ? decisionReason
+          : `cache miss: every approved generation sharing this cache key was rejected (${missReasonCode})`,
+        ...(forced ? {} : { candidateGenerationId: rejectedCandidateId }),
+      })
       const enqueued = await dependencies.enqueueProviderJob({
         workspaceId: request.workspaceId,
         projectId: request.projectId,
@@ -268,9 +470,6 @@ export function ensureSyntheticBlockGenerationsService(dependencies: {
         actor: request.actor,
         idempotencyKey: `bg-${id}`,
       })
-      const decisionReason = forced
-        ? 'explicit regenerate command: the cache was deliberately bypassed for this block'
-        : 'cache miss: no approved generation carries this exact cache key'
       const generation = createSyntheticBlockGeneration({
         ...base,
         status: 'pending',

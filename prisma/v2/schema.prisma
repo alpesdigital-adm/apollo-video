@@ -198,6 +198,7 @@ model V2Workspace {
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
   syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
   syntheticPresenterProfileHeads         V2SyntheticPresenterProfileHead[]
+  syntheticCacheDecisions                V2SyntheticCacheDecision[]
 
   @@map("workspaces")
 }
@@ -682,6 +683,7 @@ model V2Project {
   syntheticScriptBlocks                  V2SyntheticScriptBlock[]
   syntheticBlockGenerations              V2SyntheticBlockGeneration[]
   syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
+  syntheticCacheDecisions                V2SyntheticCacheDecision[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -3511,6 +3513,7 @@ model V2SyntheticMasterAsset {
   createdBy       V2ApiClient                 @relation("SyntheticMasterCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   artifacts       V2SyntheticMasterArtifact[]
   speechSegments  V2SyntheticSpeechSegment[]
+  cacheDecisions  V2SyntheticCacheDecision[]  @relation("CacheDecisionCandidateMaster")
 
   @@unique([id, workspaceId], map: "synthetic_master_assets_id_workspace_key")
   @@unique([workspaceId, masterHash], map: "synthetic_master_assets_workspace_hash_key")
@@ -3815,6 +3818,7 @@ model V2SyntheticBlockGeneration {
   profileSnapshot   V2SyntheticPresenterProfile  @relation(fields: [profileSnapshotId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   audioArtifact     V2MediaArtifact?             @relation("BlockGenerationAudio", fields: [audioArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   alignmentArtifact V2MediaArtifact?             @relation("BlockGenerationAlignment", fields: [alignmentArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  cacheDecisions    V2SyntheticCacheDecision[]   @relation("CacheDecisionCandidateGeneration")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, blockId, attempt], map: "synthetic_block_generations_block_attempt_key")
@@ -3823,6 +3827,45 @@ model V2SyntheticBlockGeneration {
   @@index([workspaceId, providerJobId], map: "synthetic_block_generations_job_idx")
   @@map("synthetic_block_generations")
 }
+
+/// Durable ledger of every synthetic cache decision, including the ones that
+/// produced no generation at all. Hashes and identifiers only: the script, the
+/// consent evidence and provider secrets never reach this table.
+model V2SyntheticCacheDecision {
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  schemaVersion             String   @db.VarChar(64)
+  operation                 String   @db.VarChar(32)
+  cacheKey                  String   @db.Char(64)
+  cacheKeyVersion           String   @db.VarChar(64)
+  outcome                   String   @db.VarChar(24)
+  reasonCode                String   @db.VarChar(48)
+  reason                    String   @db.VarChar(500)
+  candidateGenerationId     String?  @db.VarChar(128)
+  candidateMasterId         String?  @db.VarChar(128)
+  policyVersion             String   @db.VarChar(128)
+  criticReportHash          String?  @db.Char(64)
+  estimatedSavingMinorUnits Int
+  avoidedCostMinorUnits     Int
+  currency                  String   @db.Char(3)
+  subjectHash               String   @db.Char(64)
+  decisionHash              String   @db.Char(64)
+  decidedAt                 DateTime @db.Timestamptz(3)
+
+  workspace            V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project              V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  candidateGeneration  V2SyntheticBlockGeneration? @relation("CacheDecisionCandidateGeneration", fields: [candidateGenerationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  candidateMaster      V2SyntheticMasterAsset?     @relation("CacheDecisionCandidateMaster", fields: [candidateMasterId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId], map: "synthetic_cache_decisions_id_workspace_key")
+  @@unique([workspaceId, decisionHash], map: "synthetic_cache_decisions_workspace_hash_key")
+  @@index([workspaceId, cacheKey, decidedAt(sort: Desc)], map: "synthetic_cache_decisions_workspace_key_decided_idx")
+  @@index([workspaceId, projectId, decidedAt(sort: Desc)], map: "synthetic_cache_decisions_workspace_project_decided_idx")
+  @@index([workspaceId, outcome], map: "synthetic_cache_decisions_workspace_outcome_idx")
+  @@map("synthetic_cache_decisions")
+}
+
 model V2SyntheticBlockConcatenation {
   id                      String   @id @db.VarChar(128)
   workspaceId             String   @db.VarChar(128)

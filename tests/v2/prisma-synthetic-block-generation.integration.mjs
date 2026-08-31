@@ -31,6 +31,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
 
   const cleanup = async () => {
     await client.v2SyntheticScriptPlan.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+    await client.v2SyntheticCacheDecision.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticBlockGeneration.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptBlock.deleteMany({ where: { workspaceId } })
     await client.v2SyntheticScriptPlanVersion.deleteMany({ where: { workspaceId } })
@@ -85,6 +86,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     const { PrismaSyntheticAudioMasterRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-audio-master-repository.ts')
     const { PrismaSyntheticScriptPlanRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-script-plan-repository.ts')
     const { PrismaSyntheticBlockGenerationRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-block-generation-repository.ts')
+    const { PrismaSyntheticCacheDecisionRepository } = await import('../../src/v2/infrastructure/prisma/synthetic-cache-decision-repository.ts')
     const { LocalArtifactSourceMaterializer, LocalMediaUploadStorage } = await import('../../src/v2/infrastructure/media/local-media-upload-storage.ts')
     const { probeAudioDurationSeconds } = await import('../../src/v2/infrastructure/media/video-probe.ts')
     const { ElevenLabsTtsProviderAdapter } = await import('../../src/v2/infrastructure/elevenlabs-tts-provider.ts')
@@ -233,9 +235,11 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     }
     const createPlan = createSyntheticScriptPlanService(planDependencies)
     const mutatePlan = mutateSyntheticScriptPlanService(planDependencies)
+    const cacheDecisions = new PrismaSyntheticCacheDecisionRepository(client)
     const ensure = ensureSyntheticBlockGenerationsService({
       plans, generations, profiles: syntheticRepository, artifacts: artifactRepository,
-      rights: rightsRepository, enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
+      rights: rightsRepository, cacheDecisions, providerJobs: providerRepository,
+      enqueueProviderJob: enqueue, clock: () => new Date(at(2)),
     })
     const settle = settleSyntheticBlockGenerationsService({
       generations, providerJobs: providerRepository, resultArtifacts: resultArtifactRepository,
@@ -362,6 +366,48 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     await drainWorkers()
     await settle({ workspaceId, projectId, planId, actor })
     assert.equal(providerCalls.length, 8)
+
+    // Every path the ensure pass took is written down: the reuse, the misses
+    // that paid, the deliberate regeneration and the duplicate that waited.
+    const ledger = await cacheDecisions.summarize({ workspaceId, projectId })
+    assert.ok(ledger.byOutcome.hit >= 1, 'every reuse must be booked as a hit')
+    assert.equal(ledger.byOutcome['forced-regenerate'], 1)
+    assert.equal(ledger.byOutcome.blocked, 1)
+    assert.ok(ledger.byOutcome.miss >= 1, 'the paid generations must be booked as misses')
+    const decisions = await cacheDecisions.listByProject({ workspaceId, projectId, limit: 200 })
+    assert.equal(
+      decisions.length,
+      ledger.byOutcome.hit + ledger.byOutcome.miss + ledger.byOutcome['forced-regenerate'] + ledger.byOutcome.blocked,
+    )
+    const hits = decisions.filter(({ outcome }) => outcome === 'hit')
+    // The reuse is priced by the estimate the paying job persisted, not by a
+    // number this pass invented, and only the reuse claims avoided money.
+    for (const entry of hits) {
+      assert.equal(entry.reasonCode, 'CACHE_HIT_ELIGIBLE')
+      assert.ok(entry.avoidedCostMinorUnits > 0)
+      assert.equal(entry.estimatedSavingMinorUnits, entry.avoidedCostMinorUnits)
+      assert.equal(entry.currency, 'USD')
+      assert.ok(entry.candidateGenerationId)
+    }
+    assert.equal(
+      ledger.byCurrency.reduce((total, entry) => total + entry.avoidedCostMinorUnits, 0),
+      hits.reduce((total, entry) => total + entry.avoidedCostMinorUnits, 0),
+    )
+    assert.deepEqual(
+      decisions.filter(({ outcome }) => outcome !== 'hit').map(({ avoidedCostMinorUnits }) => avoidedCostMinorUnits),
+      decisions.filter(({ outcome }) => outcome !== 'hit').map(() => 0),
+    )
+    assert.deepEqual(
+      decisions.filter(({ outcome }) => outcome === 'blocked').map(({ reasonCode }) => reasonCode),
+      ['IN_FLIGHT_TWIN'],
+    )
+    // The ledger never leaks the script it decided about.
+    assert.doesNotMatch(JSON.stringify(decisions), /Primeira/)
+    // Replaying an ensure pass that changes nothing books no new economy.
+    const beforeReplay = await cacheDecisions.summarize({ workspaceId, projectId })
+    await ensure(ensureArguments())
+    assert.deepEqual(await cacheDecisions.summarize({ workspaceId, projectId }), beforeReplay)
+
     const supersededRow = await client.v2SyntheticBlockGeneration.findUniqueOrThrow({ where: { id: beforeForce.id } })
     assert.equal(supersededRow.status, 'superseded')
     assert.ok(supersededRow.supersededByGenerationId)
