@@ -1008,6 +1008,8 @@ Salvar sempre:
 - custo;
 - consent snapshot.
 
+> Implementação: aggregate `synthetic-master-asset/v1`, content-addressed e imutável, mais o catálogo de frases reutilizáveis `synthetic_speech_segments` (ADR-145, spec 06 §13). Composição continua derivada e fora do master.
+
 ### FR-105 — Cache
 
 Hash de script + áudio + perfil + provider + config evita regeneração.

@@ -1582,6 +1582,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.007 — SyntheticMasterAsset [FR-104]
 
+> Estado parcial (2026-08-30, branch `claude/f3007-synthetic-master`, não mesclada): aggregate imutável content-addressed, persistência com migrations aplicadas, promoção gated e catálogo de fala reutilizável estão implementados e testados em PostgreSQL real (ver `docs/quality/synthetic-master-asset-v1.md` e ADR-145). Nenhuma caixa fecha: falta integração final, deploy e aceite do proprietário.
+
 - [ ] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage. Evidência T-FR-104.
 - [ ] Catalogar cada frase completa como SpeechSegment reutilizável. Evidência T-FR-104.
 - [ ] Marcar qualidade, identidade, roupa, cenário, emoção e direitos. Evidência T-FR-104.
