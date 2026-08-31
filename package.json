@@ -49,6 +49,7 @@
     "test:integration:synthetic-cache-decision": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-cache-decision.integration.mjs",
     "test:integration:synthetic-cache-invalidation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-cache-invalidation.integration.mjs",
     "test:integration:synthetic-master-asset": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-master-asset.integration.mjs",
+    "test:integration:synthetic-critic-report": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-critic-report.integration.mjs",
     "test:integration:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-presenter-lifecycle.integration.mjs",
     "test:integration:provider-tts-avatar": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/provider-tts-avatar-journey.e2e.mjs",
     "test:integration:media-library": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-media-library.integration.mjs",
