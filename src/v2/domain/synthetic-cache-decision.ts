@@ -57,6 +57,8 @@ export const SYNTHETIC_CACHE_DECISION_REASON_CODES = Object.freeze([
   'CACHE_HIT_ELIGIBLE',
   'CACHE_MISS_NO_CANDIDATE',
   'CANDIDATE_BLOB_UNAVAILABLE',
+  'CANDIDATE_CHECKSUM_DRIFT',
+  'CANDIDATE_OUTPUT_MISMATCH',
   'CANDIDATE_CRITIC_REJECTED',
   'CANDIDATE_RIGHTS_BLOCKED',
   'CONSENT_REVOKED',
@@ -67,15 +69,18 @@ export type SyntheticCacheDecisionReasonCode = (typeof SYNTHETIC_CACHE_DECISION_
 
 /**
  * Which outcome each reason can justify. A candidate rejected for its blob,
- * its critic report or its rights is a `miss`, never a `blocked`: the work is
- * still generated and still paid for, and only the reason differs. Only a
- * decision where nothing was generated and nothing reused is `blocked`.
+ * its checksum, its output shape, its critic report or its rights is a `miss`,
+ * never a `blocked`: the work is still generated and still paid for, and only
+ * the reason differs. Only a decision where nothing was generated and nothing
+ * reused is `blocked`.
  */
 const REASON_CODE_OUTCOMES: Readonly<Record<SyntheticCacheDecisionReasonCode, readonly SyntheticCacheDecisionOutcome[]>> =
   Object.freeze({
     CACHE_HIT_ELIGIBLE: Object.freeze(['hit'] as const),
     CACHE_MISS_NO_CANDIDATE: Object.freeze(['miss'] as const),
     CANDIDATE_BLOB_UNAVAILABLE: Object.freeze(['miss'] as const),
+    CANDIDATE_CHECKSUM_DRIFT: Object.freeze(['miss'] as const),
+    CANDIDATE_OUTPUT_MISMATCH: Object.freeze(['miss'] as const),
     CANDIDATE_CRITIC_REJECTED: Object.freeze(['miss'] as const),
     CANDIDATE_RIGHTS_BLOCKED: Object.freeze(['miss'] as const),
     CONSENT_REVOKED: Object.freeze(['blocked'] as const),

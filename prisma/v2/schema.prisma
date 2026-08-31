@@ -199,6 +199,7 @@ model V2Workspace {
   syntheticBlockConcatenations           V2SyntheticBlockConcatenation[]
   syntheticPresenterProfileHeads         V2SyntheticPresenterProfileHead[]
   syntheticCacheDecisions                V2SyntheticCacheDecision[]
+  syntheticCacheSubmissionClaims         V2SyntheticCacheSubmissionClaim[]
 
   @@map("workspaces")
 }
@@ -3864,6 +3865,23 @@ model V2SyntheticCacheDecision {
   @@index([workspaceId, projectId, decidedAt(sort: Desc)], map: "synthetic_cache_decisions_workspace_project_decided_idx")
   @@index([workspaceId, outcome], map: "synthetic_cache_decisions_workspace_outcome_idx")
   @@map("synthetic_cache_decisions")
+}
+
+/// The right to submit paid work for one cache address, held only across the
+/// window between deciding to pay and the pending generation becoming visible.
+/// The primary key is the address itself, so two concurrent requests for the
+/// same work cannot both believe they are the first.
+model V2SyntheticCacheSubmissionClaim {
+  workspaceId String   @db.VarChar(128)
+  cacheKey    String   @db.Char(64)
+  blockId     String   @db.VarChar(128)
+  claimedAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, cacheKey])
+  @@index([claimedAt], map: "synthetic_cache_submission_claims_claimed_idx")
+  @@map("synthetic_cache_submission_claims")
 }
 
 model V2SyntheticBlockConcatenation {

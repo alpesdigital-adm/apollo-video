@@ -96,6 +96,7 @@ import type { SyntheticScriptPlanRepository } from '../application/ports/synthet
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
+import type { SyntheticCacheSubmissionClaimRepository } from '../application/ports/synthetic-cache-submission-claim-repository.ts'
 import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
 import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
@@ -265,6 +266,7 @@ import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-p
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
+import { PrismaSyntheticCacheSubmissionClaimRepository } from './prisma/synthetic-cache-submission-claim-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
 import {
@@ -724,6 +726,8 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
     ensure: ensureSyntheticBlockGenerationsService({
       plans, generations, profiles, artifacts, rights, providerJobs,
       cacheDecisions: createSyntheticCacheDecisionRepository(),
+      resultArtifacts: createProviderResultArtifactRepository(),
+      submissionClaims: createSyntheticCacheSubmissionClaimRepository(),
       enqueueProviderJob: enqueueProviderJobService({
         jobs: providerJobs,
         adapters: createProviderAdapterRegistry(environment),
@@ -749,6 +753,10 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
 
 export function createSyntheticMasterAssetRepository(): SyntheticMasterAssetRepository {
   return new PrismaSyntheticMasterAssetRepository(resolveV2Client())
+}
+
+export function createSyntheticCacheSubmissionClaimRepository(): SyntheticCacheSubmissionClaimRepository {
+  return new PrismaSyntheticCacheSubmissionClaimRepository(resolveV2Client())
 }
 
 export function createSyntheticCacheDecisionRepository(): SyntheticCacheDecisionRepository {
