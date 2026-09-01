@@ -19,6 +19,8 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
     await client.v2ReviewCleanupMask.deleteMany({ where: { workspaceId } })
     await client.v2ReviewAnnotation.deleteMany({ where: { workspaceId } })
     await client.v2TransformationBrief.deleteMany({ where: { workspaceId } })
+    await client.v2ProjectProxyRenderOperation.deleteMany({ where: { workspaceId } })
+    await client.v2PublicOperation.deleteMany({ where: { workspaceId } })
     await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId } })
     await client.v2MediaArtifact.deleteMany({ where: { workspaceId } })
@@ -66,6 +68,24 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
       manifestJson: JSON.stringify({ probe: { fps: 30, duration: 5, width: 540, height: 960 } }), createdAt: at(1),
     } })
     await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId: created.project.id, artifactId: proxyArtifactId, role: 'editing-proxy', originalFileName: 'proxy.mp4', createdAt: at(1) } })
+    const operationId = 'operation-review-mask-proxy'
+    await client.v2PublicOperation.create({ data: {
+      id: operationId, workspaceId, projectId: created.project.id, clientId,
+      actorClientId: clientId, actorCredentialId: credentialId, actorEnvironment: 'production',
+      actorAuthenticationKind: 'bearer', actorContextHash: materializeActorAuditContext(actor).contextHash,
+      type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
+      targetType: 'media-artifact', targetId: proxyArtifactId, cancelable: false, retryable: false,
+      attempt: 1, resultJson: JSON.stringify({ artifactId: proxyArtifactId }),
+      idempotencyKey: 'review-mask-proxy-render', requestFingerprint: HASH('a'),
+      createdAt: at(1), updatedAt: at(1), startedAt: at(1), completedAt: at(1),
+    } })
+    await client.v2ProjectProxyRenderOperation.create({ data: {
+      operationId, workspaceId, projectId: created.project.id, projectVersionId: created.version.id,
+      editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId: proxyArtifactId,
+      sourceManifestId: 'manifest-review-mask-proxy', inputHash: HASH('b'),
+      outputArtifactId: proxyArtifactId, outputManifestId: 'manifest-review-mask-proxy',
+      originalFileName: 'proxy.mp4', createdAt: at(1),
+    } })
 
     const annotations = new PrismaReviewAnnotationRepository(client)
     const annotation = Object.freeze({
