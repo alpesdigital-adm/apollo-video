@@ -35,6 +35,7 @@ import {
 } from './authenticate-api-client.ts'
 import type { AssetRightsRepository } from './ports/asset-rights-repository.ts'
 import type { MediaArtifactQueryRepository } from './ports/media-artifact-query-repository.ts'
+import type { NoveltyBudgetRepository } from './ports/novelty-budget-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from './ports/project-workspace-query-repository.ts'
 import type { ProviderJobRepository } from './ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from './ports/provider-job-runtime.ts'
@@ -98,6 +99,12 @@ export function requestTransformationJobService(dependencies: {
   projects: ProjectWorkspaceQueryRepository
   artifacts: MediaArtifactQueryRepository
   rights: AssetRightsRepository
+  /**
+   * The novelty preflight. Required: a transformation that no persisted
+   * decision admits must not be submitted, because the cheapest transformation
+   * is the one that was never paid for.
+   */
+  novelty: NoveltyBudgetRepository
   clock: () => Date
   createJobId: () => string
   createTransitionId: () => string
@@ -225,6 +232,32 @@ export function requestTransformationJobService(dependencies: {
       'ASSET_RIGHTS_REVISION_MISMATCH',
       'Current rights differ from the snapshot the brief was authorized under',
     )
+
+    // Novelty preflight, before any transport is chosen and long before
+    // anything is submitted. The verdict comes from a decision persisted
+    // against this exact project version: a policy evaluated in memory at
+    // request time would be a policy nobody could audit afterwards.
+    const verdict = await dependencies.novelty.findBriefVerdict({
+      workspaceId,
+      projectId,
+      projectVersionId: brief.projectVersionId,
+      briefId: brief.id,
+    })
+    if (!verdict) {
+      throw new DomainError(
+        'PRECONDITION_REQUIRED',
+        'No novelty budget decision covers this brief for the current project version',
+      )
+    }
+    if (verdict.outcome === 'blocked') {
+      // The refusal quotes the policy's own reason rather than inventing one at
+      // the boundary. An operator has to be able to act on it.
+      throw new DomainError(
+        'GOVERNANCE_LIMIT_EXCEEDED',
+        `Novelty budget blocked this transformation: ${verdict.reason}`,
+        { briefId: brief.id, decisionId: verdict.decisionId, blockedBecause: verdict.blockedBecause ?? null },
+      )
+    }
 
     const transport = selectTransport({
       completion: capabilities.completion,

@@ -202,6 +202,9 @@ model V2Workspace {
   syntheticCacheSubmissionClaims         V2SyntheticCacheSubmissionClaim[]
   syntheticCriticReports                 V2SyntheticCriticReport[]
   providerJobTransportStates             V2ProviderJobTransportState[]
+  noveltyBudgetPolicies                  V2NoveltyBudgetPolicy[]
+  noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
+  noveltyBudgetDecisionLines             V2NoveltyBudgetDecisionLine[]
   providerCallbackEvents                 V2ProviderCallbackEvent[]
   transformationBriefs                   V2TransformationBrief[]
   transformationProviders                V2TransformationProviderDefinition[]
@@ -696,6 +699,7 @@ model V2Project {
   syntheticCriticReports                 V2SyntheticCriticReport[]
   transformationBriefs                   V2TransformationBrief[]
   transformationProviderSelections       V2TransformationProviderSelection[]
+  noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -4132,6 +4136,99 @@ model V2ProviderJobTransition {
 /// the callback wait may last, whether cancellation or resume was asked for.
 /// Deliberately outside the content-addressed job body — a field that changes on
 /// every tick cannot live inside a hash that means "this is the same job".
+/// F3.014 / FR-114 — a versioned, deterministic novelty policy. Integer-only:
+/// the same candidates must yield the same verdict regardless of row order, and
+/// floating-point addition is not associative.
+model V2NoveltyBudgetPolicy {
+  id                      String   @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  totalUnits              Int
+  windowUnits             Int
+  windowFrames            Int
+  cooldownFrames          Int
+  minimumSeparationFrames Int
+  maximumPerGroup         Int
+  diversityFloor          Int
+  baseUnitsJson           String   @db.Text
+  unitsPerSecond          Int
+  proximityPenaltyBps     Int
+  repetitionPenaltyBps    Int
+  policyHash              String   @db.Char(64)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  decisions V2NoveltyBudgetDecision[]
+
+  @@id([id, workspaceId])
+  @@unique([workspaceId, policyHash])
+  @@map("novelty_budget_policies")
+}
+
+/// The verdict on one set of transformation candidates, evaluated before any
+/// paid submission. Content-addressed, so the same candidates under the same
+/// policy converge on one row.
+model V2NoveltyBudgetDecision {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  schemaVersion    String   @db.VarChar(64)
+  treatmentPlanId  String   @db.VarChar(128)
+  storyPlanId      String   @db.VarChar(128)
+  policyId         String   @db.VarChar(128)
+  policyHash       String   @db.Char(64)
+  acceptedUnits    Int
+  penalizedUnits   Int
+  blockedCount     Int
+  densityUnits     Int
+  treatment        String   @db.VarChar(16)
+  decisionHash     String   @db.Char(64)
+  evaluatedAt      DateTime @db.Timestamptz(3)
+  createdAt        DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  policy    V2NoveltyBudgetPolicy         @relation(fields: [policyId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  lines     V2NoveltyBudgetDecisionLine[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectId, evaluatedAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId])
+  @@map("novelty_budget_decisions")
+}
+
+/// One candidate's fate. `chargedUnits` is what the budget paid — zero for a
+/// cache hit. `densityUnits` is how much screen the effect occupies, identical
+/// whether generated or reused. Collapsing them is how a video ends up visually
+/// exhausting and technically under budget.
+model V2NoveltyBudgetDecisionLine {
+  id                  String  @id @db.VarChar(128)
+  workspaceId         String  @db.VarChar(128)
+  decisionId          String  @db.VarChar(128)
+  sequence            Int
+  candidateId         String  @db.VarChar(128)
+  briefId             String  @db.VarChar(128)
+  effectGroup         String  @db.VarChar(16)
+  outcome             String  @db.VarChar(16)
+  chargedUnits        Int
+  grossUnits          Int
+  penaltyUnits        Int
+  consumedBeforeUnits Int
+  remainingUnits      Int
+  densityUnits        Int
+  reason              String  @db.VarChar(300)
+  blockedBecause      String? @db.VarChar(32)
+
+  workspace V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  decision  V2NoveltyBudgetDecision @relation(fields: [decisionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([decisionId, sequence])
+  @@index([workspaceId, briefId])
+  @@map("novelty_budget_decision_lines")
+}
+
 model V2ProviderJobTransportState {
   workspaceId             String    @db.VarChar(128)
   projectId               String    @db.VarChar(128)

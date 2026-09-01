@@ -94,6 +94,7 @@ import type { SyntheticProductionRepository } from '../application/ports/synthet
 import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
 import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
+import type { NoveltyBudgetRepository } from '../application/ports/novelty-budget-repository.ts'
 import type { TransformationProviderRegistryRepository } from '../application/ports/transformation-provider-registry-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
@@ -276,6 +277,7 @@ import { PrismaSyntheticProductionRepository } from './prisma/synthetic-producti
 import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
+import { PrismaNoveltyBudgetRepository } from './prisma/novelty-budget-repository.ts'
 import { PrismaTransformationProviderRegistryRepository } from './prisma/transformation-provider-registry-repository.ts'
 import { HttpTransformationProviderAdapter } from './transformation/http-transformation-provider.ts'
 import { McpTransformationProviderAdapter } from './transformation/mcp-transformation-provider.ts'
@@ -709,6 +711,10 @@ export function createSyntheticScriptPlanRepository(): SyntheticScriptPlanReposi
 
 export function createSyntheticBlockGenerationRepository(): SyntheticBlockGenerationRepository {
   return new PrismaSyntheticBlockGenerationRepository(resolveV2Client())
+}
+
+export function createNoveltyBudgetRepository(): NoveltyBudgetRepository {
+  return new PrismaNoveltyBudgetRepository(resolveV2Client())
 }
 
 export function createTransformationProviderRegistryRepository(): TransformationProviderRegistryRepository {

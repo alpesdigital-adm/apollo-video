@@ -6,6 +6,7 @@ import { DomainError } from '@/v2/domain/errors'
 import {
   createAssetRightsRepository,
   createMediaArtifactQueryRepository,
+  createNoveltyBudgetRepository,
   createProjectWorkspaceQueryRepository,
   createProviderAdapterRegistry,
   createProviderJobRepository,
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       projects: createProjectWorkspaceQueryRepository(),
       artifacts: createMediaArtifactQueryRepository(),
       rights: createAssetRightsRepository(),
+      novelty: createNoveltyBudgetRepository(),
       clock: () => new Date(),
       createJobId: () => `provider-job-${randomUUID()}`,
       createTransitionId: () => `provider-transition-${randomUUID()}`,
