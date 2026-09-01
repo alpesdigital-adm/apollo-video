@@ -89,6 +89,7 @@ model V2Workspace {
   directorBudgetReservations             V2DirectorBudgetReservation[]
   directorBudgetEvents                   V2DirectorBudgetEvent[]
   reviewAnnotations                      V2ReviewAnnotation[]
+  reviewCleanupMasks                     V2ReviewCleanupMask[]
   renderElementMaps                      V2RenderElementMap[]
   subtitleSidecars                       V2ProjectSubtitleSidecar[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
@@ -305,6 +306,7 @@ model V2ApiClient {
   createdProofIntegrityRuns             V2ProofIntegrityRun[]                @relation("ProofIntegrityRunCreator")
   createdProofModeRuns                  V2ProofModeRun[]                     @relation("ProofModeRunCreator")
   authoredReviewAnnotations             V2ReviewAnnotation[]                 @relation("ReviewAnnotationActor")
+  createdReviewCleanupMasks             V2ReviewCleanupMask[]                @relation("ReviewCleanupMaskCreator")
   authoredReviewPatchProposals          V2ReviewPatchProposal[]              @relation("ReviewPatchProposalActor")
   authoredReviewPatchBatches            V2ReviewPatchBatch[]                 @relation("ReviewPatchBatchActor")
   authoredPerceptionTimelines           V2PerceptionTimeline[]               @relation("PerceptionTimelineActor")
@@ -614,6 +616,7 @@ model V2Project {
   directorBudgetEvents                   V2DirectorBudgetEvent[]
   treatmentPlans                         V2TreatmentPlan[]
   reviewAnnotations                      V2ReviewAnnotation[]
+  reviewCleanupMasks                     V2ReviewCleanupMask[]
   renderElementMaps                      V2RenderElementMap[]
   subtitleSidecars                       V2ProjectSubtitleSidecar[]
   reviewPatchProposals                   V2ReviewPatchProposal[]
@@ -882,6 +885,7 @@ model V2ProjectVersion {
   directorRunAsResult              V2DirectorRun?                      @relation("DirectorRunResultVersion")
   treatmentPlans                   V2TreatmentPlan[]
   reviewAnnotations                V2ReviewAnnotation[]
+  reviewCleanupMasks               V2ReviewCleanupMask[]
   renderElementMaps                V2RenderElementMap[]
   subtitleSidecars                 V2ProjectSubtitleSidecar[]
   patchProposalsAsBase             V2ReviewPatchProposal[]             @relation("PatchProposalBaseVersion")
@@ -1066,6 +1070,7 @@ model V2ReviewAnnotation {
   actorClient     V2ApiClient?             @relation("ReviewAnnotationActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_annotations_actor_fkey")
   patchProposals  V2ReviewPatchProposal[]
   patchBatchItems V2ReviewPatchBatchItem[]
+  cleanupMasks    V2ReviewCleanupMask[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, idempotencyKey])
@@ -1074,6 +1079,77 @@ model V2ReviewAnnotation {
   @@index([workspaceId, proxyArtifactId])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "review_annotations_actor_context_idx")
   @@map("review_annotations")
+}
+
+model V2ReviewCleanupMask {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  rootId                  String   @db.VarChar(128)
+  revision                Int
+  supersedesId            String?  @db.VarChar(128)
+  schemaVersion           String   @db.VarChar(64)
+  policyVersion           String   @db.VarChar(64)
+  annotationId            String   @db.Uuid
+  annotationHash          String   @db.Char(64)
+  proxyArtifactId         String   @db.VarChar(128)
+  proxyHash               String   @db.Char(64)
+  sourceArtifactId        String   @db.VarChar(128)
+  sourceArtifactHash      String   @db.Char(64)
+  transformationBriefId   String   @db.VarChar(128)
+  transformationBriefHash String   @db.Char(64)
+  outputSpecId            String   @db.VarChar(128)
+  formatWidth             Int
+  formatHeight            Int
+  rangeStartFrame         Int
+  rangeEndFrame           Int
+  regionX                 Float
+  regionY                 Float
+  regionWidth             Float
+  regionHeight            Float
+  keyframesJson           String   @db.Text
+  keyframesHash           String   @db.Char(64)
+  preserveRegionsJson     String   @db.Text
+  preserveRegionsHash     String   @db.Char(64)
+  trackingStatus          String   @db.VarChar(16)
+  trackingConfidenceBps   Int
+  formatChangeJson        String?  @db.Text
+  formatChangeHash        String?  @db.Char(64)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String?  @db.VarChar(128)
+  actorEnvironment        String?  @db.VarChar(16)
+  actorAuthenticationKind String?  @db.VarChar(16)
+  actorContextHash        String?  @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  createdAt               DateTime @db.Timestamptz(3)
+  maskJson                String   @db.Text
+  maskHash                String   @db.Char(64)
+
+  workspace           V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "review_cleanup_masks_workspace_fkey")
+  project             V2Project             @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, map: "review_cleanup_masks_project_fkey")
+  projectVersion      V2ProjectVersion      @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_project_version_fkey")
+  annotation          V2ReviewAnnotation    @relation(fields: [annotationId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_annotation_fkey")
+  proxyArtifact       V2MediaArtifact       @relation("ReviewCleanupMaskProxyArtifact", fields: [proxyArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_proxy_artifact_fkey")
+  sourceArtifact      V2MediaArtifact       @relation("ReviewCleanupMaskSourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_source_artifact_fkey")
+  transformationBrief V2TransformationBrief @relation(fields: [transformationBriefId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_brief_fkey")
+  createdBy           V2ApiClient           @relation("ReviewCleanupMaskCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_creator_fkey")
+  supersedes          V2ReviewCleanupMask?  @relation("ReviewCleanupMaskRevisions", fields: [supersedesId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "review_cleanup_masks_supersedes_fkey")
+  revisions           V2ReviewCleanupMask[] @relation("ReviewCleanupMaskRevisions")
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, rootId, revision], map: "review_cleanup_masks_root_revision_key")
+  @@unique([workspaceId, projectId, maskHash], map: "review_cleanup_masks_hash_key")
+  @@unique([workspaceId, projectId, createdByClientId, idempotencyKey], map: "review_cleanup_masks_idempotency_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "review_cleanup_masks_project_created_idx")
+  @@index([workspaceId, annotationId, revision(sort: Desc)], map: "review_cleanup_masks_annotation_revision_idx")
+  @@index([workspaceId, transformationBriefId, revision(sort: Desc)], map: "review_cleanup_masks_brief_revision_idx")
+  @@index([workspaceId, sourceArtifactId, trackingStatus], map: "review_cleanup_masks_source_tracking_idx")
+  @@map("review_cleanup_masks")
 }
 
 model V2ReviewPatchProposal {
@@ -1507,6 +1583,8 @@ model V2MediaArtifact {
   hierarchicalProcessingChunks V2HierarchicalProcessingChunk[]
   productionBatchArtifacts     V2ProductionBatchItemArtifact[]
   reviewAnnotations            V2ReviewAnnotation[]
+  reviewCleanupMasksAsSource   V2ReviewCleanupMask[]                     @relation("ReviewCleanupMaskSourceArtifact")
+  reviewCleanupMasksAsProxy    V2ReviewCleanupMask[]                     @relation("ReviewCleanupMaskProxyArtifact")
   renderElementMaps            V2RenderElementMap[]
   subtitleSidecarsAsOutput     V2ProjectSubtitleSidecar[]                @relation("SubtitleSidecarOutputArtifact")
   subtitleSidecarsAsFile       V2ProjectSubtitleSidecar[]                @relation("SubtitleSidecarArtifact")
@@ -4512,6 +4590,7 @@ model V2TransformationBrief {
   project        V2Project                           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   projectVersion V2ProjectVersion                    @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   selections     V2TransformationProviderSelection[]
+  cleanupMasks   V2ReviewCleanupMask[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, projectId, briefHash])

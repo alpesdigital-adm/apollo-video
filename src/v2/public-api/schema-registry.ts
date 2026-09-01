@@ -23704,6 +23704,47 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       preferredTransport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
     },
   }),
+  defineSchema('request-transformation-job-request', 2, 'Request a transformation with an optional reviewed cleanup mask', {
+    type: 'object', additionalProperties: false,
+    required: ['briefId','selectionId','use','market','locale'],
+    properties: {
+      briefId: idSchema, selectionId: idSchema, use: idSchema,
+      market: { type: 'string', minLength: 2, maxLength: 64 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      preferredTransport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+      maskId: idSchema,
+      outputSpecId: idSchema,
+    },
+  }),
+  defineSchema('create-review-cleanup-mask-request', 1, 'Create a cleanup mask from a regional review annotation', {
+    type: 'object', additionalProperties: false,
+    required: ['annotationId','transformationBriefId','format','trackingConfidenceBps'],
+    properties: {
+      annotationId: idSchema, transformationBriefId: idSchema,
+      format: { type: 'object', additionalProperties: false, required: ['outputSpecId','width','height'], properties: { outputSpecId: idSchema, width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 } } },
+      trackingConfidenceBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    },
+  }),
+  defineSchema('refine-review-cleanup-mask-request', 1, 'Append a reviewed cleanup mask refinement', {
+    type: 'object', additionalProperties: false,
+    required: ['expectedMaskHash','region','range','keyframes','trackingStatus','trackingConfidenceBps'],
+    properties: {
+      expectedMaskHash: sha256Schema,
+      region: { type: 'object', additionalProperties: false, required: ['x','y','width','height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } },
+      range: { type: 'object', additionalProperties: false, required: ['startFrame','endFrame'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } } },
+      keyframes: { type: 'array', minItems: 1, maxItems: 240, items: { type: 'object', additionalProperties: false, required: ['frame','region'], properties: { frame: { type: 'integer', minimum: 0 }, region: { type: 'object', additionalProperties: false, required: ['x','y','width','height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } } } },
+      trackingStatus: { enum: ['static','tracked','uncertain'] }, trackingConfidenceBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      format: { type: 'object', additionalProperties: false, required: ['outputSpecId','width','height'], properties: { outputSpecId: idSchema, width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 } } },
+      acknowledgeFormatChange: { type: 'boolean' },
+    },
+  }),
+  defineSchema('review-cleanup-mask-mutated', 1, 'A persisted immutable cleanup mask revision', successSchema({
+    type: 'object', additionalProperties: false, required: ['mask','replayed'],
+    properties: { mask: { type: 'object', additionalProperties: true, required: ['id','rootId','revision','projectVersionId','annotation','source','transformationBrief','format','range','region','keyframes','preserveRegions','tracking','maskHash','createdByClientId','createdAt'], properties: { id: idSchema, rootId: idSchema, revision: { type: 'integer', minimum: 1 }, supersedesId: idSchema, projectVersionId: idSchema, annotation: { type: 'object' }, proxy: { type: 'object' }, source: { type: 'object' }, transformationBrief: { type: 'object' }, format: { type: 'object' }, range: { type: 'object' }, region: { type: 'object' }, keyframes: { type: 'array' }, preserveRegions: { type: 'array' }, tracking: { type: 'object' }, formatChange: { type: ['object','null'] }, maskHash: sha256Schema, createdByClientId: idSchema, createdAt: dateTimeSchema } }, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('review-cleanup-mask-list', 1, 'Review-derived cleanup mask revisions', successSchema({
+    type: 'object', additionalProperties: false, required: ['masks'], properties: { masks: { type: 'array', maxItems: 500, items: { type: 'object', additionalProperties: true } } },
+  })),
   defineSchema('transformation-job-mutated', 1, 'A durable transformation job the worker now owns',
     successSchema({
       type: 'object', additionalProperties: false, required: ['job','replayed'],

@@ -30,7 +30,7 @@ function string(value: unknown, field: string): string {
 export function parseRequestTransformationJobBody(raw: unknown) {
   const body = record(raw, 'body')
   const requiredKeys = ['briefId', 'selectionId', 'use', 'market', 'locale']
-  const keys = [...requiredKeys, 'preferredTransport']
+  const keys = [...requiredKeys, 'preferredTransport', 'maskId', 'outputSpecId']
   assertDomain(
     Object.keys(body).every((key) => keys.includes(key)) && requiredKeys.every((key) => key in body),
     'INVALID_ARGUMENT',
@@ -50,6 +50,8 @@ export function parseRequestTransformationJobBody(raw: unknown) {
     use: string(body.use, 'body.use'),
     market: string(body.market, 'body.market'),
     locale: string(body.locale, 'body.locale'),
+    ...(body.maskId !== undefined ? { maskId: string(body.maskId, 'body.maskId') } : {}),
+    ...(body.outputSpecId !== undefined ? { outputSpecId: string(body.outputSpecId, 'body.outputSpecId') } : {}),
     ...(body.preferredTransport ? { preferredTransport: body.preferredTransport as (typeof PROVIDER_JOB_TRANSPORTS)[number] } : {}),
   })
 }

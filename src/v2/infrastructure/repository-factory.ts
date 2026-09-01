@@ -124,6 +124,7 @@ import type { ProjectAdministrationRepository } from '../application/ports/proje
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
+import type { ReviewCleanupMaskRepository } from '../application/ports/review-cleanup-mask-repository.ts'
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { SubtitleSidecarRepository } from '../application/ports/subtitle-sidecar-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
@@ -322,6 +323,7 @@ import { PrismaProjectAdministrationRepository } from './prisma/project-administ
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
+import { PrismaReviewCleanupMaskRepository } from './prisma/review-cleanup-mask-repository.ts'
 import { PrismaReviewPatchRepository } from './prisma/review-patch-repository.ts'
 import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-repository.ts'
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
@@ -2102,6 +2104,10 @@ export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRe
 
 export function createReviewAnnotationRepository(): ReviewAnnotationRepository {
   return new PrismaReviewAnnotationRepository(resolveV2Client())
+}
+
+export function createReviewCleanupMaskRepository(): ReviewCleanupMaskRepository {
+  return new PrismaReviewCleanupMaskRepository(resolveV2Client())
 }
 
 export function createReviewPatchRepository() {

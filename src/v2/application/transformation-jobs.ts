@@ -29,6 +29,10 @@ import {
 } from '../domain/transformation-brief.ts'
 import { TRANSFORMATION_MODE_CONTRACTS } from '../domain/transformation-mode-registry.ts'
 import {
+  assertReviewCleanupMaskExecutable,
+  projectReviewCleanupMaskProviderInput,
+} from '../domain/review-cleanup-mask.ts'
+import {
   materializeActorAuditContext,
   requireScope,
   type AuthenticatedExternalActor,
@@ -39,6 +43,7 @@ import type { NoveltyBudgetRepository } from './ports/novelty-budget-repository.
 import type { ProjectWorkspaceQueryRepository } from './ports/project-workspace-query-repository.ts'
 import type { ProviderJobRepository } from './ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from './ports/provider-job-runtime.ts'
+import type { ReviewCleanupMaskRepository } from './ports/review-cleanup-mask-repository.ts'
 import type { TransformationProviderRegistryRepository } from './ports/transformation-provider-registry-repository.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
@@ -105,6 +110,7 @@ export function requestTransformationJobService(dependencies: {
    * is the one that was never paid for.
    */
   novelty: NoveltyBudgetRepository
+  masks?: ReviewCleanupMaskRepository
   clock: () => Date
   createJobId: () => string
   createTransitionId: () => string
@@ -120,6 +126,8 @@ export function requestTransformationJobService(dependencies: {
     market: string
     locale: string
     preferredTransport?: ProviderJobTransport
+    maskId?: string
+    outputSpecId?: string
     actor: Readonly<AuthenticatedExternalActor>
     idempotencyKey: string
   }) {
@@ -141,6 +149,8 @@ export function requestTransformationJobService(dependencies: {
       market: request.market,
       locale: request.locale,
       preferredTransport: request.preferredTransport ?? null,
+      maskId: request.maskId ?? null,
+      outputSpecId: request.outputSpecId ?? null,
       actorContextHash: audit.contextHash,
     })
     const replay = await dependencies.jobs.findReplay({
@@ -196,6 +206,24 @@ export function requestTransformationJobService(dependencies: {
       'INVALID_ARGUMENT',
       'Brief omits a preserve that this transformation mode requires',
     )
+
+    let cleanupMask: Readonly<Record<string, unknown>> | undefined
+    if (contract.requiresMask) {
+      assertDomain(Boolean(request.maskId && request.outputSpecId), 'PRECONDITION_REQUIRED', 'This transformation mode requires a reviewed cleanup mask and output format')
+      assertDomain(Boolean(dependencies.masks), 'PRECONDITION_REQUIRED', 'Review cleanup mask repository is unavailable')
+      assertDomain(brief.outputSpecIds.includes(request.outputSpecId!), 'INVALID_ARGUMENT', 'Requested mask output format is outside the TransformationBrief')
+      const persistedMask = await dependencies.masks!.read({ workspaceId, projectId, maskId: identity(request.maskId!, 'maskId') })
+      if (!persistedMask) throw new DomainError('ASSET_NOT_FOUND', 'Review cleanup mask was not found')
+      const latestMask = await dependencies.masks!.readLatest({ workspaceId, projectId, rootId: persistedMask.mask.rootId })
+      assertDomain(latestMask?.mask.id === persistedMask.mask.id, 'VERSION_CONFLICT', 'Review cleanup mask has a newer revision')
+      cleanupMask = projectReviewCleanupMaskProviderInput(assertReviewCleanupMaskExecutable({
+        mask: persistedMask.mask,
+        brief,
+        outputSpecId: request.outputSpecId!,
+      }))
+    } else {
+      assertDomain(request.maskId === undefined && request.outputSpecId === undefined, 'INVALID_ARGUMENT', 'This transformation mode does not accept a cleanup mask')
+    }
 
     const project = await dependencies.projects.read({ workspaceId, projectId })
     assertDomain(
@@ -290,7 +318,10 @@ export function requestTransformationJobService(dependencies: {
       operation: operation as never,
       adapterId: provider.adapterId,
       adapterVersion: provider.adapterVersion,
-      providerInput: projectTransformationProviderInput(brief),
+      providerInput: Object.freeze({
+        ...projectTransformationProviderInput(brief),
+        ...(cleanupMask ? { cleanupMask } : {}),
+      }),
       idempotencyKey: request.idempotencyKey,
       authorization,
       createdAt: now.toISOString(),

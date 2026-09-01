@@ -10,6 +10,7 @@ import {
   createProjectWorkspaceQueryRepository,
   createProviderAdapterRegistry,
   createProviderJobRepository,
+  createReviewCleanupMaskRepository,
   createTransformationProviderRegistryRepository,
   transformationAdapterEnvironment,
 } from '@/v2/infrastructure/repository-factory'
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       artifacts: createMediaArtifactQueryRepository(),
       rights: createAssetRightsRepository(),
       novelty: createNoveltyBudgetRepository(),
+      masks: createReviewCleanupMaskRepository(),
       clock: () => new Date(),
       createJobId: () => `provider-job-${randomUUID()}`,
       createTransitionId: () => `provider-transition-${randomUUID()}`,

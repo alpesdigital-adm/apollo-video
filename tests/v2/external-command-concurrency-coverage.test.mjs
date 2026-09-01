@@ -245,6 +245,12 @@ const coverage = Object.freeze({
   'apollo.projects.annotations.create': {
     mode: 'durable-covered', evidence: 'F1-040 version-bound annotation idempotency and Postgres integration E2E',
   },
+  'apollo.projects.review-cleanup-masks.create': {
+    mode: 'durable-covered', evidence: 'F3.018 actor-bound idempotency and unique content/root revision identities converge duplicate creation while current project, annotation, proxy, source and brief hashes are rechecked',
+  },
+  'apollo.projects.review-cleanup-masks.refine': {
+    mode: 'durable-covered', evidence: 'F3.018 expected mask hash plus latest-root verification and unique root revision persistence fence concurrent append-only refinements without overwriting prior evidence',
+  },
   'apollo.projects.subtitle-sidecars.export': {
     mode: 'durable-covered', evidence: 'F1-038 content-addressed sidecar artifact whose lineage hash carries version, variant, MP4, RenderInput and cue map; concurrent exports converge on one artifact and one row',
   },
@@ -476,7 +482,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    138,
+    140,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

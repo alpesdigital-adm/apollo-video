@@ -5778,6 +5778,42 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       use: 'marketing', market: 'BR', locale: 'pt-BR',
       preferredTransport: 'polling',
     }],
+    'apollo://schemas/request-transformation-job-request/v2': [{
+      briefId: transformationBriefExample.id,
+      selectionId: transformationSelectionExample.id,
+      use: 'marketing', market: 'BR', locale: 'pt-BR', preferredTransport: 'polling',
+      maskId: 'review-cleanup-mask-example', outputSpecId: 'output-spec-vertical',
+    }],
+    'apollo://schemas/create-review-cleanup-mask-request/v1': [{
+      annotationId: 'review-annotation-region-example', transformationBriefId: transformationBriefExample.id,
+      format: { outputSpecId: 'output-spec-vertical', width: 1080, height: 1920 }, trackingConfidenceBps: 9200,
+    }],
+    'apollo://schemas/refine-review-cleanup-mask-request/v1': [{
+      expectedMaskHash: '6'.repeat(64), region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 },
+      range: { startFrame: 30, endFrame: 90 },
+      keyframes: [
+        { frame: 30, region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 } },
+        { frame: 60, region: { x: 0.11, y: 0.76, width: 0.79, height: 0.14 } },
+      ],
+      trackingStatus: 'tracked', trackingConfidenceBps: 8900,
+    }],
+    'apollo://schemas/review-cleanup-mask-mutated/v1': [{
+      data: { mask: {
+        id: 'review-cleanup-mask-example', rootId: 'review-cleanup-mask-example', revision: 1,
+        projectVersionId: transformationBriefExample.projectVersionId,
+        annotation: { id: 'review-annotation-region-example', hash: '7'.repeat(64) },
+        proxy: { artifactId: 'artifact-review-proxy-example', hash: '8'.repeat(64) },
+        source: { artifactId: transformationBriefExample.sourceArtifactId, hash: '2'.repeat(64) },
+        transformationBrief: { id: transformationBriefExample.id, hash: transformationBriefExample.briefHash },
+        format: { outputSpecId: 'output-spec-vertical', width: 1080, height: 1920 }, range: { startFrame: 30, endFrame: 90 },
+        region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 }, keyframes: [{ frame: 30, region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 } }],
+        preserveRegions: [], tracking: { status: 'static', confidenceBps: 9200 }, formatChange: null,
+        maskHash: '6'.repeat(64), createdByClientId: 'api-client-reviewer-example', createdAt: '2029-03-01T10:00:00.000Z',
+      }, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/review-cleanup-mask-list/v1': [{
+      data: { masks: [] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/transformation-job-mutated/v1': [{
       data: { job: transformationJobExample, replayed: false }, meta: { apiVersion: 'v1' },
     }],

@@ -181,6 +181,9 @@ jobs:
       - name: Run transformation brief and provider registry persistence tests
         run: npm run test:integration:transformation-registry
 
+      - name: Run review-derived cleanup mask persistence tests
+        run: npm run test:integration:review-cleanup-mask
+
       - name: Run novelty budget decision persistence tests
         run: npm run test:integration:novelty-budget
 

@@ -5561,6 +5561,93 @@
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
+    "apollo.projects.review-cleanup-masks.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/review-cleanup-masks"
+      },
+      "toolName": "apollo.projects.review-cleanup-masks.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.review-cleanup-masks.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/review-cleanup-masks"
+      },
+      "toolName": "apollo.projects.review-cleanup-masks.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "projectVersionId",
+          "required": false,
+          "description": "Restrict masks to one immutable project version.",
+          "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.review-cleanup-masks.refine": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/refine-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/review-cleanup-masks/{maskId}/refinements"
+      },
+      "toolName": "apollo.projects.review-cleanup-masks.refine",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.review-patch-batches.apply": {
       "version": "3.0.0",
       "exposure": "public",
@@ -7347,14 +7434,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.transformation-jobs.request": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "job",
       "authMode": "required",
       "requiredScopes": [
         "projects:write"
       ],
-      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v1",
+      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v2",
       "outputSchemaRef": "apollo://schemas/transformation-job-mutated/v1",
       "endpoint": {
         "method": "POST",
@@ -36990,6 +37077,59 @@
           }
         }
       ]
+    },
+    "apollo://schemas/create-review-cleanup-mask-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "annotationId",
+        "transformationBriefId",
+        "format",
+        "trackingConfidenceBps"
+      ],
+      "properties": {
+        "annotationId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "transformationBriefId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "format": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outputSpecId",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "outputSpecId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            }
+          }
+        },
+        "trackingConfidenceBps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
     },
     "apollo://schemas/create-review-patch-batch-request/v1": {
       "type": "object",
@@ -151317,6 +151457,166 @@
         }
       }
     },
+    "apollo://schemas/refine-review-cleanup-mask-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedMaskHash",
+        "region",
+        "range",
+        "keyframes",
+        "trackingStatus",
+        "trackingConfidenceBps"
+      ],
+      "properties": {
+        "expectedMaskHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "range": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "startFrame",
+            "endFrame"
+          ],
+          "properties": {
+            "startFrame": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "endFrame": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "keyframes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 240,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "frame",
+              "region"
+            ],
+            "properties": {
+              "frame": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "region": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "trackingStatus": {
+          "enum": [
+            "static",
+            "tracked",
+            "uncertain"
+          ]
+        },
+        "trackingConfidenceBps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "format": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outputSpecId",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "outputSpecId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16384
+            }
+          }
+        },
+        "acknowledgeFormatChange": {
+          "type": "boolean"
+        }
+      }
+    },
     "apollo://schemas/reframe-plan-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -152932,6 +153232,62 @@
             "webhook",
             "mcp"
           ]
+        }
+      }
+    },
+    "apollo://schemas/request-transformation-job-request/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "briefId",
+        "selectionId",
+        "use",
+        "market",
+        "locale"
+      ],
+      "properties": {
+        "briefId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "selectionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "use": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "preferredTransport": {
+          "enum": [
+            "api",
+            "polling",
+            "webhook",
+            "mcp"
+          ]
+        },
+        "maskId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "outputSpecId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
         }
       }
     },
@@ -154744,6 +155100,177 @@
                 "affectedCount": {
                   "type": "integer",
                   "minimum": 1
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/review-cleanup-mask-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "masks"
+          ],
+          "properties": {
+            "masks": {
+              "type": "array",
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/review-cleanup-mask-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mask",
+            "replayed"
+          ],
+          "properties": {
+            "mask": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "id",
+                "rootId",
+                "revision",
+                "projectVersionId",
+                "annotation",
+                "source",
+                "transformationBrief",
+                "format",
+                "range",
+                "region",
+                "keyframes",
+                "preserveRegions",
+                "tracking",
+                "maskHash",
+                "createdByClientId",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "rootId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "supersedesId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "annotation": {
+                  "type": "object"
+                },
+                "proxy": {
+                  "type": "object"
+                },
+                "source": {
+                  "type": "object"
+                },
+                "transformationBrief": {
+                  "type": "object"
+                },
+                "format": {
+                  "type": "object"
+                },
+                "range": {
+                  "type": "object"
+                },
+                "region": {
+                  "type": "object"
+                },
+                "keyframes": {
+                  "type": "array"
+                },
+                "preserveRegions": {
+                  "type": "array"
+                },
+                "tracking": {
+                  "type": "object"
+                },
+                "formatChange": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "maskHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdByClientId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
                 }
               }
             },
