@@ -3,9 +3,11 @@ import { assertDomain, DomainError } from './errors.ts'
 import {
   PROVIDER_OPERATIONS,
   type ProviderEstimate,
+  type ProviderObservedCost,
   type ProviderOperation,
   type ProviderStatus,
 } from './provider-contract.ts'
+import { PROVIDER_JOB_TRANSPORTS, type ProviderJobTransport } from './provider-job-transport.ts'
 
 export const PROVIDER_JOB_SCHEMA_VERSION = 'provider-job/v1' as const
 
@@ -67,6 +69,23 @@ export interface ProviderJobResultArtifact {
   byteSize: number
 }
 
+/**
+ * Immutable binding to the transformation this job exists to perform.
+ *
+ * The brief and the routing selection are decided before a single paid call and
+ * never change for the life of the job. Swapping providers means a *new* job
+ * against the *same* brief — which is exactly why `briefId`/`briefHash` sit here
+ * unchanged while `providerId`/`capabilityId` differ between attempts.
+ */
+export interface ProviderJobTransformationOrigin {
+  briefId: string
+  briefHash: string
+  selectionId: string
+  selectionHash: string
+  providerId: string
+  capabilityId: string
+}
+
 export interface ProviderJob {
   schemaVersion: typeof PROVIDER_JOB_SCHEMA_VERSION
   id: string
@@ -89,6 +108,19 @@ export interface ProviderJob {
   resultArtifact?: Readonly<ProviderJobResultArtifact>
   criticResultHash?: string
   normalizedError?: Readonly<ProviderJobError>
+  /**
+   * Which transport carries this job. Decided once, before any paid call.
+   *
+   * Optional because synthetic jobs from earlier waves never declared one and
+   * their persisted `jobHash` must keep verifying byte for byte — an absent
+   * field is absent from the canonical body, so those hashes are untouched.
+   * Transformation jobs always set it, and the application service refuses to
+   * create one without it.
+   */
+  transport?: ProviderJobTransport
+  transformation?: Readonly<ProviderJobTransformationOrigin>
+  /** Cost the provider actually reported, never the estimate. */
+  observedCost?: Readonly<ProviderObservedCost>
   submittedAt?: string
   heartbeatAt?: string
   completedAt?: string
@@ -183,6 +215,8 @@ export function createProviderJob(input: {
   idempotencyKey: string
   authorization: Readonly<ProviderJobAuthorization>
   createdAt: string
+  transport?: ProviderJobTransport
+  transformation?: Readonly<ProviderJobTransformationOrigin>
 }): Readonly<ProviderJob> {
   const createdAt = new Date(validDate(input.createdAt, 'createdAt')).toISOString()
   for (const [field, value] of Object.entries({
@@ -197,6 +231,20 @@ export function createProviderJob(input: {
   assertSafeProviderInput(input.providerInput)
   assertDomain(PROVIDER_OPERATIONS.includes(input.operation), 'INVALID_ARGUMENT', 'operation is invalid')
   assertAuthorization(input.authorization, createdAt)
+  if (input.transport !== undefined) {
+    assertDomain(PROVIDER_JOB_TRANSPORTS.includes(input.transport), 'INVALID_ARGUMENT', 'transport is invalid')
+  }
+  if (input.transformation !== undefined) {
+    assertDomain(input.transport !== undefined, 'INVALID_ARGUMENT', 'A transformation job must declare its transport')
+    for (const [field, value] of Object.entries({
+      briefId: input.transformation.briefId,
+      selectionId: input.transformation.selectionId,
+      providerId: input.transformation.providerId,
+      capabilityId: input.transformation.capabilityId,
+    })) id(value, `transformation.${field}`)
+    assertDomain(HASH.test(input.transformation.briefHash), 'INVALID_ARGUMENT', 'transformation.briefHash is invalid')
+    assertDomain(HASH.test(input.transformation.selectionHash), 'INVALID_ARGUMENT', 'transformation.selectionHash is invalid')
+  }
   const providerInput = JSON.parse(stableSerialize(input.providerInput)) as Record<string, unknown>
   return seal({
     schemaVersion: PROVIDER_JOB_SCHEMA_VERSION,
@@ -213,6 +261,10 @@ export function createProviderJob(input: {
     authorization: input.authorization,
     attempt: 0,
     status: 'planned',
+    // Spread conditionally so an absent transport stays absent from the
+    // canonical body. Wave 13/14 synthetic jobs keep the exact hash they had.
+    ...(input.transport ? { transport: input.transport } : {}),
+    ...(input.transformation ? { transformation: Object.freeze({ ...input.transformation }) } : {}),
     createdAt,
     updatedAt: createdAt,
   })
@@ -222,11 +274,16 @@ const ALLOWED_TRANSITIONS: Readonly<Record<ProviderJobStatus, readonly ProviderJ
   planned: ['estimated', 'failed', 'canceled', 'expired', 'superseded'],
   estimated: ['submitting', 'failed', 'canceled', 'expired', 'superseded'],
   submitting: ['submitted', 'failed', 'canceled', 'expired', 'superseded'],
-  submitted: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
-  queued: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
-  processing: ['processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
-  'suspected-stalled': ['queued', 'processing', 'retrieving', 'suspected-stalled', 'failed', 'canceled', 'expired', 'superseded'],
-  retrieving: ['evaluating', 'failed', 'canceled', 'expired', 'superseded'],
+  // `estimated` reappears as a target from every in-flight status: that is a
+  // retryable transport failure sending the same job back for another
+  // submission. It is the same job — same brief, same authorization, same
+  // idempotency key — so it keeps its identity and only `attempt` moves. A
+  // fresh creative attempt is a different job entirely and is not this edge.
+  submitted: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  queued: ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  processing: ['processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  'suspected-stalled': ['queued', 'processing', 'retrieving', 'suspected-stalled', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
+  retrieving: ['evaluating', 'estimated', 'failed', 'canceled', 'expired', 'superseded'],
   evaluating: ['approved', 'rejected', 'failed', 'canceled', 'expired', 'superseded'],
   approved: [], rejected: [], failed: [], canceled: [], expired: [], superseded: [],
 })
@@ -240,6 +297,7 @@ export function transitionProviderJob(job: Readonly<ProviderJob>, input: {
   resultArtifact?: Readonly<ProviderJobResultArtifact>
   criticResultHash?: string
   normalizedError?: Readonly<ProviderJobError>
+  observedCost?: Readonly<ProviderObservedCost>
 }): Readonly<ProviderJob> {
   assertProviderJob(job)
   assertDomain(ALLOWED_TRANSITIONS[job.status].includes(input.status), 'VERSION_CONFLICT', `Provider job cannot transition from ${job.status} to ${input.status}`)
@@ -247,6 +305,32 @@ export function transitionProviderJob(job: Readonly<ProviderJob>, input: {
   assertDomain(Date.parse(occurredAt) >= Date.parse(job.updatedAt), 'VERSION_CONFLICT', 'Provider transition time regressed')
   if (input.status === 'estimated') {
     assertDomain(Boolean(input.estimate) && input.estimate!.costMinorUnits >= 0 && input.estimate!.estimatedLatencyMs >= 0 && /^[A-Z]{3}$/.test(input.estimate!.currency), 'INVALID_ARGUMENT', 'Provider estimate is invalid')
+    if (job.status !== 'planned') {
+      // Coming back to `estimated` is a retry, and a retry has to name the
+      // retryable failure that caused it. Without that rule a worker could
+      // silently resubmit after a permanent error and pay twice for nothing.
+      assertDomain(
+        input.normalizedError?.retryable === true,
+        'VERSION_CONFLICT',
+        'A provider job may only return to estimation after a retryable failure',
+      )
+    }
+  }
+  if (input.observedCost !== undefined) {
+    assertDomain(
+      /^[A-Z]{3}$/.test(input.observedCost.currency) &&
+        Number.isSafeInteger(input.observedCost.costMinorUnits) &&
+        input.observedCost.costMinorUnits >= 0,
+      'INVALID_ARGUMENT',
+      'Observed provider cost is invalid',
+    )
+    // Silently replacing a cost in another currency would make the total a
+    // number with no unit. One job, one currency.
+    assertDomain(
+      !job.observedCost || job.observedCost.currency === input.observedCost.currency,
+      'INVALID_ARGUMENT',
+      'Observed provider cost changed currency mid-job',
+    )
   }
   if (input.status === 'submitted') id(input.providerJobId ?? '', 'providerJobId')
   if (input.status === 'evaluating') {
@@ -274,6 +358,17 @@ export function transitionProviderJob(job: Readonly<ProviderJob>, input: {
     ...(resultArtifact ? { resultArtifact } : {}),
     ...(input.criticResultHash ? { criticResultHash: input.criticResultHash } : {}),
     ...(input.normalizedError ? { normalizedError: input.normalizedError } : {}),
+    // Observed cost accumulates: a retried job paid for every attempt the
+    // provider actually charged, and dropping the earlier ones would understate
+    // what the workspace spent.
+    ...(input.observedCost
+      ? {
+          observedCost: Object.freeze({
+            currency: input.observedCost.currency,
+            costMinorUnits: (job.observedCost?.costMinorUnits ?? 0) + input.observedCost.costMinorUnits,
+          }),
+        }
+      : {}),
     attempt: input.status === 'submitting' ? job.attempt + 1 : job.attempt,
     ...(input.status === 'submitted' ? { submittedAt: occurredAt } : {}),
     ...(['submitting', 'queued', 'processing', 'suspected-stalled', 'retrieving'].includes(input.status) ? { heartbeatAt: occurredAt } : {}),
@@ -292,6 +387,16 @@ export function assertProviderJob(job: Readonly<ProviderJob>): void {
   assertDomain(job.schemaVersion === PROVIDER_JOB_SCHEMA_VERSION, 'PERSISTENCE_CONFLICT', 'Stored provider job schema is invalid')
   assertDomain(PROVIDER_JOB_STATUSES.includes(job.status), 'PERSISTENCE_CONFLICT', 'Stored provider job status is invalid')
   assertDomain(job.inputHash === calculateCanonicalHash(job.input), 'PERSISTENCE_CONFLICT', 'Stored provider job input hash is invalid')
+  assertDomain(
+    job.transport === undefined || PROVIDER_JOB_TRANSPORTS.includes(job.transport),
+    'PERSISTENCE_CONFLICT',
+    'Stored provider job transport is invalid',
+  )
+  assertDomain(
+    job.transformation === undefined || job.transport !== undefined,
+    'PERSISTENCE_CONFLICT',
+    'Stored transformation job lost its transport',
+  )
   assertAuthorization(job.authorization, job.createdAt)
   const { jobHash, ...body } = job
   if (calculateCanonicalHash(body) !== jobHash) {

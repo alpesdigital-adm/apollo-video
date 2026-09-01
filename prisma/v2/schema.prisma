@@ -201,6 +201,8 @@ model V2Workspace {
   syntheticCacheDecisions                V2SyntheticCacheDecision[]
   syntheticCacheSubmissionClaims         V2SyntheticCacheSubmissionClaim[]
   syntheticCriticReports                 V2SyntheticCriticReport[]
+  providerJobTransportStates             V2ProviderJobTransportState[]
+  providerCallbackEvents                 V2ProviderCallbackEvent[]
   transformationBriefs                   V2TransformationBrief[]
   transformationProviders                V2TransformationProviderDefinition[]
   transformationProviderCapabilities     V2TransformationProviderCapability[]
@@ -4024,48 +4026,58 @@ model V2SyntheticProductionAsset {
 }
 
 model V2ProviderJob {
-  id                      String    @id @db.VarChar(128)
-  workspaceId             String    @db.VarChar(128)
-  projectId               String    @db.VarChar(128)
-  originProjectVersionId  String    @db.VarChar(128)
-  schemaVersion           String    @db.VarChar(64)
-  operation               String    @db.VarChar(32)
-  adapterId               String    @db.VarChar(128)
-  adapterVersion          String    @db.VarChar(128)
-  providerJobId           String?   @db.VarChar(256)
-  inputJson               String    @db.Text
-  inputHash               String    @db.Char(64)
-  authorizationJson       String    @db.Text
-  authorizationHash       String    @db.Char(64)
-  estimateJson            String?   @db.Text
-  estimateHash            String?   @db.Char(64)
-  status                  String    @db.VarChar(32)
-  providerStatus          String?   @db.VarChar(24)
-  attempt                 Int       @default(0)
-  resultArtifactId        String?   @db.VarChar(128)
-  resultArtifactSha256    String?   @db.Char(64)
-  criticResultHash        String?   @db.Char(64)
-  normalizedErrorJson     String?   @db.Text
-  jobJson                 String    @db.Text
-  jobHash                 String    @db.Char(64)
-  requestFingerprint      String    @db.Char(64)
-  idempotencyKey          String    @db.VarChar(128)
-  createdByClientId       String    @db.VarChar(80)
-  actorCredentialId       String?   @db.VarChar(128)
-  actorEnvironment        String?   @db.VarChar(16)
-  actorAuthenticationKind String?   @db.VarChar(16)
-  actorContextHash        String?   @db.Char(64)
-  delegatedUserId         String?   @db.VarChar(128)
-  delegatedIdentityId     String?   @db.VarChar(128)
-  workspaceRole           String?   @db.VarChar(32)
-  submittedAt             DateTime? @db.Timestamptz(3)
-  heartbeatAt             DateTime? @db.Timestamptz(3)
-  completedAt             DateTime? @db.Timestamptz(3)
-  leaseOwner              String?   @db.VarChar(128)
-  leaseToken              String?   @db.VarChar(128)
-  leaseExpiresAt          DateTime? @db.Timestamptz(3)
-  createdAt               DateTime  @db.Timestamptz(3)
-  updatedAt               DateTime  @db.Timestamptz(3)
+  id                          String    @id @db.VarChar(128)
+  workspaceId                 String    @db.VarChar(128)
+  projectId                   String    @db.VarChar(128)
+  originProjectVersionId      String    @db.VarChar(128)
+  schemaVersion               String    @db.VarChar(64)
+  operation                   String    @db.VarChar(32)
+  adapterId                   String    @db.VarChar(128)
+  adapterVersion              String    @db.VarChar(128)
+  providerJobId               String?   @db.VarChar(256)
+  inputJson                   String    @db.Text
+  inputHash                   String    @db.Char(64)
+  authorizationJson           String    @db.Text
+  authorizationHash           String    @db.Char(64)
+  estimateJson                String?   @db.Text
+  estimateHash                String?   @db.Char(64)
+  status                      String    @db.VarChar(32)
+  providerStatus              String?   @db.VarChar(24)
+  attempt                     Int       @default(0)
+  resultArtifactId            String?   @db.VarChar(128)
+  resultArtifactSha256        String?   @db.Char(64)
+  criticResultHash            String?   @db.Char(64)
+  normalizedErrorJson         String?   @db.Text
+  jobJson                     String    @db.Text
+  jobHash                     String    @db.Char(64)
+  requestFingerprint          String    @db.Char(64)
+  idempotencyKey              String    @db.VarChar(128)
+  createdByClientId           String    @db.VarChar(80)
+  actorCredentialId           String?   @db.VarChar(128)
+  actorEnvironment            String?   @db.VarChar(16)
+  actorAuthenticationKind     String?   @db.VarChar(16)
+  actorContextHash            String?   @db.Char(64)
+  delegatedUserId             String?   @db.VarChar(128)
+  delegatedIdentityId         String?   @db.VarChar(128)
+  workspaceRole               String?   @db.VarChar(32)
+  submittedAt                 DateTime? @db.Timestamptz(3)
+  heartbeatAt                 DateTime? @db.Timestamptz(3)
+  completedAt                 DateTime? @db.Timestamptz(3)
+  leaseOwner                  String?   @db.VarChar(128)
+  leaseToken                  String?   @db.VarChar(128)
+  leaseExpiresAt              DateTime? @db.Timestamptz(3)
+  transport                   String?   @db.VarChar(16)
+  transformationBriefId       String?   @db.VarChar(128)
+  transformationBriefHash     String?   @db.Char(64)
+  transformationSelectionId   String?   @db.VarChar(128)
+  transformationSelectionHash String?   @db.Char(64)
+  transformationProviderId    String?   @db.VarChar(128)
+  transformationCapabilityId  String?   @db.VarChar(128)
+  observedCostCurrency        String?   @db.Char(3)
+  observedCostMinorUnits      Int?
+  deadlineAt                  DateTime? @db.Timestamptz(3)
+  createdAt                   DateTime  @db.Timestamptz(3)
+  updatedAt                   DateTime  @db.Timestamptz(3)
 
   workspace            V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project              V2Project                    @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -4077,6 +4089,8 @@ model V2ProviderJob {
   blockGenerations     V2SyntheticBlockGeneration[] @relation("BlockGenerationProviderJob")
   syntheticMasters     V2SyntheticMasterAsset[]     @relation("SyntheticMasterProviderJob")
   resultArtifacts      V2ProviderResultArtifact[]
+  transportState       V2ProviderJobTransportState?
+  callbackEvents       V2ProviderCallbackEvent[]
 
   @@unique([id, workspaceId])
   @@unique([id, workspaceId, projectId])
@@ -4087,6 +4101,7 @@ model V2ProviderJob {
   @@index([workspaceId, originProjectVersionId])
   @@index([workspaceId, resultArtifactId])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@index([workspaceId, transformationBriefId, createdAt(sort: Desc)])
   @@map("provider_jobs")
 }
 
@@ -4111,6 +4126,76 @@ model V2ProviderJobTransition {
   @@index([workspaceId, projectId, occurredAt(sort: Desc)])
   @@index([workspaceId, jobId, occurredAt])
   @@map("provider_job_transitions")
+}
+
+/// Mutable transport schedule for one provider job: when to poll next, how long
+/// the callback wait may last, whether cancellation or resume was asked for.
+/// Deliberately outside the content-addressed job body — a field that changes on
+/// every tick cannot live inside a hash that means "this is the same job".
+model V2ProviderJobTransportState {
+  workspaceId             String    @db.VarChar(128)
+  projectId               String    @db.VarChar(128)
+  jobId                   String    @db.VarChar(128)
+  schemaVersion           String    @db.VarChar(64)
+  transport               String    @db.VarChar(16)
+  completion              String    @db.VarChar(16)
+  retryPolicyJson         String    @db.Text
+  retryPolicyHash         String    @db.Char(64)
+  waitKind                String    @db.VarChar(16)
+  nextAttemptAt           DateTime? @db.Timestamptz(3)
+  deadlineAt              DateTime  @db.Timestamptz(3)
+  transportAttempts       Int       @default(0)
+  retryAfterMs            Int?
+  waitStartedAt           DateTime? @db.Timestamptz(3)
+  cancellation            String    @default("none") @db.VarChar(16)
+  cancellationRequestedAt DateTime? @db.Timestamptz(3)
+  resume                  String    @default("none") @db.VarChar(16)
+  resumeRequestedAt       DateTime? @db.Timestamptz(3)
+  mcpSessionId            String?   @db.VarChar(128)
+  mcpSessionClosedAt      DateTime? @db.Timestamptz(3)
+  revision                Int       @default(1)
+  createdAt               DateTime  @db.Timestamptz(3)
+  updatedAt               DateTime  @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+
+  @@id([jobId, workspaceId])
+  @@unique([jobId, workspaceId, projectId])
+  @@index([workspaceId, waitKind, nextAttemptAt])
+  @@index([deadlineAt])
+  @@map("provider_job_transport_states")
+}
+
+/// Durable replacement for the in-memory nonce set that used to guard provider
+/// callbacks. A process restart made every replayed callback look new again;
+/// persisted, it does not. Stores the sha256 of the exact bytes received, never
+/// the bytes: a provider payload is untrusted input and may carry signed URLs.
+model V2ProviderCallbackEvent {
+  id              String   @id @db.VarChar(128)
+  workspaceId     String   @db.VarChar(128)
+  projectId       String   @db.VarChar(128)
+  jobId           String   @db.VarChar(128)
+  schemaVersion   String   @db.VarChar(64)
+  providerId      String   @db.VarChar(128)
+  eventId         String   @db.VarChar(128)
+  providerJobId   String   @db.VarChar(256)
+  status          String   @db.VarChar(24)
+  outcome         String   @db.VarChar(16)
+  rejectionReason String?  @db.VarChar(32)
+  retryAfterMs    Int?
+  payloadSha256   String   @db.Char(64)
+  eventHash       String   @db.Char(64)
+  occurredAt      DateTime @db.Timestamptz(3)
+  receivedAt      DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job       V2ProviderJob @relation(fields: [jobId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, jobId, receivedAt(sort: Desc)])
+  @@index([workspaceId, providerId, receivedAt(sort: Desc)])
+  @@map("provider_callback_events")
 }
 
 model V2ProviderResultArtifact {
