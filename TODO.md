@@ -1632,6 +1632,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Criar health check/circuit breaker sem apagar jobs em andamento. Evidência T-FR-112.
 - [ ] Testar troca de provider sem alterar `TransformationBrief`. Evidência T-FR-112.
 
+> Wave 15 parcial/local: contratos versionados de TransformationBrief e seis modos, schema PostgreSQL para definitions/capabilities/health/selections e routing com razões de descarte foram implementados na branch `codex/wave15-transformation-registry`. O teste PostgreSQL foi ligado ao CI Compose. Permanecem abertos API pública, vínculo produtivo a StoryPlan/rights, execução por provider, integração em main, deploy e aceite; nenhuma caixa F3.010–F3.012 é fechada por este slice.
+
 ### F3.013 — Jobs duráveis API/MCP [FR-113]
 
 - [ ] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
