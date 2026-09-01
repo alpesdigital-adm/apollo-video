@@ -4,9 +4,9 @@
     "uiActions": 113,
     "capabilities": 101,
     "endpoints": 101,
-    "registeredCapabilities": 293,
-    "operableCapabilities": 293,
-    "publicContractCapabilities": 293,
+    "registeredCapabilities": 296,
+    "operableCapabilities": 296,
+    "publicContractCapabilities": 296,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5391,10 +5391,43 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.review-cleanup-masks.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/review-cleanup-masks",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.review-cleanup-masks.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/review-cleanup-masks",
+      "inputSchemaRef": "apollo://schemas/create-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.review-cleanup-masks.refine",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/review-cleanup-masks/{maskId}/refinements",
+      "inputSchemaRef": "apollo://schemas/refine-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.transformation-jobs.request",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/transformation-jobs",
-      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v1",
+      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v2",
       "outputSchemaRef": "apollo://schemas/transformation-job-mutated/v1",
       "internalOnlySurfaceId": null,
       "tests": [
