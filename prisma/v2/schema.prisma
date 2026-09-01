@@ -205,6 +205,11 @@ model V2Workspace {
   noveltyBudgetPolicies                  V2NoveltyBudgetPolicy[]
   noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
   noveltyBudgetDecisionLines             V2NoveltyBudgetDecisionLine[]
+  transformationFallbackLedgers          V2TransformationFallbackLedger[]
+  transformationFallbackAttempts         V2TransformationFallbackAttempt[]
+  transformationCriticReports            V2TransformationCriticReport[]
+  transformationCriticMeasurements       V2TransformationCriticMeasurement[]
+  transformationCriticIssues             V2TransformationCriticIssue[]
   providerCallbackEvents                 V2ProviderCallbackEvent[]
   transformationBriefs                   V2TransformationBrief[]
   transformationProviders                V2TransformationProviderDefinition[]
@@ -700,6 +705,8 @@ model V2Project {
   transformationBriefs                   V2TransformationBrief[]
   transformationProviderSelections       V2TransformationProviderSelection[]
   noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
+  transformationFallbackLedgers          V2TransformationFallbackLedger[]
+  transformationCriticReports            V2TransformationCriticReport[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -4139,6 +4146,152 @@ model V2ProviderJobTransition {
 /// F3.014 / FR-114 — a versioned, deterministic novelty policy. Integer-only:
 /// the same candidates must yield the same verdict regardless of row order, and
 /// floating-point addition is not associative.
+/// F3.015 / FR-115 — the fallback ledger. Append-only: an attempt is a fact
+/// that happened, and a ladder able to rewrite its own history could not answer
+/// why the workflow ended up on a cutaway.
+model V2TransformationFallbackLedger {
+  id                     String   @id @db.VarChar(128)
+  workspaceId            String   @db.VarChar(128)
+  projectId              String   @db.VarChar(128)
+  projectVersionId       String   @db.VarChar(128)
+  schemaVersion          String   @db.VarChar(64)
+  briefId                String   @db.VarChar(128)
+  briefHash              String   @db.Char(64)
+  ladderJson             String   @db.Text
+  currentRung            String   @db.VarChar(24)
+  bestArtifactId         String?  @db.VarChar(128)
+  bestArtifactSha256     String?  @db.Char(64)
+  bestIntentScoreBps     Int?
+  incurredCostMinorUnits Int      @default(0)
+  costCurrency           String   @db.Char(3)
+  reviewDecision         String   @db.VarChar(24)
+  sourceArtifactId       String   @db.VarChar(128)
+  sourceArtifactSha256   String   @db.Char(64)
+  ledgerHash             String   @db.Char(64)
+  createdAt              DateTime @db.Timestamptz(3)
+  updatedAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  attempts  V2TransformationFallbackAttempt[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, briefId])
+  @@index([workspaceId, projectId, updatedAt(sort: Desc)])
+  @@map("transformation_fallback_ledgers")
+}
+
+model V2TransformationFallbackAttempt {
+  id                       String  @id @db.VarChar(128)
+  workspaceId              String  @db.VarChar(128)
+  ledgerId                 String  @db.VarChar(128)
+  sequence                 Int
+  rung                     String  @db.VarChar(24)
+  providerJobId            String? @db.VarChar(128)
+  providerId               String? @db.VarChar(128)
+  artifactId               String? @db.VarChar(128)
+  artifactSha256           String? @db.Char(64)
+  outcome                  String  @db.VarChar(16)
+  intentScoreBps           Int?
+  criticReportHash         String? @db.Char(64)
+  violatesProtectedContent Boolean @default(false)
+  estimatedCostMinorUnits  Int     @default(0)
+  observedCostMinorUnits   Int     @default(0)
+  costCurrency             String  @db.Char(3)
+  reason                   String  @db.VarChar(300)
+  descendedBecause         String? @db.VarChar(48)
+
+  workspace V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  ledger    V2TransformationFallbackLedger @relation(fields: [ledgerId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([ledgerId, sequence])
+  @@index([workspaceId, providerJobId])
+  @@map("transformation_fallback_attempts")
+}
+
+/// F3.016 / FR-116 — the transformation critic. Not the synthetic presenter
+/// critic: that one asks whether an avatar spoke a script well, this one asks
+/// whether a transformation changed only what it was allowed to change.
+model V2TransformationCriticReport {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  schemaVersion        String   @db.VarChar(64)
+  briefId              String   @db.VarChar(128)
+  briefHash            String   @db.Char(64)
+  providerJobId        String   @db.VarChar(128)
+  policyId             String   @db.VarChar(128)
+  policyHash           String   @db.Char(64)
+  sourceArtifactId     String   @db.VarChar(128)
+  sourceArtifactSha256 String   @db.Char(64)
+  resultArtifactId     String   @db.VarChar(128)
+  resultArtifactSha256 String   @db.Char(64)
+  evaluatorsJson       String   @db.Text
+  hardGatesJson        String   @db.Text
+  hardGateCount        Int      @default(0)
+  decision             String   @db.VarChar(24)
+  action               String   @db.VarChar(16)
+  confidenceBps        Int?
+  intentScoreBps       Int?
+  reportHash           String   @db.Char(64)
+  evaluatedAt          DateTime @db.Timestamptz(3)
+  createdAt            DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace                         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project      V2Project                           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  measurements V2TransformationCriticMeasurement[]
+  issues       V2TransformationCriticIssue[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, briefId, evaluatedAt(sort: Desc)])
+  @@index([workspaceId, providerJobId])
+  @@map("transformation_critic_reports")
+}
+
+model V2TransformationCriticMeasurement {
+  id           String  @id @db.VarChar(128)
+  workspaceId  String  @db.VarChar(128)
+  reportId     String  @db.VarChar(128)
+  dimension    String  @db.VarChar(32)
+  status       String  @db.VarChar(16)
+  evaluatorId  String? @db.VarChar(128)
+  scoreBps     Int?
+  thresholdBps Int?
+  startFrame   Int?
+  endFrame     Int?
+  regionJson   String? @db.Text
+  note         String? @db.VarChar(500)
+
+  workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report    V2TransformationCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([reportId, dimension])
+  @@map("transformation_critic_measurements")
+}
+
+model V2TransformationCriticIssue {
+  id               String  @id @db.VarChar(128)
+  workspaceId      String  @db.VarChar(128)
+  reportId         String  @db.VarChar(128)
+  sequence         Int
+  dimension        String  @db.VarChar(32)
+  severity         String  @db.VarChar(16)
+  startFrame       Int
+  endFrame         Int
+  regionJson       String? @db.Text
+  violatedPreserve String? @db.VarChar(24)
+  description      String  @db.VarChar(500)
+
+  workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report    V2TransformationCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([reportId, sequence])
+  @@map("transformation_critic_issues")
+}
+
 model V2NoveltyBudgetPolicy {
   id                      String   @db.VarChar(128)
   workspaceId             String   @db.VarChar(128)
