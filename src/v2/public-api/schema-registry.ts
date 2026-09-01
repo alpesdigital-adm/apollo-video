@@ -10,6 +10,14 @@ import {
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
 import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
+import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
+import { PROVIDER_JOB_TRANSPORTS } from '../domain/provider-job-transport.ts'
+import {
+  TRANSFORMATION_FALLBACKS,
+  TRANSFORMATION_INTENTS,
+  TRANSFORMATION_MODES,
+  TRANSFORMATION_PRESERVES,
+} from '../domain/transformation-brief.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -13862,6 +13870,160 @@ const syntheticProductionPlanSchema: JsonSchema = {
     authorization: { type: 'object' }, createdAt: dateTimeSchema, planHash: sha256Schema,
   },
 }
+// F3.013 / FR-113 — public projections of the transformation control plane.
+// `prompt` is absent from the brief projection on purpose: it is untrusted
+// authored text, and INTERNAL_ONLY_SURFACES names `rawPrompt` for that reason.
+const transformationBriefPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','projectId','projectVersionId','storyPlanId','sourceArtifactId','sourceRange','intent','editorialIntent','mode','preserve','allowedChanges','outputSpecIds','intensityBps','durationFrames','noveltyBps','safety','safeZones','fallbackLadder','rightsSnapshotId','createdAt','briefHash'],
+  properties: {
+    id: idSchema, projectId: idSchema, projectVersionId: idSchema, storyPlanId: idSchema,
+    sourceArtifactId: idSchema,
+    sourceRange: {
+      type: 'object', additionalProperties: false, required: ['startFrame','endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    intent: { enum: [...TRANSFORMATION_INTENTS] },
+    editorialIntent: { type: 'string', maxLength: 500 },
+    mode: { enum: [...TRANSFORMATION_MODES] },
+    preserve: { type: 'array', maxItems: 13, items: { enum: [...TRANSFORMATION_PRESERVES] } },
+    allowedChanges: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+    outputSpecIds: { type: 'array', maxItems: 32, items: idSchema },
+    intensityBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    durationFrames: { type: 'integer', minimum: 1 },
+    noveltyBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    safety: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+    safeZones: {
+      type: 'array', maxItems: 32,
+      items: {
+        type: 'object', additionalProperties: false, required: ['x','y','width','height','purpose'],
+        properties: {
+          x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
+          purpose: { enum: ['subject','face','text','brand','protected-object'] },
+        },
+      },
+    },
+    fallbackLadder: { type: 'array', maxItems: 5, items: { enum: [...TRANSFORMATION_FALLBACKS] } },
+    rightsSnapshotId: idSchema, createdAt: dateTimeSchema, briefHash: sha256Schema,
+  },
+}
+
+const transformationSelectionPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','briefId','briefHash','selectedReason','candidates','policy','createdAt','selectionHash'],
+  properties: {
+    id: idSchema, briefId: idSchema, briefHash: sha256Schema,
+    selectedProviderId: idSchema, selectedCapabilityId: idSchema,
+    selectedReason: { type: 'string', maxLength: 300 },
+    candidates: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false, required: ['providerId','eligible','reasons'],
+        properties: {
+          providerId: idSchema, capabilityId: idSchema, eligible: { type: 'boolean' },
+          reasons: { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 64 } },
+          estimatedCostMinorUnits: { type: 'integer', minimum: 0 },
+          qualityScoreBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        },
+      },
+    },
+    policy: { type: 'object', maxProperties: 20, additionalProperties: true },
+    createdAt: dateTimeSchema, selectionHash: sha256Schema,
+  },
+}
+
+// The MCP session id is deliberately not here: it identifies a wire, not a job.
+const transformationTransportPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['transport','completion','waiting','deadlineAt','attempts','maxAttempts','cancellation','resume','mcpSessionClosed','revision'],
+  properties: {
+    transport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+    completion: { enum: ['synchronous','polling','webhook','both'] },
+    waiting: { enum: ['none','poll','callback','retry'] },
+    nextAttemptAt: { oneOf: [dateTimeSchema, { type: 'null' }] },
+    deadlineAt: dateTimeSchema,
+    attempts: { type: 'integer', minimum: 0 },
+    maxAttempts: { type: 'integer', minimum: 1 },
+    retryAfterMs: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+    cancellation: { enum: ['none','requested','acknowledged','unsupported'] },
+    resume: { enum: ['none','requested','acknowledged'] },
+    mcpSessionClosed: { type: 'boolean' },
+    revision: { type: 'integer', minimum: 1 },
+  },
+}
+
+const transformationJobPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','projectId','originProjectVersionId','operation','adapter','status','attempt','createdAt','updatedAt'],
+  properties: {
+    id: idSchema, projectId: idSchema, originProjectVersionId: idSchema,
+    operation: { type: 'string', maxLength: 32 },
+    adapter: {
+      type: 'object', additionalProperties: false, required: ['id','version'],
+      properties: { id: idSchema, version: idSchema },
+    },
+    status: { type: 'string', maxLength: 32 },
+    attempt: { type: 'integer', minimum: 0 },
+    transformation: {
+      type: 'object', additionalProperties: false,
+      required: ['briefId','briefHash','selectionId','selectionHash','providerId','capabilityId'],
+      properties: {
+        briefId: idSchema, briefHash: sha256Schema, selectionId: idSchema, selectionHash: sha256Schema,
+        providerId: idSchema, capabilityId: idSchema,
+      },
+    },
+    transport: transformationTransportPublicSchema,
+    estimate: {
+      type: 'object', additionalProperties: false, required: ['currency','costMinorUnits','estimatedLatencyMs'],
+      properties: {
+        currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+        costMinorUnits: { type: 'integer', minimum: 0 },
+        estimatedLatencyMs: { type: 'integer', minimum: 0 },
+      },
+    },
+    observedCost: {
+      type: 'object', additionalProperties: false, required: ['currency','costMinorUnits'],
+      properties: {
+        currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+        costMinorUnits: { type: 'integer', minimum: 0 },
+      },
+    },
+    resultArtifact: {
+      type: 'object', additionalProperties: false, required: ['artifactId','artifactSha256','mediaType','byteSize'],
+      properties: {
+        artifactId: idSchema, artifactSha256: sha256Schema,
+        mediaType: { enum: ['audio','video','image','data'] },
+        byteSize: { type: 'integer', minimum: 1 },
+      },
+    },
+    // The normalized error only. Upstream diagnostics never reach the public
+    // contract: they routinely echo the request, which here means the prompt.
+    error: {
+      type: 'object', additionalProperties: false, required: ['code','message','retryable'],
+      properties: {
+        code: { type: 'string', maxLength: 64 }, message: { type: 'string', maxLength: 300 },
+        retryable: { type: 'boolean' }, retryAfterMs: { type: 'integer', minimum: 0 },
+      },
+    },
+    createdAt: dateTimeSchema, updatedAt: dateTimeSchema, completedAt: dateTimeSchema,
+  },
+}
+
+// The digest of the bytes travels; the bytes do not. A provider payload may
+// carry signed URLs or tokens.
+const providerCallbackEventPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['eventId','providerId','status','outcome','payloadSha256','occurredAt','receivedAt'],
+  properties: {
+    eventId: idSchema, providerId: idSchema,
+    status: { enum: ['queued','processing','retrieving','completed','failed','cancelled'] },
+    outcome: { enum: ['accepted','duplicate','rejected'] },
+    rejectedBecause: { enum: [...PROVIDER_CALLBACK_REJECTIONS] },
+    payloadSha256: sha256Schema,
+    occurredAt: dateTimeSchema, receivedAt: dateTimeSchema,
+  },
+}
+
 const providerJobPublicSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: ['id', 'projectId', 'originProjectVersionId', 'operation', 'adapter', 'status', 'attempt', 'createdAt', 'updatedAt'],
@@ -23462,6 +23624,136 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   }),
   defineSchema('provider-job-mutated', 1, 'Created or replayed durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job','replayed'], properties: { job: providerJobPublicSchema, replayed: { type: 'boolean' } } })),
   defineSchema('provider-job-read', 1, 'Normalized durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job'], properties: { job: providerJobPublicSchema } })),
+  defineSchema('create-transformation-brief-request', 1, 'The immutable statement of one generative transformation', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId','storyPlanId','storyPlanHash','sourceArtifactId','sourceArtifactHash','sourceRange','intent','editorialIntent','mode','prompt','preserve','fallbackLadder','intensityBps','noveltyBps','rightsSnapshotId','rightsSnapshotHash'],
+    properties: {
+      projectVersionId: idSchema, storyPlanId: idSchema, storyPlanHash: sha256Schema,
+      sourceArtifactId: idSchema, sourceArtifactHash: sha256Schema,
+      sourceRange: {
+        type: 'object', additionalProperties: false, required: ['startFrame','endFrame'],
+        properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+      },
+      intent: { enum: [...TRANSFORMATION_INTENTS] },
+      editorialIntent: { type: 'string', minLength: 1, maxLength: 500 },
+      mode: { enum: [...TRANSFORMATION_MODES] },
+      prompt: { type: 'string', minLength: 1, maxLength: 2000 },
+      negativeConstraints: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      preserve: { type: 'array', minItems: 1, maxItems: 13, uniqueItems: true, items: { enum: [...TRANSFORMATION_PRESERVES] } },
+      allowedChanges: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      target: { type: 'object', maxProperties: 100, additionalProperties: true },
+      outputSpecIds: { type: 'array', maxItems: 32, items: idSchema },
+      intensityBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      noveltyBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      safety: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      safeZones: {
+        type: 'array', maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['x','y','width','height','purpose'],
+          properties: {
+            x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+            width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+            purpose: { enum: ['subject','face','text','brand','protected-object'] },
+          },
+        },
+      },
+      fallbackLadder: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { enum: [...TRANSFORMATION_FALLBACKS] } },
+      rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema,
+      identitySnapshotId: idSchema, identitySnapshotHash: sha256Schema,
+    },
+  }),
+  defineSchema('transformation-brief-created', 1, 'A persisted, content-addressed transformation brief',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['brief','replayed'],
+      properties: { brief: transformationBriefPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('route-transformation-brief-request', 1, 'The policy a routing decision is made under', {
+    type: 'object', additionalProperties: false,
+    required: ['region','maximumCostMinorUnits','minimumQualityScoreBps','output'],
+    properties: {
+      region: { type: 'string', minLength: 2, maxLength: 35 },
+      maximumCostMinorUnits: { type: 'integer', minimum: 0 },
+      minimumQualityScoreBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      output: {
+        type: 'object', additionalProperties: false, required: ['width','height','fps','includeAudio'],
+        properties: {
+          width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 },
+          fps: { type: 'integer', minimum: 1, maximum: 240 }, includeAudio: { type: 'boolean' },
+        },
+      },
+      halfOpenProbeProviderId: idSchema,
+    },
+  }),
+  defineSchema('transformation-provider-selection', 1, 'Which provider was chosen, and every candidate that was not',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['selection','replayed'],
+      properties: { selection: transformationSelectionPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('request-transformation-job-request', 1, 'Request a transformation from a persisted brief', {
+    type: 'object', additionalProperties: false,
+    required: ['briefId','selectionId','use','market','locale'],
+    properties: {
+      briefId: idSchema, selectionId: idSchema,
+      use: idSchema,
+      market: { type: 'string', minLength: 2, maxLength: 64 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      // A preference, not an instruction: the provider's completion mode
+      // decides what is possible, and an impossible pairing is refused.
+      preferredTransport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+    },
+  }),
+  defineSchema('transformation-job-mutated', 1, 'A durable transformation job the worker now owns',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','replayed'],
+      properties: { job: transformationJobPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('transformation-job-read', 1, 'A durable transformation job with its redacted callback history',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','callbacks'],
+      properties: {
+        job: transformationJobPublicSchema,
+        callbacks: { type: 'array', maxItems: 200, items: providerCallbackEventPublicSchema },
+      },
+    }),
+  ),
+  defineSchema('transformation-job-cancelled', 1, 'A recorded cancellation intent and whether the provider can honour it',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','providerSupportsCancellation'],
+      properties: {
+        job: transformationJobPublicSchema,
+        transport: transformationTransportPublicSchema,
+        providerSupportsCancellation: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('transformation-job-resumed', 1, 'A transformation job with its attempt budget reset',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job'],
+      properties: { job: transformationJobPublicSchema, transport: transformationTransportPublicSchema },
+    }),
+  ),
+  defineSchema('provider-callback-notification', 1, 'What a transformation provider sends when a job changes state', {
+    type: 'object', additionalProperties: true,
+    required: ['providerJobId','status','occurredAt'],
+    properties: {
+      providerJobId: { type: 'string', minLength: 3, maxLength: 256 },
+      status: { enum: ['queued','processing','retrieving','completed','failed','cancelled'] },
+      occurredAt: dateTimeSchema,
+      retryAfterMs: { type: 'integer', minimum: 0, maximum: 3600000 },
+    },
+  }),
+  defineSchema('provider-callback-outcome', 1, 'The verdict on one inbound provider callback',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['outcome'],
+      properties: {
+        outcome: { enum: ['accepted','duplicate','rejected'] },
+        rejectedBecause: { enum: [...PROVIDER_CALLBACK_REJECTIONS] },
+      },
+    }),
+  ),
   defineSchema(
     'speaker-diarization-read',
     1,

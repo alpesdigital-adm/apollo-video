@@ -362,6 +362,24 @@ const coverage = Object.freeze({
   'apollo.projects.synthetic-masters.promote': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent replay key plus a unique provider-job seal, and the sealing transaction rechecks the approved job critic hash and the presenter snapshot hash the bytes were generated from before commit',
   },
+  'apollo.provider-callbacks.receive': {
+    mode: 'durable-covered', evidence: 'a partial unique index on accepted events makes the event id consumable exactly once, and the wake commits in the same transaction as the consumption, so a duplicate delivery loses the race and is reported as a duplicate instead of ingesting twice',
+  },
+  'apollo.projects.transformation-briefs.create': {
+    mode: 'durable-covered', evidence: 'the brief is content-addressed, so two concurrent writers of the same intent converge on the same id and hash rather than racing; a different intent is a different brief',
+  },
+  'apollo.projects.transformation-briefs.route': {
+    mode: 'durable-covered', evidence: 'the selection hashes the brief, the candidate list and the policy, so concurrent routings under the same policy converge and a routing made against a stale brief revision is refused at request time by briefHash comparison',
+  },
+  'apollo.projects.transformation-jobs.request': {
+    mode: 'durable-covered', evidence: 'actor-bound idempotent creation with a request fingerprint over brief, selection, use, market and locale; the job and its transport schedule commit in one serializable transaction, and the rights snapshot is rechecked against the one the brief was authorized under',
+  },
+  'apollo.projects.transformation-jobs.cancel': {
+    mode: 'durable-covered', evidence: 'compare-and-swap on the transport revision, so two operators cancelling the same job concurrently get a VERSION_CONFLICT instead of one silently overwriting the other; a cancellation already recorded returns unchanged',
+  },
+  'apollo.projects.transformation-jobs.retry': {
+    mode: 'durable-covered', evidence: 'compare-and-swap on the transport revision; a resume already pending and untouched returns unchanged so repeating the request cannot extend the deadline indefinitely',
+  },
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent creation, immutable authorization, serializable project/profile/rights rechecks, leased stage claims and job-hash compare-and-swap transition history',
   },
@@ -458,7 +476,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    132,
+    138,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

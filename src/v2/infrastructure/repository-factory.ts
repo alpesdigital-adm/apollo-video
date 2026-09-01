@@ -277,6 +277,9 @@ import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-m
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaTransformationProviderRegistryRepository } from './prisma/transformation-provider-registry-repository.ts'
+import { HttpTransformationProviderAdapter } from './transformation/http-transformation-provider.ts'
+import { McpTransformationProviderAdapter } from './transformation/mcp-transformation-provider.ts'
+import { VerifiedTransformationResultIngestor } from './transformation/transformation-result-ingestion.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
 import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic-report-repository.ts'
@@ -1186,8 +1189,65 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
           ...(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS ? { maxCharacters: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS, 'ElevenLabs text limit') } : {}),
         })
       }
+      // Generative transformation providers. Every one of them is declared in
+      // the persisted registry with its own adapter id; the credential and base
+      // URL come from the environment so the application boots without them and
+      // an unconfigured provider fails closed at claim time.
+      const httpTransformation = transformationAdapterEnvironment(environment, input.adapterId)
+      if (httpTransformation && input.adapterVersion === httpTransformation.adapterVersion) {
+        if (httpTransformation.transport === 'mcp') {
+          return new McpTransformationProviderAdapter({
+            id: input.adapterId,
+            adapterVersion: httpTransformation.adapterVersion,
+            endpoint: httpTransformation.baseUrl,
+            apiKey: httpTransformation.apiKey,
+            modes: httpTransformation.modes,
+          })
+        }
+        return new HttpTransformationProviderAdapter({
+          id: input.adapterId,
+          adapterVersion: httpTransformation.adapterVersion,
+          baseUrl: httpTransformation.baseUrl,
+          apiKey: httpTransformation.apiKey,
+          completion: httpTransformation.completion,
+          modes: httpTransformation.modes,
+          ...(httpTransformation.callbackSecret ? { callbackSecret: httpTransformation.callbackSecret } : {}),
+        })
+      }
       return null
     },
+  })
+}
+
+/**
+ * Read one transformation provider's runtime configuration from the
+ * environment. The adapter id is normalized into an env prefix so a workspace
+ * can register several providers without a code change:
+ *
+ *   APOLLO_V2_TRANSFORMATION_<ID>_BASE_URL
+ *   APOLLO_V2_TRANSFORMATION_<ID>_API_KEY
+ *   APOLLO_V2_TRANSFORMATION_<ID>_COMPLETION      synchronous|polling|webhook|both|mcp
+ *   APOLLO_V2_TRANSFORMATION_<ID>_MODES           comma separated
+ *   APOLLO_V2_TRANSFORMATION_<ID>_CALLBACK_SECRET hex, >= 32 bytes
+ *   APOLLO_V2_TRANSFORMATION_<ID>_ADAPTER_VERSION
+ */
+export function transformationAdapterEnvironment(environment: NodeJS.ProcessEnv, adapterId: string) {
+  const prefix = `APOLLO_V2_TRANSFORMATION_${adapterId.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`
+  const baseUrl = environment[`${prefix}_BASE_URL`]?.trim()
+  const apiKey = environment[`${prefix}_API_KEY`]?.trim()
+  if (!baseUrl || !apiKey) return null
+  const declared = (environment[`${prefix}_COMPLETION`]?.trim() ?? 'polling') as string
+  const transport = declared === 'mcp' ? 'mcp' : 'http'
+  const completion = (declared === 'mcp' ? 'polling' : declared) as 'synchronous' | 'polling' | 'webhook' | 'both'
+  const secretHex = environment[`${prefix}_CALLBACK_SECRET`]?.trim()
+  return Object.freeze({
+    adapterVersion: environment[`${prefix}_ADAPTER_VERSION`]?.trim() || '1.0.0',
+    baseUrl,
+    apiKey,
+    transport,
+    completion,
+    modes: Object.freeze((environment[`${prefix}_MODES`]?.trim() || 'video-to-video').split(',').map((mode) => mode.trim()).filter(Boolean)),
+    ...(secretHex ? { callbackSecret: Buffer.from(secretHex, 'hex') } : {}),
   })
 }
 
@@ -1224,14 +1284,30 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
       },
     },
   })
+  const transformationIngestor = new VerifiedTransformationResultIngestor({
+    workRoot,
+    storage: createVerifiedMediaStorage(environment),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    artifactQuery,
+    resultArtifacts,
+    prober: {
+      probe(sourcePath, options) {
+        return probeVideo(sourcePath, { ...options, environment, requireAudio: false })
+      },
+    },
+  })
   const videoCritic = new PersistedProviderResultCritic(artifactQuery)
   const ttsCritic = new PersistedTtsResultCritic(artifactQuery, resultArtifacts)
+  // A transformation job is recognised by the binding it carries, not by its
+  // operation: operations are shared with the synthetic path, the brief is not.
+  const isTransformation = (job: { transformation?: unknown }) => job.transformation !== undefined
   return runProviderJobWorkerOnce({
     jobs: createProviderJobRepository(),
     adapters: createProviderAdapterRegistry(environment),
     materializer: createProviderSubmissionInputMaterializer(environment),
     ingestor: {
       ingest(input) {
+        if (isTransformation(input.job)) return transformationIngestor.ingest(input)
         return (input.job.operation === 'tts' ? ttsIngestor : videoIngestor).ingest(input)
       },
     },

@@ -4,9 +4,9 @@
     "uiActions": 113,
     "capabilities": 101,
     "endpoints": 101,
-    "registeredCapabilities": 286,
-    "operableCapabilities": 286,
-    "publicContractCapabilities": 286,
+    "registeredCapabilities": 293,
+    "operableCapabilities": 293,
+    "publicContractCapabilities": 293,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5363,6 +5363,83 @@
       "endpoint": "GET /v1/projects/{projectId}/provider-jobs/{jobId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/provider-job-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-briefs.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-briefs",
+      "inputSchemaRef": "apollo://schemas/create-transformation-brief-request/v1",
+      "outputSchemaRef": "apollo://schemas/transformation-brief-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-briefs.route",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-briefs/{briefId}/routings",
+      "inputSchemaRef": "apollo://schemas/route-transformation-brief-request/v1",
+      "outputSchemaRef": "apollo://schemas/transformation-provider-selection/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs",
+      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v1",
+      "outputSchemaRef": "apollo://schemas/transformation-job-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/transformation-jobs/{jobId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.cancel",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs/{jobId}/cancellations",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-cancelled/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.retry",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs/{jobId}/retries",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-resumed/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.provider-callbacks.receive",
+      "exposure": "public",
+      "endpoint": "POST /v1/provider-callbacks/{providerId}",
+      "inputSchemaRef": "apollo://schemas/provider-callback-notification/v1",
+      "outputSchemaRef": "apollo://schemas/provider-callback-outcome/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

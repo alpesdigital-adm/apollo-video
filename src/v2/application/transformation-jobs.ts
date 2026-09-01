@@ -363,13 +363,21 @@ export function cancelTransformationJobService(dependencies: {
     const capabilities = adapter ? await adapter.getCapabilities() : null
     const supported = Boolean(capabilities?.supportsCancellation && typeof adapter?.cancel === 'function')
 
+    // "Stop this job" is a statement of desired state, not an event. Asking
+    // twice is not an error: the second request finds the intent already
+    // recorded and returns it unchanged, which is what makes this endpoint
+    // genuinely idempotent rather than merely declared so.
+    if (state.cancellation !== 'none') {
+      return Object.freeze({ persisted, transportState: state, supported, alreadyRequested: true })
+    }
+
     const next = requestProviderJobCancellation({
       state,
       occurredAt: dependencies.clock().toISOString(),
       supported,
     })
     const saved = await dependencies.jobs.saveTransportState({ expectedRevision: state.revision, next })
-    return Object.freeze({ persisted, transportState: saved, supported })
+    return Object.freeze({ persisted, transportState: saved, supported, alreadyRequested: false })
   }
 }
 
@@ -409,6 +417,12 @@ export function retryTransformationJobService(dependencies: {
       'A terminal transformation job cannot be resumed; request a new transformation instead',
     )
     assertDomain(state.cancellation === 'none', 'VERSION_CONFLICT', 'A cancelled transformation job cannot be resumed')
+    // A resume already pending and untouched is the same desired state. Moving
+    // the deadline again on every retry of the same request would let a client
+    // extend a job indefinitely just by repeating itself.
+    if (state.resume === 'requested' && state.waitKind === 'none' && state.transportAttempts === 0) {
+      return Object.freeze({ persisted, transportState: state, alreadyRequested: true })
+    }
     const now = dependencies.clock()
     const next = requestProviderJobResume({
       state,
@@ -416,7 +430,7 @@ export function retryTransformationJobService(dependencies: {
       deadlineAt: new Date(now.getTime() + (dependencies.deadlineMs ?? DEFAULT_DEADLINE_MS)).toISOString(),
     })
     const saved = await dependencies.jobs.saveTransportState({ expectedRevision: state.revision, next })
-    return Object.freeze({ persisted, transportState: saved })
+    return Object.freeze({ persisted, transportState: saved, alreadyRequested: false })
   }
 }
 

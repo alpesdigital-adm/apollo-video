@@ -343,6 +343,26 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to estimate and submit one paid TTS or avatar provider job after exact project, consent and source-rights checks.',
     },
+    'apollo.projects.transformation-briefs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Writes the immutable, content-addressed statement of one transformation. Nothing is submitted and nothing is paid for; persisting the same intent twice yields the same brief.',
+    },
+    'apollo.projects.transformation-briefs.route': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records which registered provider would carry a brief, and every candidate that was discarded with its reasons. It decides nothing about spending: a selection is an input to a later, separately approved request.',
+    },
+    'apollo.projects.transformation-jobs.request': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Authorizes a durable worker to submit one paid generative transformation. The payload is projected from the persisted brief and never accepted from the caller, and the rights snapshot must still match the one the brief was authorized under.',
+    },
+    'apollo.projects.transformation-jobs.cancel': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Records a durable cancellation intent that the worker executes. It stops future spending on one job and never destroys an artifact already ingested; a provider that cannot cancel is reported as unsupported rather than as cancelled.',
+    },
+    'apollo.projects.transformation-jobs.retry': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Resets the attempt budget and extends the deadline of one stalled transformation job, which can lead to another paid submission. A permanently failed job cannot be resumed.',
+    },
     'apollo.projects.synthetic-script-plans.create': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Segments an approved script into an immutable block plan and enqueues one paid TTS job per uncached block after consent, rights and cache checks.',

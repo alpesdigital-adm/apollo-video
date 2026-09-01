@@ -5593,6 +5593,141 @@ const syntheticCriticMeasurementsExample = [
   criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
   criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
 ]
+// F3.013 / FR-113 — the canonical example from spec 06 §17: a specialist filmed
+// against a controlled background, placed in a medieval British village to
+// illustrate medieval traffic management. The person, their speech and their
+// wardrobe are protected; only the background may change.
+const transformationBriefRequestExample = {
+  projectVersionId: 'project-version-medieval-01',
+  storyPlanId: 'story-plan-medieval-01',
+  storyPlanHash: 'b'.repeat(64),
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceArtifactHash: 'c'.repeat(64),
+  sourceRange: { startFrame: 30, endFrame: 210 },
+  intent: 'world-shift',
+  editorialIntent: 'Colocar o especialista numa vila medieval britânica para ilustrar gestão de tráfego medieval.',
+  mode: 'background-replacement',
+  prompt: 'Medieval British village street at midday, packed earth road, timber-framed houses, market carts.',
+  negativeConstraints: ['no weapons', 'no crowd violence', 'no modern signage'],
+  preserve: ['identity', 'lips', 'expression', 'body-motion', 'wardrobe', 'speech', 'foreground'],
+  allowedChanges: ['background', 'ambient-light'],
+  target: { era: 'medieval', region: 'britain', timeOfDay: 'midday' },
+  outputSpecIds: ['output-spec-16x9-1080p'],
+  intensityBps: 6_500,
+  noveltyBps: 7_000,
+  safety: ['no-identity-change', 'no-weapon'],
+  safeZones: [{ x: 0.32, y: 0.08, width: 0.36, height: 0.62, purpose: 'subject' }],
+  fallbackLadder: ['video-to-video', 'actor-composite', 'generated-cutaway', 'still-parallax', 'source-unchanged'],
+  rightsSnapshotId: 'rights-snapshot-specialist-01',
+  rightsSnapshotHash: 'd'.repeat(64),
+  identitySnapshotId: 'identity-snapshot-specialist-01',
+  identitySnapshotHash: 'e'.repeat(64),
+}
+
+const transformationBriefExample = {
+  id: 'transformation-brief-4f2c8a1d9b7e6350a1c4d8f2b6e09374',
+  projectId: 'project-medieval-01',
+  projectVersionId: 'project-version-medieval-01',
+  storyPlanId: 'story-plan-medieval-01',
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceRange: { startFrame: 30, endFrame: 210 },
+  intent: 'world-shift',
+  editorialIntent: transformationBriefRequestExample.editorialIntent,
+  mode: 'background-replacement',
+  preserve: transformationBriefRequestExample.preserve,
+  allowedChanges: transformationBriefRequestExample.allowedChanges,
+  outputSpecIds: ['output-spec-16x9-1080p'],
+  intensityBps: 6_500,
+  durationFrames: 180,
+  noveltyBps: 7_000,
+  safety: transformationBriefRequestExample.safety,
+  safeZones: transformationBriefRequestExample.safeZones,
+  fallbackLadder: transformationBriefRequestExample.fallbackLadder,
+  rightsSnapshotId: 'rights-snapshot-specialist-01',
+  createdAt: '2029-03-01T10:00:00.000Z',
+  briefHash: '4f2c8a1d9b7e6350a1c4d8f2b6e09374' + '5a8c1e0f7d2b943681ac5f0e2d7b9436',
+}
+
+const transformationSelectionExample = {
+  id: 'transformation-provider-selection-9a1c7f3e5d208b46c1f7a930e5b28d64',
+  briefId: transformationBriefExample.id,
+  briefHash: transformationBriefExample.briefHash,
+  selectedProviderId: 'atelier-v2v',
+  selectedCapabilityId: 'atelier-background-replace-hd',
+  selectedReason: 'eligible:atelier-v2v:atelier-background-replace-hd',
+  // The discarded candidates travel with the decision. A routing choice without
+  // its rejections is unexplainable the moment anything changes.
+  candidates: [
+    { providerId: 'atelier-v2v', capabilityId: 'atelier-background-replace-hd', eligible: true, reasons: [], estimatedCostMinorUnits: 900, qualityScoreBps: 8_600 },
+    { providerId: 'kiln-motion', capabilityId: 'kiln-background-replace-sd', eligible: false, reasons: ['dimensions-exceeded', 'quality-below-policy'], estimatedCostMinorUnits: 420, qualityScoreBps: 6_100 },
+    { providerId: 'northwind-render', eligible: false, reasons: ['capability-missing'] },
+  ],
+  policy: {
+    region: 'eu-west', maximumCostMinorUnits: 4_000, minimumQualityScoreBps: 7_000,
+    output: { width: 1920, height: 1080, fps: 30, includeAudio: true },
+  },
+  createdAt: '2029-03-01T10:00:05.000Z',
+  selectionHash: '9a1c7f3e5d208b46c1f7a930e5b28d64' + '30e5b28d649a1c7f3e5d208b46c1f7a9',
+}
+
+const transformationTransportExample = {
+  transport: 'polling',
+  completion: 'both',
+  waiting: 'poll',
+  nextAttemptAt: '2029-03-01T10:00:14.000Z',
+  deadlineAt: '2029-03-01T11:00:10.000Z',
+  attempts: 3,
+  maxAttempts: 5,
+  retryAfterMs: 4_000,
+  cancellation: 'none',
+  resume: 'none',
+  mcpSessionClosed: false,
+  revision: 4,
+}
+
+const transformationJobExample = {
+  id: 'provider-job-6b3f0d92-4c81-4d5a-9f27-b0a3c8e51d74',
+  projectId: 'project-medieval-01',
+  originProjectVersionId: 'project-version-medieval-01',
+  operation: 'background-replace',
+  adapter: { id: 'atelier-v2v', version: '1.0.0' },
+  status: 'processing',
+  attempt: 1,
+  transformation: {
+    briefId: transformationBriefExample.id,
+    briefHash: transformationBriefExample.briefHash,
+    selectionId: transformationSelectionExample.id,
+    selectionHash: transformationSelectionExample.selectionHash,
+    providerId: 'atelier-v2v',
+    capabilityId: 'atelier-background-replace-hd',
+  },
+  transport: transformationTransportExample,
+  estimate: { currency: 'USD', costMinorUnits: 900, estimatedLatencyMs: 12_000 },
+  createdAt: '2029-03-01T10:00:10.000Z',
+  updatedAt: '2029-03-01T10:00:14.000Z',
+}
+
+const transformationCallbackAcceptedExample = {
+  eventId: 'atelier-event-88213',
+  providerId: 'atelier-v2v',
+  status: 'completed',
+  outcome: 'accepted',
+  payloadSha256: '1f'.repeat(32),
+  occurredAt: '2029-03-01T10:04:12.000Z',
+  receivedAt: '2029-03-01T10:04:12.410Z',
+}
+
+const transformationCallbackRejectedExample = {
+  eventId: 'atelier-event-88214',
+  providerId: 'atelier-v2v',
+  status: 'completed',
+  outcome: 'rejected',
+  rejectedBecause: 'correlation-mismatch',
+  payloadSha256: '2c'.repeat(32),
+  occurredAt: '2029-03-01T10:04:19.000Z',
+  receivedAt: '2029-03-01T10:04:19.180Z',
+}
+
 const syntheticCriticReportExample = {
   schemaVersion: 'synthetic-critic-report/v1', id: 'synthetic-critic-report-example-1',
   workspaceId, projectId, blockId: 'script-block-example-1',
@@ -5626,6 +5761,60 @@ const syntheticCriticRejectedReportExample = {
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/create-transformation-brief-request/v1': [transformationBriefRequestExample],
+    'apollo://schemas/transformation-brief-created/v1': [{
+      data: { brief: transformationBriefExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/route-transformation-brief-request/v1': [{
+      region: 'eu-west', maximumCostMinorUnits: 4_000, minimumQualityScoreBps: 7_000,
+      output: { width: 1920, height: 1080, fps: 30, includeAudio: true },
+    }],
+    'apollo://schemas/transformation-provider-selection/v1': [{
+      data: { selection: transformationSelectionExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/request-transformation-job-request/v1': [{
+      briefId: transformationBriefExample.id,
+      selectionId: transformationSelectionExample.id,
+      use: 'marketing', market: 'BR', locale: 'pt-BR',
+      preferredTransport: 'polling',
+    }],
+    'apollo://schemas/transformation-job-mutated/v1': [{
+      data: { job: transformationJobExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-read/v1': [{
+      data: {
+        job: transformationJobExample,
+        callbacks: [transformationCallbackAcceptedExample, transformationCallbackRejectedExample],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-cancelled/v1': [{
+      data: {
+        job: { ...transformationJobExample, status: 'canceled' },
+        transport: { ...transformationTransportExample, cancellation: 'requested', waiting: 'none' },
+        // Honest: this provider can actually stop the work. When it cannot,
+        // the intent is still recorded and this flag says so.
+        providerSupportsCancellation: true,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-resumed/v1': [{
+      data: {
+        job: transformationJobExample,
+        transport: { ...transformationTransportExample, resume: 'requested', attempts: 0, retryAfterMs: null },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/provider-callback-notification/v1': [{
+      providerJobId: 'medieval-v2v-7741',
+      status: 'completed',
+      occurredAt: '2029-03-01T10:04:12.000Z',
+    }],
+    'apollo://schemas/provider-callback-outcome/v1': [
+      { data: { outcome: 'accepted' }, meta: { apiVersion: 'v1' } },
+      { data: { outcome: 'duplicate' }, meta: { apiVersion: 'v1' } },
+      { data: { outcome: 'rejected', rejectedBecause: 'signature-invalid' }, meta: { apiVersion: 'v1' } },
+    ],
     'apollo://schemas/synthetic-critic-report-list/v1': [{
       data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
       meta: { apiVersion: 'v1' },

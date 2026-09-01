@@ -104,7 +104,7 @@ function parameterMap(operation) {
 }
 
 test('T-FR-241 every public operation has an executable, versioned contract test', async (t) => {
-  assert.equal(FOUNDATION_CAPABILITIES.length, 286)
+  assert.equal(FOUNDATION_CAPABILITIES.length, 293)
   const endpoints = new Set()
 
   for (const capability of FOUNDATION_CAPABILITIES) {
