@@ -71,7 +71,7 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
     const operationId = 'operation-review-mask-proxy'
     await client.v2PublicOperation.create({ data: {
       id: operationId, workspaceId, projectId: created.project.id, clientId,
-      actorClientId: clientId, actorCredentialId: credentialId, actorEnvironment: 'production',
+      actorCredentialId: credentialId, actorEnvironment: 'production',
       actorAuthenticationKind: 'bearer', actorContextHash: materializeActorAuditContext(actor).contextHash,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: proxyArtifactId, cancelable: false, retryable: false,
