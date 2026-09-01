@@ -395,10 +395,10 @@ Evidência integrada F0.031/FR-242 — o ADR-142 seleciona OIDC Authorization Co
 | FR-112 | Provider Registry | S6 | D4 | routing por capability/custo | integration |
 
 Complemento local Wave 15 — `transformation-brief/v1` substitui o tipo solto anterior por um brief imutável, frame-first e content-addressed; a projeção de provider exclui identidades internas. `transformation-mode-registry/v1` declara seis modos exaustivos sem branches por provider. Definitions, capabilities, health e selections possuem schema PostgreSQL workspace-safe, hashes revalidados e decisões que registram todos os descartes. O teste PostgreSQL está ligado ao CI Compose; execução hospedada, API pública, vínculo real ao StoryPlan/rights, transformação por provider, deploy e aceite permanecem pendentes. Nenhuma caixa de F3.010–F3.012 é fechada por este slice.
-| FR-113 | Jobs duráveis | S6 | D4 | API/MCP resume | resilience |
-| FR-114 | Novelty budget | S1 | D2 | excesso bloqueado/penalizado | unit |
-| FR-115 | Fallback | S6 | D2,D4 | v2v→composite→cutaway | integration |
-| FR-116 | Crítico | S1,S6 | D2,D4 | transform rejeitada com issue | eval |
+| FR-113 | Jobs duráveis | S6 | D4 | quatro transportes sobre um ProviderJob; callback verificado nos bytes exatos e consumido uma vez, duravelmente | resilience — parcial: unitário + contrato + persistência; **sem jornada E2E** |
+| FR-114 | Novelty budget | S1 | D2 | policy inteira e determinística; bloqueio antes de qualquer submissão paga | unit + integração PostgreSQL — **sem goldens de mídia real** |
+| FR-115 | Fallback | S6 | D2,D4 | ladder canônica, ledger append-only, artifact que viola conteúdo protegido nunca vira o melhor | unit — **migration aplicada mas nenhum service escreve; sem API, sem UI** |
+| FR-116 | Crítico | S1,S6 | D2,D4 | 14 dimensões, hard gate não compensável, evidência ausente falha fechado | eval de domínio (12 casos) — **sem evaluators ffprobe/pixel implementados; sem mídia** |
 | FR-123 | Limpeza avançada | S3,S6 | D1,D4 | separation/inpaint como derivado | visual eval |
 | FR-218 | Mask future | S6,S7 | D3,D4,D6 | annotation region vira mask input | integration |
 

@@ -1666,6 +1666,27 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
 - [ ] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
 
+> Estado parcial (2026-09-01, branches `claude/f3013-durable-transformation-jobs`,
+> `claude/f3014-novelty-budget` e `claude/f3015-f3016-transformation-quality`, nenhuma
+> mesclada). **Nenhuma caixa de F3.013 a F3.016 fecha.**
+>
+> O que existe e foi medido: o `ProviderJob` canônico ganhou transporte imutável e um
+> cronograma durável em tabela própria; callbacks de provider são verificados sobre os
+> bytes exatos e consumidos uma única vez com índice parcial; quatro transportes
+> (API, polling, webhook, MCP via SDK oficial) sobre dois adapters; sete capabilities
+> `/v1` novas; novelty budget determinístico em aritmética inteira, com gate antes de
+> qualquer submissão paga e integração verde em PostgreSQL real; ladder de fallback e
+> crítico de transformação como agregados content-addressed com migration aplicada e
+> validada desde banco vazio. Suíte 1649/1649; banco 213 tabelas / 1055 índices /
+> 814 FKs; contratos 293/533/597/240 com baseline puramente aditiva. Zero chamadas pagas.
+>
+> O que **não** existe: nenhuma jornada E2E combinada (nem a de durabilidade/transportes
+> nem a medieval com mídia FFmpeg real); nenhum service escreve o ledger de fallback nem
+> o relatório do crítico; sem superfície `/v1` para F3.015/F3.016; sem UI de revisão de
+> fallback; sem os três goldens de novelty com mídia real; sem os evaluators ffprobe e de
+> comparação por região por trás do crítico. Detalhe integral, incluindo o que foi medido
+> e o que não foi, em `docs/quality/transformation-control-plane-v1.md`.
+
 ### F3.017 — Limpeza avançada [FR-123]
 
 - [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
