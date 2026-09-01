@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createTransformationBrief, type TransformationBrief } from './transformation-brief.ts'
 
 export {
@@ -41,18 +41,19 @@ export type {
   TransformationRoutingPolicy,
 } from './transformation-provider-registry.ts'
 
-export type ProviderJob = { id: string; briefId: string; transport: 'api' | 'webhook' | 'polling' | 'mcp'; state: 'submitted' | 'waiting' | 'completed' | 'failed' | 'cancelled'; correlationId: string; attempts: number; artifact?: string };
-export function createProviderJob(brief: TransformationBrief, transport: ProviderJob['transport']): ProviderJob { return { id: `job-${brief.id}-${transport}`, briefId: brief.id, transport, state: 'submitted', correlationId: crypto.randomUUID(), attempts: 1 }; }
-export function resumeProviderJob(job: ProviderJob) { return job.state === 'waiting' || job.state === 'submitted' ? { ...job, state: 'waiting' as const, attempts: job.attempts + 1 } : job; }
-export function applyProviderCallback(job: ProviderJob, callback: { correlationId: string; artifact?: string; failed?: boolean; signature: string; nonce: string }, secret: string, consumedNonces: Set<string>) {
-  const expected = createHash('sha256').update(`${callback.correlationId}:${callback.nonce}:${secret}`).digest();
-  const supplied = Buffer.from(callback.signature, 'hex');
-  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error('invalid-callback-signature');
-  if (consumedNonces.has(callback.nonce)) return { job, duplicate: true };
-  if (callback.correlationId !== job.correlationId) throw new Error('callback-correlation-mismatch');
-  consumedNonces.add(callback.nonce);
-  return { job: { ...job, state: callback.failed ? 'failed' as const : 'completed' as const, artifact: callback.artifact }, duplicate: false };
-}
+// F3.013 / FR-113 — the second `ProviderJob` that lived here is gone.
+//
+// It was a parallel model of the same idea: a `state` union of five values, an
+// `attempts` counter incremented by a `resumeProviderJob` that resumed nothing,
+// and `applyProviderCallback` guarding replay with a `Set<string>` of nonces
+// held in memory — a set that a process restart emptied, so every replayed
+// callback looked new again. None of it was ever reachable from `src/`.
+//
+// The canonical model is `./provider-job.ts`: fifteen statuses with an explicit
+// transition table, leases and fencing, an append-only transition history, and
+// ingestion that must happen before a critic can approve anything. Transports,
+// schedules and durable callback verification are in `./provider-job-transport.ts`
+// and `./provider-job-callback.ts`.
 
 export function calculateNovelty(input: { transformations: { group: string; novelty: number; durationMs: number; atMs: number }[]; windowMs: number; limit: number }) {
   let consumed = 0; const accepted: typeof input.transformations = []; const rejected: typeof input.transformations = [];

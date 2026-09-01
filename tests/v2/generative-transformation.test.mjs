@@ -1,6 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+
+import {
+  classifyProviderCallbackReplay,
+  signProviderCallback,
+  verifyProviderCallback,
+} from '../../src/v2/domain/provider-job-callback.ts'
+import {
+  closeProviderJobMcpSession,
+  createProviderJobRetryPolicy,
+  createProviderJobTransportState,
+  providerJobBackoffMs,
+  providerJobNextAttemptMs,
+  scheduleProviderJobAttempt,
+} from '../../src/v2/domain/provider-job-transport.ts'
 
 import {
   TRANSFORMATION_GOLDENS,
@@ -8,17 +21,14 @@ import {
   TRANSFORMATION_MODE_REGISTRY_HASH,
   TRANSFORMATION_MODES,
   annotationToMask,
-  applyProviderCallback,
   calculateNovelty,
   chooseFallback,
-  createProviderJob,
   createTransformationBrief,
   createTransformationProviderDefinition,
   createTransformationProviderHealth,
   critiqueTransformation,
   planAdvancedCleanup,
   projectTransformationProviderInput,
-  resumeProviderJob,
   routeTransformationProvider,
   transitionTransformationProviderHealth,
 } from '../../src/v2/domain/generative-transformation.ts'
@@ -84,14 +94,70 @@ test('T-FR-112 circuit breaker opens deterministically without deleting provider
   assert.equal(recovered.circuitState, 'closed')
 })
 
-test('T-FR-113 durable jobs resume and reject forged or replayed callbacks', () => {
-  let job = createProviderJob(TRANSFORMATION_GOLDENS.simple, 'webhook')
-  job = resumeProviderJob(job)
-  const secret = 'secret', nonce = 'n1', signature = createHash('sha256').update(`${job.correlationId}:${nonce}:${secret}`).digest('hex'), consumed = new Set()
-  const completed = applyProviderCallback(job, { correlationId: job.correlationId, artifact: 'result.mp4', signature, nonce }, secret, consumed)
-  assert.equal(completed.job.state, 'completed')
-  assert.equal(applyProviderCallback(job, { correlationId: job.correlationId, artifact: 'result.mp4', signature, nonce }, secret, consumed).duplicate, true)
-  assert.throws(() => applyProviderCallback(job, { correlationId: job.correlationId, signature: '00', nonce: 'n2' }, secret, consumed))
+test('T-FR-113 callback verification runs over the exact bytes and survives restarts', () => {
+  // The shallow model this replaces guarded replay with a `Set<string>` held in
+  // memory. It is gone; verification is now a pure decision over raw bytes and
+  // the consumed-event record lives in PostgreSQL, so a restart no longer makes
+  // every replayed callback look new. Persistence is proved in
+  // tests/v2/prisma-transformation-jobs.integration.mjs; this covers the decision.
+  const secret = new Uint8Array(32).fill(7)
+  const now = new Date('2029-03-01T10:00:00.000Z')
+  const job = { id: 'provider-job-1', workspaceId: 'workspace-1', providerId: 'controlled-v2v', providerJobId: 'remote-77', terminal: false }
+  const rawBody = Buffer.from(JSON.stringify({ providerJobId: 'remote-77', status: 'completed', occurredAt: '2029-03-01T09:59:58.000Z' }), 'utf8')
+  const headers = signProviderCallback({ secret, eventId: 'event-1', rawBody, timestamp: now })
+
+  const accepted = verifyProviderCallback({ secret, rawBody, headers, job, now })
+  assert.equal(accepted.outcome, 'accepted')
+  assert.equal(accepted.event.providerJobId, 'remote-77')
+  assert.equal(accepted.event.status, 'completed')
+
+  // Same bytes, same id: a duplicate delivery, which providers do routinely.
+  const duplicate = verifyProviderCallback({ secret, rawBody, headers, job, now })
+  assert.equal(classifyProviderCallbackReplay({ stored: accepted.event, incoming: duplicate.event }).outcome, 'duplicate')
+
+  // Same event id, different bytes: the id is being reused to say something new.
+  const reusedIdBody = Buffer.from(JSON.stringify({ providerJobId: 'remote-77', status: 'failed', occurredAt: '2029-03-01T09:59:59.000Z' }), 'utf8')
+  const replay = verifyProviderCallback({
+    secret, rawBody: reusedIdBody,
+    headers: signProviderCallback({ secret, eventId: 'event-1', rawBody: reusedIdBody, timestamp: now }),
+    job, now,
+  })
+  assert.equal(classifyProviderCallbackReplay({ stored: accepted.event, incoming: replay.event }).outcome, 'rejected')
+
+  // Every rejection is a decision, never a thrown surprise, and never mutates.
+  assert.equal(verifyProviderCallback({ secret: new Uint8Array(32).fill(9), rawBody, headers, job, now }).reason, 'signature-invalid')
+  assert.equal(verifyProviderCallback({ secret, rawBody, headers, job, now: new Date('2029-03-01T11:00:00.000Z') }).reason, 'timestamp-outside-window')
+  assert.equal(verifyProviderCallback({ secret, rawBody, headers, job: { ...job, providerJobId: 'other' }, now }).reason, 'correlation-mismatch')
+  assert.equal(verifyProviderCallback({ secret, rawBody, headers, job: { ...job, terminal: true }, now }).reason, 'job-terminal')
+  // A body whose signature covers different bytes than those presented.
+  assert.equal(verifyProviderCallback({ secret, rawBody: reusedIdBody, headers, job, now }).reason, 'signature-invalid')
+})
+
+test('T-FR-113 the transport schedule is deterministic and honours Retry-After', () => {
+  const policy = createProviderJobRetryPolicy({ maxAttempts: 5, initialBackoffMs: 1_000, maximumBackoffMs: 20_000, backoffMultiplier: 2 })
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((attempt) => providerJobBackoffMs(policy, attempt)), [1_000, 2_000, 4_000, 8_000, 16_000, 20_000])
+  // The provider's Retry-After wins whenever it is longer: honouring a shorter
+  // delay than the provider asked for is how a 429 becomes a ban.
+  assert.equal(providerJobNextAttemptMs({ policy, attempt: 0, retryAfterMs: 9_000 }), 9_000)
+  assert.equal(providerJobNextAttemptMs({ policy, attempt: 3, retryAfterMs: 500 }), 8_000)
+
+  // A transport can only carry a provider whose completion mode allows it.
+  const base = { workspaceId: 'workspace-1', projectId: 'project-1', jobId: 'provider-job-1', deadlineAt: '2029-03-01T11:00:00.000Z', createdAt: '2029-03-01T10:00:00.000Z' }
+  assert.throws(() => createProviderJobTransportState({ ...base, transport: 'webhook', completion: 'synchronous' }), /cannot carry/)
+  assert.throws(() => createProviderJobTransportState({ ...base, transport: 'polling', completion: 'webhook' }), /cannot carry/)
+
+  // An MCP session going away is bookkeeping, not a failure: the durable job,
+  // its provider job id and its schedule belong to Apollo, not to the session.
+  const mcp = createProviderJobTransportState({ ...base, transport: 'mcp', completion: 'polling', mcpSessionId: 'mcp-session-1' })
+  const closed = closeProviderJobMcpSession({ state: mcp, occurredAt: '2029-03-01T10:05:00.000Z' })
+  assert.equal(closed.mcpSessionClosedAt, '2029-03-01T10:05:00.000Z')
+  assert.equal(closed.waitKind, mcp.waitKind)
+  assert.equal(closed.nextAttemptAt, mcp.nextAttemptAt)
+
+  // A scheduled attempt never runs past the deadline.
+  const polling = createProviderJobTransportState({ ...base, transport: 'polling', completion: 'polling' })
+  const parked = scheduleProviderJobAttempt({ state: polling, waitKind: 'poll', occurredAt: '2029-03-01T10:59:59.000Z', retryAfterMs: 600_000 })
+  assert.equal(parked.nextAttemptAt, base.deadlineAt)
 })
 
 test('T-FR-114 through T-FR-116 preserve novelty fallback and protected-change behavior', () => {

@@ -3,6 +3,11 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  boundaryStateOwnershipViolations,
+  transformationArchitectureViolations,
+} from './transformation-architecture-rules.mjs'
+
+import {
   architectureImportViolation,
   v2PersistenceConfigurationViolations,
   webDataAccessViolation,
@@ -126,6 +131,26 @@ for (const root of applicationUiRoots) {
     if (dataAccessViolation) violations.push(dataAccessViolation)
   }
 }
+
+// F3.013 / FR-113 — structural gates for the transformation control plane.
+// The rules live in their own module so they can be tested against violating
+// sources; see tests/v2/transformation-architecture-gates.test.mjs.
+
+const v2Sources = []
+for (const file of await files(v2Root)) {
+  if (!/[.](ts|tsx)$/.test(file)) continue
+  v2Sources.push({ rel: normalized(relative(v2Root, file)), source: await readFile(file, 'utf8') })
+}
+violations.push(...transformationArchitectureViolations(v2Sources))
+
+const boundarySources = []
+for (const root of [publicRoutesRoot, join(v2Root, 'public-api')]) {
+  for (const file of await files(root)) {
+    if (!/[.](ts|tsx)$/.test(file)) continue
+    boundarySources.push({ rel: normalized(relative(repositoryRoot, file)), source: await readFile(file, 'utf8') })
+  }
+}
+violations.push(...boundaryStateOwnershipViolations(boundarySources))
 
 const destructiveRemoteDatabasePatterns = [
   {
