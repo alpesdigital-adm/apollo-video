@@ -1697,6 +1697,17 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.018 — Mask a partir da revisão [FR-218]
 
+> Slice local Wave 17 (`codex/f3017-f3018-advanced-cleanup`): `review-cleanup-mask/v1`
+> converte annotation regional já persistida em máscara normalizada e content-addressed,
+> ligada ao proxy, source, versão, `TransformationBrief` e formato exatos; revisões são
+> append-only, idempotentes e bloqueiam tracking incerto, baixa confiança, preserve overlap,
+> formato não revisado e revisão stale antes do `ProviderJob`. A API pública possui list/create/refine
+> e o request de transformação v2 aceita somente `maskId`/`outputSpecId`, projetando os pixels
+> canônicos do banco sem screenshot, texto ou autor. Evidência local: 15 testes focados,
+> suíte 1667/1667, typecheck/API/DB verdes. **Não fecha caixas:** migration ainda não foi
+> executada em PostgreSQL do CI, não há UI/browser E2E, upload vivo do source ao adapter,
+> MP4 de inpaint, visual eval, deploy ou aceite.
+
 - [ ] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
 - [ ] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
 - [ ] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.

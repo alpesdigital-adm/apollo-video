@@ -1079,6 +1079,11 @@ Trim semântico, crop/reframe, cobertura simples e rejeição quando não houver
 
 Separação voz/música, inpainting, remoção de legenda e restauração em fase posterior.
 
+O inpainting só pode ser solicitado a partir de uma máscara revisada e vinculada ao
+mesmo source, `TransformationBrief`, versão e formato. Preserve regions não podem ser
+intersectadas; tracking incerto ou abaixo do limiar bloqueia qualquer submissão paga.
+O resultado permanece um derivative e nunca substitui o source publicado.
+
 ### FR-124 — Validation envelope
 
 O reuso de material historicamente validado deve representar separadamente
@@ -1711,6 +1716,12 @@ Critérios de aceite:
 ### FR-218 — Mask future
 
 Região anotada poderá servir como máscara para inpainting/transformação.
+
+A conversão usa coordenadas normalizadas e range frame-first, registra keyframes e
+confiança de tracking, e mantém refinamentos como revisões imutáveis. Mudança de formato
+exige confirmação explícita e volta ao estado incerto até nova revisão. A projeção enviada
+ao provider contém apenas geometria, range, preserve regions e hashes; screenshot, texto
+da annotation e identidade do autor permanecem internos.
 
 ## 7.21.1 Aprendizado de preferências
 

@@ -402,6 +402,13 @@ Complemento local Wave 15 — `transformation-brief/v1` substitui o tipo solto a
 | FR-123 | Limpeza avançada | S3,S6 | D1,D4 | separation/inpaint como derivado | visual eval |
 | FR-218 | Mask future | S6,S7 | D3,D4,D6 | annotation region vira mask input | integration |
 
+Complemento local Wave 17 — `review-cleanup-mask/v1` persiste revisões imutáveis ligadas
+à annotation, proxy, source, versão, `TransformationBrief` e output spec; a API pública
+list/create/refine e o gate do `ProviderJob` recusam mask stale, incerta, de baixa confiança
+ou projetada para outro formato. Migration, Prisma adapter e contratos existem; a execução
+PostgreSQL hospedada, UI/browser, adapter com upload vivo, MP4 real, visual eval, deploy e
+aceite seguem pendentes. F3.017/F3.018 permanecem abertas.
+
 ## F4 — Multicâmera e long-form avançado
 
 | Req | Título | Spec | Dep. | Evidência de aceite | Teste |

@@ -188,3 +188,26 @@ region differ and no controlled identity probe exist behind it. The eval set is
 | E2E journey | **no** | **no** | **no** | **no** |
 | deployed | no | no | no | no |
 | accepted by the owner | no | no | no | no |
+
+---
+
+## 8. Wave 17 local addendum: reviewed cleanup masks
+
+The local Wave 17 slice replaces the earlier `annotationToMask` fixture with a
+runtime boundary. `review-cleanup-mask/v1` is immutable and content-addressed;
+it binds one open regional annotation to the exact proxy, source artifact,
+project version, TransformationBrief and output format. Refinements append a
+revision under the same root and use both an expected hash and latest-revision
+check. Format reprojection is explicit and remains `uncertain` until reviewed.
+
+Masked transformation modes now require the latest stored mask before the job
+exists. Submission is refused when protected regions overlap, source or brief
+hashes drift, output format differs, tracking is uncertain or confidence is
+below policy. The provider projection excludes screenshot, review copy and
+author identity. The common submission materializer now accepts transformation
+jobs and revalidates the authorized source immediately before the adapter call.
+
+This is still local evidence: 15 focused tests plus the full 1667-test suite,
+schema/migration static validation and public-contract validation. PostgreSQL CI,
+browser UI, a live source-upload transport, real inpaint bytes, visual evaluation,
+deploy and owner acceptance have not happened; F3.017 and F3.018 stay open.
