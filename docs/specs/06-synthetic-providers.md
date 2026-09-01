@@ -135,6 +135,66 @@ planned → estimated → submitted → queued → processing
 
 Terminais adicionais: failed, canceled, expired, superseded.
 
+### 7.1 Transporte e cronograma (Wave 16, F3.013)
+
+O `ProviderJob` é *content-addressed*: `jobHash` cobre o corpo inteiro. Isso
+divide o que orbita um job por **ciclo de vida**, não por assunto.
+
+No corpo do job, opcional e imutável — decidido uma vez, antes de qualquer
+chamada paga:
+
+```ts
+transport?: 'api' | 'polling' | 'webhook' | 'mcp'
+transformation?: {
+  briefId: string; briefHash: string
+  selectionId: string; selectionHash: string
+  providerId: string; capabilityId: string
+}
+observedCost?: { currency: string; costMinorUnits: number }
+```
+
+Opcional é estrutural: campo ausente não entra no corpo canônico, então todo job
+sintético escrito pelas Waves 13 e 14 mantém o `jobHash` que já tinha.
+
+Fora do corpo, em `provider_job_transport_states`, com compare-and-swap em
+`revision`: `nextAttemptAt`, `deadlineAt`, `retryAfterMs`, `transportAttempts`,
+`waitKind`, intents de cancelamento e resume, sessão MCP. Um campo que muda a
+cada poll não pode viver dentro de um hash que significa "este é o mesmo job".
+
+O par transporte × modo de conclusão é imposto pelo PostgreSQL: um provider
+`synchronous` não pode ser dirigido por webhook, e um provider `webhook` não
+pode ser levado à conclusão por polling.
+
+O transporte MCP é um provider **exposto via** MCP, com a Apollo como cliente —
+não é o servidor MCP público da Apollo, que é a direção oposta. A sessão é
+apenas o fio: cada chamada abre e fecha uma sessão no `finally`, e depois que o
+`submit` devolve o `providerJobId` o job durável é dono do próprio futuro.
+
+### 7.2 Callback de provider (Wave 16, F3.013)
+
+Verificação sobre os **bytes exatos** recebidos: parsear e re-serializar antes de
+conferir a assinatura permitiria reordenar chaves ou reformatar um número por
+baixo da checagem.
+
+Ordem deliberada: tamanho, event id, timestamp dentro de janela estreita,
+assinatura HMAC em tempo constante e, só então, os vínculos semânticos
+(correlation, workspace, provider). Um chamador não deve conseguir descobrir se
+um job existe cronometrando a checagem de assinatura.
+
+`provider_callback_events` substitui o conjunto de nonces em memória que um
+restart esvaziava. Guarda o sha256 dos bytes — nunca os bytes, que podem carregar
+URLs assinadas. **Só eventos aceitos** tomam a chave única, via índice parcial:
+um callback rejeitado não pode queimar um event id e travar a entrega legítima.
+Mesmo id com mesmos bytes é entrega duplicada; com bytes diferentes é replay.
+
+O wake e o consumo commitam na mesma transação: um crash entre os dois deixaria
+um evento marcado como consumido cuja consequência nunca aconteceu.
+
+O boundary de entrada (`POST /v1/provider-callbacks/{providerId}`) tem
+autenticação própria e não aceita Bearer: um provider não tem credencial Apollo.
+Não é `/v1/webhooks/*`, que é a direção de saída, e não compartilha segredo com
+ela.
+
 ## 8. Polling/webhook
 
 - Webhook verifica assinatura, event ID e replay.
