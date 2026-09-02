@@ -284,7 +284,14 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     assert.equal(rejectedReport.hardGates.includes('preserve-list'), true)
     const latestLedger = review.ledgers[0].ledger
     assert.equal(latestLedger.currentRung, 'actor-composite')
-    assert.equal(latestLedger.attempts.length, 2)
+    assert.deepEqual(
+      latestLedger.attempts.map(({ rung, outcome }) => ({ rung, outcome })),
+      [
+        { rung: 'video-to-video', outcome: 'approved' },
+        { rung: 'video-to-video', outcome: 'rejected' },
+        { rung: 'actor-composite', outcome: 'skipped' },
+      ],
+    )
     assert.equal(latestLedger.bestArtifactId, acceptedArtifact.id)
     assert.equal(latestLedger.incurredCostMinorUnits, 32)
     assert.equal(review.novelty[0].treatment, 'sober')
