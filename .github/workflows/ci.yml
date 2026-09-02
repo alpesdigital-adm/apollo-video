@@ -189,6 +189,7 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-transformation-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_TRANSFORMATION_E2E_SCREENSHOT: ${{ runner.temp }}/transformation-reviewed-and-accepted.png
+          APOLLO_TRANSFORMATION_E2E_DEBUG: "1"
 
       - name: Publish transformation review visual evidence
         uses: actions/upload-artifact@v4

@@ -337,8 +337,19 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     await page.getByRole('button', { name: 'Entrar no Apollo' }).click()
     assert.ok([200, 303].includes((await loginCompleted).status()))
     await page.goto(`${baseUrl}/projects/${projectId}`, { waitUntil: 'domcontentloaded' })
+    const [workspaceProbe, policyProbe] = await Promise.all([
+      context.request.get(`${baseUrl}/v1/projects/${projectId}/workspace`),
+      context.request.get(`${baseUrl}/v1/projects/${projectId}/policy-overrides`),
+    ])
+    assert.equal(workspaceProbe.status(), 200, `workspace API: ${await workspaceProbe.text()}`)
+    assert.equal(policyProbe.status(), 200, `policy API: ${await policyProbe.text()}`)
     const panel = page.getByTestId('transformation-review-panel')
-    await panel.waitFor({ state: 'visible', timeout: 120_000 })
+    try {
+      await panel.waitFor({ state: 'visible', timeout: 20_000 })
+    } catch (error) {
+      const body = (await page.locator('body').innerText()).slice(0, 4_000)
+      throw new Error(`Transformation review panel did not mount at ${page.url()}.\nPage: ${body}\nServer: ${serverLogs.slice(-4_000)}`, { cause: error })
+    }
     await panel.getByText('Critic de 14 dimensões').waitFor({ state: 'visible' })
     assert.match(await panel.innerText(), /Fonte preservada/)
     assert.match(await panel.innerText(), /BRL 0\.32/)
