@@ -75,6 +75,7 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
       actorAuthenticationKind: 'bearer', actorContextHash: materializeActorAuditContext(actor).contextHash,
       type: 'project-proxy-render', status: 'succeeded', phase: 'completed',
       targetType: 'media-artifact', targetId: proxyArtifactId, cancelable: false, retryable: false,
+      progressCompleted: 4, progressTotal: 4, progressUnit: 'render',
       attempt: 1, resultJson: JSON.stringify({ artifactId: proxyArtifactId }),
       idempotencyKey: 'review-mask-proxy-render', requestFingerprint: HASH('a'),
       createdAt: at(1), updatedAt: at(1), startedAt: at(1), completedAt: at(1),
