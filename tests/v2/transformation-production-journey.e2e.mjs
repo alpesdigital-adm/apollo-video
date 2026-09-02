@@ -124,6 +124,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const { createTransformationBrief } = await import('../../src/v2/domain/transformation-brief.ts')
     const { createMediaArtifactManifestV2 } = await import('../../src/v2/domain/media-artifact.ts')
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { stableSerialize } = await import('../../src/v2/domain/canonical-hash.ts')
     const { PrismaApiClientRepository } = await import('../../src/v2/infrastructure/prisma/api-client-repository.ts')
     const { PrismaAssetRightsRepository } = await import('../../src/v2/infrastructure/prisma/asset-rights-repository.ts')
     const { PrismaMediaArtifactRepository } = await import('../../src/v2/infrastructure/prisma/media-artifact-repository.ts')
@@ -187,7 +188,14 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     await client.v2ProjectMediaAsset.create({ data: { id: randomUUID(), workspaceId, projectId, artifactId: sourceArtifactId, role: 'editing-proxy', originalFileName: 'source.mp4', createdAt: at(1) } })
     const proxyOperationId = 'operation-transformation-production-proxy'
     await client.v2PublicOperation.create({ data: { id: proxyOperationId, workspaceId, projectId, clientId, actorCredentialId: credentialId, actorEnvironment: 'production', actorAuthenticationKind: 'bearer', actorContextHash: materializeActorAuditContext(actor).contextHash, type: 'project-proxy-render', status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: sourceArtifactId, cancelable: false, retryable: false, progressCompleted: 4, progressTotal: 4, progressUnit: 'render', attempt: 1, resultJson: JSON.stringify({ resource: { type: 'media-artifact', id: sourceArtifactId, manifestId: sourceManifestId } }), idempotencyKey: 'transformation-production-proxy', requestFingerprint: createHash('sha256').update('proxy-fingerprint').digest('hex'), createdAt: at(1), updatedAt: at(1), startedAt: at(1), completedAt: at(1) } })
-    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: JSON.stringify([]), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
+    const proxyColorBindings = [{
+      compilationHash: createHash('sha256').update('proxy-color-compilation').digest('hex'),
+      compilationId: 'color-compilation-transformation-production',
+      pipelineHash: createHash('sha256').update('proxy-color-pipeline').digest('hex'),
+      sourceArtifactId,
+      sourceManifestId,
+    }]
+    await client.v2ProjectProxyRenderOperation.create({ data: { operationId: proxyOperationId, workspaceId, projectId, projectVersionId, editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId, sourceManifestId, colorPipelineBindingsJson: stableSerialize(proxyColorBindings), inputHash: createHash('sha256').update('proxy-input').digest('hex'), outputArtifactId: sourceArtifactId, outputManifestId: sourceManifestId, originalFileName: 'source.mp4', createdAt: at(1) } })
     const seededProxyOperation = await new PrismaPublicOperationRepository(client).findById(workspaceId, proxyOperationId)
     assert.equal(seededProxyOperation?.operation.result?.resource.manifestId, sourceManifestId)
 
