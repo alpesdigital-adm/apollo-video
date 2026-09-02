@@ -118,12 +118,17 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     const providerCalls = []
     let requestSequence = 0
     const audioByCall = new Map()
-    const audioBytesFor = async (key) => {
+    const audioBytesFor = (key) => {
       if (!audioByCall.has(key)) {
         const index = audioByCall.size
-        const path = join(root, `tts-${index}.mp3`)
-        execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=${230 + index * 29}:sample_rate=44100:duration=2`, '-c:a', 'libmp3lame', '-b:a', '128k', path], { windowsHide: true })
-        audioByCall.set(key, await readFile(path))
+        const pending = (async () => {
+          const path = join(root, `tts-${index}.mp3`)
+          execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=${230 + index * 29}:sample_rate=44100:duration=2`, '-c:a', 'libmp3lame', '-b:a', '128k', path], { windowsHide: true })
+          return readFile(path)
+        })()
+        // Reserve the call before yielding to readFile. Concurrent requests
+        // must never derive the same index or overwrite one another's media.
+        audioByCall.set(key, pending)
       }
       return audioByCall.get(key)
     }
