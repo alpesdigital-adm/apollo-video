@@ -207,7 +207,9 @@ below policy. The provider projection excludes screenshot, review copy and
 author identity. The common submission materializer now accepts transformation
 jobs and revalidates the authorized source immediately before the adapter call.
 
-This is still local evidence: 15 focused tests plus the full 1667-test suite,
-schema/migration static validation and public-contract validation. PostgreSQL CI,
-browser UI, a live source-upload transport, real inpaint bytes, visual evaluation,
-deploy and owner acceptance have not happened; F3.017 and F3.018 stay open.
+Evidence now includes 15 focused tests, the full 1667-test suite, schema/migration
+validation, public-contract validation and hosted CI `33574454216`. That run applied
+the migrations from zero and proved create/replay/refine/tamper through the Prisma
+adapter on real PostgreSQL. Browser UI, a live source-upload transport, real inpaint
+bytes, visual evaluation, deploy and owner acceptance have not happened; F3.017 and
+F3.018 stay open.

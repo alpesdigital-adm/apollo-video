@@ -406,8 +406,9 @@ Complemento local Wave 17 — `review-cleanup-mask/v1` persiste revisões imutá
 à annotation, proxy, source, versão, `TransformationBrief` e output spec; a API pública
 list/create/refine e o gate do `ProviderJob` recusam mask stale, incerta, de baixa confiança
 ou projetada para outro formato. Migration, Prisma adapter e contratos existem; a execução
-PostgreSQL hospedada, UI/browser, adapter com upload vivo, MP4 real, visual eval, deploy e
-aceite seguem pendentes. F3.017/F3.018 permanecem abertas.
+PostgreSQL hospedada foi aprovada no CI `33574454216`, incluindo replay, refinamento e tamper;
+UI/browser, adapter com upload vivo, MP4 real, visual eval, deploy e aceite seguem pendentes.
+F3.017/F3.018 permanecem abertas.
 
 ## F4 — Multicâmera e long-form avançado
 

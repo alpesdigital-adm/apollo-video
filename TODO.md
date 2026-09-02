@@ -1704,8 +1704,9 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > formato não revisado e revisão stale antes do `ProviderJob`. A API pública possui list/create/refine
 > e o request de transformação v2 aceita somente `maskId`/`outputSpecId`, projetando os pixels
 > canônicos do banco sem screenshot, texto ou autor. Evidência local: 15 testes focados,
-> suíte 1667/1667, typecheck/API/DB verdes. **Não fecha caixas:** migration ainda não foi
-> executada em PostgreSQL do CI, não há UI/browser E2E, upload vivo do source ao adapter,
+> suíte 1667/1667, typecheck/API/DB verdes. O CI `33574454216` aplicou as migrations do zero
+> e aprovou o round-trip create/replay/refine/tamper em PostgreSQL real. **Não fecha caixas:**
+> não há UI/browser E2E, upload vivo do source ao adapter,
 > MP4 de inpaint, visual eval, deploy ou aceite.
 
 - [ ] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
