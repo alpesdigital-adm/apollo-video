@@ -233,7 +233,7 @@ export class PrismaNoveltyBudgetRepository implements NoveltyBudgetRepository {
           projectVersionId: input.projectVersionId,
         },
       },
-      include: { decision: { select: { id: true, decisionHash: true, policyId: true, evaluatedAt: true } } },
+      include: { decision: { select: { id: true, decisionHash: true, policyId: true, policyHash: true, evaluatedAt: true } } },
       // Newest decision wins: a re-evaluation after the plan changed is the one
       // that governs, not the first verdict ever recorded for this brief.
       orderBy: [{ decision: { evaluatedAt: 'desc' } }, { sequence: 'asc' }],
@@ -243,6 +243,7 @@ export class PrismaNoveltyBudgetRepository implements NoveltyBudgetRepository {
       decisionId: row.decision.id,
       decisionHash: row.decision.decisionHash,
       policyId: row.decision.policyId,
+      policyHash: row.decision.policyHash,
       outcome: row.outcome as 'accepted' | 'penalized' | 'blocked',
       chargedUnits: row.chargedUnits,
       densityUnits: row.densityUnits,

@@ -106,7 +106,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
     },
     estimate: { currency: 'USD', costMinorUnits: 12, estimatedLatencyMs: 3_000 },
     statuses: ['queued', 'processing', 'completed'],
-    result: { bytes: 'controlled-video', mediaType: 'video' },
+    result: { bytes: 'controlled-video', mediaType: 'video', observedCost: { currency: 'USD', costMinorUnits: 11 } },
   })
   let tick = 0
   let transition = 0
@@ -125,6 +125,7 @@ test('T-FR-101 controlled adapter survives stage restarts and ingests before cri
   assert.deepEqual(history, ['planned', 'estimated', 'submitting', 'submitted', 'queued', 'processing', 'retrieving', 'evaluating', 'approved'])
   assert.deepEqual(adapter.calls, ['capabilities', 'estimate', 'submit', 'status', 'status', 'status', 'retrieve'])
   assert.equal(stored.job.resultArtifact.artifactSha256, hash('c'))
+  assert.deepEqual(stored.job.observedCost, { currency: 'USD', costMinorUnits: 11 })
   assert.equal(JSON.stringify(stored).includes('ephemeral-only'), false)
 })
 

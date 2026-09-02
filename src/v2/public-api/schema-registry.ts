@@ -23668,6 +23668,12 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: { brief: transformationBriefPublicSchema, replayed: { type: 'boolean' } },
     }),
   ),
+  defineSchema('transformation-brief-list', 1, 'Immutable transformation briefs available to the project editor',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['briefs'],
+      properties: { briefs: { type: 'array', maxItems: 500, items: transformationBriefPublicSchema } },
+    }),
+  ),
   defineSchema('route-transformation-brief-request', 1, 'The policy a routing decision is made under', {
     type: 'object', additionalProperties: false,
     required: ['region','maximumCostMinorUnits','minimumQualityScoreBps','output'],
@@ -23774,6 +23780,42 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     successSchema({
       type: 'object', additionalProperties: false, required: ['job'],
       properties: { job: transformationJobPublicSchema, transport: transformationTransportPublicSchema },
+    }),
+  ),
+  defineSchema('transformation-quality-read', 1, 'Novelty, critic and fallback evidence for transformation review',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['ledgers','reports','novelty'],
+      properties: {
+        ledgers: {
+          type: 'array', maxItems: 50,
+          items: {
+            type: 'object', additionalProperties: false, required: ['ledger','actions'],
+            properties: {
+              ledger: { type: 'object', additionalProperties: true },
+              actions: { type: 'array', uniqueItems: true, items: { enum: ['accept','retry','descend','keep-source'] } },
+            },
+          },
+        },
+        reports: { type: 'array', maxItems: 50, items: { type: 'object', additionalProperties: true } },
+        novelty: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: true } },
+      },
+    }),
+  ),
+  defineSchema('transformation-fallback-action-request', 1, 'A human decision on the current fallback ledger revision', {
+    type: 'object', additionalProperties: false, required: ['action'],
+    properties: {
+      action: { enum: ['accept','keep-source','descend'] },
+      because: { enum: ['critic-rejected-protected-content','critic-rejected-quality','capability-unavailable','provider-exhausted','attempt-budget-exhausted','novelty-budget-blocked','rights-withdrawn','intent-not-satisfied','no-improvement'] },
+    },
+  }),
+  defineSchema('transformation-fallback-action-result', 1, 'The immutable fallback ledger revision created by a review action',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['ledger','actions','replayed'],
+      properties: {
+        ledger: { type: 'object', additionalProperties: true },
+        actions: { type: 'array', uniqueItems: true, items: { enum: ['accept','retry','descend','keep-source'] } },
+        replayed: { type: 'boolean' },
+      },
     }),
   ),
   defineSchema('provider-callback-notification', 1, 'What a transformation provider sends when a job changes state', {

@@ -184,6 +184,21 @@ jobs:
       - name: Run review-derived cleanup mask persistence tests
         run: npm run test:integration:review-cleanup-mask
 
+      - name: Run transformation production journey
+        run: npm run test:e2e:transformation-production
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-transformation-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_TRANSFORMATION_E2E_SCREENSHOT: ${{ runner.temp }}/transformation-reviewed-and-accepted.png
+          APOLLO_TRANSFORMATION_E2E_DEBUG: "1"
+
+      - name: Publish transformation review visual evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: transformation-review-${{ github.sha }}
+          path: ${{ runner.temp }}/transformation-reviewed-and-accepted.png
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Run novelty budget decision persistence tests
         run: npm run test:integration:novelty-budget
 

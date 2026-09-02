@@ -207,23 +207,52 @@ async function assertAuthority(
   job: Readonly<ProviderJob>,
   at: Date,
 ): Promise<void> {
-  const [project, profile, artifacts] = await Promise.all([
+  const authorityBinding = job.transformation
+    ? Promise.all([
+        transaction.v2TransformationBrief.findFirst({
+          where: {
+            id: job.transformation.briefId,
+            workspaceId: job.workspaceId,
+            projectId: job.projectId,
+            projectVersionId: job.originProjectVersionId,
+            briefHash: job.transformation.briefHash,
+          },
+          select: { id: true },
+        }),
+        transaction.v2TransformationProviderSelection.findFirst({
+          where: {
+            id: job.transformation.selectionId,
+            workspaceId: job.workspaceId,
+            projectId: job.projectId,
+            projectVersionId: job.originProjectVersionId,
+            briefId: job.transformation.briefId,
+            briefHash: job.transformation.briefHash,
+            selectionHash: job.transformation.selectionHash,
+            selectedProviderId: job.transformation.providerId,
+            selectedCapabilityId: job.transformation.capabilityId,
+          },
+          select: { id: true },
+        }),
+      ]).then(([brief, selection]) => Boolean(brief && selection))
+    : transaction.v2SyntheticPresenterProfile.findFirst({
+        where: {
+          workspaceId: job.workspaceId,
+          profileHash: job.authorization.profileSnapshotHash,
+          status: 'active',
+          OR: [
+            { id: job.authorization.profileSnapshotId },
+            { profileId: job.authorization.profileSnapshotId },
+          ],
+        },
+        select: { id: true },
+      }).then(Boolean)
+
+  const [project, bindingIsCurrent, artifacts] = await Promise.all([
     transaction.v2Project.findFirst({
       where: { id: job.projectId, workspaceId: job.workspaceId, currentVersionId: job.originProjectVersionId },
       select: { id: true },
     }),
-    transaction.v2SyntheticPresenterProfile.findFirst({
-      where: {
-        workspaceId: job.workspaceId,
-        profileHash: job.authorization.profileSnapshotHash,
-        status: 'active',
-        OR: [
-          { id: job.authorization.profileSnapshotId },
-          { profileId: job.authorization.profileSnapshotId },
-        ],
-      },
-      select: { id: true },
-    }),
+    authorityBinding,
     transaction.v2MediaArtifact.findMany({
       where: {
         workspaceId: job.workspaceId,
@@ -240,7 +269,7 @@ async function assertAuthority(
       artifact.currentRightsSnapshot?.snapshotHash === decision.rightsSnapshotHash &&
       Date.parse(decision.validUntil) > at.getTime()
   })
-  if (!project || !profile || !authorized || Date.parse(job.authorization.expiresAt) <= at.getTime()) {
+  if (!project || !bindingIsCurrent || !authorized || Date.parse(job.authorization.expiresAt) <= at.getTime()) {
     throw new DomainError('ASSET_RIGHTS_BLOCKED', 'Provider job authority changed before persistence or submit')
   }
 }

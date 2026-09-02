@@ -34,6 +34,7 @@ export interface NoveltyBudgetRepository {
     decisionId: string
     decisionHash: string
     policyId: string
+    policyHash: string
     outcome: 'accepted' | 'penalized' | 'blocked'
     chargedUnits: number
     densityUnits: number

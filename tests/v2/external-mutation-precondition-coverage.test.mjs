@@ -384,6 +384,9 @@ const coverage = Object.freeze({
   'apollo.projects.transformation-jobs.request': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds brief id and hash, selection id and hash, use, market and locale to the actor context; the service rechecks current project version, source artifact hash and the exact rights snapshot the brief was authorized under before creating the job',
   },
+  'apollo.projects.transformation-fallbacks.act': {
+    mode: 'single-flight-action', evidence: 'the ledger id names a content-addressed revision; the service rejects any revision that is no longer latest and an identical already-settled decision converges as replay',
+  },
   'apollo.projects.transformation-jobs.cancel': {
     mode: 'single-flight-action', evidence: 'transport revision compare-and-swap; a job already terminal is refused and a cancellation already requested returns the recorded intent unchanged',
   },
@@ -678,7 +681,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'idempotent-create': 65,
     'natural-idempotent-create': 7,
     'state-machine-action': 16,
-    'single-flight-action': 3,
+    'single-flight-action': 4,
     'revision-bound-action': 16,
     'base-version-bound-action': 16,
     'production-batch-revision-action': 2,

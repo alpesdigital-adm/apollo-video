@@ -5765,6 +5765,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/transformation-brief-created/v1': [{
       data: { brief: transformationBriefExample, replayed: false }, meta: { apiVersion: 'v1' },
     }],
+    'apollo://schemas/transformation-brief-list/v1': [{
+      data: { briefs: [transformationBriefExample] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/route-transformation-brief-request/v1': [{
       region: 'eu-west', maximumCostMinorUnits: 4_000, minimumQualityScoreBps: 7_000,
       output: { width: 1920, height: 1080, fps: 30, includeAudio: true },
@@ -5838,6 +5841,42 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       data: {
         job: transformationJobExample,
         transport: { ...transformationTransportExample, resume: 'requested', attempts: 0, retryAfterMs: null },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-quality-read/v1': [{
+      data: {
+        ledgers: [{
+          ledger: {
+            id: 'transformation-fallback-example', briefId: transformationBriefExample.id,
+            currentRung: 'actor-composite', attempts: [], reviewDecision: 'awaiting-review',
+            ledgerHash: '8'.repeat(64),
+          },
+          actions: ['descend', 'keep-source'],
+        }],
+        reports: [{
+          id: 'transformation-critic-example', briefId: transformationBriefExample.id,
+          providerJobId: transformationJobExample.id, measurements: [], issues: [],
+          decision: 'approved', action: 'approve', reportHash: '9'.repeat(64),
+        }],
+        novelty: [{
+          id: 'novelty-decision-example', policyId: 'novelty-policy-example', treatment: 'balanced',
+          lines: [], decisionHash: 'a'.repeat(64),
+        }],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-fallback-action-request/v1': [{
+      action: 'descend', because: 'critic-rejected-quality',
+    }],
+    'apollo://schemas/transformation-fallback-action-result/v1': [{
+      data: {
+        ledger: {
+          id: 'transformation-fallback-example-next', briefId: transformationBriefExample.id,
+          currentRung: 'generated-cutaway', attempts: [], reviewDecision: 'awaiting-review',
+          ledgerHash: 'b'.repeat(64),
+        },
+        actions: ['descend', 'keep-source'], replayed: false,
       },
       meta: { apiVersion: 'v1' },
     }],

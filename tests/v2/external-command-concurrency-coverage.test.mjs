@@ -386,6 +386,9 @@ const coverage = Object.freeze({
   'apollo.projects.transformation-jobs.retry': {
     mode: 'durable-covered', evidence: 'compare-and-swap on the transport revision; a resume already pending and untouched returns unchanged so repeating the request cannot extend the deadline indefinitely',
   },
+  'apollo.projects.transformation-fallbacks.act': {
+    mode: 'durable-covered', evidence: 'the action is appended to the immutable fallback ledger through a brief-scoped advisory lock and exact previous-ledger-hash compare-and-swap; same-decision retries converge naturally and stale concurrent reviewers receive VERSION_CONFLICT',
+  },
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'durable-covered', evidence: 'actor-bound idempotent creation, immutable authorization, serializable project/profile/rights rechecks, leased stage claims and job-hash compare-and-swap transition history',
   },
@@ -482,7 +485,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    140,
+    141,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

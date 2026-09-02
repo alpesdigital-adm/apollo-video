@@ -355,6 +355,10 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to submit one paid generative transformation. The payload is projected from the persisted brief and never accepted from the caller, and the rights snapshot must still match the one the brief was authorized under.',
     },
+    'apollo.projects.transformation-fallbacks.act': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Settles one measured transformation result or descends one declared fallback rung. The action is fenced by the selected content-addressed ledger revision, preserves every prior derivative and never alters the source.',
+    },
     'apollo.projects.review-cleanup-masks.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Creates a content-addressed mask revision from existing review evidence. It does not submit provider work, render media or mutate the project version.',

@@ -1,7 +1,7 @@
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
-import { ProviderAdapterError } from '../domain/provider-contract.ts'
+import { ProviderAdapterError, type ProviderObservedCost } from '../domain/provider-contract.ts'
 import {
   acknowledgeProviderJobCancellation,
   awaitProviderJobCallback,
@@ -40,6 +40,25 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
 function identity(value: string, field: string): string {
   assertDomain(ID.test(value), 'INVALID_ARGUMENT', `${field} is invalid`)
   return value
+}
+
+function observedCostFromProviderResult(value: unknown): Readonly<ProviderObservedCost> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const observedCost = (value as Readonly<Record<string, unknown>>).observedCost
+  if (observedCost === undefined) return undefined
+  assertDomain(
+    typeof observedCost === 'object' && observedCost !== null &&
+      typeof (observedCost as Readonly<Record<string, unknown>>).currency === 'string' &&
+      /^[A-Z]{3}$/.test(String((observedCost as Readonly<Record<string, unknown>>).currency)) &&
+      Number.isSafeInteger((observedCost as Readonly<Record<string, unknown>>).costMinorUnits) &&
+      Number((observedCost as Readonly<Record<string, unknown>>).costMinorUnits) >= 0,
+    'PERSISTENCE_CONFLICT',
+    'Provider result observed cost is invalid',
+  )
+  return Object.freeze({
+    currency: String((observedCost as Readonly<Record<string, unknown>>).currency),
+    costMinorUnits: Number((observedCost as Readonly<Record<string, unknown>>).costMinorUnits),
+  })
 }
 
 function jobAuthorizationHash(body: Omit<ProviderJobAuthorization, 'authorizationHash'>) {
@@ -415,14 +434,21 @@ export function runProviderJobWorkerOnce(dependencies: {
         }
       } else if (job.status === 'retrieving') {
         let artifact = job.resultArtifact
+        let observedCost: Readonly<ProviderObservedCost> | undefined
         if (!artifact) {
           assertDomain(typeof adapter.retrieve === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter has no retrieval path')
           const providerResult = await adapter.retrieve(job.providerJobId!, signal)
+          observedCost = observedCostFromProviderResult(providerResult)
           artifact = await dependencies.ingestor.ingest({ job, providerResult, signal })
         }
-        next = transitionProviderJob(job, { status: 'evaluating', occurredAt: now.toISOString(), resultArtifact: artifact })
+        next = transitionProviderJob(job, {
+          status: 'evaluating',
+          occurredAt: now.toISOString(),
+          resultArtifact: artifact,
+          ...(observedCost ? { observedCost } : {}),
+        })
       } else if (job.status === 'evaluating') {
-        const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact! })
+        const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact!, signal })
         next = transitionProviderJob(job, { status: result.approved ? 'approved' : 'rejected', occurredAt: now.toISOString(), criticResultHash: result.resultHash })
       } else {
         throw new DomainError('VERSION_CONFLICT', `Provider job status ${job.status} is not executable`)

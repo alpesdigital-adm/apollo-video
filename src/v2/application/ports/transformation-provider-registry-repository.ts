@@ -12,7 +12,7 @@ export interface TransformationProviderRegistryRepository {
   readLatestHealth(input: { workspaceId: string; providerIds: readonly string[] }): Promise<readonly Readonly<TransformationProviderHealth>[]>
   persistBrief(input: { brief: Readonly<TransformationBrief> }): Promise<Readonly<{ brief: Readonly<TransformationBrief>; replayed: boolean }>>
   readBrief(input: { workspaceId: string; projectId: string; briefId: string }): Promise<Readonly<TransformationBrief> | null>
+  listBriefs(input: { workspaceId: string; projectId: string; projectVersionId?: string; limit?: number }): Promise<readonly Readonly<TransformationBrief>[]>
   persistSelection(input: { selection: Readonly<TransformationProviderSelection> }): Promise<Readonly<{ selection: Readonly<TransformationProviderSelection>; replayed: boolean }>>
   listSelections(input: { workspaceId: string; projectId: string; briefId?: string }): Promise<readonly Readonly<TransformationProviderSelection>[]>
 }
-
