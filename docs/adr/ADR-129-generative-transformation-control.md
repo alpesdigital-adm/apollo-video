@@ -41,6 +41,9 @@ artifact as its best at any intent score. Evaluators declare themselves as
 `measured` or `controlled`, and a controlled detector is never described as a
 production visual evaluation.
 
-State: none of F3.013–F3.016 is complete. See
-`docs/quality/transformation-control-plane-v1.md` for what was measured and, in
-the same detail, what was not.
+State after production acceptance on 2026-09-02: F3.013–F3.016 and F3.018 are
+implemented, integrated, exercised end to end, deployed and accepted. The
+reviewed inpaint path, immutable derivative and visual eval also close three of
+five F3.017 tasks. Source separation and the measured comparison against
+crop/cover/reject remain explicitly open. The complete evidence and operational
+boundaries are recorded in `docs/quality/transformation-control-plane-v1.md`.

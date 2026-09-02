@@ -508,6 +508,17 @@ O painel interno deve permitir filtrar por build da UI, navegador, capacidade do
 13. Performance budgets possuem medição automatizada.
 14. Mockups aprovados orientam visual/hierarquia.
 
+### Aceite do painel de transformação (2026-09-02)
+
+`TransformationReviewPanel` está montado no editor autenticado e consome a API
+pública do mesmo runtime usado pelos workers. A evidência browser da jornada
+T-FR-113/114/115/116/123/218 exibe novelty treatment, quatorze dimensões do
+critic, issues, ladder e custo observado; permite accept, retry, descend e keep
+source; e cria/refina uma máscara antes da operação. Chrome contra `next start`
+confirmou a revisão imutável no PostgreSQL, o derivative MP4 avaliado e o
+aceite. O artifact visual `transformation-reviewed-and-accepted.png` foi salvo
+pelo CI `33662647886`; a revisão implantada é `b0cd3e17`.
+
 ## 35. Questões para design/ADR
 
 - Framework de timeline/canvas.

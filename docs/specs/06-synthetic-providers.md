@@ -195,6 +195,19 @@ autenticação própria e não aceita Bearer: um provider não tem credencial Ap
 Não é `/v1/webhooks/*`, que é a direção de saída, e não compartilha segredo com
 ela.
 
+### 7.3 Evidência de runtime e aceite (2026-09-02)
+
+O control plane foi exercitado pela jornada combinada
+T-FR-113/114/115/116/123/218 com PostgreSQL, quatro transportes controlados,
+workers reinstanciados entre ticks, callbacks assinados/repetidos, source MP4
+materializado por bytes e resultado ingerido no storage content-addressed. O
+runtime persistiu o critic medido de quatorze dimensões, issues, melhor
+derivative válido, custo observado e descida da ladder. A API pública e o
+browser consumiram os mesmos application services. Os CIs `33662647886`,
+`33664477610`, `33667530939` e `33669465697` passaram e a revisão
+`b0cd3e17` foi implantada. Providers comerciais não foram cobrados: os adapters
+reais executaram contra fronteiras HTTP/MCP controladas, sem credenciais vivas.
+
 ## 8. Polling/webhook
 
 - Webhook verifica assinatura, event ID e replay.

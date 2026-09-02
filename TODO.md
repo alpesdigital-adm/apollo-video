@@ -20,14 +20,14 @@ Critério vigente para `[x]`:
 - itens descritos como “parcial” nunca podem permanecer marcados como concluídos;
 - nenhum comportamento do pipeline legado conta como evidência do Apollo novo.
 
-Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core e o gate de reutilização e produção em lote operando sobre PostgreSQL V2,
-API pública e implantação em produção:
+Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core, o gate de reutilização e produção em lote e o control plane de transformação F3.013–F3.016/F3.018 operando sobre PostgreSQL V2, API pública e implantação em produção:
 
-- **355 de 1.259 microtarefas verificadas como efetivamente entregues (28,1%, arredondamento conservador)**;
-- **904 microtarefas abertas ou aguardando nova comprovação**;
+- **383 de 1.259 microtarefas verificadas como efetivamente entregues (30,4%, arredondamento conservador)**;
+- **876 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
-- os gates do MVP Core F1 e de reutilização/lote F2 foram aprovados; gates
-  F3–F5 e o release final permanecem abertos; a comparação visual autenticada
+- os gates do MVP Core F1 e de reutilização/lote F2 foram aprovados; o slice de
+  transformação F3.013–F3.018 foi aceito, mas o gate sintético F3, F4–F5 e o
+  release final permanecem abertos; a comparação visual autenticada
   remanescente de F2.026 continua explicitamente aberta e não é contada como
   entregue;
 - decisões, ADRs e tipos/documentação canônica realmente existentes permanecem concluídos;
@@ -48,6 +48,16 @@ H+B+CTA permitidos pela policy, penaliza o elo mais fraco, compila
 take, artifact e source range sem materializar fontes nem duplicar masters.
 Isso não conclui as demais capacidades F2–F5 nem autoriza
 marcar contratos isolados como produto entregue.
+
+O control plane de transformação agora possui quatro transportes sobre um
+`ProviderJob` durável, novelty budget antes da submissão, critic persistido de
+14 dimensões com medição FFmpeg por região, ladder/custo append-only, máscara
+revisável e painel operacional no editor. A jornada T-FR-113/114/115/116/123/218
+atravessou PostgreSQL, API, workers reiniciados, bytes reais e Chrome no CI
+`33662647886`; o merge `6c377613` repetiu a matriz no CI `33664477610`. O hotfix
+operacional `b0cd3e17` passou pelos CIs `33667530939` e `33669465697` e foi
+implantado como `apollo-video:b0cd3e1`, com backup imediato, 192 migrations,
+app saudável e cinco workers sem reinício. Não houve chamada paga de provider.
 
 O diagnóstico de contaminação F2.016 também está implantado: detector
 identificado, regiões/ranges/confidence, cruzamento com fala e pixels
@@ -1636,84 +1646,69 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.013 — Jobs duráveis API/MCP [FR-113]
 
-- [ ] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
-- [ ] Normalizar submit/result/cancel/resume em `ProviderJob`. Evidência T-FR-113.
-- [ ] Verificar assinatura, replay e correlação de callbacks. Evidência T-FR-113.
-- [ ] Retomar polling/callback wait após restart. Evidência T-FR-113.
-- [ ] Simular timeout, duplicate callback, rate limit e artifact ausente. Evidência T-FR-113.
+- [x] Criar transport adapters separados para API, webhook/polling e MCP. Evidência T-FR-113.
+- [x] Normalizar submit/result/cancel/resume em `ProviderJob`. Evidência T-FR-113.
+- [x] Verificar assinatura, replay e correlação de callbacks. Evidência T-FR-113.
+- [x] Retomar polling/callback wait após restart. Evidência T-FR-113.
+- [x] Simular timeout, duplicate callback, rate limit e artifact ausente. Evidência T-FR-113.
 
 ### F3.014 — Novelty budget [FR-114]
 
-- [ ] Modelar custo de novidade por transformação, duração e janela narrativa. Evidência T-FR-114.
-- [ ] Penalizar excesso antes de enviar ao provider. Evidência T-FR-114.
-- [ ] Aplicar cooldown e diversidade de grupos de efeito. Evidência T-FR-114.
-- [ ] Expor consumo no TreatmentPlan/QualityReport. Evidência T-FR-114.
-- [ ] Criar golden de vídeo sóbrio, equilibrado e exagerado. Evidência T-FR-114.
+- [x] Modelar custo de novidade por transformação, duração e janela narrativa. Evidência T-FR-114.
+- [x] Penalizar excesso antes de enviar ao provider. Evidência T-FR-114.
+- [x] Aplicar cooldown e diversidade de grupos de efeito. Evidência T-FR-114.
+- [x] Expor consumo no TreatmentPlan/QualityReport. Evidência T-FR-114.
+- [x] Criar golden de vídeo sóbrio, equilibrado e exagerado. Evidência T-FR-114.
 
 ### F3.015 — Fallback de transformação [FR-115]
 
-- [ ] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged. Evidência T-FR-115.
-- [ ] Verificar se cada fallback ainda cumpre a intenção do AssetBrief. Evidência T-FR-115.
-- [ ] Preservar melhor artifact válido e custo já incorrido. Evidência T-FR-115.
-- [ ] Mostrar fallback aplicado e permitir revisão. Evidência T-FR-115.
-- [ ] Testar falha transitória, capability ausente e resultado reprovado. Evidência T-FR-115.
+- [x] Implementar ladder v2v → composite/background → cutaway/B-roll → source unchanged. Evidência T-FR-115.
+- [x] Verificar se cada fallback ainda cumpre a intenção do AssetBrief. Evidência T-FR-115.
+- [x] Preservar melhor artifact válido e custo já incorrido. Evidência T-FR-115.
+- [x] Mostrar fallback aplicado e permitir revisão. Evidência T-FR-115.
+- [x] Testar falha transitória, capability ausente e resultado reprovado. Evidência T-FR-115.
 
 ### F3.016 — Crítico de transformação [FR-116]
 
-- [ ] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco. Evidência T-FR-116.
-- [ ] Comparar source/result por regiões e ranges relevantes. Evidência T-FR-116.
-- [ ] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom. Evidência T-FR-116.
-- [ ] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
-- [ ] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
+- [x] Avaliar intenção, preserve list, identidade, temporal coherence, artefatos e risco. Evidência T-FR-116.
+- [x] Comparar source/result por regiões e ranges relevantes. Evidência T-FR-116.
+- [x] Rejeitar resultado que muda conteúdo protegido mesmo se visualmente bom. Evidência T-FR-116.
+- [x] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
+- [x] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
 
-> Estado parcial (2026-09-01, branches `claude/f3013-durable-transformation-jobs`,
-> `claude/f3014-novelty-budget` e `claude/f3015-f3016-transformation-quality`, nenhuma
-> mesclada). **Nenhuma caixa de F3.013 a F3.016 fecha.**
->
-> O que existe e foi medido: o `ProviderJob` canônico ganhou transporte imutável e um
-> cronograma durável em tabela própria; callbacks de provider são verificados sobre os
-> bytes exatos e consumidos uma única vez com índice parcial; quatro transportes
-> (API, polling, webhook, MCP via SDK oficial) sobre dois adapters; sete capabilities
-> `/v1` novas; novelty budget determinístico em aritmética inteira, com gate antes de
-> qualquer submissão paga e integração verde em PostgreSQL real; ladder de fallback e
-> crítico de transformação como agregados content-addressed com migration aplicada e
-> validada desde banco vazio. Suíte 1649/1649; banco 213 tabelas / 1055 índices /
-> 814 FKs; contratos 293/533/597/240 com baseline puramente aditiva. Zero chamadas pagas.
->
-> O que **não** existe: nenhuma jornada E2E combinada (nem a de durabilidade/transportes
-> nem a medieval com mídia FFmpeg real); nenhum service escreve o ledger de fallback nem
-> o relatório do crítico; sem superfície `/v1` para F3.015/F3.016; sem UI de revisão de
-> fallback; sem os três goldens de novelty com mídia real; sem os evaluators ffprobe e de
-> comparação por região por trás do crítico. Detalhe integral, incluindo o que foi medido
-> e o que não foi, em `docs/quality/transformation-control-plane-v1.md`.
+> Aceite de produção (2026-09-02): F3.013–F3.016 atravessaram a jornada combinada
+> T-FR-113/114/115/116/123/218 com PostgreSQL, API, workers reiniciados, source/result
+> MP4 reais, FFmpeg/ffprobe, persistência de critic/ledger/custo e Chrome sobre `next start`.
+> O painel exibe novelty, 14 dimensões, issues, custo, fallback e ações accept/descend/
+> keep-source; o refino de máscara foi persistido pela própria UI. Suíte 1672/1672,
+> banco 214 tabelas/1063 índices/823 FKs e contratos 299/542/606/244. Evidências nos
+> CIs `33662647886`, `33664477610`, `33667530939` e `33669465697`; produção
+> `apollo-video:b0cd3e1`, seis containers estáveis, zero chamadas pagas. Detalhes em
+> `docs/quality/transformation-control-plane-v1.md`.
 
 ### F3.017 — Limpeza avançada [FR-123]
 
 - [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
-- [ ] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
-- [ ] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.
+- [x] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
+- [x] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.
 - [ ] Comparar custo/qualidade com crop/cover/reject. Evidência T-FR-123.
-- [ ] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
+- [x] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
 
 ### F3.018 — Mask a partir da revisão [FR-218]
 
-> Slice local Wave 17 (`codex/f3017-f3018-advanced-cleanup`): `review-cleanup-mask/v1`
-> converte annotation regional já persistida em máscara normalizada e content-addressed,
-> ligada ao proxy, source, versão, `TransformationBrief` e formato exatos; revisões são
-> append-only, idempotentes e bloqueiam tracking incerto, baixa confiança, preserve overlap,
-> formato não revisado e revisão stale antes do `ProviderJob`. A API pública possui list/create/refine
-> e o request de transformação v2 aceita somente `maskId`/`outputSpecId`, projetando os pixels
-> canônicos do banco sem screenshot, texto ou autor. Evidência local: 15 testes focados,
-> suíte 1667/1667, typecheck/API/DB verdes. O CI `33574454216` aplicou as migrations do zero
-> e aprovou o round-trip create/replay/refine/tamper em PostgreSQL real. **Não fecha caixas:**
-> não há UI/browser E2E, upload vivo do source ao adapter,
-> MP4 de inpaint, visual eval, deploy ou aceite.
+> Aceite T-FR-218 (2026-09-02): a região da annotation e seus refinamentos imutáveis
+> chegaram ao adapter a partir do PostgreSQL, sem screenshot/texto/autor, e produziram
+> derivative MP4 real; source/hash permaneceram imutáveis. Chrome refinou a região e
+> conferiu três revisões persistidas, critic e aceite. Tracking incerto, baixa confiança,
+> overlap protegido, formato não revisado e stale seguem fail-closed. Evidências e deploy
+> são os mesmos do bloco F3.013–F3.016. F3.018 está aceito; em F3.017 permanecem abertos
+> apenas o adapter de separation e a comparação direta com crop/cover/reject.
 
-- [ ] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
-- [ ] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
-- [ ] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.
-- [ ] Tratar tracking incerto e mudança de formato explicitamente. Evidência T-FR-218.
-- [ ] Criar E2E de selecionar região, remover/alterar e revisar resultado. Evidência T-FR-218.
+- [x] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
+- [x] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.
+- [x] Vincular mask input ao PatchSet/TransformationBrief. Evidência T-FR-218.
+- [x] Tratar tracking incerto e mudança de formato explicitamente. Evidência T-FR-218.
+- [x] Criar E2E de selecionar região, remover/alterar e revisar resultado. Evidência T-FR-218.
 
 ### F3.019 — Gate sintético
 
