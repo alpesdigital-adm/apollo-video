@@ -6,11 +6,22 @@ import {
 
 import type {
   ClaimedProviderJob,
+  PersistedProviderCallbackEvent,
   PersistedProviderJob,
   ProviderJobRepository,
 } from '../../application/ports/provider-job-repository.ts'
 import { stableSerialize } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  assertProviderCallbackEvent,
+  type ProviderCallbackEvent,
+  type ProviderCallbackOutcome,
+  type ProviderCallbackRejection,
+} from '../../domain/provider-job-callback.ts'
+import {
+  assertProviderJobTransportState,
+  type ProviderJobTransportState,
+} from '../../domain/provider-job-transport.ts'
 import {
   assertProviderJob,
   TERMINAL_PROVIDER_JOB_STATUSES,
@@ -46,11 +57,119 @@ function parseJob(row: V2ProviderJob): Readonly<PersistedProviderJob> {
     job.resultArtifact?.artifactSha256 !== (row.resultArtifactSha256 ?? undefined) ||
     job.criticResultHash !== (row.criticResultHash ?? undefined) || job.jobHash !== row.jobHash ||
     job.idempotencyKey !== row.idempotencyKey || job.createdAt !== row.createdAt.toISOString() ||
-    job.updatedAt !== row.updatedAt.toISOString()
+    job.updatedAt !== row.updatedAt.toISOString() ||
+    job.transport !== (row.transport ?? undefined) ||
+    job.transformation?.briefId !== (row.transformationBriefId ?? undefined) ||
+    job.transformation?.briefHash !== (row.transformationBriefHash ?? undefined) ||
+    job.transformation?.selectionId !== (row.transformationSelectionId ?? undefined) ||
+    job.transformation?.selectionHash !== (row.transformationSelectionHash ?? undefined) ||
+    job.transformation?.providerId !== (row.transformationProviderId ?? undefined) ||
+    job.transformation?.capabilityId !== (row.transformationCapabilityId ?? undefined) ||
+    job.observedCost?.currency !== (row.observedCostCurrency ?? undefined) ||
+    job.observedCost?.costMinorUnits !== (row.observedCostMinorUnits ?? undefined)
   ) {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored provider job ${row.id} failed integrity validation`)
   }
   return Object.freeze({ job: Object.freeze(job), requestFingerprint: row.requestFingerprint })
+}
+
+type TransportStateRow = {
+  workspaceId: string; projectId: string; jobId: string; schemaVersion: string
+  transport: string; completion: string; retryPolicyJson: string; retryPolicyHash: string
+  waitKind: string; nextAttemptAt: Date | null; deadlineAt: Date; transportAttempts: number
+  retryAfterMs: number | null; waitStartedAt: Date | null
+  cancellation: string; cancellationRequestedAt: Date | null
+  resume: string; resumeRequestedAt: Date | null
+  mcpSessionId: string | null; mcpSessionClosedAt: Date | null
+  revision: number; updatedAt: Date
+}
+
+function parseTransportState(row: TransportStateRow): Readonly<ProviderJobTransportState> {
+  let retryPolicy: ProviderJobTransportState['retryPolicy']
+  try {
+    retryPolicy = JSON.parse(row.retryPolicyJson) as ProviderJobTransportState['retryPolicy']
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored transport state for ${row.jobId} has invalid retry policy JSON`)
+  }
+  if (retryPolicy.policyHash !== row.retryPolicyHash) {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored retry policy for ${row.jobId} does not match its column hash`)
+  }
+  return assertProviderJobTransportState(Object.freeze({
+    schemaVersion: row.schemaVersion as ProviderJobTransportState['schemaVersion'],
+    workspaceId: row.workspaceId,
+    projectId: row.projectId,
+    jobId: row.jobId,
+    transport: row.transport as ProviderJobTransportState['transport'],
+    completion: row.completion as ProviderJobTransportState['completion'],
+    retryPolicy: Object.freeze(retryPolicy),
+    waitKind: row.waitKind as ProviderJobTransportState['waitKind'],
+    nextAttemptAt: row.nextAttemptAt?.toISOString() ?? null,
+    deadlineAt: row.deadlineAt.toISOString(),
+    transportAttempts: row.transportAttempts,
+    retryAfterMs: row.retryAfterMs,
+    waitStartedAt: row.waitStartedAt?.toISOString() ?? null,
+    cancellation: row.cancellation as ProviderJobTransportState['cancellation'],
+    cancellationRequestedAt: row.cancellationRequestedAt?.toISOString() ?? null,
+    resume: row.resume as ProviderJobTransportState['resume'],
+    resumeRequestedAt: row.resumeRequestedAt?.toISOString() ?? null,
+    mcpSessionId: row.mcpSessionId,
+    mcpSessionClosedAt: row.mcpSessionClosedAt?.toISOString() ?? null,
+    revision: row.revision,
+    updatedAt: row.updatedAt.toISOString(),
+  }))
+}
+
+function transportStateData(state: Readonly<ProviderJobTransportState>) {
+  return {
+    schemaVersion: state.schemaVersion,
+    transport: state.transport,
+    completion: state.completion,
+    retryPolicyJson: stableSerialize(state.retryPolicy),
+    retryPolicyHash: state.retryPolicy.policyHash,
+    waitKind: state.waitKind,
+    nextAttemptAt: state.nextAttemptAt ? new Date(state.nextAttemptAt) : null,
+    deadlineAt: new Date(state.deadlineAt),
+    transportAttempts: state.transportAttempts,
+    retryAfterMs: state.retryAfterMs,
+    waitStartedAt: state.waitStartedAt ? new Date(state.waitStartedAt) : null,
+    cancellation: state.cancellation,
+    cancellationRequestedAt: state.cancellationRequestedAt ? new Date(state.cancellationRequestedAt) : null,
+    resume: state.resume,
+    resumeRequestedAt: state.resumeRequestedAt ? new Date(state.resumeRequestedAt) : null,
+    mcpSessionId: state.mcpSessionId,
+    mcpSessionClosedAt: state.mcpSessionClosedAt ? new Date(state.mcpSessionClosedAt) : null,
+    revision: state.revision,
+    updatedAt: new Date(state.updatedAt),
+  }
+}
+
+type CallbackEventRow = {
+  workspaceId: string; providerId: string; eventId: string; jobId: string; schemaVersion: string
+  providerJobId: string; status: string; outcome: string; rejectionReason: string | null
+  retryAfterMs: number | null; payloadSha256: string; eventHash: string
+  occurredAt: Date; receivedAt: Date
+}
+
+function parseCallbackEvent(row: CallbackEventRow): Readonly<PersistedProviderCallbackEvent> {
+  const event = assertProviderCallbackEvent(Object.freeze({
+    schemaVersion: row.schemaVersion as ProviderCallbackEvent['schemaVersion'],
+    workspaceId: row.workspaceId,
+    providerId: row.providerId,
+    eventId: row.eventId,
+    jobId: row.jobId,
+    providerJobId: row.providerJobId,
+    status: row.status as ProviderCallbackEvent['status'],
+    occurredAt: row.occurredAt.toISOString(),
+    retryAfterMs: row.retryAfterMs,
+    payloadSha256: row.payloadSha256,
+    receivedAt: row.receivedAt.toISOString(),
+    eventHash: row.eventHash,
+  }))
+  return Object.freeze({
+    event,
+    outcome: row.outcome as ProviderCallbackOutcome,
+    ...(row.rejectionReason ? { rejectionReason: row.rejectionReason as ProviderCallbackRejection } : {}),
+  })
 }
 
 function projection(job: Readonly<ProviderJob>) {
@@ -67,6 +186,15 @@ function projection(job: Readonly<ProviderJob>) {
     normalizedErrorJson: job.normalizedError ? stableSerialize(job.normalizedError) : null,
     jobJson: stableSerialize(job),
     jobHash: job.jobHash,
+    transport: job.transport ?? null,
+    transformationBriefId: job.transformation?.briefId ?? null,
+    transformationBriefHash: job.transformation?.briefHash ?? null,
+    transformationSelectionId: job.transformation?.selectionId ?? null,
+    transformationSelectionHash: job.transformation?.selectionHash ?? null,
+    transformationProviderId: job.transformation?.providerId ?? null,
+    transformationCapabilityId: job.transformation?.capabilityId ?? null,
+    observedCostCurrency: job.observedCost?.currency ?? null,
+    observedCostMinorUnits: job.observedCost?.costMinorUnits ?? null,
     submittedAt: job.submittedAt ? new Date(job.submittedAt) : null,
     heartbeatAt: job.heartbeatAt ? new Date(job.heartbeatAt) : null,
     completedAt: job.completedAt ? new Date(job.completedAt) : null,
@@ -177,7 +305,30 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
             },
           },
         })
-        return Object.freeze({ persisted: parseJob(row), replayed: false })
+        // Same transaction as the job. A job that declares a transport but has
+        // no schedule would never be picked up by the worker; there is no
+        // window in which that pair can exist.
+        let transportState: Readonly<ProviderJobTransportState> | null = null
+        if (input.transportState) {
+          if (
+            input.transportState.jobId !== input.job.id ||
+            input.transportState.workspaceId !== input.job.workspaceId ||
+            input.transportState.projectId !== input.job.projectId ||
+            input.transportState.transport !== input.job.transport
+          ) {
+            throw new DomainError('PERSISTENCE_CONFLICT', 'Transport state does not belong to its provider job')
+          }
+          transportState = parseTransportState(await transaction.v2ProviderJobTransportState.create({
+            data: {
+              workspaceId: input.job.workspaceId,
+              projectId: input.job.projectId,
+              jobId: input.job.id,
+              ...transportStateData(input.transportState),
+              createdAt: new Date(input.job.createdAt),
+            },
+          }))
+        }
+        return Object.freeze({ persisted: Object.freeze({ ...parseJob(row), transportState }), replayed: false })
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       // Serializable write conflicts against a concurrently polling worker
@@ -199,8 +350,116 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
   }
 
   async read(input: Parameters<ProviderJobRepository['read']>[0]) {
-    const row = await this.prisma.v2ProviderJob.findFirst({ where: { id: input.jobId, workspaceId: input.workspaceId, projectId: input.projectId } })
-    return row ? parseJob(row) : null
+    const row = await this.prisma.v2ProviderJob.findFirst({
+      where: { id: input.jobId, workspaceId: input.workspaceId, projectId: input.projectId },
+      include: { transportState: true },
+    })
+    if (!row) return null
+    const { transportState, ...jobRow } = row
+    return Object.freeze({ ...parseJob(jobRow), transportState: transportState ? parseTransportState(transportState) : null })
+  }
+
+  async findByProviderCorrelation(input: Parameters<ProviderJobRepository['findByProviderCorrelation']>[0]) {
+    const row = await this.prisma.v2ProviderJob.findFirst({
+      where: { workspaceId: input.workspaceId, adapterId: input.adapterId, providerJobId: input.providerJobId },
+      include: { transportState: true },
+    })
+    if (!row) return null
+    const { transportState, ...jobRow } = row
+    return Object.freeze({ ...parseJob(jobRow), transportState: transportState ? parseTransportState(transportState) : null })
+  }
+
+  async readTransportState(input: Parameters<ProviderJobRepository['readTransportState']>[0]) {
+    const row = await this.prisma.v2ProviderJobTransportState.findFirst({
+      where: { jobId: input.jobId, workspaceId: input.workspaceId, projectId: input.projectId },
+    })
+    return row ? parseTransportState(row) : null
+  }
+
+  async saveTransportState(input: Parameters<ProviderJobRepository['saveTransportState']>[0]) {
+    const saved = await this.prisma.v2ProviderJobTransportState.updateMany({
+      where: {
+        jobId: input.next.jobId,
+        workspaceId: input.next.workspaceId,
+        revision: input.expectedRevision,
+      },
+      data: transportStateData(input.next),
+    })
+    // Compare-and-swap, not last-write-wins: two operators cancelling the same
+    // job concurrently must not silently overwrite each other's intent.
+    if (saved.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Transport state advanced concurrently')
+    return input.next
+  }
+
+  async findCallbackEvent(input: Parameters<ProviderJobRepository['findCallbackEvent']>[0]) {
+    const row = await this.prisma.v2ProviderCallbackEvent.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        providerId: input.providerId,
+        eventId: input.eventId,
+        outcome: 'accepted',
+      },
+    })
+    return row ? parseCallbackEvent(row).event : null
+  }
+
+  async listCallbackEvents(input: Parameters<ProviderJobRepository['listCallbackEvents']>[0]) {
+    const rows = await this.prisma.v2ProviderCallbackEvent.findMany({
+      where: { workspaceId: input.workspaceId, projectId: input.projectId, jobId: input.jobId },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+      take: Math.min(Math.max(input.limit ?? 50, 1), 200),
+    })
+    return Object.freeze(rows.map(parseCallbackEvent))
+  }
+
+  async recordCallbackEvent(input: Parameters<ProviderJobRepository['recordCallbackEvent']>[0]) {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const row = await transaction.v2ProviderCallbackEvent.create({
+          data: {
+            id: input.id,
+            workspaceId: input.event.workspaceId,
+            projectId: input.projectId,
+            jobId: input.event.jobId,
+            schemaVersion: input.event.schemaVersion,
+            providerId: input.event.providerId,
+            eventId: input.event.eventId,
+            providerJobId: input.event.providerJobId,
+            status: input.event.status,
+            outcome: input.outcome,
+            rejectionReason: input.rejectionReason ?? null,
+            retryAfterMs: input.event.retryAfterMs,
+            payloadSha256: input.event.payloadSha256,
+            eventHash: input.event.eventHash,
+            occurredAt: new Date(input.event.occurredAt),
+            receivedAt: new Date(input.event.receivedAt),
+          },
+        })
+        // The wake and the consumption of the event id commit together. If they
+        // did not, a crash between them would leave an event marked consumed
+        // whose effect never happened — and the retry would be refused as a
+        // duplicate.
+        if (input.wake) {
+          const woken = await transaction.v2ProviderJobTransportState.updateMany({
+            where: {
+              jobId: input.wake.next.jobId,
+              workspaceId: input.wake.next.workspaceId,
+              revision: input.wake.expectedRevision,
+            },
+            data: transportStateData(input.wake.next),
+          })
+          if (woken.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Transport state advanced while the callback was being applied')
+        }
+        return parseCallbackEvent(row)
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      // The partial unique index on accepted events is the replay gate. Losing
+      // that race means another delivery of the same event id already landed.
+      if (isPrismaCode(error, 'P2002')) {
+        throw new DomainError('WEBHOOK_REPLAY_DETECTED', 'Provider callback event was already consumed')
+      }
+      throw error
+    }
   }
 
   async claimNext(input: Parameters<ProviderJobRepository['claimNext']>[0]) {
@@ -210,8 +469,19 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         where: {
           status: { notIn: [...TERMINAL_PROVIDER_JOB_STATUSES] },
           OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lt: input.now } }],
+          // A job parked on a backoff, a Retry-After or a callback wait is not
+          // due yet. Without this the worker would spin on it, burn its attempt
+          // budget and ignore the delay the provider explicitly asked for.
+          AND: [{
+            OR: [
+              { transportState: { is: null } },
+              { transportState: { nextAttemptAt: null } },
+              { transportState: { nextAttemptAt: { lte: input.now } } },
+            ],
+          }],
         },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: { transportState: true },
       })
       if (!row) return null
       const claimed = await transaction.v2ProviderJob.updateMany({
@@ -223,8 +493,10 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
         data: { leaseOwner: input.workerId, leaseToken: input.leaseToken, leaseExpiresAt: input.leaseExpiresAt },
       })
       if (claimed.count !== 1) return null
+      const { transportState, ...jobRow } = row
       return Object.freeze({
-        ...parseJob(row),
+        ...parseJob(jobRow),
+        transportState: transportState ? parseTransportState(transportState) : null,
         lease: Object.freeze({ owner: input.workerId, token: input.leaseToken, expiresAt: input.leaseExpiresAt.toISOString() }),
       }) as Readonly<ClaimedProviderJob>
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
@@ -265,7 +537,20 @@ export class PrismaProviderJobRepository implements ProviderJobRepository {
           occurredAt: input.occurredAt,
         },
       })
-      return parseJob(updated)
+      let transportState: Readonly<ProviderJobTransportState> | null = input.current.transportState ?? null
+      if (input.transportState) {
+        const saved = await transaction.v2ProviderJobTransportState.updateMany({
+          where: {
+            jobId: row.id,
+            workspaceId: row.workspaceId,
+            revision: input.transportState.revision - 1,
+          },
+          data: transportStateData(input.transportState),
+        })
+        if (saved.count !== 1) throw new DomainError('VERSION_CONFLICT', 'Transport state advanced concurrently')
+        transportState = input.transportState
+      }
+      return Object.freeze({ ...parseJob(updated), transportState })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   }
 

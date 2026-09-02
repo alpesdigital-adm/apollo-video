@@ -148,6 +148,14 @@ const coverage = Object.freeze({
   'apollo.projects.create': {
     mode: 'idempotent-create', evidence: 'F0-060',
   },
+  'apollo.projects.review-cleanup-masks.create': {
+    mode: 'idempotent-create',
+    evidence: 'F3.018 binds annotation, proxy, current project version, source artifact, TransformationBrief, output format and complete authenticated actor in one request fingerprint before immutable persistence',
+  },
+  'apollo.projects.review-cleanup-masks.refine': {
+    mode: 'idempotent-create',
+    evidence: 'F3.018 requires expectedMaskHash, verifies the selected revision is still the latest root revision and persists only an append-only successor under a unique root revision',
+  },
   'apollo.projects.duplicates.create': {
     mode: 'idempotent-create', evidence: 'request additionally binds the source current version and hash; serializable persistence rechecks the source snapshots and media before creating the copy-on-write fork',
   },
@@ -360,6 +368,27 @@ const coverage = Object.freeze({
   },
   'apollo.projects.synthetic-production-runs.create': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, profile snapshot, critic results, artifact digests and authorization; serializable persistence rechecks current state before commit',
+  },
+  'apollo.projects.synthetic-masters.promote': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds the approved provider job, presenter snapshot, exact script hash, locale, use, market, lineage and cost; the sealing transaction rechecks the job critic hash and profile snapshot hash, and a job already promoted returns its master instead of sealing a second one',
+  },
+  'apollo.provider-callbacks.receive': {
+    mode: 'natural-idempotent-create', evidence: 'the signature is verified over the exact bytes received, the timestamp must sit inside a narrow window, and the event id is consumed exactly once; the same id with the same bytes is a duplicate, the same id with different bytes is a replay and is refused',
+  },
+  'apollo.projects.transformation-briefs.create': {
+    mode: 'natural-idempotent-create', evidence: 'the brief id is derived from its own canonical hash, so the same intent is the same brief and a replay is indistinguishable from the original write',
+  },
+  'apollo.projects.transformation-briefs.route': {
+    mode: 'natural-idempotent-create', evidence: 'the selection id is derived from the hash of brief, candidates and policy; a routing whose brief has since changed is caught by briefHash before any job is created',
+  },
+  'apollo.projects.transformation-jobs.request': {
+    mode: 'idempotent-create', evidence: 'request fingerprint binds brief id and hash, selection id and hash, use, market and locale to the actor context; the service rechecks current project version, source artifact hash and the exact rights snapshot the brief was authorized under before creating the job',
+  },
+  'apollo.projects.transformation-jobs.cancel': {
+    mode: 'single-flight-action', evidence: 'transport revision compare-and-swap; a job already terminal is refused and a cancellation already requested returns the recorded intent unchanged',
+  },
+  'apollo.projects.transformation-jobs.retry': {
+    mode: 'single-flight-action', evidence: 'transport revision compare-and-swap; a terminal or cancelled job cannot be resumed, and a pending untouched resume is returned unchanged',
   },
   'apollo.projects.provider-jobs.enqueue': {
     mode: 'idempotent-create', evidence: 'request fingerprint binds current ProjectVersion, presenter profile, adapter identity, portable input and exact source authorization; submit rechecks consent and current rights under the durable lease',
@@ -646,10 +675,10 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 61,
-    'natural-idempotent-create': 4,
+    'idempotent-create': 65,
+    'natural-idempotent-create': 7,
     'state-machine-action': 16,
-    'single-flight-action': 1,
+    'single-flight-action': 3,
     'revision-bound-action': 16,
     'base-version-bound-action': 16,
     'production-batch-revision-action': 2,

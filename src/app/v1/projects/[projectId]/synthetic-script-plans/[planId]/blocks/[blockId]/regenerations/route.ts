@@ -21,6 +21,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     let raw: unknown
     try { raw = await request.json() } catch { throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON') }
     const body = parseRegenerateBlockBody(raw)
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
     const services = createSyntheticScriptPlanServices()
     const mutated = await services.mutatePlan({
       workspaceId: actor.workspaceId,
@@ -31,12 +32,17 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       baseHash: body.baseHash,
       mutation: { kind: 'regenerate-block', blockId },
       actor,
-      idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '',
+      idempotencyKey,
     })
     const generations = await services.ensure({
       workspaceId: actor.workspaceId, projectId, projectVersionId: body.projectVersionId,
       planId, use: body.use, market: body.market, actor,
-      forceBlockIds: [blockId],
+      // The motive is never empty: when the caller states none, the audited
+      // reason is the command itself, identified by the key it was sent with.
+      mustRegenerate: {
+        blockIds: [blockId],
+        reason: body.reason ?? `regenerate-block command for ${blockId} (idempotency ${idempotencyKey || 'absent'})`,
+      },
     })
     return NextResponse.json(
       presentSuccess({ plan: presentSyntheticScriptPlan(mutated.plan), generations: presentBlockGenerationOutcomes(generations), replayed: mutated.replayed }),

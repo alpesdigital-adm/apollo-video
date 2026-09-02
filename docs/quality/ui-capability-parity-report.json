@@ -4,9 +4,9 @@
     "uiActions": 113,
     "capabilities": 101,
     "endpoints": 101,
-    "registeredCapabilities": 274,
-    "operableCapabilities": 274,
-    "publicContractCapabilities": 274,
+    "registeredCapabilities": 296,
+    "operableCapabilities": 296,
+    "publicContractCapabilities": 296,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -5193,6 +5193,138 @@
       ]
     },
     {
+      "capabilityId": "apollo.projects.synthetic-masters.promote",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/synthetic-masters",
+      "inputSchemaRef": "apollo://schemas/promote-synthetic-master-request/v1",
+      "outputSchemaRef": "apollo://schemas/synthetic-master-promoted/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.read-lineage",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}/lineage",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-master-lineage-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-masters.list-speech-segments",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-masters/{masterId}/speech-segments",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-speech-segment-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.workspaces.synthetic-speech-segments.search",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-speech-segments",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-speech-segment-search/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-cache-decisions.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-cache-decisions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-cache-decisions.summarize",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-cache-decisions/summary",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-summary/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.workspaces.synthetic-cache-decisions.trace",
+      "exposure": "public",
+      "endpoint": "GET /v1/workspaces/{workspaceId}/synthetic-cache-decisions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-cache-decision-trace/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-critic-reports.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-critic-reports",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-critic-report-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-critic-reports.get",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-critic-reports/{reportId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-critic-report-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.synthetic-critic-reports.read-block-evidence",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/synthetic-blocks/{blockId}/critic-evidence",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/synthetic-critic-block-evidence/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "capabilityId": "apollo.projects.synthetic-production-runs.create",
       "exposure": "public",
       "endpoint": "POST /v1/projects/{projectId}/synthetic-production-runs",
@@ -5231,6 +5363,116 @@
       "endpoint": "GET /v1/projects/{projectId}/provider-jobs/{jobId}",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/provider-job-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-briefs.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-briefs",
+      "inputSchemaRef": "apollo://schemas/create-transformation-brief-request/v1",
+      "outputSchemaRef": "apollo://schemas/transformation-brief-created/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-briefs.route",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-briefs/{briefId}/routings",
+      "inputSchemaRef": "apollo://schemas/route-transformation-brief-request/v1",
+      "outputSchemaRef": "apollo://schemas/transformation-provider-selection/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.review-cleanup-masks.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/review-cleanup-masks",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.review-cleanup-masks.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/review-cleanup-masks",
+      "inputSchemaRef": "apollo://schemas/create-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.review-cleanup-masks.refine",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/review-cleanup-masks/{maskId}/refinements",
+      "inputSchemaRef": "apollo://schemas/refine-review-cleanup-mask-request/v1",
+      "outputSchemaRef": "apollo://schemas/review-cleanup-mask-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs",
+      "inputSchemaRef": "apollo://schemas/request-transformation-job-request/v2",
+      "outputSchemaRef": "apollo://schemas/transformation-job-mutated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/transformation-jobs/{jobId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.cancel",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs/{jobId}/cancellations",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-cancelled/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.transformation-jobs.retry",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/transformation-jobs/{jobId}/retries",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/transformation-job-resumed/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.provider-callbacks.receive",
+      "exposure": "public",
+      "endpoint": "POST /v1/provider-callbacks/{providerId}",
+      "inputSchemaRef": "apollo://schemas/provider-callback-notification/v1",
+      "outputSchemaRef": "apollo://schemas/provider-callback-outcome/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

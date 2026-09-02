@@ -135,6 +135,66 @@ planned → estimated → submitted → queued → processing
 
 Terminais adicionais: failed, canceled, expired, superseded.
 
+### 7.1 Transporte e cronograma (Wave 16, F3.013)
+
+O `ProviderJob` é *content-addressed*: `jobHash` cobre o corpo inteiro. Isso
+divide o que orbita um job por **ciclo de vida**, não por assunto.
+
+No corpo do job, opcional e imutável — decidido uma vez, antes de qualquer
+chamada paga:
+
+```ts
+transport?: 'api' | 'polling' | 'webhook' | 'mcp'
+transformation?: {
+  briefId: string; briefHash: string
+  selectionId: string; selectionHash: string
+  providerId: string; capabilityId: string
+}
+observedCost?: { currency: string; costMinorUnits: number }
+```
+
+Opcional é estrutural: campo ausente não entra no corpo canônico, então todo job
+sintético escrito pelas Waves 13 e 14 mantém o `jobHash` que já tinha.
+
+Fora do corpo, em `provider_job_transport_states`, com compare-and-swap em
+`revision`: `nextAttemptAt`, `deadlineAt`, `retryAfterMs`, `transportAttempts`,
+`waitKind`, intents de cancelamento e resume, sessão MCP. Um campo que muda a
+cada poll não pode viver dentro de um hash que significa "este é o mesmo job".
+
+O par transporte × modo de conclusão é imposto pelo PostgreSQL: um provider
+`synchronous` não pode ser dirigido por webhook, e um provider `webhook` não
+pode ser levado à conclusão por polling.
+
+O transporte MCP é um provider **exposto via** MCP, com a Apollo como cliente —
+não é o servidor MCP público da Apollo, que é a direção oposta. A sessão é
+apenas o fio: cada chamada abre e fecha uma sessão no `finally`, e depois que o
+`submit` devolve o `providerJobId` o job durável é dono do próprio futuro.
+
+### 7.2 Callback de provider (Wave 16, F3.013)
+
+Verificação sobre os **bytes exatos** recebidos: parsear e re-serializar antes de
+conferir a assinatura permitiria reordenar chaves ou reformatar um número por
+baixo da checagem.
+
+Ordem deliberada: tamanho, event id, timestamp dentro de janela estreita,
+assinatura HMAC em tempo constante e, só então, os vínculos semânticos
+(correlation, workspace, provider). Um chamador não deve conseguir descobrir se
+um job existe cronometrando a checagem de assinatura.
+
+`provider_callback_events` substitui o conjunto de nonces em memória que um
+restart esvaziava. Guarda o sha256 dos bytes — nunca os bytes, que podem carregar
+URLs assinadas. **Só eventos aceitos** tomam a chave única, via índice parcial:
+um callback rejeitado não pode queimar um event id e travar a entrega legítima.
+Mesmo id com mesmos bytes é entrega duplicada; com bytes diferentes é replay.
+
+O wake e o consumo commitam na mesma transação: um crash entre os dois deixaria
+um evento marcado como consumido cuja consequência nunca aconteceu.
+
+O boundary de entrada (`POST /v1/provider-callbacks/{providerId}`) tem
+autenticação própria e não aceita Bearer: um provider não tem credencial Apollo.
+Não é `/v1/webhooks/*`, que é a direção de saída, e não compartilha segredo com
+ela.
+
 ## 8. Polling/webhook
 
 - Webhook verifica assinatura, event ID e replay.
@@ -257,6 +317,8 @@ Salvar:
 
 Composição, legenda, LUT e B-roll são derivados; não alteram master.
 
+> **Nota de implementação (F3.007).** O master é o aggregate imutável e content-addressed `synthetic-master-asset/v1` (ADR-145), persistido em `synthetic_master_assets` + `synthetic_master_artifacts`. Os papéis obrigatórios são os três que o pipeline produz — `provider-original`, `final-audio` e `alignment` (espelhando `primary-video`, `primary-audio` e `alignment-evidence` do ledger); `normalized-video` fica modelado porém opcional enquanto nenhum estágio normalizar vídeo de provider; composição/legenda/LUT/B-roll/formato de saída **não possuem campo** no aggregate, e um teste prova essa ausência. Áudio governa a timeline: `durationMs` é igual à duração de áudio medida e o vídeo pode divergir no máximo um frame a 30fps (34 ms) — exigido no domínio e por CHECK no PostgreSQL. Identidade é o endereço de conteúdo: `(workspaceId, masterHash)` é único, e `(workspaceId, providerJobId)` garante que um job aprovado sela exatamente um master. A promoção (`promoteSyntheticMasterAssetService`) só publica depois de verificar job terminal+aprovado com critic, presença dos papéis obrigatórios no ledger, artifacts catalogados e disponíveis com checksum/tamanho batendo, **bytes conferidos no storage**, snapshot íntegro e permitido pelo policy engine, direitos liberando cada artifact e durações medidas coerentes; snapshot ou aprovação que mudem entre a validação e o commit produzem `VERSION_CONFLICT`. As frases aprovadas viram segmentos reutilizáveis em `synthetic_speech_segments` — tabela própria porque `speech_segments` exige catalog run, transcript e complete-thought score que uma fala sintética não possui (ADR-145) —, com fronteiras da F3.005, ranges half-open casados palavra a palavra com o alignment persistido e silêncio preservado como gap real.
+
 ## 14. Cache
 
 ```text
@@ -270,6 +332,8 @@ Cache hit só é utilizável se:
 - rights/consent atuais permitem;
 - output constraints atendidos;
 - nenhum mustRegenerate explícito.
+
+> **Nota de implementação (F3.008).** A fórmula acima continua sendo a autoridade de FORMA. A identidade é calculada por um único módulo (`synthetic-cache-identity.ts`, ADR-146) que cobre TTS e avatar: a chave de TTS é byte-idêntica à `synthetic-block-cache-key/v1` já persistida (congelada por sentinela), e a de avatar acrescenta checksum do áudio condutor, referência de identidade do avatar, versão do presenter, model, formato, hash de config de render, direção e background. Uma sentinela de forma proíbe que projeto, posição, bloco, plano, consent, custo, moeda, timeout, retry, tentativa, deadline, timestamps, workspace, actor ou idempotency key entrem no endereço — consent é elegibilidade, não identidade, senão renovar consent fabricaria regeneração paga e revogar deixaria endereço reutilizável. A elegibilidade é revalidada a cada consulta na ordem vinculante: request/workspace → snapshot → head (vontade atual) → rights/consent → identidade → candidato → critic → blob/checksum → output constraints → `mustRegenerate` → hit; custo só é reservado depois que um miss sobrevive a essa ordem. Toda decisão vira linha durável em `synthetic_cache_decisions` (hit/miss/forced-regenerate/blocked + reason code + candidato + política + critic + economia estimada + custo evitado + hash da decisão), com o assunto guardado apenas como hash domain-separated — nunca o texto, a evidência de consent ou segredo de provider. O custo evitado vem da estimativa persistida do provider job que pagou pelo candidato; sem essa evidência o reuso falha fechado em vez de alegar economia. Invalidação nunca apaga master ou histórico.
 
 ## 15. TransformationBrief
 
@@ -343,6 +407,8 @@ Fala: “gestão de tráfego medieval”.
 - format/safe areas.
 
 Hard gate falho → rejected, não compensado por estética.
+
+> **Nota de implementação (F3.009).** O crítico é o relatório versionado, imutável e content-addressed `synthetic-critic-report/v1` (ADR-147), localizado por bloco e range. Ele **responde por todas as dimensões** desta seção com `measured`, `not-applicable` ou `unavailable` — silêncio é recusado no domínio e por CHECK do PostgreSQL. Cada evaluator declara seu `kind`: `measured` quando um instrumento leu do artifact (ffprobe/ffmpeg para duração, codecs, frames, presença de áudio e freeze; comparação alignment×roteiro para omissões e adições) e `controlled` quando é um detector determinístico nomeado substituindo modelo não implantado (hoje: lip-sync, identidade e continuidade). Dimensões sem modelo — artefatos visuais, enquadramento, olhos, dentes e mãos — ficam `unavailable` com nota escrita, e uma capability que as exija falha fechado com decisão `evidence-unavailable`, que **nunca** equivale a aprovação. A ação (`retry`/`fallback`/`manual-review`) deriva da CAUSA registrada na issue, jamais de score agregado. Thresholds são versionados por capability (§19 continua sendo a autoridade dos valores-alvo; os limites implementados hoje — 34 ms de deriva e 40 ms de offset — são política declarada, não calibração empírica). Só relatório aprovado e persistido sela master ou torna um candidato elegível a cache.
 
 ## 19. Thresholds iniciais
 

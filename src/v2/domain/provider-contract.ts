@@ -27,13 +27,21 @@ export interface ProviderObservedCost {
   costMinorUnits: number
 }
 
-export type ProviderStatus =
-  | 'queued'
-  | 'processing'
-  | 'retrieving'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
+/**
+ * Runtime companion to `ProviderStatus`. Untrusted input — a provider callback
+ * body, an MCP tool result — has to be checked against real values, and a bare
+ * union type disappears at compile time.
+ */
+export const PROVIDER_STATUS_VALUES = [
+  'queued',
+  'processing',
+  'retrieving',
+  'completed',
+  'failed',
+  'cancelled',
+] as const
+
+export type ProviderStatus = (typeof PROVIDER_STATUS_VALUES)[number]
 
 /**
  * How a provider finishes a job, declared truthfully per adapter:

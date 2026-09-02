@@ -58,7 +58,11 @@ export function prepareAudio(input: { text?: string; uploaded?: AudioMaster; loc
   return { id: `audio-${createHash('sha256').update(`${input.locale}:${input.text}`).digest('hex').slice(0, 12)}`, source: 'tts', uri: 'pending://tts', durationMs: words.length * 420, locale: input.locale, alignment, approved: false };
 }
 
-export type SyntheticBlock = { id: string; text: string; audioId: string; rangeMs: [number, number]; cacheKey: string; status: 'planned' | 'ready' | 'failed'; artifact?: string };
+// Blocks carry no cache key of their own: the canonical synthetic cache
+// identity (`synthetic-cache-identity.ts`) is the single address of synthetic
+// work. A second, locally invented key here would answer the same question
+// differently and silently duplicate paid generations.
+export type SyntheticBlock = { id: string; text: string; audioId: string; rangeMs: [number, number]; status: 'planned' | 'ready' | 'failed'; artifact?: string };
 export function splitSyntheticBlocks(text: string, input: { audio: AudioMaster; profile: SyntheticPresenterProfile; providerCapability: string; settings?: object }) {
   const sentences = text.match(/[^.!?]+[.!?]?/g)?.map(value => value.trim()).filter(Boolean) ?? [];
   let cursor = 0;
@@ -67,8 +71,7 @@ export function splitSyntheticBlocks(text: string, input: { audio: AudioMaster; 
     const duration = Math.max(420, wordCount * 420);
     const rangeMs: [number, number] = [cursor, Math.min(input.audio.durationMs, cursor + duration)];
     cursor = rangeMs[1];
-    const canonical = JSON.stringify({ sentence: sentence.normalize('NFC').trim(), profile: `${input.profile.id}@${input.profile.version}`, capability: input.providerCapability, locale: input.audio.locale, settings: input.settings ?? {} });
-    return { id: `block-${index + 1}`, text: sentence, audioId: input.audio.id, rangeMs, cacheKey: createHash('sha256').update(canonical).digest('hex'), status: 'planned' };
+    return { id: `block-${index + 1}`, text: sentence, audioId: input.audio.id, rangeMs, status: 'planned' };
   });
 }
 
@@ -91,21 +94,19 @@ export function validateHybridStory(blocks: StoryBlock[]) {
   return { allowed: issues.length === 0, issues, sequence: blocks.map(block => block.kind).join('>') };
 }
 
-export type SyntheticMasterAsset = { id: string; rawVideo: string; finalAudio: AudioMaster; blocks: SyntheticBlock[]; providerConfig: object; lineage: string[]; metadata: { identity: string; outfit: string; scene: string; emotion: string; quality: number; rights: boolean } };
-export function catalogSyntheticMaster(asset: SyntheticMasterAsset) {
-  return asset.blocks.map(block => ({ id: `${asset.id}:${block.id}`, assetId: asset.id, exactText: block.text, rangeMs: block.rangeMs, identity: asset.metadata.identity, outfit: asset.metadata.outfit, atmosphere: asset.metadata.scene, emotion: asset.metadata.emotion, quality: asset.metadata.quality, rights: asset.metadata.rights, raw: true }));
-}
+// The in-memory master, its catalog and its reuse lookup lived here as a
+// second, unpersisted implementation of F3.007/F3.008. They were never called
+// by any service, worker or route. The canonical master aggregate now lives in
+// `synthetic-master-asset.ts`, is persisted, content-addressed and gated by
+// consent, rights and criticism; `synthetic-master-assets.ts` promotes it.
 
-export function reuseSyntheticBlock(asset: SyntheticMasterAsset, cacheKey: string) {
-  const block = asset.blocks.find(item => item.cacheKey === cacheKey && item.status === 'ready' && item.artifact);
-  return block ? { block, regenerated: false, estimatedSavings: 1 } : undefined;
-}
-
-export function evaluateSyntheticBlock(input: { blockId: string; rangeMs: [number, number]; lipSync: number; identity: number; pronunciation: number; artifacts: number; framing: number; continuity: number }) {
-  const hardFailure = input.identity < .9 || input.pronunciation < .8 || input.artifacts > .2;
-  const score = (input.lipSync + input.identity + input.pronunciation + input.framing + input.continuity + (1 - input.artifacts)) / 6;
-  return { passed: !hardFailure && score >= .82, score, issue: hardFailure ? { blockId: input.blockId, rangeMs: input.rangeMs, action: input.identity < .9 ? 'fallback' : 'retry' } : undefined };
-}
+// The in-memory block critic lived here as a second, unpersisted
+// implementation of F3.009: six invented ratios averaged into a score, with no
+// evidence, no thresholds per capability and no record of what was actually
+// measured. It had zero call sites in src/. The canonical critic now lives in
+// `synthetic-critic-report.ts`, states measured / not-applicable / unavailable
+// per dimension, localizes issues by block and range, and never turns missing
+// evidence into approval.
 
 export interface SyntheticArtifactRef {
   id: string

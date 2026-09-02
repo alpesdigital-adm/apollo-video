@@ -58,10 +58,11 @@ implements ProviderSubmissionInputMaterializer {
 
   async materialize(input: { job: Readonly<ProviderJob>; signal?: AbortSignal }): Promise<Readonly<Record<string, unknown>>> {
     const { job } = input
-    assertDomain(job.operation === 'audio-avatar' || job.operation === 'tts', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
     const now = (this.dependencies.clock ?? (() => new Date()))()
     assertDomain(Number.isFinite(now.getTime()) && Date.parse(job.authorization.expiresAt) > now.getTime(), 'ASSET_RIGHTS_BLOCKED', 'Provider authorization expired before submission')
     if (job.operation === 'tts') return this.materializeTts(job, now)
+    if (job.transformation) return this.materializeTransformation(job, now)
+    assertDomain(job.operation === 'audio-avatar', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
 
     const profile = await this.dependencies.profiles.readProfile({
       workspaceId: job.workspaceId,
@@ -121,6 +122,24 @@ implements ProviderSubmissionInputMaterializer {
     } finally {
       await this.dependencies.sources.cleanup(job.id)
     }
+  }
+
+  /**
+   * Revalidates the immutable source immediately before a transformation is
+   * submitted. The adapter receives only the brief projection and reviewed
+   * mask already sealed in `job.input`; Apollo identifiers and review copy do
+   * not cross the provider boundary.
+   */
+  private async materializeTransformation(job: Readonly<ProviderJob>, now: Date): Promise<Readonly<Record<string, unknown>>> {
+    const sourceArtifactHash = job.input.sourceArtifactHash
+    assertDomain(typeof sourceArtifactHash === 'string' && /^[a-f0-9]{64}$/.test(sourceArtifactHash), 'INVALID_ARGUMENT', 'providerInput.sourceArtifactHash is invalid')
+    const decision = job.authorization.artifactDecisions[0]
+    assertDomain(Boolean(decision) && job.authorization.artifactDecisions.length === 1 && Date.parse(decision!.validUntil) > now.getTime(), 'ASSET_RIGHTS_BLOCKED', 'Transformation source is not authorized for submission')
+    const artifact = await this.dependencies.artifacts.findById(job.workspaceId, decision!.artifactId)
+    if (!artifact || artifact.status !== 'available') throw new DomainError('ASSET_NOT_USABLE', 'Transformation source artifact is unavailable')
+    assertDomain(artifact.sha256 === sourceArtifactHash, 'PERSISTENCE_CONFLICT', 'Transformation source changed after job authorization')
+    assertDomain(artifact.mediaType === 'video' || artifact.mediaType === 'image', 'ASSET_NOT_USABLE', 'Transformation source must be visual media')
+    return Object.freeze(JSON.parse(JSON.stringify(job.input)) as Record<string, unknown>)
   }
 
   /**

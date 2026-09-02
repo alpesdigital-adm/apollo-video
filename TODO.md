@@ -1582,6 +1582,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.007 — SyntheticMasterAsset [FR-104]
 
+> Estado parcial (2026-08-30, branch `claude/f3007-synthetic-master`, não mesclada): aggregate imutável content-addressed, persistência com migrations aplicadas, promoção gated e catálogo de fala reutilizável estão implementados e testados em PostgreSQL real (ver `docs/quality/synthetic-master-asset-v1.md` e ADR-145). Nenhuma caixa fecha: falta integração final, deploy e aceite do proprietário.
+
 - [ ] Salvar vídeo bruto, áudio final, alignment, provider config e generation lineage. Evidência T-FR-104.
 - [ ] Catalogar cada frase completa como SpeechSegment reutilizável. Evidência T-FR-104.
 - [ ] Marcar qualidade, identidade, roupa, cenário, emoção e direitos. Evidência T-FR-104.
@@ -1590,6 +1592,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.008 — Cache sintético [FR-105]
 
+> Estado parcial (2026-08-31, branch `claude/f3008-synthetic-cache`, não mesclada): identidade canônica única para TTS e avatar (compatível byte a byte com as chaves já persistidas), ledger durável de decisões com custo evitado derivado de evidência, e elegibilidade revalidada em ordem vinculante — ver ADR-146 e `docs/quality/synthetic-cache-v1.md`. Nenhuma caixa fecha: falta integração final, deploy e aceite do proprietário.
+
 - [ ] Definir hash canônico de conteúdo, profile, provider capability, locale e settings relevantes. Evidência T-FR-105.
 - [ ] Consultar cache após rights/consent e antes de reservar custo. Evidência T-FR-103/T-FR-104.
 - [ ] Invalidar somente por mudança que altere o resultado ou elegibilidade. Evidência T-FR-105.
@@ -1597,6 +1601,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Testar igualdade semântica, config diferente e artifact expirado/corrompido. Evidência T-FR-105.
 
 ### F3.009 — Crítico sintético [FR-106]
+
+> Estado parcial (2026-08-31, branch `claude/f3009-synthetic-critic`, não mesclada): relatório versionado com evidência por dimensão, thresholds por capability, ação derivada da causa e eval set de 14 casos — ver ADR-147 e `docs/quality/synthetic-critic-v1.md`. Lip-sync/identidade/continuidade são detector CONTROLADO; artefatos, enquadramento, olhos, dentes e mãos estão `unavailable`. Nenhuma caixa fecha: falta integração final, deploy e aceite.
 
 - [ ] Avaliar lip-sync, identidade, pronúncia, artefatos, enquadramento e continuidade. Evidência T-FR-106.
 - [ ] Definir hard gates e thresholds por capability/provider. Evidência T-FR-106.
@@ -1625,6 +1631,8 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Registrar razão da seleção e alternativas descartadas. Evidência T-FR-112.
 - [ ] Criar health check/circuit breaker sem apagar jobs em andamento. Evidência T-FR-112.
 - [ ] Testar troca de provider sem alterar `TransformationBrief`. Evidência T-FR-112.
+
+> Wave 15 parcial/local: contratos versionados de TransformationBrief e seis modos, schema PostgreSQL para definitions/capabilities/health/selections e routing com razões de descarte foram implementados na branch `codex/wave15-transformation-registry`. O teste PostgreSQL foi ligado ao CI Compose. Permanecem abertos API pública, vínculo produtivo a StoryPlan/rights, execução por provider, integração em main, deploy e aceite; nenhuma caixa F3.010–F3.012 é fechada por este slice.
 
 ### F3.013 — Jobs duráveis API/MCP [FR-113]
 
@@ -1658,6 +1666,27 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Emitir issue e acionar ladder conforme confidence/budget. Evidência T-FR-116.
 - [ ] Criar eval set com transformações aceitáveis e violações sutis. Evidência T-FR-116.
 
+> Estado parcial (2026-09-01, branches `claude/f3013-durable-transformation-jobs`,
+> `claude/f3014-novelty-budget` e `claude/f3015-f3016-transformation-quality`, nenhuma
+> mesclada). **Nenhuma caixa de F3.013 a F3.016 fecha.**
+>
+> O que existe e foi medido: o `ProviderJob` canônico ganhou transporte imutável e um
+> cronograma durável em tabela própria; callbacks de provider são verificados sobre os
+> bytes exatos e consumidos uma única vez com índice parcial; quatro transportes
+> (API, polling, webhook, MCP via SDK oficial) sobre dois adapters; sete capabilities
+> `/v1` novas; novelty budget determinístico em aritmética inteira, com gate antes de
+> qualquer submissão paga e integração verde em PostgreSQL real; ladder de fallback e
+> crítico de transformação como agregados content-addressed com migration aplicada e
+> validada desde banco vazio. Suíte 1649/1649; banco 213 tabelas / 1055 índices /
+> 814 FKs; contratos 293/533/597/240 com baseline puramente aditiva. Zero chamadas pagas.
+>
+> O que **não** existe: nenhuma jornada E2E combinada (nem a de durabilidade/transportes
+> nem a medieval com mídia FFmpeg real); nenhum service escreve o ledger de fallback nem
+> o relatório do crítico; sem superfície `/v1` para F3.015/F3.016; sem UI de revisão de
+> fallback; sem os três goldens de novelty com mídia real; sem os evaluators ffprobe e de
+> comparação por região por trás do crítico. Detalhe integral, incluindo o que foi medido
+> e o que não foi, em `docs/quality/transformation-control-plane-v1.md`.
+
 ### F3.017 — Limpeza avançada [FR-123]
 
 - [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
@@ -1667,6 +1696,18 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Criar visual eval para legenda queimada, logo e fundo complexo. Evidência T-FR-123.
 
 ### F3.018 — Mask a partir da revisão [FR-218]
+
+> Slice local Wave 17 (`codex/f3017-f3018-advanced-cleanup`): `review-cleanup-mask/v1`
+> converte annotation regional já persistida em máscara normalizada e content-addressed,
+> ligada ao proxy, source, versão, `TransformationBrief` e formato exatos; revisões são
+> append-only, idempotentes e bloqueiam tracking incerto, baixa confiança, preserve overlap,
+> formato não revisado e revisão stale antes do `ProviderJob`. A API pública possui list/create/refine
+> e o request de transformação v2 aceita somente `maskId`/`outputSpecId`, projetando os pixels
+> canônicos do banco sem screenshot, texto ou autor. Evidência local: 15 testes focados,
+> suíte 1667/1667, typecheck/API/DB verdes. O CI `33574454216` aplicou as migrations do zero
+> e aprovou o round-trip create/replay/refine/tamper em PostgreSQL real. **Não fecha caixas:**
+> não há UI/browser E2E, upload vivo do source ao adapter,
+> MP4 de inpaint, visual eval, deploy ou aceite.
 
 - [ ] Converter região de annotation em coordenadas normalizadas e tracking range. Evidência T-FR-218.
 - [ ] Permitir refino da máscara antes de operação paga. Evidência T-FR-218.

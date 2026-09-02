@@ -152,9 +152,9 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.5 | ConsentRecord | Synthetic | planned | gap: immutable consent record | subject+scope+version |
 | 10.5 | ProviderDefinition | Synthetic | planned | gap: provider registry persistence | provider+capability+version |
 | 10.5 | ProviderCredentialRef | Synthetic | planned | gap: provider secret reference | workspace+provider+environment |
-| 10.5 | ProviderJob | Synthetic | value-object | src/v2/domain/generative-transformation.ts#ProviderJob | operation+provider job id |
+| 10.5 | ProviderJob | Synthetic | table | V2ProviderJob,V2ProviderJobTransition,V2ProviderJobTransportState,V2ProviderCallbackEvent | workspace+adapter+provider job id |
 | 10.5 | SyntheticMasterAsset | Synthetic | planned | gap: consent-bound synthetic master | profile+artifact id |
-| 10.5 | TransformationBrief | Synthetic | value-object | src/v2/domain/generative-transformation.ts#TransformationBrief | project version+brief id |
+| 10.5 | TransformationBrief | Synthetic | value-object | src/v2/domain/transformation-brief.ts#TransformationBrief | project version+brief id |
 | 10.5 | TransformationArtifact | Synthetic | table | V2MediaArtifact,V2MediaArtifactLineage | generated artifact+lineage |
 | 10.6 | WorkflowRun | Execution | table | V2PublicOperation | typed operation id |
 | 10.6 | WorkflowStep | Execution | table | V2ProductionBatchStep,V2LongFormIndexStageCheckpoint | owning run+step id |

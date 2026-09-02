@@ -10,6 +10,14 @@ import {
 import { DIRECTOR_TOOL_DESCRIPTORS } from '../domain/director-tools.ts'
 import { SUBTITLE_SEGMENT_OVERRIDE_ANCHORS } from '../domain/subtitle-segment-override.ts'
 import { SUBTITLE_MODES, SUBTITLE_ORIGINS, SUBTITLE_PRESETS } from '../domain/subtitle-system.ts'
+import { PROVIDER_CALLBACK_REJECTIONS } from '../domain/provider-job-callback.ts'
+import { PROVIDER_JOB_TRANSPORTS } from '../domain/provider-job-transport.ts'
+import {
+  TRANSFORMATION_FALLBACKS,
+  TRANSFORMATION_INTENTS,
+  TRANSFORMATION_MODES,
+  TRANSFORMATION_PRESERVES,
+} from '../domain/transformation-brief.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -13458,6 +13466,342 @@ const syntheticAudioMasterSchema: JsonSchema = {
     createdAt: dateTimeSchema, masterHash: sha256Schema,
   },
 }
+const syntheticMasterArtifactRefProperties = {
+  artifactId: idSchema, sha256: sha256Schema,
+  byteSize: { type: 'integer', minimum: 1 },
+  mediaType: { enum: ['audio', 'video', 'data'] },
+  container: { type: 'string', minLength: 1, maxLength: 32 },
+}
+const syntheticMasterArtifactRefSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['artifactId', 'sha256', 'byteSize', 'mediaType', 'container'],
+  properties: syntheticMasterArtifactRefProperties,
+}
+const syntheticMasterProvenanceSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['adapterId', 'adapterVersion', 'capability', 'modelRef', 'adapterConfigHash', 'providerJobId', 'providerJobRef'],
+  properties: {
+    adapterId: idSchema, adapterVersion: idSchema,
+    capability: { type: 'string', minLength: 2, maxLength: 64 },
+    modelRef: { oneOf: [idSchema, { type: 'null' }] },
+    adapterConfigHash: sha256Schema, providerJobId: idSchema,
+    providerJobRef: { type: 'string', minLength: 1, maxLength: 256 },
+  },
+}
+const syntheticMasterCostSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['currency', 'minorUnits', 'latencyMs'],
+  properties: {
+    currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+    minorUnits: { type: 'integer', minimum: 0 },
+    latencyMs: { type: 'integer', minimum: 0 },
+  },
+}
+const syntheticMasterCriticSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['reportId', 'reportHash', 'decision'],
+  properties: { reportId: idSchema, reportHash: sha256Schema, decision: { const: 'approved' } },
+}
+const syntheticMasterLineageListSchema: JsonSchema = {
+  type: 'array', minItems: 1, maxItems: 500, uniqueItems: true, items: idSchema,
+}
+const syntheticMasterAssetSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'projectVersionId', 'profileId',
+    'profileSnapshotId', 'profileVersion', 'consentSnapshotHash', 'authorizationHash',
+    'rightsSnapshotId', 'artifacts', 'scriptText', 'scriptHash', 'alignmentHash', 'locale',
+    'durationMs', 'audioDurationMs', 'videoDurationMs', 'provenance', 'cost', 'critic',
+    'lineage', 'createdAt', 'masterHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-master-asset/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, projectVersionId: idSchema,
+    profileId: idSchema, profileSnapshotId: idSchema,
+    profileVersion: { type: 'integer', minimum: 1 },
+    consentSnapshotHash: sha256Schema, authorizationHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    artifacts: {
+      type: 'array', minItems: 4, maxItems: 4,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['role', 'artifactId', 'sha256', 'byteSize', 'mediaType', 'container'],
+        properties: {
+          role: { enum: ['provider-original', 'normalized-video', 'final-audio', 'alignment'] },
+          ...syntheticMasterArtifactRefProperties,
+        },
+      },
+    },
+    scriptText: { type: 'string', minLength: 1, maxLength: 100000 },
+    scriptHash: sha256Schema, alignmentHash: sha256Schema,
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    audioDurationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    videoDurationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    provenance: syntheticMasterProvenanceSchema,
+    cost: syntheticMasterCostSchema,
+    critic: syntheticMasterCriticSchema,
+    lineage: syntheticMasterLineageListSchema,
+    createdAt: dateTimeSchema, masterHash: sha256Schema,
+  },
+}
+const syntheticMasterLineageSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'masterId', 'masterHash', 'projectId', 'projectVersionId', 'profileId', 'profileSnapshotId',
+    'profileVersion', 'locale', 'durationMs', 'scriptHash', 'alignmentHash', 'consentSnapshotHash',
+    'authorizationHash', 'rightsSnapshotId', 'artifacts', 'lineage', 'provenance', 'cost',
+    'critic', 'createdAt',
+  ],
+  properties: {
+    masterId: idSchema, masterHash: sha256Schema, projectId: idSchema, projectVersionId: idSchema,
+    profileId: idSchema, profileSnapshotId: idSchema,
+    profileVersion: { type: 'integer', minimum: 1 },
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    durationMs: { type: 'integer', minimum: 1, maximum: 21_600_000 },
+    scriptHash: sha256Schema, alignmentHash: sha256Schema,
+    consentSnapshotHash: sha256Schema, authorizationHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    artifacts: {
+      type: 'object', additionalProperties: false,
+      required: ['provider-original', 'normalized-video', 'final-audio', 'alignment'],
+      properties: {
+        'provider-original': syntheticMasterArtifactRefSchema,
+        'normalized-video': syntheticMasterArtifactRefSchema,
+        'final-audio': syntheticMasterArtifactRefSchema,
+        alignment: syntheticMasterArtifactRefSchema,
+      },
+    },
+    lineage: syntheticMasterLineageListSchema,
+    provenance: syntheticMasterProvenanceSchema,
+    cost: syntheticMasterCostSchema,
+    critic: syntheticMasterCriticSchema,
+    createdAt: dateTimeSchema,
+  },
+}
+const syntheticSpeechSegmentSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'masterId', 'masterHash', 'blockId',
+    'occurrence', 'sequence', 'audioArtifactId', 'videoArtifactId', 'alignmentArtifactId',
+    'exactText', 'normalizedText', 'scriptHash', 'words', 'startMs', 'endMs', 'locale',
+    'identity', 'consentSnapshotHash', 'rightsSnapshotId', 'criticReportId', 'criticReportHash',
+    'createdAt', 'segmentHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-speech-segment/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, masterId: idSchema,
+    masterHash: sha256Schema, blockId: idSchema,
+    occurrence: { type: 'integer', minimum: 1 },
+    sequence: { type: 'integer', minimum: 0 },
+    audioArtifactId: idSchema, videoArtifactId: idSchema, alignmentArtifactId: idSchema,
+    exactText: { type: 'string', minLength: 1, maxLength: 10000 },
+    normalizedText: { type: 'string', minLength: 1, maxLength: 10000 },
+    scriptHash: sha256Schema,
+    words: {
+      type: 'array', minItems: 1, maxItems: 10000,
+      items: {
+        type: 'object', additionalProperties: false, required: ['word', 'startMs', 'endMs'],
+        properties: {
+          word: { type: 'string', minLength: 1, maxLength: 128 },
+          startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+    startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 },
+    locale: { type: 'string', minLength: 2, maxLength: 35 },
+    identity: {
+      type: 'object', additionalProperties: false,
+      required: [
+        'actorIdentityId', 'profileId', 'profileVersion', 'voiceId', 'voiceVersion',
+        'avatarIdentityRef', 'emotion', 'wardrobe', 'background', 'framing',
+      ],
+      properties: {
+        actorIdentityId: idSchema, profileId: idSchema,
+        profileVersion: { type: 'integer', minimum: 1 },
+        voiceId: idSchema, voiceVersion: { type: 'integer', minimum: 1 },
+        avatarIdentityRef: idSchema,
+        emotion: { oneOf: [{ type: 'string', minLength: 1, maxLength: 64 }, { type: 'null' }] },
+        wardrobe: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+        background: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+        framing: { oneOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+      },
+    },
+    consentSnapshotHash: sha256Schema,
+    rightsSnapshotId: { oneOf: [idSchema, { type: 'null' }] },
+    criticReportId: idSchema, criticReportHash: sha256Schema,
+    createdAt: dateTimeSchema, segmentHash: sha256Schema,
+  },
+}
+/**
+ * F3.008 — one entry of the cache decision ledger. Every field is a digest, an
+ * identifier, an enumerated outcome or an amount: the script the subject was
+ * derived from never appears, only `subjectHash` and `cacheKey`.
+ */
+const syntheticCacheDecisionSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'operation', 'cacheKey', 'cacheKeyVersion',
+    'outcome', 'reasonCode', 'reason', 'candidateGenerationId', 'candidateMasterId',
+    'policyVersion', 'criticReportHash', 'estimatedSavingMinorUnits', 'avoidedCostMinorUnits',
+    'currency', 'subjectHash', 'decidedAt', 'decisionHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-cache-decision/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema,
+    operation: { enum: ['tts', 'audio-avatar'] },
+    cacheKey: sha256Schema,
+    cacheKeyVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    outcome: { enum: ['hit', 'miss', 'forced-regenerate', 'blocked'] },
+    reasonCode: {
+      enum: [
+        'CACHE_HIT_ELIGIBLE', 'CACHE_MISS_NO_CANDIDATE', 'CANDIDATE_BLOB_UNAVAILABLE',
+        'CANDIDATE_CHECKSUM_DRIFT', 'CANDIDATE_OUTPUT_MISMATCH', 'CANDIDATE_CRITIC_REJECTED',
+        'CANDIDATE_RIGHTS_BLOCKED', 'CONSENT_REVOKED', 'MUST_REGENERATE', 'IN_FLIGHT_TWIN',
+      ],
+    },
+    reason: { type: 'string', minLength: 3, maxLength: 500 },
+    candidateGenerationId: { oneOf: [idSchema, { type: 'null' }] },
+    candidateMasterId: { oneOf: [idSchema, { type: 'null' }] },
+    policyVersion: idSchema,
+    criticReportHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    estimatedSavingMinorUnits: { type: 'integer', minimum: 0 },
+    avoidedCostMinorUnits: { type: 'integer', minimum: 0 },
+    currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+    subjectHash: sha256Schema,
+    decidedAt: dateTimeSchema, decisionHash: sha256Schema,
+  },
+}
+/**
+ * F3.009 — one immutable critic verdict.
+ *
+ * `evaluators[].kind` and `evaluators[].scope` are required on purpose: they
+ * are what separates a number an instrument measured from a deterministic
+ * stand-in for a model nobody deployed, and a report without them would read as
+ * production visual validation it is not. Every dimension appears exactly once
+ * with its status, and a dimension that was not measured carries a null value
+ * and a note saying why. The approved script text and the consent evidence
+ * never appear — only `scriptHash` and `profileSnapshotId`.
+ */
+const syntheticCriticRangeSchema: JsonSchema = {
+  oneOf: [
+    {
+      type: 'object', additionalProperties: false, required: ['startMs', 'endMs'],
+      properties: { startMs: { type: 'integer', minimum: 0 }, endMs: { type: 'integer', minimum: 1 } },
+    },
+    { type: 'null' },
+  ],
+}
+const syntheticCriticDimensionSchema: JsonSchema = {
+  enum: [
+    'lip-sync', 'identity', 'pronunciation', 'visual-artifacts', 'framing', 'continuity',
+    'eyes', 'teeth', 'hands', 'temporal-integrity', 'audiovisual-integrity',
+  ],
+}
+const syntheticCriticReportSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'blockId', 'capability', 'adapterId',
+    'adapterVersion', 'artifactId', 'artifactSha256', 'audioArtifactId', 'alignmentArtifactId',
+    'scriptHash', 'profileSnapshotId', 'expectedIdentityRef', 'evaluators', 'measurements',
+    'issues', 'decision', 'recommendedAction', 'thresholdsVersion', 'decidedAt', 'reportHash',
+  ],
+  properties: {
+    schemaVersion: { const: 'synthetic-critic-report/v1' },
+    id: idSchema, workspaceId: idSchema, projectId: idSchema, blockId: idSchema,
+    capability: idSchema, adapterId: idSchema, adapterVersion: idSchema,
+    artifactId: idSchema, artifactSha256: sha256Schema,
+    audioArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    alignmentArtifactId: { oneOf: [idSchema, { type: 'null' }] },
+    scriptHash: sha256Schema, profileSnapshotId: idSchema,
+    expectedIdentityRef: { type: 'string', minLength: 1, maxLength: 256 },
+    evaluators: {
+      type: 'array', minItems: 1, maxItems: 32,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'version', 'kind', 'scope'],
+        properties: {
+          id: idSchema,
+          version: { type: 'string', minLength: 1, maxLength: 64 },
+          kind: { enum: ['measured', 'controlled'] },
+          scope: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    measurements: {
+      type: 'array', minItems: 11, maxItems: 11,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: [
+          'dimension', 'status', 'evaluatorId', 'value', 'unit', 'threshold',
+          'confidence', 'evidenceRefs', 'range', 'note',
+        ],
+        properties: {
+          dimension: syntheticCriticDimensionSchema,
+          status: { enum: ['measured', 'not-applicable', 'unavailable'] },
+          evaluatorId: { oneOf: [idSchema, { type: 'null' }] },
+          value: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          unit: { oneOf: [{ type: 'string', minLength: 1, maxLength: 64 }, { type: 'null' }] },
+          threshold: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          confidence: { oneOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] },
+          evidenceRefs: { type: 'array', maxItems: 64, items: { type: 'string', minLength: 1, maxLength: 512 } },
+          range: syntheticCriticRangeSchema,
+          note: { oneOf: [{ type: 'string', minLength: 1, maxLength: 500 }, { type: 'null' }] },
+        },
+      },
+    },
+    issues: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['blockId', 'dimension', 'severity', 'range', 'evidence', 'action'],
+        properties: {
+          blockId: idSchema,
+          dimension: syntheticCriticDimensionSchema,
+          severity: { enum: ['blocking', 'major', 'minor'] },
+          range: syntheticCriticRangeSchema,
+          evidence: { type: 'string', minLength: 1, maxLength: 500 },
+          action: { enum: ['retry', 'fallback', 'manual-review'] },
+        },
+      },
+    },
+    decision: { enum: ['approved', 'rejected', 'needs-review', 'evidence-unavailable'] },
+    recommendedAction: { enum: ['retry', 'fallback', 'manual-review', 'none'] },
+    thresholdsVersion: { type: 'string', minLength: 3, maxLength: 128 },
+    decidedAt: dateTimeSchema, reportHash: sha256Schema,
+  },
+}
+const syntheticCacheDecisionSummarySchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['byOutcome', 'byCurrency'],
+  properties: {
+    byOutcome: {
+      type: 'object', additionalProperties: false,
+      required: ['hit', 'miss', 'forced-regenerate', 'blocked'],
+      properties: {
+        hit: { type: 'integer', minimum: 0 },
+        miss: { type: 'integer', minimum: 0 },
+        'forced-regenerate': { type: 'integer', minimum: 0 },
+        blocked: { type: 'integer', minimum: 0 },
+      },
+    },
+    // Never a single total: summing minor units across currencies would
+    // fabricate an exchange rate the caller cannot reproduce.
+    byCurrency: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['currency', 'decisions', 'avoidedCostMinorUnits', 'estimatedSavingMinorUnits'],
+        properties: {
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          decisions: { type: 'integer', minimum: 0 },
+          avoidedCostMinorUnits: { type: 'integer', minimum: 0 },
+          estimatedSavingMinorUnits: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  },
+}
 const syntheticPresenterProfileSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: [
@@ -13526,6 +13870,160 @@ const syntheticProductionPlanSchema: JsonSchema = {
     authorization: { type: 'object' }, createdAt: dateTimeSchema, planHash: sha256Schema,
   },
 }
+// F3.013 / FR-113 — public projections of the transformation control plane.
+// `prompt` is absent from the brief projection on purpose: it is untrusted
+// authored text, and INTERNAL_ONLY_SURFACES names `rawPrompt` for that reason.
+const transformationBriefPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','projectId','projectVersionId','storyPlanId','sourceArtifactId','sourceRange','intent','editorialIntent','mode','preserve','allowedChanges','outputSpecIds','intensityBps','durationFrames','noveltyBps','safety','safeZones','fallbackLadder','rightsSnapshotId','createdAt','briefHash'],
+  properties: {
+    id: idSchema, projectId: idSchema, projectVersionId: idSchema, storyPlanId: idSchema,
+    sourceArtifactId: idSchema,
+    sourceRange: {
+      type: 'object', additionalProperties: false, required: ['startFrame','endFrame'],
+      properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+    },
+    intent: { enum: [...TRANSFORMATION_INTENTS] },
+    editorialIntent: { type: 'string', maxLength: 500 },
+    mode: { enum: [...TRANSFORMATION_MODES] },
+    preserve: { type: 'array', maxItems: 13, items: { enum: [...TRANSFORMATION_PRESERVES] } },
+    allowedChanges: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+    outputSpecIds: { type: 'array', maxItems: 32, items: idSchema },
+    intensityBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    durationFrames: { type: 'integer', minimum: 1 },
+    noveltyBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    safety: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+    safeZones: {
+      type: 'array', maxItems: 32,
+      items: {
+        type: 'object', additionalProperties: false, required: ['x','y','width','height','purpose'],
+        properties: {
+          x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
+          purpose: { enum: ['subject','face','text','brand','protected-object'] },
+        },
+      },
+    },
+    fallbackLadder: { type: 'array', maxItems: 5, items: { enum: [...TRANSFORMATION_FALLBACKS] } },
+    rightsSnapshotId: idSchema, createdAt: dateTimeSchema, briefHash: sha256Schema,
+  },
+}
+
+const transformationSelectionPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','briefId','briefHash','selectedReason','candidates','policy','createdAt','selectionHash'],
+  properties: {
+    id: idSchema, briefId: idSchema, briefHash: sha256Schema,
+    selectedProviderId: idSchema, selectedCapabilityId: idSchema,
+    selectedReason: { type: 'string', maxLength: 300 },
+    candidates: {
+      type: 'array', maxItems: 100,
+      items: {
+        type: 'object', additionalProperties: false, required: ['providerId','eligible','reasons'],
+        properties: {
+          providerId: idSchema, capabilityId: idSchema, eligible: { type: 'boolean' },
+          reasons: { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 64 } },
+          estimatedCostMinorUnits: { type: 'integer', minimum: 0 },
+          qualityScoreBps: { type: 'integer', minimum: 0, maximum: 10000 },
+        },
+      },
+    },
+    policy: { type: 'object', maxProperties: 20, additionalProperties: true },
+    createdAt: dateTimeSchema, selectionHash: sha256Schema,
+  },
+}
+
+// The MCP session id is deliberately not here: it identifies a wire, not a job.
+const transformationTransportPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['transport','completion','waiting','deadlineAt','attempts','maxAttempts','cancellation','resume','mcpSessionClosed','revision'],
+  properties: {
+    transport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+    completion: { enum: ['synchronous','polling','webhook','both'] },
+    waiting: { enum: ['none','poll','callback','retry'] },
+    nextAttemptAt: { oneOf: [dateTimeSchema, { type: 'null' }] },
+    deadlineAt: dateTimeSchema,
+    attempts: { type: 'integer', minimum: 0 },
+    maxAttempts: { type: 'integer', minimum: 1 },
+    retryAfterMs: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+    cancellation: { enum: ['none','requested','acknowledged','unsupported'] },
+    resume: { enum: ['none','requested','acknowledged'] },
+    mcpSessionClosed: { type: 'boolean' },
+    revision: { type: 'integer', minimum: 1 },
+  },
+}
+
+const transformationJobPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['id','projectId','originProjectVersionId','operation','adapter','status','attempt','createdAt','updatedAt'],
+  properties: {
+    id: idSchema, projectId: idSchema, originProjectVersionId: idSchema,
+    operation: { type: 'string', maxLength: 32 },
+    adapter: {
+      type: 'object', additionalProperties: false, required: ['id','version'],
+      properties: { id: idSchema, version: idSchema },
+    },
+    status: { type: 'string', maxLength: 32 },
+    attempt: { type: 'integer', minimum: 0 },
+    transformation: {
+      type: 'object', additionalProperties: false,
+      required: ['briefId','briefHash','selectionId','selectionHash','providerId','capabilityId'],
+      properties: {
+        briefId: idSchema, briefHash: sha256Schema, selectionId: idSchema, selectionHash: sha256Schema,
+        providerId: idSchema, capabilityId: idSchema,
+      },
+    },
+    transport: transformationTransportPublicSchema,
+    estimate: {
+      type: 'object', additionalProperties: false, required: ['currency','costMinorUnits','estimatedLatencyMs'],
+      properties: {
+        currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+        costMinorUnits: { type: 'integer', minimum: 0 },
+        estimatedLatencyMs: { type: 'integer', minimum: 0 },
+      },
+    },
+    observedCost: {
+      type: 'object', additionalProperties: false, required: ['currency','costMinorUnits'],
+      properties: {
+        currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+        costMinorUnits: { type: 'integer', minimum: 0 },
+      },
+    },
+    resultArtifact: {
+      type: 'object', additionalProperties: false, required: ['artifactId','artifactSha256','mediaType','byteSize'],
+      properties: {
+        artifactId: idSchema, artifactSha256: sha256Schema,
+        mediaType: { enum: ['audio','video','image','data'] },
+        byteSize: { type: 'integer', minimum: 1 },
+      },
+    },
+    // The normalized error only. Upstream diagnostics never reach the public
+    // contract: they routinely echo the request, which here means the prompt.
+    error: {
+      type: 'object', additionalProperties: false, required: ['code','message','retryable'],
+      properties: {
+        code: { type: 'string', maxLength: 64 }, message: { type: 'string', maxLength: 300 },
+        retryable: { type: 'boolean' }, retryAfterMs: { type: 'integer', minimum: 0 },
+      },
+    },
+    createdAt: dateTimeSchema, updatedAt: dateTimeSchema, completedAt: dateTimeSchema,
+  },
+}
+
+// The digest of the bytes travels; the bytes do not. A provider payload may
+// carry signed URLs or tokens.
+const providerCallbackEventPublicSchema: JsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['eventId','providerId','status','outcome','payloadSha256','occurredAt','receivedAt'],
+  properties: {
+    eventId: idSchema, providerId: idSchema,
+    status: { enum: ['queued','processing','retrieving','completed','failed','cancelled'] },
+    outcome: { enum: ['accepted','duplicate','rejected'] },
+    rejectedBecause: { enum: [...PROVIDER_CALLBACK_REJECTIONS] },
+    payloadSha256: sha256Schema,
+    occurredAt: dateTimeSchema, receivedAt: dateTimeSchema,
+  },
+}
+
 const providerJobPublicSchema: JsonSchema = {
   type: 'object', additionalProperties: false,
   required: ['id', 'projectId', 'originProjectVersionId', 'operation', 'adapter', 'status', 'attempt', 'createdAt', 'updatedAt'],
@@ -22995,6 +23493,99 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('promote-synthetic-master-request', 1, 'Promote one approved provider result into an immutable synthetic master', {
+    type: 'object', additionalProperties: false,
+    required: ['providerJobId', 'profileSnapshotId', 'scriptText', 'locale', 'use', 'market', 'lineage', 'cost'],
+    properties: {
+      providerJobId: idSchema, profileSnapshotId: idSchema,
+      scriptText: { type: 'string', minLength: 1, maxLength: 100000 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      use: idSchema, market: { type: 'string', minLength: 2, maxLength: 64 },
+      lineage: syntheticMasterLineageListSchema,
+      cost: {
+        type: 'object', additionalProperties: false, required: ['currency', 'minorUnits'],
+        properties: {
+          currency: { type: 'string', pattern: '^[A-Z]{3}$' },
+          minorUnits: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  }),
+  defineSchema('synthetic-master-promoted', 1, 'Sealed or replayed immutable synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['master', 'replayed'],
+      properties: { master: syntheticMasterAssetSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('synthetic-master-read', 1, 'Read one immutable synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['master'],
+      properties: { master: syntheticMasterAssetSchema },
+    }),
+  ),
+  defineSchema('synthetic-master-list', 1, 'List the immutable synthetic masters of one project',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['masters'],
+      properties: { masters: { type: 'array', maxItems: 100, items: syntheticMasterAssetSchema } },
+    }),
+  ),
+  defineSchema('synthetic-master-lineage-read', 1, 'Artifacts by role, generation lineage and provenance of one master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['lineage'],
+      properties: { lineage: syntheticMasterLineageSchema },
+    }),
+  ),
+  defineSchema('synthetic-speech-segment-list', 1, 'Catalogued reusable sentences of one synthetic master',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['segments'],
+      properties: { segments: { type: 'array', maxItems: 500, items: syntheticSpeechSegmentSchema } },
+    }),
+  ),
+  defineSchema('synthetic-speech-segment-search', 1, 'Workspace-wide reuse search over catalogued synthetic sentences',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['segments'],
+      properties: { segments: { type: 'array', maxItems: 100, items: syntheticSpeechSegmentSchema } },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-list', 1, 'Cache decisions taken for one project, newest first',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['decisions'],
+      properties: { decisions: { type: 'array', maxItems: 100, items: syntheticCacheDecisionSchema } },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-summary', 1, 'Cache decision counts by outcome and avoided cost per currency',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['summary'],
+      properties: { summary: syntheticCacheDecisionSummarySchema },
+    }),
+  ),
+  defineSchema('synthetic-cache-decision-trace', 1, 'Every decision taken about one cache address in the workspace',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['cacheKey', 'decisions'],
+      properties: {
+        cacheKey: sha256Schema,
+        decisions: { type: 'array', maxItems: 100, items: syntheticCacheDecisionSchema },
+      },
+    }),
+  ),
+  defineSchema('synthetic-critic-report-list', 1, 'Critic verdicts recorded for one project, newest first',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['reports'],
+      properties: { reports: { type: 'array', maxItems: 100, items: syntheticCriticReportSchema } },
+    }),
+  ),
+  defineSchema('synthetic-critic-report-read', 1, 'One immutable synthetic critic verdict with its evidence',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['report'],
+      properties: { report: syntheticCriticReportSchema },
+    }),
+  ),
+  defineSchema('synthetic-critic-block-evidence', 1, 'The critic verdict currently in force for one script block',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['report'],
+      properties: { report: syntheticCriticReportSchema },
+    }),
+  ),
   defineSchema('enqueue-provider-job-request', 1, 'Enqueue one authorized durable TTS or audio-avatar job', {
     type: 'object', additionalProperties: false,
     required: ['projectVersionId','profileSnapshotId','operation','adapterId','adapterVersion','providerInput','sourceArtifactIds','use','market','locale'],
@@ -23033,6 +23624,177 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   }),
   defineSchema('provider-job-mutated', 1, 'Created or replayed durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job','replayed'], properties: { job: providerJobPublicSchema, replayed: { type: 'boolean' } } })),
   defineSchema('provider-job-read', 1, 'Normalized durable provider job', successSchema({ type: 'object', additionalProperties: false, required: ['job'], properties: { job: providerJobPublicSchema } })),
+  defineSchema('create-transformation-brief-request', 1, 'The immutable statement of one generative transformation', {
+    type: 'object', additionalProperties: false,
+    required: ['projectVersionId','storyPlanId','storyPlanHash','sourceArtifactId','sourceArtifactHash','sourceRange','intent','editorialIntent','mode','prompt','preserve','fallbackLadder','intensityBps','noveltyBps','rightsSnapshotId','rightsSnapshotHash'],
+    properties: {
+      projectVersionId: idSchema, storyPlanId: idSchema, storyPlanHash: sha256Schema,
+      sourceArtifactId: idSchema, sourceArtifactHash: sha256Schema,
+      sourceRange: {
+        type: 'object', additionalProperties: false, required: ['startFrame','endFrame'],
+        properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } },
+      },
+      intent: { enum: [...TRANSFORMATION_INTENTS] },
+      editorialIntent: { type: 'string', minLength: 1, maxLength: 500 },
+      mode: { enum: [...TRANSFORMATION_MODES] },
+      prompt: { type: 'string', minLength: 1, maxLength: 2000 },
+      negativeConstraints: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      preserve: { type: 'array', minItems: 1, maxItems: 13, uniqueItems: true, items: { enum: [...TRANSFORMATION_PRESERVES] } },
+      allowedChanges: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      target: { type: 'object', maxProperties: 100, additionalProperties: true },
+      outputSpecIds: { type: 'array', maxItems: 32, items: idSchema },
+      intensityBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      noveltyBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      safety: { type: 'array', maxItems: 32, items: { type: 'string', maxLength: 300 } },
+      safeZones: {
+        type: 'array', maxItems: 32,
+        items: {
+          type: 'object', additionalProperties: false, required: ['x','y','width','height','purpose'],
+          properties: {
+            x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 },
+            width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+            purpose: { enum: ['subject','face','text','brand','protected-object'] },
+          },
+        },
+      },
+      fallbackLadder: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { enum: [...TRANSFORMATION_FALLBACKS] } },
+      rightsSnapshotId: idSchema, rightsSnapshotHash: sha256Schema,
+      identitySnapshotId: idSchema, identitySnapshotHash: sha256Schema,
+    },
+  }),
+  defineSchema('transformation-brief-created', 1, 'A persisted, content-addressed transformation brief',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['brief','replayed'],
+      properties: { brief: transformationBriefPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('route-transformation-brief-request', 1, 'The policy a routing decision is made under', {
+    type: 'object', additionalProperties: false,
+    required: ['region','maximumCostMinorUnits','minimumQualityScoreBps','output'],
+    properties: {
+      region: { type: 'string', minLength: 2, maxLength: 35 },
+      maximumCostMinorUnits: { type: 'integer', minimum: 0 },
+      minimumQualityScoreBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      output: {
+        type: 'object', additionalProperties: false, required: ['width','height','fps','includeAudio'],
+        properties: {
+          width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 },
+          fps: { type: 'integer', minimum: 1, maximum: 240 }, includeAudio: { type: 'boolean' },
+        },
+      },
+      halfOpenProbeProviderId: idSchema,
+    },
+  }),
+  defineSchema('transformation-provider-selection', 1, 'Which provider was chosen, and every candidate that was not',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['selection','replayed'],
+      properties: { selection: transformationSelectionPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('request-transformation-job-request', 1, 'Request a transformation from a persisted brief', {
+    type: 'object', additionalProperties: false,
+    required: ['briefId','selectionId','use','market','locale'],
+    properties: {
+      briefId: idSchema, selectionId: idSchema,
+      use: idSchema,
+      market: { type: 'string', minLength: 2, maxLength: 64 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      // A preference, not an instruction: the provider's completion mode
+      // decides what is possible, and an impossible pairing is refused.
+      preferredTransport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+    },
+  }),
+  defineSchema('request-transformation-job-request', 2, 'Request a transformation with an optional reviewed cleanup mask', {
+    type: 'object', additionalProperties: false,
+    required: ['briefId','selectionId','use','market','locale'],
+    properties: {
+      briefId: idSchema, selectionId: idSchema, use: idSchema,
+      market: { type: 'string', minLength: 2, maxLength: 64 },
+      locale: { type: 'string', minLength: 2, maxLength: 35 },
+      preferredTransport: { enum: [...PROVIDER_JOB_TRANSPORTS] },
+      maskId: idSchema,
+      outputSpecId: idSchema,
+    },
+  }),
+  defineSchema('create-review-cleanup-mask-request', 1, 'Create a cleanup mask from a regional review annotation', {
+    type: 'object', additionalProperties: false,
+    required: ['annotationId','transformationBriefId','format','trackingConfidenceBps'],
+    properties: {
+      annotationId: idSchema, transformationBriefId: idSchema,
+      format: { type: 'object', additionalProperties: false, required: ['outputSpecId','width','height'], properties: { outputSpecId: idSchema, width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 } } },
+      trackingConfidenceBps: { type: 'integer', minimum: 0, maximum: 10000 },
+    },
+  }),
+  defineSchema('refine-review-cleanup-mask-request', 1, 'Append a reviewed cleanup mask refinement', {
+    type: 'object', additionalProperties: false,
+    required: ['expectedMaskHash','region','range','keyframes','trackingStatus','trackingConfidenceBps'],
+    properties: {
+      expectedMaskHash: sha256Schema,
+      region: { type: 'object', additionalProperties: false, required: ['x','y','width','height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } },
+      range: { type: 'object', additionalProperties: false, required: ['startFrame','endFrame'], properties: { startFrame: { type: 'integer', minimum: 0 }, endFrame: { type: 'integer', minimum: 1 } } },
+      keyframes: { type: 'array', minItems: 1, maxItems: 240, items: { type: 'object', additionalProperties: false, required: ['frame','region'], properties: { frame: { type: 'integer', minimum: 0 }, region: { type: 'object', additionalProperties: false, required: ['x','y','width','height'], properties: { x: { type: 'number', minimum: 0, maximum: 1 }, y: { type: 'number', minimum: 0, maximum: 1 }, width: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, height: { type: 'number', exclusiveMinimum: 0, maximum: 1 } } } } } },
+      trackingStatus: { enum: ['static','tracked','uncertain'] }, trackingConfidenceBps: { type: 'integer', minimum: 0, maximum: 10000 },
+      format: { type: 'object', additionalProperties: false, required: ['outputSpecId','width','height'], properties: { outputSpecId: idSchema, width: { type: 'integer', minimum: 1, maximum: 16384 }, height: { type: 'integer', minimum: 1, maximum: 16384 } } },
+      acknowledgeFormatChange: { type: 'boolean' },
+    },
+  }),
+  defineSchema('review-cleanup-mask-mutated', 1, 'A persisted immutable cleanup mask revision', successSchema({
+    type: 'object', additionalProperties: false, required: ['mask','replayed'],
+    properties: { mask: { type: 'object', additionalProperties: true, required: ['id','rootId','revision','projectVersionId','annotation','source','transformationBrief','format','range','region','keyframes','preserveRegions','tracking','maskHash','createdByClientId','createdAt'], properties: { id: idSchema, rootId: idSchema, revision: { type: 'integer', minimum: 1 }, supersedesId: idSchema, projectVersionId: idSchema, annotation: { type: 'object' }, proxy: { type: 'object' }, source: { type: 'object' }, transformationBrief: { type: 'object' }, format: { type: 'object' }, range: { type: 'object' }, region: { type: 'object' }, keyframes: { type: 'array' }, preserveRegions: { type: 'array' }, tracking: { type: 'object' }, formatChange: { type: ['object','null'] }, maskHash: sha256Schema, createdByClientId: idSchema, createdAt: dateTimeSchema } }, replayed: { type: 'boolean' } },
+  })),
+  defineSchema('review-cleanup-mask-list', 1, 'Review-derived cleanup mask revisions', successSchema({
+    type: 'object', additionalProperties: false, required: ['masks'], properties: { masks: { type: 'array', maxItems: 500, items: { type: 'object', additionalProperties: true } } },
+  })),
+  defineSchema('transformation-job-mutated', 1, 'A durable transformation job the worker now owns',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','replayed'],
+      properties: { job: transformationJobPublicSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('transformation-job-read', 1, 'A durable transformation job with its redacted callback history',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','callbacks'],
+      properties: {
+        job: transformationJobPublicSchema,
+        callbacks: { type: 'array', maxItems: 200, items: providerCallbackEventPublicSchema },
+      },
+    }),
+  ),
+  defineSchema('transformation-job-cancelled', 1, 'A recorded cancellation intent and whether the provider can honour it',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job','providerSupportsCancellation'],
+      properties: {
+        job: transformationJobPublicSchema,
+        transport: transformationTransportPublicSchema,
+        providerSupportsCancellation: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema('transformation-job-resumed', 1, 'A transformation job with its attempt budget reset',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['job'],
+      properties: { job: transformationJobPublicSchema, transport: transformationTransportPublicSchema },
+    }),
+  ),
+  defineSchema('provider-callback-notification', 1, 'What a transformation provider sends when a job changes state', {
+    type: 'object', additionalProperties: true,
+    required: ['providerJobId','status','occurredAt'],
+    properties: {
+      providerJobId: { type: 'string', minLength: 3, maxLength: 256 },
+      status: { enum: ['queued','processing','retrieving','completed','failed','cancelled'] },
+      occurredAt: dateTimeSchema,
+      retryAfterMs: { type: 'integer', minimum: 0, maximum: 3600000 },
+    },
+  }),
+  defineSchema('provider-callback-outcome', 1, 'The verdict on one inbound provider callback',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['outcome'],
+      properties: {
+        outcome: { enum: ['accepted','duplicate','rejected'] },
+        rejectedBecause: { enum: [...PROVIDER_CALLBACK_REJECTIONS] },
+      },
+    }),
+  ),
   defineSchema(
     'speaker-diarization-read',
     1,

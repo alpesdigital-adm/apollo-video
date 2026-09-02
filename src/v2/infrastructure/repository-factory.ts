@@ -94,7 +94,14 @@ import type { SyntheticProductionRepository } from '../application/ports/synthet
 import type { SyntheticAudioMasterRepository } from '../application/ports/synthetic-audio-master-repository.ts'
 import type { SyntheticScriptPlanRepository } from '../application/ports/synthetic-script-plan-repository.ts'
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
+import type { NoveltyBudgetRepository } from '../application/ports/novelty-budget-repository.ts'
+import type { TransformationProviderRegistryRepository } from '../application/ports/transformation-provider-registry-repository.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
+import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
+import type { SyntheticCacheSubmissionClaimRepository } from '../application/ports/synthetic-cache-submission-claim-repository.ts'
+import type { SyntheticCriticReportRepository } from '../application/ports/synthetic-critic-report-repository.ts'
+import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
+import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -117,6 +124,7 @@ import type { ProjectAdministrationRepository } from '../application/ports/proje
 import type { ProjectQueryRepository } from '../application/ports/project-query-repository.ts'
 import type { ProjectWorkspaceQueryRepository } from '../application/ports/project-workspace-query-repository.ts'
 import type { ReviewAnnotationRepository } from '../application/ports/review-annotation-repository.ts'
+import type { ReviewCleanupMaskRepository } from '../application/ports/review-cleanup-mask-repository.ts'
 import type { RenderElementMapRepository } from '../application/ports/render-element-map-repository.ts'
 import type { SubtitleSidecarRepository } from '../application/ports/subtitle-sidecar-repository.ts'
 import type { EditorialCommandRepository } from '../application/ports/editorial-command-repository.ts'
@@ -180,6 +188,23 @@ import {
   settleSyntheticBlockGenerationsService,
 } from '../application/synthetic-block-generations.ts'
 import { createSyntheticAudioMasterService } from '../application/synthetic-audio-masters.ts'
+import { promoteSyntheticMasterAssetService } from '../application/synthetic-master-assets.ts'
+import { searchSyntheticSpeechSegmentsService } from '../application/synthetic-speech-segments.ts'
+import {
+  listSyntheticMasterAssetsService,
+  listSyntheticSpeechSegmentsService,
+  readSyntheticMasterAssetService,
+} from '../application/synthetic-master-asset-queries.ts'
+import {
+  listSyntheticCacheDecisionsService,
+  summarizeSyntheticCacheDecisionsService,
+  traceSyntheticCacheDecisionsService,
+} from '../application/synthetic-cache-decision-queries.ts'
+import {
+  listSyntheticCriticReportsService,
+  readSyntheticCriticBlockEvidenceService,
+  readSyntheticCriticReportService,
+} from '../application/synthetic-critic-report-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
@@ -253,7 +278,21 @@ import { PrismaSyntheticProductionRepository } from './prisma/synthetic-producti
 import { PrismaSyntheticAudioMasterRepository } from './prisma/synthetic-audio-master-repository.ts'
 import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-plan-repository.ts'
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
+import { PrismaNoveltyBudgetRepository } from './prisma/novelty-budget-repository.ts'
+import { PrismaTransformationProviderRegistryRepository } from './prisma/transformation-provider-registry-repository.ts'
+import { HttpTransformationProviderAdapter } from './transformation/http-transformation-provider.ts'
+import { McpTransformationProviderAdapter } from './transformation/mcp-transformation-provider.ts'
+import { VerifiedTransformationResultIngestor } from './transformation/transformation-result-ingestion.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
+import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
+import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic-report-repository.ts'
+import { PrismaSyntheticCacheSubmissionClaimRepository } from './prisma/synthetic-cache-submission-claim-repository.ts'
+import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
+import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
+import {
+  PrismaPromotableProviderJobReader,
+  PrismaStoredArtifactIdentityReader,
+} from './prisma/synthetic-master-promotion-readers.ts'
 import { PrismaProviderJobRepository } from './prisma/provider-job-repository.ts'
 import { AuthorizedProviderSubmissionInputMaterializer } from './provider-submission-input-materializer.ts'
 import { ElevenLabsTtsProviderAdapter } from './elevenlabs-tts-provider.ts'
@@ -284,6 +323,7 @@ import { PrismaProjectAdministrationRepository } from './prisma/project-administ
 import { PrismaProjectQueryRepository } from './prisma/project-query-repository.ts'
 import { PrismaProjectWorkspaceQueryRepository } from './prisma/project-workspace-query-repository.ts'
 import { PrismaReviewAnnotationRepository } from './prisma/review-annotation-repository.ts'
+import { PrismaReviewCleanupMaskRepository } from './prisma/review-cleanup-mask-repository.ts'
 import { PrismaReviewPatchRepository } from './prisma/review-patch-repository.ts'
 import { PrismaReviewPatchBatchRepository } from './prisma/review-patch-batch-repository.ts'
 import { PrismaRenderElementMapRepository } from './prisma/render-element-map-repository.ts'
@@ -361,6 +401,10 @@ import { FfmpegMediaSegmentExtractor } from './media/ffmpeg-media-segment-extrac
 import { SharpImageAnalysisProcessor } from './media/sharp-image-analysis-processor.ts'
 import { createConfiguredImageVisionProvider } from './image/composite-image-vision-provider.ts'
 import { inspectUploadedMedia, probeAudioDurationSeconds, probeVideo } from './media/video-probe.ts'
+import {
+  ArtifactContentSyntheticMasterByteVerifier,
+  FfprobeSyntheticMasterDurationProber,
+} from './media/synthetic-master-media.ts'
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
@@ -671,6 +715,14 @@ export function createSyntheticBlockGenerationRepository(): SyntheticBlockGenera
   return new PrismaSyntheticBlockGenerationRepository(resolveV2Client())
 }
 
+export function createNoveltyBudgetRepository(): NoveltyBudgetRepository {
+  return new PrismaNoveltyBudgetRepository(resolveV2Client())
+}
+
+export function createTransformationProviderRegistryRepository(): TransformationProviderRegistryRepository {
+  return new PrismaTransformationProviderRegistryRepository(resolveV2Client())
+}
+
 export function createSyntheticBlockConcatenationRepository(): SyntheticBlockConcatenationRepository {
   return new PrismaSyntheticBlockConcatenationRepository(resolveV2Client())
 }
@@ -701,7 +753,11 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
     mutatePlan: mutateSyntheticScriptPlanService(planDependencies),
     readPlan: readSyntheticScriptPlanService({ plans }),
     ensure: ensureSyntheticBlockGenerationsService({
-      plans, generations, profiles, artifacts, rights,
+      plans, generations, profiles, artifacts, rights, providerJobs,
+      cacheDecisions: createSyntheticCacheDecisionRepository(),
+      resultArtifacts: createProviderResultArtifactRepository(),
+      criticReports: createSyntheticCriticReportRepository(),
+      submissionClaims: createSyntheticCacheSubmissionClaimRepository(),
       enqueueProviderJob: enqueueProviderJobService({
         jobs: providerJobs,
         adapters: createProviderAdapterRegistry(environment),
@@ -722,6 +778,90 @@ export function createSyntheticScriptPlanServices(environment: NodeJS.ProcessEnv
       resultArtifacts: createProviderResultArtifactRepository(),
       clock: () => new Date(),
     }),
+  }
+}
+
+export function createSyntheticMasterAssetRepository(): SyntheticMasterAssetRepository {
+  return new PrismaSyntheticMasterAssetRepository(resolveV2Client())
+}
+
+export function createSyntheticCacheSubmissionClaimRepository(): SyntheticCacheSubmissionClaimRepository {
+  return new PrismaSyntheticCacheSubmissionClaimRepository(resolveV2Client())
+}
+
+export function createSyntheticCacheDecisionRepository(): SyntheticCacheDecisionRepository {
+  return new PrismaSyntheticCacheDecisionRepository(resolveV2Client())
+}
+
+export function createSyntheticCriticReportRepository(): SyntheticCriticReportRepository {
+  return new PrismaSyntheticCriticReportRepository(resolveV2Client())
+}
+
+/** Read-only wiring for the critic evidence routes: the verdicts themselves,
+ * their per-dimension measurements and the issues they localized. */
+export function createSyntheticCriticReportQueryServices() {
+  const reports = createSyntheticCriticReportRepository()
+  return {
+    reports,
+    list: listSyntheticCriticReportsService({ reports }),
+    read: readSyntheticCriticReportService({ reports }),
+    readBlockEvidence: readSyntheticCriticBlockEvidenceService({ reports }),
+  }
+}
+
+export function createSyntheticSpeechSegmentRepository(): SyntheticSpeechSegmentRepository {
+  return new PrismaSyntheticSpeechSegmentRepository(resolveV2Client())
+}
+
+/** Read-only wiring for the cache decision ledger routes: the evidence of what
+ * the cache reused, regenerated or blocked, and what that avoided paying. */
+export function createSyntheticCacheDecisionQueryServices() {
+  const decisions = createSyntheticCacheDecisionRepository()
+  return {
+    decisions,
+    list: listSyntheticCacheDecisionsService({ decisions }),
+    summarize: summarizeSyntheticCacheDecisionsService({ decisions }),
+    trace: traceSyntheticCacheDecisionsService({ decisions }),
+  }
+}
+
+/** One wiring for every synthetic-master route: the promotion gate plus the
+ * read side over the same immutable master and speech-segment catalog. */
+export function createSyntheticMasterAssetServices(environment: NodeJS.ProcessEnv = process.env) {
+  const masters = createSyntheticMasterAssetRepository()
+  const segments = createSyntheticSpeechSegmentRepository()
+  const artifacts = createMediaArtifactQueryRepository()
+  const profiles = createSyntheticProductionRepository()
+  const assetRights = createAssetRightsRepository()
+  return {
+    masters,
+    segments,
+    promote: promoteSyntheticMasterAssetService({
+      masters,
+      jobs: new PrismaPromotableProviderJobReader(resolveV2Client()),
+      resultArtifacts: createProviderResultArtifactRepository(),
+      artifacts,
+      profiles,
+      rights: {
+        async currentSnapshot(input: { workspaceId: string; artifactId: string }) {
+          const current = await assetRights.findCurrent(input.workspaceId, input.artifactId)
+          return current?.snapshot ?? null
+        },
+      },
+      criticReports: createSyntheticCriticReportRepository(),
+      bytes: new ArtifactContentSyntheticMasterByteVerifier(createArtifactContentStorage(environment)),
+      durations: new FfprobeSyntheticMasterDurationProber(
+        createArtifactSourceMaterializer(environment),
+        new PrismaStoredArtifactIdentityReader(resolveV2Client()),
+        environment,
+      ),
+      clock: () => new Date(),
+      createId: () => `synthetic-master-${randomUUID()}`,
+    }),
+    readMaster: readSyntheticMasterAssetService({ masters }),
+    listMasters: listSyntheticMasterAssetsService({ masters }),
+    listSpeechSegments: listSyntheticSpeechSegmentsService({ masters, segments }),
+    searchSpeechSegments: searchSyntheticSpeechSegmentsService({ segments }),
   }
 }
 
@@ -1057,8 +1197,65 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
           ...(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS ? { maxCharacters: nonNegativeInteger(environment.APOLLO_V2_ELEVENLABS_MAX_CHARACTERS, 'ElevenLabs text limit') } : {}),
         })
       }
+      // Generative transformation providers. Every one of them is declared in
+      // the persisted registry with its own adapter id; the credential and base
+      // URL come from the environment so the application boots without them and
+      // an unconfigured provider fails closed at claim time.
+      const httpTransformation = transformationAdapterEnvironment(environment, input.adapterId)
+      if (httpTransformation && input.adapterVersion === httpTransformation.adapterVersion) {
+        if (httpTransformation.transport === 'mcp') {
+          return new McpTransformationProviderAdapter({
+            id: input.adapterId,
+            adapterVersion: httpTransformation.adapterVersion,
+            endpoint: httpTransformation.baseUrl,
+            apiKey: httpTransformation.apiKey,
+            modes: httpTransformation.modes,
+          })
+        }
+        return new HttpTransformationProviderAdapter({
+          id: input.adapterId,
+          adapterVersion: httpTransformation.adapterVersion,
+          baseUrl: httpTransformation.baseUrl,
+          apiKey: httpTransformation.apiKey,
+          completion: httpTransformation.completion,
+          modes: httpTransformation.modes,
+          ...(httpTransformation.callbackSecret ? { callbackSecret: httpTransformation.callbackSecret } : {}),
+        })
+      }
       return null
     },
+  })
+}
+
+/**
+ * Read one transformation provider's runtime configuration from the
+ * environment. The adapter id is normalized into an env prefix so a workspace
+ * can register several providers without a code change:
+ *
+ *   APOLLO_V2_TRANSFORMATION_<ID>_BASE_URL
+ *   APOLLO_V2_TRANSFORMATION_<ID>_API_KEY
+ *   APOLLO_V2_TRANSFORMATION_<ID>_COMPLETION      synchronous|polling|webhook|both|mcp
+ *   APOLLO_V2_TRANSFORMATION_<ID>_MODES           comma separated
+ *   APOLLO_V2_TRANSFORMATION_<ID>_CALLBACK_SECRET hex, >= 32 bytes
+ *   APOLLO_V2_TRANSFORMATION_<ID>_ADAPTER_VERSION
+ */
+export function transformationAdapterEnvironment(environment: NodeJS.ProcessEnv, adapterId: string) {
+  const prefix = `APOLLO_V2_TRANSFORMATION_${adapterId.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`
+  const baseUrl = environment[`${prefix}_BASE_URL`]?.trim()
+  const apiKey = environment[`${prefix}_API_KEY`]?.trim()
+  if (!baseUrl || !apiKey) return null
+  const declared = (environment[`${prefix}_COMPLETION`]?.trim() ?? 'polling') as string
+  const transport = declared === 'mcp' ? 'mcp' : 'http'
+  const completion = (declared === 'mcp' ? 'polling' : declared) as 'synchronous' | 'polling' | 'webhook' | 'both'
+  const secretHex = environment[`${prefix}_CALLBACK_SECRET`]?.trim()
+  return Object.freeze({
+    adapterVersion: environment[`${prefix}_ADAPTER_VERSION`]?.trim() || '1.0.0',
+    baseUrl,
+    apiKey,
+    transport,
+    completion,
+    modes: Object.freeze((environment[`${prefix}_MODES`]?.trim() || 'video-to-video').split(',').map((mode) => mode.trim()).filter(Boolean)),
+    ...(secretHex ? { callbackSecret: Buffer.from(secretHex, 'hex') } : {}),
   })
 }
 
@@ -1095,14 +1292,30 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
       },
     },
   })
+  const transformationIngestor = new VerifiedTransformationResultIngestor({
+    workRoot,
+    storage: createVerifiedMediaStorage(environment),
+    artifacts: createMediaArtifactPersistenceRepository(environment),
+    artifactQuery,
+    resultArtifacts,
+    prober: {
+      probe(sourcePath, options) {
+        return probeVideo(sourcePath, { ...options, environment, requireAudio: false })
+      },
+    },
+  })
   const videoCritic = new PersistedProviderResultCritic(artifactQuery)
   const ttsCritic = new PersistedTtsResultCritic(artifactQuery, resultArtifacts)
+  // A transformation job is recognised by the binding it carries, not by its
+  // operation: operations are shared with the synthetic path, the brief is not.
+  const isTransformation = (job: { transformation?: unknown }) => job.transformation !== undefined
   return runProviderJobWorkerOnce({
     jobs: createProviderJobRepository(),
     adapters: createProviderAdapterRegistry(environment),
     materializer: createProviderSubmissionInputMaterializer(environment),
     ingestor: {
       ingest(input) {
+        if (isTransformation(input.job)) return transformationIngestor.ingest(input)
         return (input.job.operation === 'tts' ? ttsIngestor : videoIngestor).ingest(input)
       },
     },
@@ -1891,6 +2104,10 @@ export function createProjectWorkspaceQueryRepository(): ProjectWorkspaceQueryRe
 
 export function createReviewAnnotationRepository(): ReviewAnnotationRepository {
   return new PrismaReviewAnnotationRepository(resolveV2Client())
+}
+
+export function createReviewCleanupMaskRepository(): ReviewCleanupMaskRepository {
+  return new PrismaReviewCleanupMaskRepository(resolveV2Client())
 }
 
 export function createReviewPatchRepository() {

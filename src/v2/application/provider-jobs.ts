@@ -3,6 +3,14 @@ import { evaluateAssetUse } from '../domain/asset-rights.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import { ProviderAdapterError } from '../domain/provider-contract.ts'
 import {
+  acknowledgeProviderJobCancellation,
+  awaitProviderJobCallback,
+  providerJobAttemptsExhausted,
+  providerJobDeadlineExceeded,
+  scheduleProviderJobAttempt,
+  type ProviderJobTransportState,
+} from '../domain/provider-job-transport.ts'
+import {
   createProviderJob,
   normalizeProviderStatus,
   transitionProviderJob,
@@ -232,6 +240,15 @@ function normalizedFailure(error: unknown) {
   return Object.freeze({ code: 'PROVIDER_FAILURE', message: 'Provider operation failed', retryable: false })
 }
 
+/**
+ * Statuses a retryable failure may return to `estimated` from. `submitting` is
+ * absent on purpose: a submission whose outcome is unknown may already have
+ * been accepted and charged, so resubmitting it would risk paying twice.
+ */
+const ALLOWED_RETRY_SOURCE_STATUSES: readonly string[] = Object.freeze([
+  'submitted', 'queued', 'processing', 'suspected-stalled', 'retrieving',
+])
+
 async function waitForProviderPoll(signal: AbortSignal, milliseconds: number): Promise<void> {
   if (signal.aborted) return
   await new Promise<void>((resolveWait) => {
@@ -293,10 +310,32 @@ export function runProviderJobWorkerOnce(dependencies: {
     let activeClaim = claimed
     let job = claimed.job
     let next
+    // Transport state is advanced in the same transaction as the transition, so
+    // a job can never be recorded as retrying without its schedule moving, nor
+    // parked on a wait whose transition never committed.
+    let transportState: Readonly<ProviderJobTransportState> | undefined
+    const state = claimed.transportState ?? null
     try {
       const adapter = dependencies.adapters.get({ adapterId: job.adapterId, adapterVersion: job.adapterVersion })
       if (!adapter) throw new DomainError('PRECONDITION_REQUIRED', 'Configured provider adapter is unavailable')
-      if (job.status === 'planned') {
+
+      // A job past its deadline fails closed. Waiting forever for a callback
+      // that is not coming is how a queue silently stops being a queue.
+      if (state && providerJobDeadlineExceeded(state, now.toISOString())) {
+        next = transitionProviderJob(job, {
+          status: 'expired',
+          occurredAt: now.toISOString(),
+          normalizedError: { code: 'PROVIDER_DEADLINE_EXCEEDED', message: 'Provider did not finish before the durable deadline', retryable: false },
+        })
+      } else if (state?.cancellation === 'requested') {
+        // The worker holds the lease, so the worker is what talks to the
+        // provider. A route calling cancel directly would race it.
+        if (typeof adapter.cancel === 'function' && job.providerJobId) {
+          await adapter.cancel(job.providerJobId, signal)
+        }
+        next = transitionProviderJob(job, { status: 'canceled', occurredAt: now.toISOString() })
+        transportState = acknowledgeProviderJobCancellation({ state, occurredAt: now.toISOString() })
+      } else if (job.status === 'planned') {
         const capabilities = await adapter.getCapabilities()
         const durationMs = typeof job.input.durationMs === 'number' ? job.input.durationMs : undefined
         const locale = typeof job.input.locale === 'string' ? job.input.locale : undefined
@@ -334,7 +373,12 @@ export function runProviderJobWorkerOnce(dependencies: {
         if (submission.kind === 'completed') {
           assertDomain(Number.isFinite(Date.parse(submission.bundle.completedAt)), 'INVALID_ARGUMENT', 'Provider result bundle completedAt is invalid')
           const artifact = await dependencies.ingestor.ingest({ job, providerResult: submission.bundle.result, signal })
-          next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.bundle.providerJobRef, providerStatus: 'completed', resultArtifact: artifact })
+          next = transitionProviderJob(job, {
+            status: 'submitted', occurredAt: now.toISOString(),
+            providerJobId: submission.bundle.providerJobRef, providerStatus: 'completed', resultArtifact: artifact,
+            // The cost the provider actually reported, never the estimate.
+            ...(submission.bundle.observedCost ? { observedCost: submission.bundle.observedCost } : {}),
+          })
         } else {
           next = transitionProviderJob(job, { status: 'submitted', occurredAt: now.toISOString(), providerJobId: submission.providerJobId })
         }
@@ -352,6 +396,13 @@ export function runProviderJobWorkerOnce(dependencies: {
         if (job.providerStatus === 'completed') {
           assertDomain(Boolean(job.resultArtifact), 'PERSISTENCE_CONFLICT', 'Synchronously completed provider job lost its ingested result artifact')
           next = transitionProviderJob(job, { status: 'retrieving', occurredAt: now.toISOString() })
+        } else if (state?.transport === 'webhook' && state.waitKind !== 'callback') {
+          // A webhook provider is not polled into completion: it pushes. The
+          // job parks on a durable wait whose wake-up is the deadline, so an
+          // absent callback is reaped by this same loop rather than by a timer
+          // nobody owns.
+          next = transitionProviderJob(job, { status: job.status === 'submitted' ? 'queued' : job.status, occurredAt: now.toISOString() })
+          transportState = awaitProviderJobCallback({ state, occurredAt: now.toISOString() })
         } else {
           assertDomain(typeof adapter.getStatus === 'function', 'PRECONDITION_REQUIRED', 'Provider adapter cannot be polled')
           const providerStatus = await adapter.getStatus(job.providerJobId!, signal)
@@ -378,13 +429,40 @@ export function runProviderJobWorkerOnce(dependencies: {
       }
     } catch (error) {
       if (signal?.aborted) throw error
-      next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: normalizedFailure(error) })
+      const failure = normalizedFailure(error)
+      // A retryable transport failure is not the end of the job. It goes back
+      // for another submission with the schedule advanced, and the provider's
+      // Retry-After wins over our own backoff whenever it is longer — honouring
+      // a shorter delay than the provider asked for is how a 429 becomes a ban.
+      const retryable =
+        failure.retryable &&
+        Boolean(state) &&
+        !providerJobAttemptsExhausted(state!) &&
+        !providerJobDeadlineExceeded(state!, now.toISOString()) &&
+        ALLOWED_RETRY_SOURCE_STATUSES.includes(job.status)
+      if (retryable) {
+        next = transitionProviderJob(job, {
+          status: 'estimated',
+          occurredAt: now.toISOString(),
+          estimate: job.estimate ?? { currency: 'USD', costMinorUnits: 0, estimatedLatencyMs: 0 },
+          normalizedError: failure,
+        })
+        transportState = scheduleProviderJobAttempt({
+          state: state!,
+          waitKind: 'retry',
+          occurredAt: now.toISOString(),
+          retryAfterMs: failure.retryAfterMs ?? null,
+        })
+      } else {
+        next = transitionProviderJob(job, { status: 'failed', occurredAt: now.toISOString(), normalizedError: failure })
+      }
     }
     return dependencies.jobs.advance({
       current: activeClaim,
       next,
       transitionId: identity(dependencies.createTransitionId(), 'createTransitionId()'),
       occurredAt: now,
+      ...(transportState ? { transportState } : {}),
     })
   }
 }

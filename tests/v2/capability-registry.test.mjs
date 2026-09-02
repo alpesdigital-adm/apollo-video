@@ -29,7 +29,14 @@ function expectDomainError(callback, code) {
 
 const root = resolve(import.meta.dirname, '../..')
 
-test('foundation registry exposes health and discovery without scopes', () => {
+test('the scope-free surface is a closed set, and every member authenticates itself', () => {
+  // Renamed from "exposes health and discovery": that stopped being the whole
+  // truth before this wave. `media.uploads.content.put` and
+  // `media.download-grants.consume` are mutations reachable without a scope
+  // because they carry their own proof — a signed upload token, a signed grant.
+  // `provider-callbacks.receive` joins them on the same terms: no Bearer token,
+  // an HMAC over the exact bytes instead. What the assertion actually protects
+  // is that this set stays closed and deliberate.
   const visible = capabilitiesForScopes(FOUNDATION_CAPABILITIES, new Set())
 
   assert.deepEqual(
@@ -52,6 +59,7 @@ test('foundation registry exposes health and discovery without scopes', () => {
       'apollo.contracts.schemas.read',
       'apollo.media.uploads.content.put',
       'apollo.media.download-grants.consume',
+      'apollo.provider-callbacks.receive',
     ],
   )
   assert.ok(visible.every((capability) => Object.isFrozen(capability)))

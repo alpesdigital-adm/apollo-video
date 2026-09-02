@@ -331,6 +331,10 @@ export function createFoundationAgentToolSafety(
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Approves one immutable audio and word-alignment master that can authorize later paid avatar generation, after exact consent, rights, project-version and critic evidence checks.',
     },
+    'apollo.projects.synthetic-masters.promote': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Seals one immutable, reusable synthetic performance that later projects can reuse without paying again, after exact byte, consent, rights, critic and duration checks.',
+    },
     'apollo.projects.synthetic-production-runs.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Compiles already ingested, critic-approved and rights-authorized synthetic media into one immutable EditPlan without submitting provider work or starting a render.',
@@ -338,6 +342,34 @@ export function createFoundationAgentToolSafety(
     'apollo.projects.provider-jobs.enqueue': {
       impact: 'broad', confirmation: 'human-approval',
       reason: 'Authorizes a durable worker to estimate and submit one paid TTS or avatar provider job after exact project, consent and source-rights checks.',
+    },
+    'apollo.projects.transformation-briefs.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Writes the immutable, content-addressed statement of one transformation. Nothing is submitted and nothing is paid for; persisting the same intent twice yields the same brief.',
+    },
+    'apollo.projects.transformation-briefs.route': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records which registered provider would carry a brief, and every candidate that was discarded with its reasons. It decides nothing about spending: a selection is an input to a later, separately approved request.',
+    },
+    'apollo.projects.transformation-jobs.request': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Authorizes a durable worker to submit one paid generative transformation. The payload is projected from the persisted brief and never accepted from the caller, and the rights snapshot must still match the one the brief was authorized under.',
+    },
+    'apollo.projects.review-cleanup-masks.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates a content-addressed mask revision from existing review evidence. It does not submit provider work, render media or mutate the project version.',
+    },
+    'apollo.projects.review-cleanup-masks.refine': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Appends a reviewable mask revision with optimistic concurrency. It does not overwrite prior evidence or submit paid work.',
+    },
+    'apollo.projects.transformation-jobs.cancel': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Records a durable cancellation intent that the worker executes. It stops future spending on one job and never destroys an artifact already ingested; a provider that cannot cancel is reported as unsupported rather than as cancelled.',
+    },
+    'apollo.projects.transformation-jobs.retry': {
+      impact: 'broad', confirmation: 'human-approval',
+      reason: 'Resets the attempt budget and extends the deadline of one stalled transformation job, which can lead to another paid submission. A permanently failed job cannot be resumed.',
     },
     'apollo.projects.synthetic-script-plans.create': {
       impact: 'broad', confirmation: 'human-approval',

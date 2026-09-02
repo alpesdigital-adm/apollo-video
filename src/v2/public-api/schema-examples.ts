@@ -5462,8 +5462,452 @@ const scriptPlanCommandContextExample = {
   projectVersionId: 'project-version-example-1', baseVersionId: 'script-plan-version-example-1', baseHash: 'a'.repeat(64), use: 'ads', market: 'BRA',
 }
 
+/** F3.007 — one sealed performance: four ingested roles, sanitized provenance and its cost. */
+const syntheticMasterProvenanceExample = {
+  adapterId: 'heygen-v3', adapterVersion: '3.0.0', capability: 'audio-avatar', modelRef: null,
+  adapterConfigHash: '5'.repeat(64), providerJobId: 'provider-job-example-1',
+  providerJobRef: 'heygen-run-example-1',
+}
+const syntheticMasterCostExample = { currency: 'BRL', minorUnits: 1240, latencyMs: 48210 }
+const syntheticMasterCriticExample = {
+  reportId: 'provider-job-example-1:critic', reportHash: '6'.repeat(64), decision: 'approved',
+}
+const syntheticMasterArtifactsExample = {
+  'provider-original': { artifactId: 'artifact-provider-original-example-1', sha256: '1'.repeat(64), byteSize: 4_194_304, mediaType: 'video', container: 'mp4' },
+  'normalized-video': { artifactId: 'artifact-normalized-video-example-1', sha256: '2'.repeat(64), byteSize: 3_145_728, mediaType: 'video', container: 'mp4' },
+  'final-audio': { artifactId: 'artifact-final-audio-example-1', sha256: '3'.repeat(64), byteSize: 262_144, mediaType: 'audio', container: 'wav' },
+  alignment: { artifactId: 'artifact-master-alignment-example-1', sha256: '4'.repeat(64), byteSize: 2048, mediaType: 'data', container: 'json' },
+}
+const syntheticMasterExample = {
+  schemaVersion: 'synthetic-master-asset/v1', id: 'synthetic-master-example-1',
+  workspaceId, projectId, projectVersionId: 'project-version-example-1',
+  profileId: 'presenter-example-1', profileSnapshotId: 'presenter-example-1', profileVersion: 1,
+  consentSnapshotHash: 'c'.repeat(64), authorizationHash: '7'.repeat(64), rightsSnapshotId: null,
+  artifacts: [
+    { role: 'provider-original', ...syntheticMasterArtifactsExample['provider-original'] },
+    { role: 'normalized-video', ...syntheticMasterArtifactsExample['normalized-video'] },
+    { role: 'final-audio', ...syntheticMasterArtifactsExample['final-audio'] },
+    { role: 'alignment', ...syntheticMasterArtifactsExample.alignment },
+  ],
+  scriptText: 'Primeira ideia completa. Segunda ideia forte!', scriptHash: '8'.repeat(64),
+  alignmentHash: '4'.repeat(64), locale: 'pt-BR',
+  durationMs: 4226, audioDurationMs: 4226, videoDurationMs: 4240,
+  provenance: syntheticMasterProvenanceExample, cost: syntheticMasterCostExample,
+  critic: syntheticMasterCriticExample, lineage: ['sbg-example-1', 'sbg-example-2'],
+  createdAt, masterHash: '9'.repeat(64),
+}
+const syntheticMasterLineageExample = {
+  masterId: syntheticMasterExample.id, masterHash: syntheticMasterExample.masterHash,
+  projectId, projectVersionId: 'project-version-example-1', profileId: 'presenter-example-1',
+  profileSnapshotId: 'presenter-example-1', profileVersion: 1, locale: 'pt-BR', durationMs: 4226,
+  scriptHash: '8'.repeat(64), alignmentHash: '4'.repeat(64), consentSnapshotHash: 'c'.repeat(64),
+  authorizationHash: '7'.repeat(64), rightsSnapshotId: null,
+  artifacts: syntheticMasterArtifactsExample,
+  lineage: ['sbg-example-1', 'sbg-example-2'], provenance: syntheticMasterProvenanceExample,
+  cost: syntheticMasterCostExample, critic: syntheticMasterCriticExample, createdAt,
+}
+const syntheticSpeechSegmentExample = {
+  schemaVersion: 'synthetic-speech-segment/v1', id: 'synthetic-speech-segment-example-1',
+  workspaceId, projectId, masterId: 'synthetic-master-example-1', masterHash: '9'.repeat(64),
+  blockId: 'script-block-example-1', occurrence: 1, sequence: 0,
+  audioArtifactId: 'artifact-final-audio-example-1',
+  videoArtifactId: 'artifact-normalized-video-example-1',
+  alignmentArtifactId: 'artifact-master-alignment-example-1',
+  exactText: 'Primeira ideia completa.', normalizedText: 'primeira ideia completa',
+  scriptHash: '8'.repeat(64),
+  words: [
+    { word: 'Primeira', startMs: 0, endMs: 620 },
+    { word: 'ideia', startMs: 640, endMs: 1180 },
+    { word: 'completa', startMs: 1200, endMs: 2009 },
+  ],
+  startMs: 0, endMs: 2009, locale: 'pt-BR',
+  identity: {
+    actorIdentityId: 'identity-example-1', profileId: 'presenter-example-1', profileVersion: 1,
+    voiceId: 'voice-example-1', voiceVersion: 1, avatarIdentityRef: 'avatar-identity-example-1',
+    emotion: null, wardrobe: null, background: null, framing: null,
+  },
+  consentSnapshotHash: 'c'.repeat(64), rightsSnapshotId: null,
+  criticReportId: 'synthetic-critic-report-example-1', criticReportHash: '6'.repeat(64),
+  createdAt, segmentHash: 'b'.repeat(64),
+}
+
+/** F3.008 — one ledger entry: a reuse that avoided paying for the work again. */
+const syntheticCacheDecisionHitExample = {
+  schemaVersion: 'synthetic-cache-decision/v1', id: 'synthetic-cache-decision-example-1',
+  workspaceId, projectId, operation: 'tts',
+  cacheKey: 'a'.repeat(64), cacheKeyVersion: 'synthetic-block-cache-key/v1',
+  outcome: 'hit', reasonCode: 'CACHE_HIT_ELIGIBLE',
+  reason: 'Identical voice identity, locale and script content address with an approved critic report.',
+  candidateGenerationId: 'sbg-example-1', candidateMasterId: null,
+  policyVersion: 'synthetic-presenter-eligibility-policy/v1', criticReportHash: '6'.repeat(64),
+  estimatedSavingMinorUnits: 1240, avoidedCostMinorUnits: 1240, currency: 'BRL',
+  subjectHash: 'd'.repeat(64), decidedAt: createdAt, decisionHash: 'e'.repeat(64),
+}
+/** A block: nothing reused, nothing generated, and therefore nothing avoided. */
+const syntheticCacheDecisionBlockedExample = {
+  schemaVersion: 'synthetic-cache-decision/v1', id: 'synthetic-cache-decision-example-2',
+  workspaceId, projectId, operation: 'audio-avatar',
+  cacheKey: 'a'.repeat(64), cacheKeyVersion: 'synthetic-avatar-cache-key/v1',
+  outcome: 'blocked', reasonCode: 'CONSENT_REVOKED',
+  reason: 'Presenter consent was revoked before the reuse could be authorized.',
+  candidateGenerationId: null, candidateMasterId: null,
+  policyVersion: 'synthetic-presenter-eligibility-policy/v1', criticReportHash: null,
+  estimatedSavingMinorUnits: 0, avoidedCostMinorUnits: 0, currency: 'BRL',
+  subjectHash: 'd'.repeat(64), decidedAt: createdAt, decisionHash: 'f'.repeat(64),
+}
+
+/**
+ * F3.009 — one approved verdict. The evaluators carry their `kind` and `scope`
+ * so a reader can see that lip-sync and identity came from a controlled
+ * deterministic stand-in, not from a deployed perceptual model, and the five
+ * dimensions with no instrument say so instead of reporting a passing score.
+ */
+const syntheticCriticEvaluatorsExample = [
+  { id: 'ffprobe-media-integrity', version: '1.0.0', kind: 'measured', scope: 'timeline and signal read from the artifact itself' },
+  { id: 'alignment-pronunciation', version: '1.0.0', kind: 'measured', scope: 'spoken words compared to the approved script' },
+  { id: 'controlled-deterministic-probe', version: '1.0.0', kind: 'controlled', scope: 'deterministic stand-in, not production visual validation' },
+]
+const criticMeasured = (
+  dimension: string, evaluatorId: string, value: number, unit: string, threshold: number,
+) => ({
+  dimension, status: 'measured', evaluatorId, value, unit, threshold,
+  confidence: 1, evidenceRefs: ['artifact://media-artifact-example-1'], range: null,
+  note: null as string | null,
+})
+const criticUnavailable = (dimension: string, note: string) => ({
+  dimension, status: 'unavailable', evaluatorId: null as string | null,
+  value: null as number | null, unit: null as string | null,
+  threshold: null as number | null, confidence: null as number | null,
+  evidenceRefs: [] as string[], range: null, note,
+})
+const syntheticCriticMeasurementsExample = [
+  criticMeasured('lip-sync', 'controlled-deterministic-probe', 0, 'ms-av-offset', 34),
+  criticMeasured('identity', 'controlled-deterministic-probe', 1, 'identity-ref-match', 1),
+  criticMeasured('pronunciation', 'alignment-pronunciation', 0, 'word-deviations', 0),
+  criticUnavailable('visual-artifacts', 'no visual artifact detector is deployed, so the take was not inspected for warping, ghosting or banding'),
+  criticUnavailable('framing', 'no framing model is deployed, so the take was not inspected for headroom, crop or camera position'),
+  criticUnavailable('continuity', 'this is the first approved block of the take, so there is no baseline to compare against'),
+  criticUnavailable('eyes', 'no eye model is deployed, so the take was not inspected for gaze, blinking or pupil rendering'),
+  criticUnavailable('teeth', 'no teeth model is deployed, so the take was not inspected for dental rendering'),
+  criticUnavailable('hands', 'no hand model is deployed, so the take was not inspected for finger count or hand geometry'),
+  criticMeasured('temporal-integrity', 'ffprobe-media-integrity', 0, 'ms-drift', 34),
+  criticMeasured('audiovisual-integrity', 'ffprobe-media-integrity', 1, 'live-signal', 1),
+]
+// F3.013 / FR-113 — the canonical example from spec 06 §17: a specialist filmed
+// against a controlled background, placed in a medieval British village to
+// illustrate medieval traffic management. The person, their speech and their
+// wardrobe are protected; only the background may change.
+const transformationBriefRequestExample = {
+  projectVersionId: 'project-version-medieval-01',
+  storyPlanId: 'story-plan-medieval-01',
+  storyPlanHash: 'b'.repeat(64),
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceArtifactHash: 'c'.repeat(64),
+  sourceRange: { startFrame: 30, endFrame: 210 },
+  intent: 'world-shift',
+  editorialIntent: 'Colocar o especialista numa vila medieval britânica para ilustrar gestão de tráfego medieval.',
+  mode: 'background-replacement',
+  prompt: 'Medieval British village street at midday, packed earth road, timber-framed houses, market carts.',
+  negativeConstraints: ['no weapons', 'no crowd violence', 'no modern signage'],
+  preserve: ['identity', 'lips', 'expression', 'body-motion', 'wardrobe', 'speech', 'foreground'],
+  allowedChanges: ['background', 'ambient-light'],
+  target: { era: 'medieval', region: 'britain', timeOfDay: 'midday' },
+  outputSpecIds: ['output-spec-16x9-1080p'],
+  intensityBps: 6_500,
+  noveltyBps: 7_000,
+  safety: ['no-identity-change', 'no-weapon'],
+  safeZones: [{ x: 0.32, y: 0.08, width: 0.36, height: 0.62, purpose: 'subject' }],
+  fallbackLadder: ['video-to-video', 'actor-composite', 'generated-cutaway', 'still-parallax', 'source-unchanged'],
+  rightsSnapshotId: 'rights-snapshot-specialist-01',
+  rightsSnapshotHash: 'd'.repeat(64),
+  identitySnapshotId: 'identity-snapshot-specialist-01',
+  identitySnapshotHash: 'e'.repeat(64),
+}
+
+const transformationBriefExample = {
+  id: 'transformation-brief-4f2c8a1d9b7e6350a1c4d8f2b6e09374',
+  projectId: 'project-medieval-01',
+  projectVersionId: 'project-version-medieval-01',
+  storyPlanId: 'story-plan-medieval-01',
+  sourceArtifactId: 'artifact-specialist-take-01',
+  sourceRange: { startFrame: 30, endFrame: 210 },
+  intent: 'world-shift',
+  editorialIntent: transformationBriefRequestExample.editorialIntent,
+  mode: 'background-replacement',
+  preserve: transformationBriefRequestExample.preserve,
+  allowedChanges: transformationBriefRequestExample.allowedChanges,
+  outputSpecIds: ['output-spec-16x9-1080p'],
+  intensityBps: 6_500,
+  durationFrames: 180,
+  noveltyBps: 7_000,
+  safety: transformationBriefRequestExample.safety,
+  safeZones: transformationBriefRequestExample.safeZones,
+  fallbackLadder: transformationBriefRequestExample.fallbackLadder,
+  rightsSnapshotId: 'rights-snapshot-specialist-01',
+  createdAt: '2029-03-01T10:00:00.000Z',
+  briefHash: '4f2c8a1d9b7e6350a1c4d8f2b6e09374' + '5a8c1e0f7d2b943681ac5f0e2d7b9436',
+}
+
+const transformationSelectionExample = {
+  id: 'transformation-provider-selection-9a1c7f3e5d208b46c1f7a930e5b28d64',
+  briefId: transformationBriefExample.id,
+  briefHash: transformationBriefExample.briefHash,
+  selectedProviderId: 'atelier-v2v',
+  selectedCapabilityId: 'atelier-background-replace-hd',
+  selectedReason: 'eligible:atelier-v2v:atelier-background-replace-hd',
+  // The discarded candidates travel with the decision. A routing choice without
+  // its rejections is unexplainable the moment anything changes.
+  candidates: [
+    { providerId: 'atelier-v2v', capabilityId: 'atelier-background-replace-hd', eligible: true, reasons: [], estimatedCostMinorUnits: 900, qualityScoreBps: 8_600 },
+    { providerId: 'kiln-motion', capabilityId: 'kiln-background-replace-sd', eligible: false, reasons: ['dimensions-exceeded', 'quality-below-policy'], estimatedCostMinorUnits: 420, qualityScoreBps: 6_100 },
+    { providerId: 'northwind-render', eligible: false, reasons: ['capability-missing'] },
+  ],
+  policy: {
+    region: 'eu-west', maximumCostMinorUnits: 4_000, minimumQualityScoreBps: 7_000,
+    output: { width: 1920, height: 1080, fps: 30, includeAudio: true },
+  },
+  createdAt: '2029-03-01T10:00:05.000Z',
+  selectionHash: '9a1c7f3e5d208b46c1f7a930e5b28d64' + '30e5b28d649a1c7f3e5d208b46c1f7a9',
+}
+
+const transformationTransportExample = {
+  transport: 'polling',
+  completion: 'both',
+  waiting: 'poll',
+  nextAttemptAt: '2029-03-01T10:00:14.000Z',
+  deadlineAt: '2029-03-01T11:00:10.000Z',
+  attempts: 3,
+  maxAttempts: 5,
+  retryAfterMs: 4_000,
+  cancellation: 'none',
+  resume: 'none',
+  mcpSessionClosed: false,
+  revision: 4,
+}
+
+const transformationJobExample = {
+  id: 'provider-job-6b3f0d92-4c81-4d5a-9f27-b0a3c8e51d74',
+  projectId: 'project-medieval-01',
+  originProjectVersionId: 'project-version-medieval-01',
+  operation: 'background-replace',
+  adapter: { id: 'atelier-v2v', version: '1.0.0' },
+  status: 'processing',
+  attempt: 1,
+  transformation: {
+    briefId: transformationBriefExample.id,
+    briefHash: transformationBriefExample.briefHash,
+    selectionId: transformationSelectionExample.id,
+    selectionHash: transformationSelectionExample.selectionHash,
+    providerId: 'atelier-v2v',
+    capabilityId: 'atelier-background-replace-hd',
+  },
+  transport: transformationTransportExample,
+  estimate: { currency: 'USD', costMinorUnits: 900, estimatedLatencyMs: 12_000 },
+  createdAt: '2029-03-01T10:00:10.000Z',
+  updatedAt: '2029-03-01T10:00:14.000Z',
+}
+
+const transformationCallbackAcceptedExample = {
+  eventId: 'atelier-event-88213',
+  providerId: 'atelier-v2v',
+  status: 'completed',
+  outcome: 'accepted',
+  payloadSha256: '1f'.repeat(32),
+  occurredAt: '2029-03-01T10:04:12.000Z',
+  receivedAt: '2029-03-01T10:04:12.410Z',
+}
+
+const transformationCallbackRejectedExample = {
+  eventId: 'atelier-event-88214',
+  providerId: 'atelier-v2v',
+  status: 'completed',
+  outcome: 'rejected',
+  rejectedBecause: 'correlation-mismatch',
+  payloadSha256: '2c'.repeat(32),
+  occurredAt: '2029-03-01T10:04:19.000Z',
+  receivedAt: '2029-03-01T10:04:19.180Z',
+}
+
+const syntheticCriticReportExample = {
+  schemaVersion: 'synthetic-critic-report/v1', id: 'synthetic-critic-report-example-1',
+  workspaceId, projectId, blockId: 'script-block-example-1',
+  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+  artifactId: 'media-artifact-example-1', artifactSha256: 'a'.repeat(64),
+  audioArtifactId: 'media-artifact-example-2', alignmentArtifactId: 'media-artifact-example-3',
+  scriptHash: '7'.repeat(64), profileSnapshotId: 'presenter-example-1',
+  expectedIdentityRef: 'avatar-identity-example-1',
+  evaluators: syntheticCriticEvaluatorsExample,
+  measurements: syntheticCriticMeasurementsExample,
+  issues: [],
+  decision: 'approved', recommendedAction: 'none',
+  thresholdsVersion: 'synthetic-critic-thresholds/audio-avatar/heygen-v3/v1',
+  decidedAt: createdAt, reportHash: '6'.repeat(64),
+}
+/** A rejection localizes its cause on the block and says what to do about it. */
+const syntheticCriticRejectedReportExample = {
+  ...syntheticCriticReportExample,
+  id: 'synthetic-critic-report-example-2',
+  artifactId: 'media-artifact-example-4', artifactSha256: 'b'.repeat(64),
+  measurements: syntheticCriticMeasurementsExample.map((measurement) =>
+    measurement.dimension === 'pronunciation' ? { ...measurement, value: 2 } : measurement),
+  issues: [{
+    blockId: 'script-block-example-1', dimension: 'pronunciation', severity: 'blocking',
+    range: { startMs: 1200, endMs: 1850 },
+    evidence: 'two words of the approved script were not spoken in the aligned take',
+    action: 'retry',
+  }],
+  decision: 'rejected', recommendedAction: 'retry', reportHash: '5'.repeat(64),
+}
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/create-transformation-brief-request/v1': [transformationBriefRequestExample],
+    'apollo://schemas/transformation-brief-created/v1': [{
+      data: { brief: transformationBriefExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/route-transformation-brief-request/v1': [{
+      region: 'eu-west', maximumCostMinorUnits: 4_000, minimumQualityScoreBps: 7_000,
+      output: { width: 1920, height: 1080, fps: 30, includeAudio: true },
+    }],
+    'apollo://schemas/transformation-provider-selection/v1': [{
+      data: { selection: transformationSelectionExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/request-transformation-job-request/v1': [{
+      briefId: transformationBriefExample.id,
+      selectionId: transformationSelectionExample.id,
+      use: 'marketing', market: 'BR', locale: 'pt-BR',
+      preferredTransport: 'polling',
+    }],
+    'apollo://schemas/request-transformation-job-request/v2': [{
+      briefId: transformationBriefExample.id,
+      selectionId: transformationSelectionExample.id,
+      use: 'marketing', market: 'BR', locale: 'pt-BR', preferredTransport: 'polling',
+      maskId: 'review-cleanup-mask-example', outputSpecId: 'output-spec-vertical',
+    }],
+    'apollo://schemas/create-review-cleanup-mask-request/v1': [{
+      annotationId: 'review-annotation-region-example', transformationBriefId: transformationBriefExample.id,
+      format: { outputSpecId: 'output-spec-vertical', width: 1080, height: 1920 }, trackingConfidenceBps: 9200,
+    }],
+    'apollo://schemas/refine-review-cleanup-mask-request/v1': [{
+      expectedMaskHash: '6'.repeat(64), region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 },
+      range: { startFrame: 30, endFrame: 90 },
+      keyframes: [
+        { frame: 30, region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 } },
+        { frame: 60, region: { x: 0.11, y: 0.76, width: 0.79, height: 0.14 } },
+      ],
+      trackingStatus: 'tracked', trackingConfidenceBps: 8900,
+    }],
+    'apollo://schemas/review-cleanup-mask-mutated/v1': [{
+      data: { mask: {
+        id: 'review-cleanup-mask-example', rootId: 'review-cleanup-mask-example', revision: 1,
+        projectVersionId: transformationBriefExample.projectVersionId,
+        annotation: { id: 'review-annotation-region-example', hash: '7'.repeat(64) },
+        proxy: { artifactId: 'artifact-review-proxy-example', hash: '8'.repeat(64) },
+        source: { artifactId: transformationBriefExample.sourceArtifactId, hash: '2'.repeat(64) },
+        transformationBrief: { id: transformationBriefExample.id, hash: transformationBriefExample.briefHash },
+        format: { outputSpecId: 'output-spec-vertical', width: 1080, height: 1920 }, range: { startFrame: 30, endFrame: 90 },
+        region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 }, keyframes: [{ frame: 30, region: { x: 0.1, y: 0.75, width: 0.8, height: 0.15 } }],
+        preserveRegions: [], tracking: { status: 'static', confidenceBps: 9200 }, formatChange: null,
+        maskHash: '6'.repeat(64), createdByClientId: 'api-client-reviewer-example', createdAt: '2029-03-01T10:00:00.000Z',
+      }, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/review-cleanup-mask-list/v1': [{
+      data: { masks: [] }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-mutated/v1': [{
+      data: { job: transformationJobExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-read/v1': [{
+      data: {
+        job: transformationJobExample,
+        callbacks: [transformationCallbackAcceptedExample, transformationCallbackRejectedExample],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-cancelled/v1': [{
+      data: {
+        job: { ...transformationJobExample, status: 'canceled' },
+        transport: { ...transformationTransportExample, cancellation: 'requested', waiting: 'none' },
+        // Honest: this provider can actually stop the work. When it cannot,
+        // the intent is still recorded and this flag says so.
+        providerSupportsCancellation: true,
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/transformation-job-resumed/v1': [{
+      data: {
+        job: transformationJobExample,
+        transport: { ...transformationTransportExample, resume: 'requested', attempts: 0, retryAfterMs: null },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/provider-callback-notification/v1': [{
+      providerJobId: 'medieval-v2v-7741',
+      status: 'completed',
+      occurredAt: '2029-03-01T10:04:12.000Z',
+    }],
+    'apollo://schemas/provider-callback-outcome/v1': [
+      { data: { outcome: 'accepted' }, meta: { apiVersion: 'v1' } },
+      { data: { outcome: 'duplicate' }, meta: { apiVersion: 'v1' } },
+      { data: { outcome: 'rejected', rejectedBecause: 'signature-invalid' }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/synthetic-critic-report-list/v1': [{
+      data: { reports: [syntheticCriticReportExample, syntheticCriticRejectedReportExample] },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-report-read/v1': [{
+      data: { report: syntheticCriticReportExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-critic-block-evidence/v1': [{
+      data: { report: syntheticCriticRejectedReportExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-cache-decision-list/v1': [{
+      data: { decisions: [syntheticCacheDecisionHitExample, syntheticCacheDecisionBlockedExample] },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-cache-decision-summary/v1': [{
+      data: {
+        summary: {
+          byOutcome: { hit: 41, miss: 12, 'forced-regenerate': 2, blocked: 3 },
+          byCurrency: [
+            { currency: 'BRL', decisions: 52, avoidedCostMinorUnits: 50_840, estimatedSavingMinorUnits: 64_480 },
+            { currency: 'USD', decisions: 6, avoidedCostMinorUnits: 1_180, estimatedSavingMinorUnits: 1_490 },
+          ],
+        },
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-cache-decision-trace/v1': [{
+      data: {
+        cacheKey: 'a'.repeat(64),
+        decisions: [syntheticCacheDecisionBlockedExample, syntheticCacheDecisionHitExample],
+      },
+      meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/promote-synthetic-master-request/v1': [{
+      providerJobId: 'provider-job-example-1', profileSnapshotId: 'presenter-example-1',
+      scriptText: 'Primeira ideia completa. Segunda ideia forte!', locale: 'pt-BR',
+      use: 'ads', market: 'BRA', lineage: ['sbg-example-1', 'sbg-example-2'],
+      cost: { currency: 'BRL', minorUnits: 1240 },
+    }],
+    'apollo://schemas/synthetic-master-promoted/v1': [{
+      data: { master: syntheticMasterExample, replayed: false }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-read/v1': [{
+      data: { master: syntheticMasterExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-list/v1': [{
+      data: { masters: [syntheticMasterExample] }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-master-lineage-read/v1': [{
+      data: { lineage: syntheticMasterLineageExample }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-speech-segment-list/v1': [{
+      data: { segments: [syntheticSpeechSegmentExample] }, meta: { apiVersion: 'v1' },
+    }],
+    'apollo://schemas/synthetic-speech-segment-search/v1': [{
+      data: { segments: [syntheticSpeechSegmentExample] }, meta: { apiVersion: 'v1' },
+    }],
     'apollo://schemas/create-synthetic-script-plan-request/v1': [{
       projectVersionId: 'project-version-example-1', profileSnapshotId: 'presenter-example-1',
       locale: 'pt-BR', scriptText: 'Primeira ideia completa. Segunda ideia forte!', use: 'ads', market: 'BRA',

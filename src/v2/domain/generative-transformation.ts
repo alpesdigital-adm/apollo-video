@@ -1,43 +1,59 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { createTransformationBrief, type TransformationBrief } from './transformation-brief.ts'
 
-export const TRANSFORMATION_MODES = ['background-replacement', 'stylization', 'cutaway', 'camera-motion', 'relight', 'object-environment-change'] as const;
-export type TransformationMode = typeof TRANSFORMATION_MODES[number];
-export type TransformationBrief = { id: string; intent: string; sourceRangeMs: [number, number]; mode: TransformationMode; preserve: string[]; allowedChanges: string[]; novelty: number; safety: string[]; fallback: ('v2v' | 'composite' | 'cutaway' | 'unchanged')[]; sourceRefs: string[] };
+export {
+  TRANSFORMATION_BRIEF_SCHEMA_VERSION,
+  TRANSFORMATION_FALLBACKS,
+  TRANSFORMATION_INTENTS,
+  TRANSFORMATION_MODES,
+  TRANSFORMATION_PRESERVES,
+  assertTransformationBrief,
+  createTransformationBrief,
+  createTransformationBriefFromStoryPlan,
+  projectTransformationProviderInput,
+} from './transformation-brief.ts'
+export type {
+  StoryPlanTransformationCandidate,
+  TransformationBrief,
+  TransformationFallback,
+  TransformationIntent,
+  TransformationMode,
+  TransformationPreserve,
+  TransformationSafeZone,
+} from './transformation-brief.ts'
+export {
+  TRANSFORMATION_MODE_CONTRACTS,
+  TRANSFORMATION_MODE_REGISTRY_HASH,
+  TRANSFORMATION_MODE_REGISTRY_VERSION,
+} from './transformation-mode-registry.ts'
+export { TRANSFORMATION_MODE_CONTRACTS as MODE_CONTRACTS } from './transformation-mode-registry.ts'
+export {
+  createTransformationProviderDefinition,
+  createTransformationProviderHealth,
+  routeTransformationProvider,
+  transitionTransformationProviderHealth,
+} from './transformation-provider-registry.ts'
+export type {
+  TransformationProviderCapability,
+  TransformationProviderDefinition,
+  TransformationProviderHealth,
+  TransformationProviderSelection,
+  TransformationRoutingPolicy,
+} from './transformation-provider-registry.ts'
 
-export function createTransformationBrief(input: Omit<TransformationBrief, 'id'>) {
-  if (!input.intent || input.sourceRangeMs[1] <= input.sourceRangeMs[0] || input.preserve.some(item => input.allowedChanges.includes(item))) throw new Error('invalid-transformation-brief');
-  const payload = JSON.stringify(input);
-  return { ...input, id: `brief-${createHash('sha256').update(payload).digest('hex').slice(0, 12)}` };
-}
-
-export const MODE_CONTRACTS: Record<TransformationMode, { input: string; output: string; preserves: string[]; risks: string[]; fallback: string }> = {
-  'background-replacement': { input: 'video+subject-mask', output: 'video', preserves: ['person', 'speech'], risks: ['edges'], fallback: 'composite' },
-  stylization: { input: 'video+style', output: 'video', preserves: ['timing', 'speech'], risks: ['identity'], fallback: 'cutaway' },
-  cutaway: { input: 'intent', output: 'video', preserves: ['audio'], risks: ['semantic-mismatch'], fallback: 'unchanged' },
-  'camera-motion': { input: 'video+motion', output: 'video', preserves: ['content'], risks: ['crop'], fallback: 'unchanged' },
-  relight: { input: 'video+light', output: 'video', preserves: ['identity'], risks: ['flicker'], fallback: 'unchanged' },
-  'object-environment-change': { input: 'video+mask+prompt', output: 'video', preserves: ['person', 'speech'], risks: ['hallucination'], fallback: 'composite' },
-};
-
-export type ProviderCapability = { provider: string; capability: TransformationMode; healthy: boolean; circuitOpen: boolean; limits: { maxDurationMs: number }; regions: string[]; pricePerSecond: number; quality: number; credentialsRef: string };
-export function routeTransformation(brief: TransformationBrief, providers: ProviderCapability[], input: { region: string; maxCost: number; minQuality: number }) {
-  const durationSeconds = (brief.sourceRangeMs[1] - brief.sourceRangeMs[0]) / 1000;
-  const candidates = providers.filter(item => item.capability === brief.mode && item.healthy && !item.circuitOpen && item.regions.includes(input.region) && item.limits.maxDurationMs >= brief.sourceRangeMs[1] - brief.sourceRangeMs[0] && item.quality >= input.minQuality && item.pricePerSecond * durationSeconds <= input.maxCost).sort((a, b) => b.quality - a.quality || a.pricePerSecond - b.pricePerSecond);
-  return { selected: candidates[0], reason: candidates[0] ? `quality:${candidates[0].quality};cost:${candidates[0].pricePerSecond * durationSeconds}` : 'no-eligible-provider', discarded: providers.filter(item => item !== candidates[0]).map(item => item.provider) };
-}
-
-export type ProviderJob = { id: string; briefId: string; transport: 'api' | 'webhook' | 'polling' | 'mcp'; state: 'submitted' | 'waiting' | 'completed' | 'failed' | 'cancelled'; correlationId: string; attempts: number; artifact?: string };
-export function createProviderJob(brief: TransformationBrief, transport: ProviderJob['transport']): ProviderJob { return { id: `job-${brief.id}-${transport}`, briefId: brief.id, transport, state: 'submitted', correlationId: crypto.randomUUID(), attempts: 1 }; }
-export function resumeProviderJob(job: ProviderJob) { return job.state === 'waiting' || job.state === 'submitted' ? { ...job, state: 'waiting' as const, attempts: job.attempts + 1 } : job; }
-export function applyProviderCallback(job: ProviderJob, callback: { correlationId: string; artifact?: string; failed?: boolean; signature: string; nonce: string }, secret: string, consumedNonces: Set<string>) {
-  const expected = createHash('sha256').update(`${callback.correlationId}:${callback.nonce}:${secret}`).digest();
-  const supplied = Buffer.from(callback.signature, 'hex');
-  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) throw new Error('invalid-callback-signature');
-  if (consumedNonces.has(callback.nonce)) return { job, duplicate: true };
-  if (callback.correlationId !== job.correlationId) throw new Error('callback-correlation-mismatch');
-  consumedNonces.add(callback.nonce);
-  return { job: { ...job, state: callback.failed ? 'failed' as const : 'completed' as const, artifact: callback.artifact }, duplicate: false };
-}
+// F3.013 / FR-113 — the second `ProviderJob` that lived here is gone.
+//
+// It was a parallel model of the same idea: a `state` union of five values, an
+// `attempts` counter incremented by a `resumeProviderJob` that resumed nothing,
+// and `applyProviderCallback` guarding replay with a `Set<string>` of nonces
+// held in memory — a set that a process restart emptied, so every replayed
+// callback looked new again. None of it was ever reachable from `src/`.
+//
+// The canonical model is `./provider-job.ts`: fifteen statuses with an explicit
+// transition table, leases and fencing, an append-only transition history, and
+// ingestion that must happen before a critic can approve anything. Transports,
+// schedules and durable callback verification are in `./provider-job-transport.ts`
+// and `./provider-job-callback.ts`.
 
 export function calculateNovelty(input: { transformations: { group: string; novelty: number; durationMs: number; atMs: number }[]; windowMs: number; limit: number }) {
   let consumed = 0; const accepted: typeof input.transformations = []; const rejected: typeof input.transformations = [];
@@ -49,14 +65,14 @@ export function calculateNovelty(input: { transformations: { group: string; nove
   return { accepted, rejected, consumed, treatment: consumed < input.limit * .35 ? 'sober' : consumed < input.limit * .8 ? 'balanced' : 'intense' };
 }
 
-export function chooseFallback(brief: TransformationBrief, attempts: { mode: TransformationBrief['fallback'][number]; valid: boolean; intentScore: number; artifact?: string; cost: number }[]) {
-  const candidates = brief.fallback.flatMap(mode => attempts.filter(item => item.mode === mode && item.valid && item.intentScore >= .7));
+export function chooseFallback(brief: TransformationBrief, attempts: { mode: TransformationBrief['fallbackLadder'][number]; valid: boolean; intentScore: number; artifact?: string; cost: number }[]) {
+  const candidates = brief.fallbackLadder.flatMap(mode => attempts.filter(item => item.mode === mode && item.valid && item.intentScore >= .7));
   const selected = candidates[0];
-  return { selected, applied: selected?.mode ?? 'blocked', preservedArtifact: attempts.filter(item => item.valid && item.artifact).sort((a, b) => b.intentScore - a.intentScore)[0]?.artifact, incurredCost: attempts.reduce((sum, item) => sum + item.cost, 0), requiresReview: selected?.mode !== 'v2v' };
+  return { selected, applied: selected?.mode ?? 'blocked', preservedArtifact: attempts.filter(item => item.valid && item.artifact).sort((a, b) => b.intentScore - a.intentScore)[0]?.artifact, incurredCost: attempts.reduce((sum, item) => sum + item.cost, 0), requiresReview: selected?.mode !== 'video-to-video' };
 }
 
 export function critiqueTransformation(brief: TransformationBrief, result: { intent: number; temporal: number; artifacts: number; risk: number; changed: string[]; regionScores: { rangeMs: [number, number]; score: number }[] }) {
-  const protectedChange = result.changed.find(item => brief.preserve.includes(item));
+  const protectedChange = result.changed.find(item => brief.preserve.some((preserved) => preserved === item));
   const passed = !protectedChange && result.intent >= .75 && result.temporal >= .75 && result.artifacts <= .2 && result.risk <= .3;
   return { passed, issue: passed ? undefined : { code: protectedChange ? 'protected-content-changed' : 'quality-below-threshold', protectedChange, ranges: result.regionScores.filter(item => item.score < .75), action: protectedChange ? 'fallback' : 'retry' } };
 }
@@ -74,6 +90,10 @@ export function planAdvancedCleanup(input: { mask: ReviewMask; sourceId: string;
 }
 
 export const TRANSFORMATION_GOLDENS = {
-  simple: createTransformationBrief({ intent: 'iluminar estúdio', sourceRangeMs: [0, 5000], mode: 'relight', preserve: ['identity', 'speech'], allowedChanges: ['light'], novelty: .2, safety: ['no-face-change'], fallback: ['v2v', 'unchanged'], sourceRefs: ['scene-1'] }),
-  medieval: createTransformationBrief({ intent: 'colocar especialista em vila medieval britânica para ilustrar gestão de tráfego medieval', sourceRangeMs: [1000, 7000], mode: 'background-replacement', preserve: ['identity', 'speech', 'clothes'], allowedChanges: ['background'], novelty: .8, safety: ['no-weapon', 'no-identity-change'], fallback: ['v2v', 'composite', 'cutaway', 'unchanged'], sourceRefs: ['scene-2'] }),
+  simple: createTransformationBrief({
+    workspaceId: 'workspace-golden', projectId: 'project-golden', projectVersionId: 'version-golden', storyPlanId: 'story-plan-simple', storyPlanHash: '1'.repeat(64), sourceArtifactId: 'artifact-scene-one', sourceArtifactHash: '2'.repeat(64), sourceRange: { startFrame: 0, endFrame: 150 }, intent: 'dramatic-emphasis', editorialIntent: 'Iluminar o estúdio sem alterar a pessoa.', mode: 'relight', prompt: 'Luz de estúdio suave e natural.', negativeConstraints: ['não alterar o rosto'], preserve: ['identity', 'speech', 'wardrobe'], allowedChanges: ['lighting'], target: { lighting: 'soft' }, outputSpecIds: ['output-vertical'], intensityBps: 2_000, noveltyBps: 2_000, safety: ['no-face-change'], safeZones: [{ x: 0.25, y: 0.05, width: 0.5, height: 0.6, purpose: 'face' }], fallbackLadder: ['source-unchanged'], rightsSnapshotId: 'rights-simple', rightsSnapshotHash: '3'.repeat(64), identitySnapshotId: 'identity-simple', identitySnapshotHash: '4'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z',
+  }),
+  medieval: createTransformationBrief({
+    workspaceId: 'workspace-golden', projectId: 'project-golden', projectVersionId: 'version-golden', storyPlanId: 'story-plan-medieval', storyPlanHash: '5'.repeat(64), sourceArtifactId: 'artifact-scene-two', sourceArtifactHash: '6'.repeat(64), sourceRange: { startFrame: 30, endFrame: 210 }, intent: 'world-shift', editorialIntent: 'Ilustrar gestão de tráfego medieval mantendo a fala e a identidade.', mode: 'background-replacement', prompt: 'Vila medieval britânica sóbria ao fundo.', negativeConstraints: ['sem armas', 'sem texto inventado'], preserve: ['identity', 'lips', 'expression', 'body-motion', 'wardrobe', 'speech', 'foreground'], allowedChanges: ['background'], target: { environment: 'medieval-british-village' }, outputSpecIds: ['output-vertical'], intensityBps: 8_000, noveltyBps: 8_000, safety: ['no-weapon', 'no-identity-change'], safeZones: [{ x: 0.2, y: 0.05, width: 0.6, height: 0.9, purpose: 'subject' }], fallbackLadder: ['actor-composite', 'generated-cutaway', 'still-parallax', 'source-unchanged'], rightsSnapshotId: 'rights-medieval', rightsSnapshotHash: '7'.repeat(64), identitySnapshotId: 'identity-medieval', identitySnapshotHash: '8'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z',
+  }),
 };

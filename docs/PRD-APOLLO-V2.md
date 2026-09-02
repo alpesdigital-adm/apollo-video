@@ -1008,13 +1008,19 @@ Salvar sempre:
 - custo;
 - consent snapshot.
 
+> Implementação: aggregate `synthetic-master-asset/v1`, content-addressed e imutável, mais o catálogo de frases reutilizáveis `synthetic_speech_segments` (ADR-145, spec 06 §13). Composição continua derivada e fora do master.
+
 ### FR-105 — Cache
 
 Hash de script + áudio + perfil + provider + config evita regeneração.
 
+> Implementação: identidade canônica única em `synthetic-cache-identity.ts` cobrindo TTS e avatar, com elegibilidade revalidada a cada consulta e decisões persistidas em `synthetic_cache_decisions` (ADR-146, spec 06 §14).
+
 ### FR-106 — Crítico sintético
 
 Lip-sync, identidade, olhos, dentes, mãos, pronúncia, omissões, continuidade e artefatos.
+
+> Implementação: relatório versionado `synthetic-critic-report/v1` que responde por TODAS as dimensões com `measured`/`not-applicable`/`unavailable`, declara se cada evaluator mediu ou é detector controlado, e trata `evidence-unavailable` como decisão distinta de aprovação (ADR-147, spec 06 §17). Olhos, dentes, mãos, artefatos e enquadramento estão hoje `unavailable` por ausência de modelo implantado.
 
 ---
 
@@ -1072,6 +1078,11 @@ Trim semântico, crop/reframe, cobertura simples e rejeição quando não houver
 ### FR-123 — Limpeza avançada
 
 Separação voz/música, inpainting, remoção de legenda e restauração em fase posterior.
+
+O inpainting só pode ser solicitado a partir de uma máscara revisada e vinculada ao
+mesmo source, `TransformationBrief`, versão e formato. Preserve regions não podem ser
+intersectadas; tracking incerto ou abaixo do limiar bloqueia qualquer submissão paga.
+O resultado permanece um derivative e nunca substitui o source publicado.
 
 ### FR-124 — Validation envelope
 
@@ -1705,6 +1716,12 @@ Critérios de aceite:
 ### FR-218 — Mask future
 
 Região anotada poderá servir como máscara para inpainting/transformação.
+
+A conversão usa coordenadas normalizadas e range frame-first, registra keyframes e
+confiança de tracking, e mantém refinamentos como revisões imutáveis. Mudança de formato
+exige confirmação explícita e volta ao estado incerto até nova revisão. A projeção enviada
+ao provider contém apenas geometria, range, preserve regions e hashes; screenshot, texto
+da annotation e identidade do autor permanecem internos.
 
 ## 7.21.1 Aprendizado de preferências
 

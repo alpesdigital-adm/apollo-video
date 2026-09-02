@@ -96,13 +96,20 @@ export function parseSetPresenterProfileBody(raw: unknown) {
   })
 }
 
+/**
+ * Regenerating on purpose spends money a valid cache entry had already saved,
+ * so the caller may state why. The field is optional on the wire — existing
+ * clients keep working — but the motive itself is not optional downstream: the
+ * route always hands the application one, and the ledger always records it.
+ */
 export function parseRegenerateBlockBody(raw: unknown) {
   const body = record(raw, 'body')
-  exact(body, ['projectVersionId', 'baseVersionId', 'baseHash', 'use', 'market'], 'body')
+  exact(body, ['projectVersionId', 'baseVersionId', 'baseHash', 'use', 'market'], 'body', ['reason'])
   return Object.freeze({
     ...context(body),
     baseVersionId: string(body.baseVersionId, 'body.baseVersionId'),
     baseHash: string(body.baseHash, 'body.baseHash'),
+    ...(body.reason === undefined ? {} : { reason: string(body.reason, 'body.reason') }),
   })
 }
 
