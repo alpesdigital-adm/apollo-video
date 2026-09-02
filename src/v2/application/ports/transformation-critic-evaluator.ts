@@ -7,6 +7,7 @@ import type {
   TransformationCriticEvaluator as CriticEvaluatorDescriptor,
   TransformationCriticIssue,
   TransformationCriticMeasurement,
+  TransformationCriticRegion,
 } from '../../domain/transformation-critic-report.ts'
 
 export interface TransformationCriticEvaluation {
@@ -25,6 +26,8 @@ export interface TransformationCriticEvaluator {
     brief: Readonly<TransformationBrief>
     source: Readonly<MediaArtifactRecord>
     result: Readonly<MediaArtifactRecord>
+    changeRegion?: Readonly<TransformationCriticRegion>
+    intentThresholdBps: number
     operationId: string
     signal?: AbortSignal
   }): Promise<Readonly<TransformationCriticEvaluation>>

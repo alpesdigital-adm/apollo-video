@@ -25,6 +25,7 @@ const MAX_BUFFER = SAMPLE_BYTES * 4
 
 interface FrameEvidence {
   wholeDifferenceBps: number
+  changeDifferenceBps: number | null
   protectedDifferenceBps: number | null
   sourceLumaBps: number
   resultLumaBps: number
@@ -139,6 +140,12 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
           sampleFrame({ path: source.path, second: sourceSecond, signal: input.signal }),
           sampleFrame({ path: result.path, second: resultSecond, signal: input.signal }),
         ])
+        const changeDifference = input.changeRegion
+          ? await Promise.all([
+              sampleFrame({ path: source.path, second: sourceSecond, region: input.changeRegion, signal: input.signal }),
+              sampleFrame({ path: result.path, second: resultSecond, region: input.changeRegion, signal: input.signal }),
+            ]).then(([sourceChange, resultChange]) => pixelDifferenceBps(sourceChange, resultChange))
+          : null
         const zoneDifferences = await Promise.all(protectedZones.map(async (zone) => {
           const region = { x: zone.x, y: zone.y, width: zone.width, height: zone.height }
           const [sourceZone, resultZone] = await Promise.all([
@@ -149,6 +156,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         }))
         evidence.push({
           wholeDifferenceBps: pixelDifferenceBps(sourceWhole, resultWhole),
+          changeDifferenceBps: changeDifference,
           protectedDifferenceBps: zoneDifferences.length > 0 ? Math.max(...zoneDifferences) : null,
           sourceLumaBps: lumaBps(sourceWhole),
           resultLumaBps: lumaBps(resultWhole),
@@ -156,6 +164,9 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       }
 
       const wholeDifference = average(evidence.map((entry) => entry.wholeDifferenceBps))
+      const intentDifference = input.changeRegion
+        ? average(evidence.map((entry) => entry.changeDifferenceBps ?? 0))
+        : wholeDifference
       const protectedDifference = protectedZones.length > 0
         ? Math.max(...evidence.map((entry) => entry.protectedDifferenceBps ?? 10_000))
         : null
@@ -165,7 +176,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       const fpsScore = 10_000 - Math.abs(resultProbe.fps - sourceProbe.fps) / Math.max(sourceProbe.fps, 1) * 10_000
       const mediaScore = Math.min(durationScore, fpsScore, resultProbe.width > 0 && resultProbe.height > 0 ? 10_000 : 0)
       const expectedDifference = Math.max(500, input.brief.intensityBps * 0.35)
-      const intentScore = clampBps(wholeDifference / expectedDifference * 8_500)
+      const intentScore = clampBps(intentDifference / expectedDifference * 8_500)
       const flickerSpread = Math.max(...evidence.map((entry) => entry.wholeDifferenceBps)) - Math.min(...evidence.map((entry) => entry.wholeDifferenceBps))
       const flickerScore = 10_000 - flickerSpread
       const lightDelta = average(evidence.map((entry) => Math.abs(entry.sourceLumaBps - entry.resultLumaBps)))
@@ -178,7 +189,15 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       const probeEvaluator = 'ffprobe-media-integrity/v1'
       const controlledEvaluator = 'deterministic-transformation-proxy/v1'
       const measurements = new Map<TransformationCriticDimension, Readonly<TransformationCriticMeasurement>>()
-      measurements.set('intent-adherence', measured('intent-adherence', pixelEvaluator, intentScore, 4_500, frameRange, null, `mean decoded-frame difference ${Math.round(wholeDifference)} bps`))
+      measurements.set('intent-adherence', measured(
+        'intent-adherence',
+        pixelEvaluator,
+        intentScore,
+        input.intentThresholdBps,
+        frameRange,
+        input.changeRegion ?? null,
+        `mean decoded ${input.changeRegion ? 'reviewed-change-region' : 'whole-frame'} difference ${Math.round(intentDifference)} bps`,
+      ))
       measurements.set('preserve-list', preserveScore === null
         ? Object.freeze({ dimension: 'preserve-list', status: 'unavailable', scoreBps: null, thresholdBps: null, frameRange: null, region: null, note: 'The brief declares no protected region that a pixel evaluator can compare safely.' })
         : measured('preserve-list', pixelEvaluator, preserveScore, 9_200, frameRange, region, `maximum protected-region difference ${protectedDifference} bps`))
@@ -214,7 +233,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
         issues.push(Object.freeze({ dimension: 'identity', severity: 'blocking', frameRange, region, violatedPreserve: 'identity', description: 'The protected face or subject region changed beyond the identity-preservation threshold.' }))
         hardGates.push('identity')
       }
-      if (intentScore < 4_500) issues.push(Object.freeze({ dimension: 'intent-adherence', severity: 'major', frameRange, region: null, description: 'The derivative did not change enough of the decoded image to satisfy the requested transformation intent.' }))
+      if (intentScore < input.intentThresholdBps) issues.push(Object.freeze({ dimension: 'intent-adherence', severity: 'major', frameRange, region: input.changeRegion ?? null, description: 'The derivative did not change enough of the authorized decoded region to satisfy the current fallback rung.' }))
       if (mediaScore < 9_000) issues.push(Object.freeze({ dimension: 'media-integrity', severity: 'major', frameRange, region: null, description: 'The derivative duration, frame rate, or geometry drifted outside the media-integrity threshold.' }))
 
       const ordered = Object.freeze(TRANSFORMATION_CRITIC_DIMENSIONS.map((dimension) => measurements.get(dimension)!))
@@ -223,7 +242,7 @@ export class FfmpegTransformationCriticEvaluator implements TransformationCritic
       const rejected = hardGates.length > 0 || issues.some((issue) => issue.severity === 'major')
       return Object.freeze({
         evaluators: Object.freeze([
-          Object.freeze({ id: pixelEvaluator, kind: 'measured' as const, version: '1.0.0', scope: 'Decodes three RGB samples and compares whole frames and protected normalized regions.' }),
+          Object.freeze({ id: pixelEvaluator, kind: 'measured' as const, version: '1.1.0', scope: 'Decodes three RGB samples and compares the reviewed change region, whole frame and protected normalized regions.' }),
           Object.freeze({ id: probeEvaluator, kind: 'measured' as const, version: '1.0.0', scope: 'Reads codec, geometry, duration and frame rate from the source and derivative bytes.' }),
           Object.freeze({ id: controlledEvaluator, kind: 'controlled' as const, version: '1.0.0', scope: 'Conservative deterministic proxy only; it is not a deployed semantic or pose model.' }),
         ]),

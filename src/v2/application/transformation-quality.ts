@@ -9,8 +9,10 @@ import {
   availableFallbackActions,
   createTransformationFallbackLedger,
   descendFallbackLadder,
+  minimumIntentScoreBps,
   nextFallbackRung,
   recordFallbackAttempt,
+  resolveFallbackLadder,
   settleFallbackReview,
   type FallbackDescentReason,
 } from '../domain/transformation-fallback.ts'
@@ -31,6 +33,39 @@ function id(value: string, field: string): string {
 
 function afterLedger(ledger: Readonly<{ updatedAt: string }>, candidate: string): string {
   return new Date(Math.max(Date.parse(candidate), Date.parse(ledger.updatedAt) + 1)).toISOString()
+}
+
+function criticChangeRegion(job: Readonly<ProviderJob>) {
+  const cleanupMask = job.input.cleanupMask
+  if (cleanupMask === undefined) return undefined
+  assertDomain(
+    typeof cleanupMask === 'object' && cleanupMask !== null && !Array.isArray(cleanupMask),
+    'PERSISTENCE_CONFLICT',
+    'Transformation cleanup mask is invalid',
+  )
+  const region = (cleanupMask as Readonly<Record<string, unknown>>).region
+  assertDomain(
+    typeof region === 'object' && region !== null && !Array.isArray(region),
+    'PERSISTENCE_CONFLICT',
+    'Transformation cleanup mask region is invalid',
+  )
+  const candidate = region as Readonly<Record<string, unknown>>
+  const values = [candidate.x, candidate.y, candidate.width, candidate.height]
+  assertDomain(
+    values.every((value) => typeof value === 'number' && Number.isFinite(value)) &&
+      Number(candidate.x) >= 0 && Number(candidate.y) >= 0 &&
+      Number(candidate.width) > 0 && Number(candidate.height) > 0 &&
+      Number(candidate.x) + Number(candidate.width) <= 1 &&
+      Number(candidate.y) + Number(candidate.height) <= 1,
+    'PERSISTENCE_CONFLICT',
+    'Transformation cleanup mask region is outside normalized bounds',
+  )
+  return Object.freeze({
+    x: Number(candidate.x),
+    y: Number(candidate.y),
+    width: Number(candidate.width),
+    height: Number(candidate.height),
+  })
 }
 
 export class PersistedTransformationResultCritic {
@@ -82,12 +117,20 @@ export class PersistedTransformationResultCritic {
     if (!novelty || novelty.outcome === 'blocked') {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Transformation critic cannot find the novelty decision that admitted this job')
     }
+    let ledger = await this.dependencies.quality.readLatestFallbackLedger({
+      workspaceId: job.workspaceId,
+      projectId: job.projectId,
+      briefId: brief.id,
+    })
+    const fallbackRung = ledger?.currentRung ?? resolveFallbackLadder(brief)[0]!
     const now = (this.dependencies.clock ?? (() => new Date()))()
     const evaluatedAt = now.toISOString()
     const evidence = await this.dependencies.evaluator.evaluate({
       brief,
       source,
       result,
+      changeRegion: criticChangeRegion(job),
+      intentThresholdBps: minimumIntentScoreBps(fallbackRung),
       operationId: job.id,
       signal: input.signal,
     })
@@ -108,11 +151,6 @@ export class PersistedTransformationResultCritic {
     })
     await this.dependencies.quality.recordCriticReport({ report })
 
-    let ledger = await this.dependencies.quality.readLatestFallbackLedger({
-      workspaceId: job.workspaceId,
-      projectId: job.projectId,
-      briefId: brief.id,
-    })
     if (!ledger) {
       ledger = createTransformationFallbackLedger({
         workspaceId: job.workspaceId,

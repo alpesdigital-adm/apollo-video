@@ -56,12 +56,12 @@ test('T-FR-116 real ffprobe and decoded pixels approve protected regions and rej
       fallbackLadder: ['video-to-video', 'source-unchanged'], rightsSnapshotId: 'rights-critic-media', rightsSnapshotHash: digest('3'),
       identitySnapshotId: 'identity-critic-media', identitySnapshotHash: digest('4'), createdAt: '2029-03-01T10:00:00.000Z',
     })
-    const accepted = await evaluator.evaluate({ brief, source: artifact('artifact-source-media', 'source', digest('2')), result: artifact('artifact-result-accepted', 'accepted', digest('5')), operationId: 'critic-media-accepted' })
+    const accepted = await evaluator.evaluate({ brief, source: artifact('artifact-source-media', 'source', digest('2')), result: artifact('artifact-result-accepted', 'accepted', digest('5')), intentThresholdBps: 7_500, operationId: 'critic-media-accepted' })
     assert.equal(accepted.measurements.length, 14)
     assert.equal(accepted.decision, 'approved')
     assert.deepEqual(accepted.hardGates, [])
-    assert.ok(accepted.intentScoreBps >= 4_500)
-    const tampered = await evaluator.evaluate({ brief, source: artifact('artifact-source-media', 'source', digest('2')), result: artifact('artifact-result-tampered', 'tampered', digest('6')), operationId: 'critic-media-tampered' })
+    assert.ok(accepted.intentScoreBps >= 7_500)
+    const tampered = await evaluator.evaluate({ brief, source: artifact('artifact-source-media', 'source', digest('2')), result: artifact('artifact-result-tampered', 'tampered', digest('6')), intentThresholdBps: 7_500, operationId: 'critic-media-tampered' })
     assert.equal(tampered.decision, 'rejected')
     assert.ok(tampered.hardGates.includes('preserve-list'))
     assert.ok(tampered.hardGates.includes('identity'))
@@ -148,10 +148,17 @@ test('T-FR-123 burned subtitle, logo and complex-background cleanup pass protect
         fallbackLadder: ['video-to-video', 'source-unchanged'], rightsSnapshotId: 'rights-cleanup-visual', rightsSnapshotHash: digest('3'),
         identitySnapshotId: 'identity-cleanup-visual', identitySnapshotHash: digest('4'), createdAt: '2029-03-01T10:00:00.000Z',
       })
-      const outcome = await evaluator.evaluate({ brief, source: artifact(`source-${fixture.name}`, 'source', digest('2')), result: artifact(`result-${fixture.name}`, 'result', digest('5')), operationId: `cleanup-${fixture.name}` })
+      const targetRegions = {
+        'burned-subtitle': { x: 15 / 320, y: 145 / 180, width: 130 / 320, height: 22 / 180 },
+        logo: { x: 12 / 320, y: 12 / 180, width: 44 / 320, height: 44 / 180 },
+        'complex-background': { x: 205 / 320, y: 115 / 180, width: 75 / 320, height: 38 / 180 },
+      }
+      const outcome = await evaluator.evaluate({ brief, source: artifact(`source-${fixture.name}`, 'source', digest('2')), result: artifact(`result-${fixture.name}`, 'result', digest('5')), changeRegion: targetRegions[fixture.name], intentThresholdBps: 7_500, operationId: `cleanup-${fixture.name}` })
       assert.equal(outcome.decision, 'approved', `${fixture.name}: ${JSON.stringify(outcome.issues)}`)
       assert.equal(outcome.hardGates.length, 0)
       assert.equal(outcome.measurements.length, 14)
+      assert.ok(outcome.intentScoreBps >= 7_500)
+      assert.deepEqual(outcome.measurements.find((entry) => entry.dimension === 'intent-adherence').region, targetRegions[fixture.name])
     }
   } finally {
     await rm(root, { recursive: true, force: true })
