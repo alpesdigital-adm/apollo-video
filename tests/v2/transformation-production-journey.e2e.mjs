@@ -17,7 +17,12 @@ const ffprobePath = require('ffprobe-static').path
 const workspaceId = 'transformation-production-e2e-workspace'
 const clientId = 'transformation-production-e2e-client'
 const credentialId = 'transformation-production-e2e-credential'
-const at = (second) => new Date(Date.parse('2029-05-01T00:00:00.000Z') + second * 1_000)
+// Provider capability snapshots are intentionally short-lived. Anchor the
+// journey to its actual run so the production adapter and the application
+// clock agree about freshness instead of comparing real time with a fixture
+// date years in the future.
+const runStartedAt = Date.now()
+const at = (second) => new Date(runStartedAt + second * 1_000)
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
