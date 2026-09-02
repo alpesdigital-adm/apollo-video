@@ -24,5 +24,6 @@ export interface ProviderResultCritic {
   evaluate(input: {
     job: Readonly<ProviderJob>
     artifact: Readonly<ProviderJobResultArtifact>
+    signal?: AbortSignal
   }): Promise<Readonly<{ approved: boolean; resultHash: string }>>
 }

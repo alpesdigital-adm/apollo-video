@@ -52,6 +52,8 @@
     "test:integration:synthetic-critic-report": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env --test tests/v2/prisma-synthetic-critic-report.integration.mjs",
     "test:integration:novelty-budget": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-novelty-budget.integration.mjs",
     "test:integration:transformation-registry": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-transformation-provider-registry.integration.mjs",
+    "test:integration:transformation-critic-media": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/transformation-critic-media.integration.mjs",
+    "test:e2e:transformation-production": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/transformation-production-journey.e2e.mjs",
     "test:integration:review-cleanup-mask": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-review-cleanup-mask.integration.mjs",
     "test:integration:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/prisma-synthetic-presenter-lifecycle.integration.mjs",
     "test:integration:provider-tts-avatar": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/provider-tts-avatar-journey.e2e.mjs",

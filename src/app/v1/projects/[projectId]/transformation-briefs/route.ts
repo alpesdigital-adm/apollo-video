@@ -12,6 +12,22 @@ import { parseCreateTransformationBriefBody, presentTransformationBrief } from '
 
 export const dynamic = 'force-dynamic'
 
+export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
+  const requestId = resolveRequestId(request)
+  try {
+    const actor = await authenticateExternalRequest(request)
+    requireScope(actor, 'projects:read')
+    const { projectId } = await context.params
+    const projectVersionId = request.nextUrl.searchParams.get('projectVersionId')?.trim() || undefined
+    const briefs = await createTransformationProviderRegistryRepository().listBriefs({
+      workspaceId: actor.workspaceId,
+      projectId,
+      projectVersionId,
+    })
+    return NextResponse.json(presentSuccess({ briefs: briefs.map(presentTransformationBrief) }), { headers: publicApiHeaders(requestId) })
+  } catch (error) { return respondPublicError(error, requestId) }
+}
+
 export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   const requestId = resolveRequestId(request)
   try {

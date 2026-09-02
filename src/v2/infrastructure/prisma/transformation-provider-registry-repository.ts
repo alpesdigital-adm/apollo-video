@@ -203,6 +203,19 @@ export class PrismaTransformationProviderRegistryRepository implements Transform
     return row ? hydrateBrief(row) : null
   }
 
+  async listBriefs(input: Parameters<TransformationProviderRegistryRepository['listBriefs']>[0]) {
+    const rows = await this.client.v2TransformationBrief.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        ...(input.projectVersionId ? { projectVersionId: input.projectVersionId } : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: Math.min(Math.max(input.limit ?? 100, 1), 500),
+    })
+    return Object.freeze(rows.map(hydrateBrief))
+  }
+
   async persistSelection(input: Parameters<TransformationProviderRegistryRepository['persistSelection']>[0]) {
     const selection = input.selection
     try {

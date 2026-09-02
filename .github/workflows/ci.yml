@@ -184,6 +184,9 @@ jobs:
       - name: Run review-derived cleanup mask persistence tests
         run: npm run test:integration:review-cleanup-mask
 
+      - name: Run transformation production journey
+        run: npm run test:e2e:transformation-production
+
       - name: Run novelty budget decision persistence tests
         run: npm run test:integration:novelty-budget
 

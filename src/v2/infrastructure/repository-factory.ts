@@ -96,6 +96,8 @@ import type { SyntheticScriptPlanRepository } from '../application/ports/synthet
 import type { SyntheticBlockGenerationRepository } from '../application/ports/synthetic-block-generation-repository.ts'
 import type { NoveltyBudgetRepository } from '../application/ports/novelty-budget-repository.ts'
 import type { TransformationProviderRegistryRepository } from '../application/ports/transformation-provider-registry-repository.ts'
+import type { TransformationQualityRepository } from '../application/ports/transformation-quality-repository.ts'
+import { PersistedTransformationResultCritic } from '../application/transformation-quality.ts'
 import type { SyntheticBlockConcatenationRepository } from '../application/ports/synthetic-block-concatenation-repository.ts'
 import type { SyntheticCacheDecisionRepository } from '../application/ports/synthetic-cache-decision-repository.ts'
 import type { SyntheticCacheSubmissionClaimRepository } from '../application/ports/synthetic-cache-submission-claim-repository.ts'
@@ -280,9 +282,11 @@ import { PrismaSyntheticScriptPlanRepository } from './prisma/synthetic-script-p
 import { PrismaSyntheticBlockGenerationRepository } from './prisma/synthetic-block-generation-repository.ts'
 import { PrismaNoveltyBudgetRepository } from './prisma/novelty-budget-repository.ts'
 import { PrismaTransformationProviderRegistryRepository } from './prisma/transformation-provider-registry-repository.ts'
+import { PrismaTransformationQualityRepository } from './prisma/transformation-quality-repository.ts'
 import { HttpTransformationProviderAdapter } from './transformation/http-transformation-provider.ts'
 import { McpTransformationProviderAdapter } from './transformation/mcp-transformation-provider.ts'
 import { VerifiedTransformationResultIngestor } from './transformation/transformation-result-ingestion.ts'
+import { FfmpegTransformationCriticEvaluator } from './transformation/ffmpeg-transformation-critic.ts'
 import { PrismaSyntheticBlockConcatenationRepository } from './prisma/synthetic-block-concatenation-repository.ts'
 import { PrismaSyntheticCacheDecisionRepository } from './prisma/synthetic-cache-decision-repository.ts'
 import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic-report-repository.ts'
@@ -721,6 +725,10 @@ export function createNoveltyBudgetRepository(): NoveltyBudgetRepository {
 
 export function createTransformationProviderRegistryRepository(): TransformationProviderRegistryRepository {
   return new PrismaTransformationProviderRegistryRepository(resolveV2Client())
+}
+
+export function createTransformationQualityRepository(): TransformationQualityRepository {
+  return new PrismaTransformationQualityRepository(resolveV2Client())
 }
 
 export function createSyntheticBlockConcatenationRepository(): SyntheticBlockConcatenationRepository {
@@ -1306,6 +1314,20 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
   })
   const videoCritic = new PersistedProviderResultCritic(artifactQuery)
   const ttsCritic = new PersistedTtsResultCritic(artifactQuery, resultArtifacts)
+  const transformationCritic = new PersistedTransformationResultCritic({
+    registry: createTransformationProviderRegistryRepository(),
+    quality: createTransformationQualityRepository(),
+    artifacts: artifactQuery,
+    novelty: createNoveltyBudgetRepository(),
+    evaluator: new FfmpegTransformationCriticEvaluator({
+      sources: createArtifactSourceMaterializer(environment),
+      prober: {
+        probe(sourcePath, options) {
+          return probeVideo(sourcePath, { ...options, environment, requireAudio: false })
+        },
+      },
+    }),
+  })
   // A transformation job is recognised by the binding it carries, not by its
   // operation: operations are shared with the synthetic path, the brief is not.
   const isTransformation = (job: { transformation?: unknown }) => job.transformation !== undefined
@@ -1321,6 +1343,7 @@ export function createProviderJobWorker(environment: NodeJS.ProcessEnv = process
     },
     critic: {
       evaluate(input) {
+        if (isTransformation(input.job)) return transformationCritic.evaluate(input)
         return (input.job.operation === 'tts' ? ttsCritic : videoCritic).evaluate(input)
       },
     },

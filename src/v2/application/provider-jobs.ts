@@ -422,7 +422,7 @@ export function runProviderJobWorkerOnce(dependencies: {
         }
         next = transitionProviderJob(job, { status: 'evaluating', occurredAt: now.toISOString(), resultArtifact: artifact })
       } else if (job.status === 'evaluating') {
-        const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact! })
+        const result = await dependencies.critic.evaluate({ job, artifact: job.resultArtifact!, signal })
         next = transitionProviderJob(job, { status: result.approved ? 'approved' : 'rejected', occurredAt: now.toISOString(), criticResultHash: result.resultHash })
       } else {
         throw new DomainError('VERSION_CONFLICT', `Provider job status ${job.status} is not executable`)

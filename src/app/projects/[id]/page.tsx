@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 import LogoutButton from '@/components/LogoutButton'
+import TransformationReviewPanel from '@/components/TransformationReviewPanel'
 import type { VisibleState } from '@/v2/domain/visible-state'
 import {
   STRATEGIC_OBJECTIVES,
@@ -4910,6 +4911,13 @@ export default function ProjectWorkspacePage() {
               </div>
             )}
           </section>
+
+          <TransformationReviewPanel
+            annotations={review?.annotations ?? []}
+            projectId={projectId}
+            projectVersionId={review?.session.projectVersionId ?? workspace.version?.id}
+            reviewResolution={review?.session.resolution}
+          />
 
           <section
             aria-label="Proteção de material validado durante o reuso"

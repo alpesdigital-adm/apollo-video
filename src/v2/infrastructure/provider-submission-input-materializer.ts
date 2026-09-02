@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
@@ -11,6 +12,7 @@ import type { ProviderSubmissionInputMaterializer } from '../application/ports/p
 import type { SyntheticProductionRepository } from '../application/ports/synthetic-production-repository.ts'
 
 const MAX_HEYGEN_ASSET_BYTES = 32 * 1024 * 1024
+const MAX_TRANSFORMATION_SOURCE_BYTES = 256 * 1024 * 1024
 const AUDIO_CONTAINERS = new Set(['mp3', 'wav'])
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -61,7 +63,7 @@ implements ProviderSubmissionInputMaterializer {
     const now = (this.dependencies.clock ?? (() => new Date()))()
     assertDomain(Number.isFinite(now.getTime()) && Date.parse(job.authorization.expiresAt) > now.getTime(), 'ASSET_RIGHTS_BLOCKED', 'Provider authorization expired before submission')
     if (job.operation === 'tts') return this.materializeTts(job, now)
-    if (job.transformation) return this.materializeTransformation(job, now)
+    if (job.transformation) return this.materializeTransformation(job, now, input.signal)
     assertDomain(job.operation === 'audio-avatar', 'PRECONDITION_REQUIRED', 'Provider input materializer does not support this operation')
 
     const profile = await this.dependencies.profiles.readProfile({
@@ -125,12 +127,16 @@ implements ProviderSubmissionInputMaterializer {
   }
 
   /**
-   * Revalidates the immutable source immediately before a transformation is
-   * submitted. The adapter receives only the brief projection and reviewed
-   * mask already sealed in `job.input`; Apollo identifiers and review copy do
-   * not cross the provider boundary.
+   * Revalidates and materializes the immutable source immediately before a
+   * transformation is submitted. The adapter receives the exact bytes and
+   * their digest alongside the brief projection and reviewed mask. Apollo
+   * identifiers and review copy still do not cross the provider boundary.
    */
-  private async materializeTransformation(job: Readonly<ProviderJob>, now: Date): Promise<Readonly<Record<string, unknown>>> {
+  private async materializeTransformation(
+    job: Readonly<ProviderJob>,
+    now: Date,
+    signal?: AbortSignal,
+  ): Promise<Readonly<Record<string, unknown>>> {
     const sourceArtifactHash = job.input.sourceArtifactHash
     assertDomain(typeof sourceArtifactHash === 'string' && /^[a-f0-9]{64}$/.test(sourceArtifactHash), 'INVALID_ARGUMENT', 'providerInput.sourceArtifactHash is invalid')
     const decision = job.authorization.artifactDecisions[0]
@@ -139,7 +145,35 @@ implements ProviderSubmissionInputMaterializer {
     if (!artifact || artifact.status !== 'available') throw new DomainError('ASSET_NOT_USABLE', 'Transformation source artifact is unavailable')
     assertDomain(artifact.sha256 === sourceArtifactHash, 'PERSISTENCE_CONFLICT', 'Transformation source changed after job authorization')
     assertDomain(artifact.mediaType === 'video' || artifact.mediaType === 'image', 'ASSET_NOT_USABLE', 'Transformation source must be visual media')
-    return Object.freeze(JSON.parse(JSON.stringify(job.input)) as Record<string, unknown>)
+    const byteSize = Number(artifact.byteSize)
+    assertDomain(
+      Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= MAX_TRANSFORMATION_SOURCE_BYTES,
+      'ASSET_NOT_USABLE',
+      'Transformation source exceeds the provider upload limit',
+    )
+    const source = await this.dependencies.sources.materialize({
+      operationId: job.id,
+      artifactKey: artifact.artifactKey,
+      sha256: artifact.sha256,
+      byteSize,
+    })
+    try {
+      const bytes = await readFile(source.path, { signal })
+      assertDomain(
+        bytes.byteLength === byteSize && createHash('sha256').update(bytes).digest('hex') === artifact.sha256,
+        'PERSISTENCE_CONFLICT',
+        'Materialized transformation source does not match its immutable artifact',
+      )
+      return Object.freeze({
+        ...(JSON.parse(JSON.stringify(job.input)) as Record<string, unknown>),
+        sourceMediaBase64: bytes.toString('base64'),
+        sourceMediaSha256: artifact.sha256,
+        sourceMediaByteSize: byteSize,
+        sourceContainer: artifact.container,
+      })
+    } finally {
+      await this.dependencies.sources.cleanup(job.id)
+    }
   }
 
   /**
