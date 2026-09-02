@@ -83,7 +83,7 @@ test('T-FR-218 persists, replays and refines a review-derived mask in PostgreSQL
     await client.v2ProjectProxyRenderOperation.create({ data: {
       operationId, workspaceId, projectId: created.project.id, projectVersionId: created.version.id,
       editPlanSnapshotId: created.version.snapshotRefs.editPlan, sourceArtifactId: proxyArtifactId,
-      sourceManifestId: 'manifest-review-mask-proxy', inputHash: HASH('b'),
+      sourceManifestId: 'manifest-review-mask-proxy', colorPipelineBindingsJson: JSON.stringify([]), inputHash: HASH('b'),
       outputArtifactId: proxyArtifactId, outputManifestId: 'manifest-review-mask-proxy',
       originalFileName: 'proxy.mp4', createdAt: at(1),
     } })
