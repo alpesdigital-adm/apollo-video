@@ -41,6 +41,19 @@ test('production deploy waits for PostgreSQL before migrating or replacing conta
   )
   assert.match(
     script,
+    /PROVIDER_WORK_ROOT="\$\{APOLLO_V2_PROVIDER_WORK_ROOT:-\/app\/tmp\/provider-results\}"/,
+  )
+  assert.match(
+    script,
+    /--env APOLLO_V2_PROVIDER_WORK_ROOT="\$\{PROVIDER_WORK_ROOT\}"/,
+  )
+  assert.match(
+    script,
+    /install -d -o 1000 -g 1000 "\$\{APP_ROOT\}\/tmp\/provider-results"/,
+  )
+  assert.match(script, /sleep 20\nfor worker in/)
+  assert.match(
+    script,
     /GROQ_TRANSCRIBE_COST_MINOR_UNITS_PER_HOUR.*must be a positive integer/s,
   )
   assert.match(
