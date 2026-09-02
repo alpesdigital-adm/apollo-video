@@ -1059,6 +1059,16 @@ Full v2v → actor composite → cutaway → still/parallax → nenhuma transfor
 
 Semântica, identidade, lip-sync, temporal consistency, anatomia, transições e safe areas.
 
+**Evidência de produção (2026-09-02).** A jornada combinada
+T-FR-113/114/115/116/123/218 materializa os bytes reais do source, dirige quatro
+transportes sobre o `ProviderJob` persistido, aplica novelty antes da submissão,
+mede source/result por regiões com FFmpeg/ffprobe, grava critic de quatorze
+dimensões e ledger/custo de fallback, e expõe tudo pela API e pelo painel do
+editor. PostgreSQL, workers reiniciados, MP4 real e Chrome contra `next start`
+foram exercitados nos CIs `33662647886` e `33664477610`; o hotfix operacional
+passou nos CIs `33667530939` e `33669465697` e foi implantado como
+`apollo-video:b0cd3e1`. Nenhuma chamada paga de provider foi necessária.
+
 ---
 
 ## 7.13 Reaproveitamento de vídeos publicados
@@ -1083,6 +1093,12 @@ O inpainting só pode ser solicitado a partir de uma máscara revisada e vincula
 mesmo source, `TransformationBrief`, versão e formato. Preserve regions não podem ser
 intersectadas; tracking incerto ou abaixo do limiar bloqueia qualquer submissão paga.
 O resultado permanece um derivative e nunca substitui o source publicado.
+
+O caminho de inpainting a partir da máscara revisada, a persistência do
+derivative e o visual eval de legenda queimada, logo e fundo complexo foram
+aceitos em produção em 2026-09-02. A integração de source separation e a
+comparação medida de custo/qualidade contra crop, cover e reject continuam fora
+deste aceite e permanecem abertas em F3.017.
 
 ### FR-124 — Validation envelope
 
@@ -1722,6 +1738,12 @@ confiança de tracking, e mantém refinamentos como revisões imutáveis. Mudan�
 exige confirmação explícita e volta ao estado incerto até nova revisão. A projeção enviada
 ao provider contém apenas geometria, range, preserve regions e hashes; screenshot, texto
 da annotation e identidade do autor permanecem internos.
+
+**Aceite (2026-09-02).** A interface autenticada refinou a região pela API
+pública, o provider recebeu somente a projeção canônica persistida, um MP4
+derivative real foi avaliado e aceito, e source/hash permaneceram imutáveis.
+Tracking incerto, baixa confiança, overlap protegido, formato não revisado e
+revisão stale foram comprovados como falhas fechadas.
 
 ## 7.21.1 Aprendizado de preferências
 

@@ -1,12 +1,14 @@
-# Transformation control plane — evidence (Wave 16, F3.013–F3.016)
+# Transformation control plane — production evidence (F3.013–F3.018)
 
-Written 2026-09-01. This file records what was **measured**, not what was
+Updated 2026-09-02. This file records what was **measured**, not what was
 intended. Where evidence does not exist it says so, in the same detail as where
 it does.
 
-Nothing in this document means a task is complete. F3.013, F3.014, F3.015 and
-F3.016 are all open: without final integration into `main`, deployment and the
-owner's acceptance, none of them close.
+F3.013–F3.016 and F3.018 now meet the five-state delivery rule: implemented,
+integrated into `main`, exercised end to end with real persistence/media/UI,
+deployed and accepted. F3.017 remains partial: its reviewed inpaint path and
+visual eval are delivered, while source separation and the direct comparison
+against crop/cover/reject remain open.
 
 ---
 
@@ -83,15 +85,19 @@ technically under budget, so `treatment` reads the density and not the spend.
 
 ## 4. Measured numbers
 
-Everything below was produced by running the command named, on this branch.
+Everything below was produced by the final implementation and repeated on the
+merge commit before deployment.
 
 | gate | command | result |
 |---|---|---|
-| unit + contract suite | `npm test` | **1649 / 1649** |
+| unit + contract suite | `npm test` | **1672 / 1672** |
 | transformation registry (PostgreSQL) | `npm run test:integration:transformation-registry` | 1 / 1 |
 | novelty budget (PostgreSQL) | `npm run test:integration:novelty-budget` | 1 / 1 |
-| schema from an empty database | `npm run db:v2:validate` | **213 tables, 1055 indexes, 814 foreign keys** |
-| public contracts | `npm run api:v1:validate` | **293 capabilities, 533 schemas, 597 examples, 240 paths** |
+| reviewed masks (PostgreSQL) | `npm run test:integration:review-cleanup-mask` | 1 / 1 |
+| real-media critic and novelty/cleanup goldens | `npm run test:integration:transformation-critic-media` | **3 / 3** |
+| combined provider/worker/API/browser journey | `npm run test:e2e:transformation-production` | **1 / 1** |
+| schema from an empty database | `npm run db:v2:validate` | **214 tables, 1063 indexes, 823 foreign keys** |
+| public contracts | `npm run api:v1:validate` | **299 capabilities, 542 schemas, 606 examples, 244 paths** |
 | UI / REST / MCP parity | `npm run api:parity:validate` | verified |
 | architecture gates | `npm run lint` | verified |
 | code lint | `npm run lint:code` | 0 warnings |
@@ -99,9 +105,9 @@ Everything below was produced by running the command named, on this branch.
 | types | `npm run typecheck` | 0 errors |
 | dependency audit | `npm audit --audit-level=low` | 0 vulnerabilities |
 
-Baseline movement across the wave, reviewed before it was normalized:
-**+7 capabilities, +11 schemas, +13 examples, +7 paths. Zero removed, zero
-changed.**
+The final public surface includes list/create/refine for cleanup masks, durable
+transformation job request/read/cancel/retry, transformation-quality read and
+fallback actions. Compatibility baseline movement remained additive.
 
 **Paid provider calls: zero.** No credential for any live provider was
 configured at any point.
@@ -137,61 +143,57 @@ A gate that cries wolf teaches people to ignore the lint.
 
 ---
 
-## 6. What is **not** here
+## 6. End-to-end and observable acceptance
 
-This section exists because the wave is not finished and saying otherwise would
-be the failure `AGENTS.md` was written to prevent.
+The combined T-FR-113/114/115/116/123/218 journey starts from an immutable MP4
+source and persisted rights, brief, routing, novelty decision, annotation and
+reviewed mask. Each provider tick is executed by a fresh worker identity, which
+proves that polling and state live in PostgreSQL rather than process memory. The
+controlled HTTP boundary receives the exact source bytes and mask hash; result
+bytes return through the real ingestor into content-addressed storage.
 
-**No combined E2E journey ran.** Neither Journey A (durability and transports
-against loopback servers, with a real worker restart) nor Journey B (medieval
-traffic-management with real FFmpeg media, critic rejection and a fallback
-descent) exists yet. The evidence for F3.013–F3.016 today is unit, contract and
-PostgreSQL-persistence — **not journey**. Every claim in this file is scoped to
-that.
+One result removes only the reviewed region and is approved. A second changes a
+protected subject and is rejected despite its visual plausibility. The runtime
+persists fourteen measurements, blocking issues, the best valid derivative,
+both observed costs and the fallback descent. The source artifact and hash do
+not change.
 
-**No repository writes the fallback ledger or the critic report.** Their
-migration is applied and validated, and their domain aggregates are covered by
-13 tests, but no application service persists them yet. Under the `AGENTS.md`
-rule "schema sem persistência/migration executada" this counts as scaffolding,
-not as delivery.
+The browser logs in against `next start`, loads the same project through `/v1`,
+shows novelty treatment, all critic dimensions, cost, ladder and review actions,
+refines the cleanup mask through the public API, observes the new immutable
+revision and accepts the measured result. The CI artifact
+`transformation-reviewed-and-accepted.png` is the durable visual evidence.
 
-**No `/v1` surface for F3.015 or F3.016.** The transformation control plane's
-public API today covers briefs, routing and jobs only. Fallback state and critic
-verdicts are not readable from outside.
+Independent real-media goldens cover 270-frame sober/balanced/intense videos
+and burned subtitle, logo and complex-background cleanup. FFmpeg/ffprobe verify
+container, frames and decoded pixels; region comparison permits change only
+inside the reviewed mask while protected zones remain hard gates.
 
-**No UI.** The editor cannot show a fallback that was applied, its reason, the
-accumulated cost or the four review actions. `availableFallbackActions` computes
-them; nothing renders them.
-
-**No novelty goldens with real media.** The sober / balanced / excessive
-separation is proven against synthetic candidate sets, not against three
-FFmpeg-produced videos.
-
-**The critic's evaluators are not implemented.** The report *aggregate* enforces
-that evaluators declare themselves honestly, but no ffprobe integrity probe, no
-region differ and no controlled identity probe exist behind it. The eval set is
-12 domain cases, not 10 pieces of media.
-
-**No browser E2E, no production Next build against these routes.**
+Hosted evidence: PR CI `33662647886`, feature merge CI `33664477610`, deploy
+hotfix PR CI `33667530939` and hotfix merge CI `33669465697`. Production runs
+`apollo-video:b0cd3e1` from `b0cd3e17`, with 192 migrations, a healthy app and
+five workers observed with zero restarts and zero OOM after the stability
+window. Immediate recovery backup:
+`apollo_video_v2-20260902T190458Z.dump`.
 
 ---
 
 ## 7. Honest state
 
-| | F3.013 | F3.014 | F3.015 | F3.016 |
-|---|---|---|---|---|
-| specified | yes | yes | yes | yes |
-| implemented (domain) | yes | yes | yes | yes |
-| persisted, migration validated | yes | yes | tables only | tables only |
-| integrated into the runtime | yes | yes (submission gate) | no | no |
-| public `/v1` contract | yes | no | no | no |
-| E2E journey | **no** | **no** | **no** | **no** |
-| deployed | no | no | no | no |
-| accepted by the owner | no | no | no | no |
+| | F3.013 | F3.014 | F3.015 | F3.016 | F3.018 |
+|---|---|---|---|---|---|
+| specified | yes | yes | yes | yes | yes |
+| implemented | yes | yes | yes | yes | yes |
+| persisted, migration validated | yes | yes | yes | yes | yes |
+| integrated into the runtime | yes | yes | yes | yes | yes |
+| public `/v1` contract | yes | yes | yes | yes | yes |
+| E2E journey | yes | yes | yes | yes | yes |
+| deployed | yes | yes | yes | yes | yes |
+| accepted | yes | yes | yes | yes | yes |
 
 ---
 
-## 8. Wave 17 local addendum: reviewed cleanup masks
+## 8. Reviewed cleanup masks and remaining F3.017 boundary
 
 The local Wave 17 slice replaces the earlier `annotationToMask` fixture with a
 runtime boundary. `review-cleanup-mask/v1` is immutable and content-addressed;
@@ -207,9 +209,14 @@ below policy. The provider projection excludes screenshot, review copy and
 author identity. The common submission materializer now accepts transformation
 jobs and revalidates the authorized source immediately before the adapter call.
 
-Evidence now includes 15 focused tests, the full 1667-test suite, schema/migration
-validation, public-contract validation and hosted CI `33574454216`. That run applied
-the migrations from zero and proved create/replay/refine/tamper through the Prisma
-adapter on real PostgreSQL. Browser UI, a live source-upload transport, real inpaint
-bytes, visual evaluation, deploy and owner acceptance have not happened; F3.017 and
-F3.018 stay open.
+The final journey added the missing browser, source-byte materialization,
+derivative MP4, critic, fallback, deployment and acceptance evidence. F3.018 is
+therefore complete. F3.017 closes the pre-job mask/preserve/threshold boundary,
+immutable derivative storage and the three-case visual eval. It does **not**
+claim a source-separation adapter or a measured cost/quality comparison against
+crop, cover and reject; those two microtasks remain open.
+
+No paid provider credential was used. HTTP and MCP adapters ran at their real
+contract boundaries against controlled loopback implementations, so transport,
+bytes, retry/callback semantics and persistence were exercised without claiming
+a live commercial-provider smoke.
