@@ -11,6 +11,7 @@ PROVIDER_WORKER="${APOLLO_PROVIDER_WORKER_CONTAINER:-${CONTAINER}-provider-worke
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
+PROVIDER_WORK_ROOT="${APOLLO_V2_PROVIDER_WORK_ROOT:-/app/tmp/provider-results}"
 
 test -f "${ENV_FILE}"
 docker network inspect easypanel >/dev/null
@@ -18,6 +19,7 @@ docker network inspect easypanel >/dev/null
 for directory in tmp artifacts render-outputs; do
   install -d -o 1000 -g 1000 "${APP_ROOT}/${directory}"
 done
+install -d -o 1000 -g 1000 "${APP_ROOT}/tmp/provider-results"
 
 docker run --rm \
   --env-file "${ENV_FILE}" \
@@ -62,6 +64,7 @@ COMMON_RUNTIME=(
   --env-file "${ENV_FILE}"
   --add-host host.docker.internal:host-gateway
   --network easypanel
+  --env APOLLO_V2_PROVIDER_WORK_ROOT="${PROVIDER_WORK_ROOT}"
   -v "${APP_ROOT}/tmp:/app/tmp"
   -v "${APP_ROOT}/artifacts:/app/artifacts"
   -v "${APP_ROOT}/render-outputs:/app/render-outputs"
@@ -216,7 +219,7 @@ for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
 done
 
-sleep 5
+sleep 20
 for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}" "${PROVIDER_WORKER}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
   test "$(docker inspect --format '{{.RestartCount}}' "${worker}")" = "0"
