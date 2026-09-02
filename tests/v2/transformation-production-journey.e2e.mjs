@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -276,7 +276,7 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     assert.equal(review.reports.every((report) => report.measurements.length === 14), true)
     const rejectedReport = review.reports.find((report) => report.providerJobId === rejected.job.id)
     assert.equal(rejectedReport.decision, 'rejected')
-    assert.equal(rejectedReport.hardGates.includes('preserve-list-violated'), true)
+    assert.equal(rejectedReport.hardGates.includes('preserve-list'), true)
     const latestLedger = review.ledgers[0].ledger
     assert.equal(latestLedger.currentRung, 'actor-composite')
     assert.equal(latestLedger.attempts.length, 2)
@@ -345,9 +345,18 @@ test('T-FR-113/114/115/116/123/218 review mask reaches a real derivative, critic
     const acceptanceResponse = page.waitForResponse((response) => response.url().includes('/transformation-fallbacks/') && response.url().endsWith('/actions') && response.request().method() === 'POST')
     await panel.getByRole('button', { name: 'Aceitar resultado' }).click()
     assert.equal((await acceptanceResponse).status(), 201)
-    await page.screenshot({ path: join(shotsRoot, 'transformation-reviewed-and-accepted.png'), fullPage: true })
+    const screenshotPath = process.env.APOLLO_TRANSFORMATION_E2E_SCREENSHOT ?? join(shotsRoot, 'transformation-reviewed-and-accepted.png')
+    await mkdir(dirname(screenshotPath), { recursive: true })
+    await page.screenshot({ path: screenshotPath, fullPage: true })
     const acceptedLedger = await quality.readLatestFallbackLedger({ workspaceId, projectId, briefId: brief.id })
     assert.equal(acceptedLedger.reviewDecision, 'accepted')
+    const cookie = (await context.cookies()).map((entry) => `${entry.name}=${entry.value}`).join('; ')
+    const actionUrl = `${baseUrl}/v1/projects/${projectId}/transformation-fallbacks/${latestLedger.id}/actions`
+    const repeatAcceptance = await fetch(actionUrl, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'accept' }) })
+    assert.equal(repeatAcceptance.status, 200)
+    assert.equal((await repeatAcceptance.json()).data.replayed, true)
+    const staleContradiction = await fetch(actionUrl, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'keep-source' }) })
+    assert.equal(staleContradiction.status, 409)
   } finally {
     if (browser) await browser.close().catch(() => undefined)
     if (server && server.exitCode === null) {
