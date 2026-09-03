@@ -160,6 +160,90 @@ test('T-FR-122 rejects mixed music and destructive visual removal inside the MVP
   assert.equal(plan(music).postCleanupReviewRequired, false)
 })
 
+test('T-FR-123 selects a bound separation adapter and compares it with crop, cover and reject', () => {
+  const music = reportWithFinding({
+    kind: 'music',
+    region: null,
+    signals: { musicLikelihood: 0.99, speechLikelihood: 0.8, separableStem: true, spectralPersistence: 0.9 },
+  })
+  const separationOffer = Object.freeze({
+    adapterId: 'elevenlabs-voice-isolation',
+    adapterVersion: '1.0.0',
+    provider: 'elevenlabs',
+    modelRef: 'voice-isolator/v1',
+    configHash: sha('separation-config'),
+    capabilityHash: sha('separation-capability'),
+    minDurationMs: 4_600,
+    maxDurationMs: 3_600_000,
+    normalizedCost: 0.6,
+    predictedSpeechRetention: 0.92,
+    predictedMusicRemoval: 0.9,
+    predictedIntegrity: 0.95,
+    billing: { unit: 'provider-characters', quantity: 1_000 },
+  })
+  const cleanup = plan(music, { separationOffer })
+  assert.equal(cleanup.selectedStrategy, 'separation')
+  assert.equal(cleanup.selectedAction.offer.configHash, separationOffer.configHash)
+  assert.deepEqual(
+    cleanup.candidates.map((candidate) => candidate.strategy),
+    ['trim', 'crop-reframe', 'cover', 'separation'],
+  )
+  assert.equal(cleanup.candidates.find((candidate) => candidate.strategy === 'crop-reframe').eligible, false)
+  assert.equal(cleanup.candidates.find((candidate) => candidate.strategy === 'cover').eligible, false)
+  assert.equal(cleanup.candidates.find((candidate) => candidate.strategy === 'separation').cost, 0.6)
+  assert.equal(cleanup.predictedResidualQuality, 0.9)
+
+  const review = createPostCleanupReview({
+    plan: cleanup,
+    outputArtifactId: cleanup.outputArtifactId,
+    outputArtifactSha256: sha('separated-output'),
+    outputManifestId: cleanup.outputManifestId,
+    outputRightsSnapshotId: 'rights-separated-output',
+    outputRightsSnapshotHash: sha('rights-separated'),
+    visual: {
+      passed: true,
+      contaminationRemoved: true,
+      outputPlayable: true,
+      durationAligned: true,
+      framingPreserved: true,
+      residualQuality: 1,
+      reasonCodes: [],
+    },
+    audio: {
+      passed: true,
+      providerBindingVerified: true,
+      isolatedSpeechPresent: true,
+      durationAligned: true,
+      reasonCodes: [],
+    },
+    reviewedAt: '2026-09-02T22:00:00.000Z',
+  })
+  assert.equal(review.passed, true)
+  assert.equal(hydrateSourceCleanupPlan(cleanup, music).planHash, cleanup.planHash)
+  assert.equal(hydratePostCleanupReview(review, cleanup).reviewHash, review.reviewHash)
+})
+
+test('T-FR-123 fails closed when separation is unavailable, over budget or lacks audio evidence', () => {
+  const music = reportWithFinding({
+    kind: 'music',
+    region: null,
+    signals: { musicLikelihood: 0.99, speechLikelihood: 0.8, separableStem: true, spectralPersistence: 0.9 },
+  })
+  assert.equal(plan(music).selectedStrategy, 'reject')
+  const tooExpensive = plan(music, {
+    separationOffer: {
+      adapterId: 'separator-adapter', adapterVersion: '1.0.0', provider: 'provider-separator',
+      modelRef: 'model-separator/v1', configHash: sha('config'), capabilityHash: sha('capability'),
+      minDurationMs: 4_600,
+      maxDurationMs: 60_000, normalizedCost: 2, predictedSpeechRetention: 0.95,
+      predictedMusicRemoval: 0.95, predictedIntegrity: 0.95,
+      billing: { unit: 'provider-characters', quantity: 1_000 },
+    },
+  })
+  assert.equal(tooExpensive.selectedStrategy, 'reject')
+  assert.ok(tooExpensive.candidates.find((candidate) => candidate.strategy === 'separation').reasonCodes.includes('COST_LIMIT_EXCEEDED'))
+})
+
 test('T-FR-122 fails closed when source rights do not allow editing', () => {
   const cleanup = plan(reportWithFinding(), {
     rights: {

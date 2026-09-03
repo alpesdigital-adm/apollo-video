@@ -3299,14 +3299,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.source-cleanups.list',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'List source cleanup plans',
-    description: 'Returns cleanup strategy decisions, durable derivative operation status and mandatory post-cleanup visual and rights reviews.',
+    description: 'Returns cleanup strategy decisions, provider-bound cost/quality comparisons, durable derivative operation status and mandatory post-cleanup media and rights reviews.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/source-cleanup-page/v1',
+    outputSchemaRef: 'apollo://schemas/source-cleanup-page/v2',
     endpoint: {
       method: 'GET',
       path: '/v1/projects/{projectId}/source-cleanups',
@@ -3351,9 +3351,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.source-cleanups.create',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Clean one diagnosed source range',
-    description: 'Selects trim, crop/reframe, bounded cover or explicit rejection by residual quality, integrity, cost and rights; accepted work creates a durable source-cleanup operation and immutable derivative.',
+    description: 'Selects trim, crop/reframe, bounded cover, provider-bound voice/music separation or explicit rejection by residual quality, integrity, cost and rights; accepted work creates a durable source-cleanup operation and immutable derivative.',
     exposure: 'public',
     operationKind: 'command',
     authMode: 'required',
@@ -3361,7 +3361,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     inputSchemaRef:
       'apollo://schemas/create-source-cleanup-request/v1',
     outputSchemaRef:
-      'apollo://schemas/source-cleanup-mutated/v1',
+      'apollo://schemas/source-cleanup-mutated/v2',
     endpoint: {
       method: 'POST',
       path: '/v1/projects/{projectId}/source-cleanups',
@@ -3376,14 +3376,14 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   },
   {
     id: 'apollo.projects.source-cleanups.read',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Read source cleanup result',
-    description: 'Reads one exact cleanup plan, derivative operation and post-cleanup visual and rights review without exposing storage paths.',
+    description: 'Reads one exact cleanup plan, provider binding and cost/quality comparison, derivative operation, and post-cleanup media and rights review without exposing storage paths.',
     exposure: 'public',
     operationKind: 'query',
     authMode: 'required',
     requiredScopes: ['projects:read'],
-    outputSchemaRef: 'apollo://schemas/source-cleanup-read/v1',
+    outputSchemaRef: 'apollo://schemas/source-cleanup-read/v2',
     endpoint: {
       method: 'GET',
       path: '/v1/projects/{projectId}/source-cleanups/{cleanupPlanId}',

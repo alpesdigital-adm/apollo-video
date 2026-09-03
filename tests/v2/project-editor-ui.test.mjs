@@ -359,6 +359,14 @@ test('T-FR-122 project editor exposes API-backed cleanup decisions and post-clea
   assert.match(projectEditorSource, /master intacto/)
 })
 
+test('T-FR-123 project editor explains source separation cost, alternatives and audio evidence', () => {
+  assert.match(projectEditorSource, /separation: 'Voz isolada da trilha'/)
+  assert.match(projectEditorSource, /data-testid="source-cleanup-comparison"/)
+  assert.match(projectEditorSource, /candidate\.predictedResidualQuality/)
+  assert.match(projectEditorSource, /billing\.quantity/)
+  assert.match(projectEditorSource, /Vídeo, voz isolada e direitos aprovados/)
+})
+
 test('T-FR-124 project editor exposes API-backed validation envelopes and explicit approval', () => {
   assert.match(
     projectEditorSource,

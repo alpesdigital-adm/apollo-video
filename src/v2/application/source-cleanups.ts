@@ -25,6 +25,9 @@ import type {
 import type {
   SourceCleanupRepository,
 } from './ports/source-cleanup-repository.ts'
+import type {
+  SourceSeparationProvider,
+} from './ports/source-separation-provider.ts'
 import { materializeActorAuditContext, requireScope, type AuthenticatedExternalActor } from './authenticate-api-client.ts'
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
@@ -84,6 +87,7 @@ export function createSourceCleanupService(dependencies: {
   projects: ProjectWorkspaceQueryRepository
   clock: () => Date
   createId: () => string
+  separationProvider?: Pick<SourceSeparationProvider, 'offer'>
 }) {
   return async function execute(request: {
     workspaceId: string
@@ -165,6 +169,9 @@ export function createSourceCleanupService(dependencies: {
         'Project was not found',
       )
     }
+    const separationOffer = dependencies.separationProvider
+      ? dependencies.separationProvider.offer(report.sourceDurationMs)
+      : undefined
     const artifact = await dependencies.mediaArtifacts.findById(
       workspaceId,
       report.sourceArtifactId,
@@ -204,6 +211,7 @@ export function createSourceCleanupService(dependencies: {
       findingId,
       sourceManifestId: sourceManifest.id,
       policy,
+      ...(separationOffer ? { separationOffer } : {}),
       rights: {
         outcome: rightsDecision.outcome,
         reasonCodes: rightsDecision.reasonCodes,
@@ -250,7 +258,7 @@ export function createSourceCleanupService(dependencies: {
               outputArtifactId: plan.outputArtifactId!,
               outputManifestId: plan.outputManifestId!,
               strategy: plan.selectedStrategy as
-                'trim' | 'crop-reframe' | 'cover',
+                'trim' | 'crop-reframe' | 'cover' | 'separation',
             },
           }
         : {}),

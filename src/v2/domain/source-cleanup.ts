@@ -14,6 +14,7 @@ export const SOURCE_CLEANUP_STRATEGIES = [
   'trim',
   'crop-reframe',
   'cover',
+  'separation',
   'reject',
 ] as const
 export type SourceCleanupStrategy = (typeof SOURCE_CLEANUP_STRATEGIES)[number]
@@ -26,7 +27,26 @@ export interface SourceCleanupPolicy {
   maxCropFraction: number
   maxCoverArea: number
   coverColor: string
-  costs: Readonly<Record<Exclude<SourceCleanupStrategy, 'reject'>, number>>
+  costs: Readonly<Record<'trim' | 'crop-reframe' | 'cover', number>>
+}
+
+export interface SourceSeparationOffer {
+  adapterId: string
+  adapterVersion: string
+  provider: string
+  modelRef: string
+  configHash: string
+  capabilityHash: string
+  minDurationMs: number
+  maxDurationMs: number
+  normalizedCost: number
+  predictedSpeechRetention: number
+  predictedMusicRemoval: number
+  predictedIntegrity: number
+  billing: Readonly<{
+    unit: 'provider-characters'
+    quantity: number
+  }>
 }
 
 export type SourceCleanupAction =
@@ -45,6 +65,11 @@ export type SourceCleanupAction =
       rangeMs: readonly [number, number]
       region: Readonly<NormalizedRegion>
       color: string
+    }>
+  | Readonly<{
+      strategy: 'separation'
+      rangeMs: readonly [number, number]
+      offer: Readonly<SourceSeparationOffer>
     }>
   | Readonly<{
       strategy: 'reject'
@@ -115,6 +140,13 @@ export interface PostCleanupReview {
     durationAligned: boolean
     framingPreserved: boolean
     residualQuality: number
+    reasonCodes: readonly string[]
+  }>
+  audio?: Readonly<{
+    passed: boolean
+    providerBindingVerified: boolean
+    isolatedSpeechPresent: boolean
+    durationAligned: boolean
     reasonCodes: readonly string[]
   }>
   rights: Readonly<{
@@ -436,6 +468,133 @@ function coverCandidate(
   })
 }
 
+function normalizeSeparationOffer(
+  value: Readonly<SourceSeparationOffer>,
+): Readonly<SourceSeparationOffer> {
+  const minDurationMs = Number(value.minDurationMs)
+  const maxDurationMs = Number(value.maxDurationMs)
+  const quantity = Number(value.billing?.quantity)
+  assertDomain(
+    Number.isSafeInteger(minDurationMs) && minDurationMs >= 1 &&
+      Number.isSafeInteger(maxDurationMs) && maxDurationMs >= minDurationMs && maxDurationMs <= 3_600_000 &&
+      Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 60_000 &&
+      value.billing?.unit === 'provider-characters',
+    'INVALID_ARGUMENT',
+    'Source separation offer limits are invalid',
+  )
+  return Object.freeze({
+    adapterId: identity(value.adapterId, 'separation adapterId'),
+    adapterVersion: identity(value.adapterVersion, 'separation adapterVersion'),
+    provider: identity(value.provider, 'separation provider'),
+    modelRef: identity(value.modelRef, 'separation modelRef'),
+    configHash: hash(value.configHash, 'separation configHash'),
+    capabilityHash: hash(value.capabilityHash, 'separation capabilityHash'),
+    minDurationMs,
+    maxDurationMs,
+    normalizedCost: cost(value.normalizedCost, 'separation normalizedCost'),
+    predictedSpeechRetention: score(
+      value.predictedSpeechRetention,
+      'separation predictedSpeechRetention',
+    ),
+    predictedMusicRemoval: score(
+      value.predictedMusicRemoval,
+      'separation predictedMusicRemoval',
+    ),
+    predictedIntegrity: score(
+      value.predictedIntegrity,
+      'separation predictedIntegrity',
+    ),
+    billing: Object.freeze({
+      unit: 'provider-characters' as const,
+      quantity,
+    }),
+  })
+}
+
+function separationCandidate(
+  report: Readonly<ContaminationReport>,
+  finding: Readonly<ContaminationFinding>,
+  policy: Readonly<SourceCleanupPolicy>,
+  offerValue?: Readonly<SourceSeparationOffer>,
+): Readonly<SourceCleanupCandidate> {
+  const offer = offerValue
+    ? normalizeSeparationOffer(offerValue)
+    : undefined
+  const signals = finding.kind === 'music'
+    ? finding.signals as Readonly<{
+        musicLikelihood: number
+        speechLikelihood: number
+        separableStem: boolean
+      }>
+    : undefined
+  const predictedResidualQuality = offer
+    ? Math.min(offer.predictedSpeechRetention, offer.predictedMusicRemoval)
+    : 0
+  const predictedIntegrity = offer?.predictedIntegrity ?? 0
+  const candidateCost = offer?.normalizedCost ?? 0
+  const costFit = policy.maxCost === 0
+    ? Number(candidateCost === 0)
+    : Math.max(0, 1 - candidateCost / policy.maxCost)
+  const candidateScore = 0.45 * predictedResidualQuality +
+    0.4 * predictedIntegrity + 0.15 * costFit
+  const eligible = Boolean(
+    offer &&
+      signals?.separableStem &&
+      signals.speechLikelihood > 0 &&
+      report.sourceDurationMs >= offer.minDurationMs &&
+      report.sourceDurationMs <= offer.maxDurationMs &&
+      candidateCost <= policy.maxCost &&
+      predictedResidualQuality >= policy.minResidualQuality &&
+      predictedIntegrity >= policy.minIntegrity,
+  )
+  const reasonCodes = [
+    ...(finding.kind !== 'music' ? ['MUSIC_FINDING_REQUIRED'] : []),
+    ...(!offer ? ['SOURCE_SEPARATION_PROVIDER_UNAVAILABLE'] : []),
+    ...(signals && !signals.separableStem ? ['SOURCE_STEM_NOT_SEPARABLE'] : []),
+    ...(signals && signals.speechLikelihood <= 0 ? ['SOURCE_SPEECH_NOT_DETECTED'] : []),
+    ...(offer && report.sourceDurationMs > offer.maxDurationMs
+      ? ['SOURCE_DURATION_EXCEEDS_PROVIDER_LIMIT']
+      : []),
+    ...(offer && report.sourceDurationMs < offer.minDurationMs
+      ? ['SOURCE_DURATION_BELOW_PROVIDER_LIMIT']
+      : []),
+    ...(candidateCost > policy.maxCost ? ['COST_LIMIT_EXCEEDED'] : []),
+    ...(predictedResidualQuality < policy.minResidualQuality
+      ? ['RESIDUAL_QUALITY_TOO_LOW']
+      : []),
+    ...(predictedIntegrity < policy.minIntegrity
+      ? ['INTEGRITY_BELOW_THRESHOLD']
+      : []),
+  ]
+  return Object.freeze({
+    strategy: 'separation',
+    eligible,
+    predictedResidualQuality: score(
+      predictedResidualQuality,
+      'separation residual quality',
+    ),
+    predictedIntegrity: score(
+      predictedIntegrity,
+      'separation integrity',
+    ),
+    cost: candidateCost,
+    score: score(
+      Math.max(0, Math.min(1, candidateScore)),
+      'separation score',
+    ),
+    reasonCodes: Object.freeze(reasonCodes),
+    ...(eligible && offer
+      ? {
+          action: Object.freeze({
+            strategy: 'separation' as const,
+            rangeMs: Object.freeze([...finding.rangeMs] as [number, number]),
+            offer,
+          }),
+        }
+      : {}),
+  })
+}
+
 function freezeCandidate(candidate: Readonly<SourceCleanupCandidate>): Readonly<SourceCleanupCandidate> {
   return Object.freeze({
     ...candidate,
@@ -454,10 +613,18 @@ function freezeCandidate(candidate: Readonly<SourceCleanupCandidate>): Readonly<
                     crop: Object.freeze({ ...candidate.action.crop }),
                     removedRegion: Object.freeze({ ...candidate.action.removedRegion }),
                   }
-                : {
+                : candidate.action.strategy === 'cover'
+                  ? {
                     rangeMs: Object.freeze([...candidate.action.rangeMs] as [number, number]),
                     region: Object.freeze({ ...candidate.action.region }),
-                  }),
+                  }
+                  : {
+                      rangeMs: Object.freeze([...candidate.action.rangeMs] as [number, number]),
+                      offer: Object.freeze({
+                        ...candidate.action.offer,
+                        billing: Object.freeze({ ...candidate.action.offer.billing }),
+                      }),
+                    }),
           }) as Exclude<SourceCleanupAction, { strategy: 'reject' }>,
         }
       : {}),
@@ -471,6 +638,7 @@ export function createSourceCleanupPlan(input: {
   findingId: string
   sourceManifestId: string
   policy?: Readonly<SourceCleanupPolicy>
+  separationOffer?: Readonly<SourceSeparationOffer>
   rights: Readonly<{
     outcome: 'allow' | 'deny'
     reasonCodes: readonly string[]
@@ -496,6 +664,9 @@ export function createSourceCleanupPlan(input: {
     trimCandidate(input.report, finding!, policy),
     cropCandidate(input.report, finding!, policy),
     coverCandidate(finding!, policy),
+    ...(finding!.kind === 'music' && input.separationOffer
+      ? [separationCandidate(input.report, finding!, policy, input.separationOffer)]
+      : []),
   ].map(freezeCandidate))
   const viable = candidates
     .filter((candidate) => candidate.eligible && candidate.action)
@@ -580,6 +751,9 @@ export function createPostCleanupReview(input: {
   visual: Omit<PostCleanupReview['visual'], 'reasonCodes'> & {
     reasonCodes: readonly string[]
   }
+  audio?: Omit<NonNullable<PostCleanupReview['audio']>, 'reasonCodes'> & {
+    reasonCodes: readonly string[]
+  }
   rightsReasonCodes?: readonly string[]
   reviewedAt: Date | string
 }): Readonly<PostCleanupReview> {
@@ -605,6 +779,20 @@ export function createPostCleanupReview(input: {
   const rightsReasonCodes = Object.freeze([
     ...new Set(input.rightsReasonCodes ?? []),
   ].sort())
+  const audio = input.audio
+    ? Object.freeze({
+        passed: Boolean(input.audio.passed),
+        providerBindingVerified: Boolean(input.audio.providerBindingVerified),
+        isolatedSpeechPresent: Boolean(input.audio.isolatedSpeechPresent),
+        durationAligned: Boolean(input.audio.durationAligned),
+        reasonCodes: Object.freeze([...new Set(input.audio.reasonCodes)].sort()),
+      })
+    : undefined
+  assertDomain(
+    (input.plan.selectedStrategy === 'separation') === Boolean(audio),
+    'INVALID_ARGUMENT',
+    'Source separation review requires exact audio evidence',
+  )
   const rights = Object.freeze({
     passed: rightsReasonCodes.length === 0,
     sourceRightsSnapshotId: identity(input.plan.rightsSnapshotId!, 'sourceRightsSnapshotId'),
@@ -625,8 +813,9 @@ export function createPostCleanupReview(input: {
     outputManifestId: identity(input.outputManifestId, 'outputManifestId'),
     strategy: input.plan.selectedStrategy,
     visual,
+    ...(audio ? { audio } : {}),
     rights,
-    passed: visual.passed && rights.passed,
+    passed: visual.passed && rights.passed && (audio?.passed ?? true),
     reviewedAt: date(input.reviewedAt, 'reviewedAt'),
   }
   const reviewHash = calculateCanonicalHash(content)
@@ -644,6 +833,9 @@ export function hydrateSourceCleanupPlan(
     findingId: value.findingId,
     sourceManifestId: value.sourceManifestId,
     policy: value.policy,
+    ...(value.selectedAction.strategy === 'separation'
+      ? { separationOffer: value.selectedAction.offer }
+      : {}),
     rights: {
       outcome: value.rightsDecision,
       reasonCodes: value.rightsReasonCodes,
@@ -674,6 +866,7 @@ export function hydratePostCleanupReview(
     outputRightsSnapshotId: value.rights.outputRightsSnapshotId,
     outputRightsSnapshotHash: value.rights.outputRightsSnapshotHash,
     visual: value.visual,
+    ...(value.audio ? { audio: value.audio } : {}),
     rightsReasonCodes: value.rights.reasonCodes,
     reviewedAt: value.reviewedAt,
   })

@@ -102,7 +102,7 @@ export interface SourceCleanupOperationContext {
   sourceManifestId: string
   outputArtifactId: string
   outputManifestId: string
-  strategy: 'trim' | 'crop-reframe' | 'cover'
+  strategy: 'trim' | 'crop-reframe' | 'cover' | 'separation'
 }
 
 export interface LongFormIndexOperationContext {

@@ -5928,7 +5928,7 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.source-cleanups.create": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "command",
       "authMode": "required",
@@ -5936,7 +5936,7 @@
         "projects:write"
       ],
       "inputSchemaRef": "apollo://schemas/create-source-cleanup-request/v1",
-      "outputSchemaRef": "apollo://schemas/source-cleanup-mutated/v1",
+      "outputSchemaRef": "apollo://schemas/source-cleanup-mutated/v2",
       "endpoint": {
         "method": "POST",
         "path": "/v1/projects/{projectId}/source-cleanups"
@@ -5955,14 +5955,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.source-cleanups.list": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/source-cleanup-page/v1",
+      "outputSchemaRef": "apollo://schemas/source-cleanup-page/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/source-cleanups"
@@ -6021,14 +6021,14 @@
       "responseMediaType": "application/json"
     },
     "apollo.projects.source-cleanups.read": {
-      "version": "1.0.0",
+      "version": "1.1.0",
       "exposure": "public",
       "operationKind": "query",
       "authMode": "required",
       "requiredScopes": [
         "projects:read"
       ],
-      "outputSchemaRef": "apollo://schemas/source-cleanup-read/v1",
+      "outputSchemaRef": "apollo://schemas/source-cleanup-read/v2",
       "endpoint": {
         "method": "GET",
         "path": "/v1/projects/{projectId}/source-cleanups/{cleanupPlanId}"
@@ -170040,6 +170040,1486 @@
         }
       }
     },
+    "apollo://schemas/source-cleanup-mutated/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cleanup",
+            "replayed"
+          ],
+          "properties": {
+            "cleanup": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "policyVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "contaminationReportId",
+                    "contaminationReportHash",
+                    "findingId",
+                    "findingHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "sourceManifestId",
+                    "sourceDurationMs",
+                    "sourceImmutable",
+                    "policy",
+                    "candidates",
+                    "selectedStrategy",
+                    "selectedAction",
+                    "decision",
+                    "predictedResidualQuality",
+                    "predictedIntegrity",
+                    "predictedCost",
+                    "rightsDecision",
+                    "rightsReasonCodes",
+                    "postCleanupReviewRequired",
+                    "createdByClientId",
+                    "createdAt",
+                    "planHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "source-cleanup-plan/v1"
+                    },
+                    "policyVersion": {
+                      "const": "source-cleanup-mvp/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contaminationReportId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contaminationReportHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "findingId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "findingHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceDurationMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 86400000
+                    },
+                    "sourceImmutable": {
+                      "const": true
+                    },
+                    "policy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "minResidualQuality",
+                        "minIntegrity",
+                        "maxCost",
+                        "edgeTolerance",
+                        "maxCropFraction",
+                        "maxCoverArea",
+                        "coverColor",
+                        "costs"
+                      ],
+                      "properties": {
+                        "minResidualQuality": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "minIntegrity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "maxCost": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        },
+                        "edgeTolerance": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.2
+                        },
+                        "maxCropFraction": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.4
+                        },
+                        "maxCoverArea": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.4
+                        },
+                        "coverColor": {
+                          "type": "string",
+                          "pattern": "^#[A-F0-9]{6}$"
+                        },
+                        "costs": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "trim",
+                            "crop-reframe",
+                            "cover"
+                          ],
+                          "properties": {
+                            "trim": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "crop-reframe": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "cover": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "strategy",
+                          "eligible",
+                          "predictedResidualQuality",
+                          "predictedIntegrity",
+                          "cost",
+                          "score",
+                          "reasonCodes"
+                        ],
+                        "properties": {
+                          "strategy": {
+                            "enum": [
+                              "trim",
+                              "crop-reframe",
+                              "cover",
+                              "separation",
+                              "reject"
+                            ]
+                          },
+                          "eligible": {
+                            "type": "boolean"
+                          },
+                          "predictedResidualQuality": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "predictedIntegrity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "cost": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000
+                          },
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "maxItems": 128,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Z0-9_]+$"
+                            }
+                          },
+                          "action": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "rangeMs",
+                                  "offer"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "separation"
+                                  },
+                                  "rangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "offer": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "adapterId",
+                                      "adapterVersion",
+                                      "provider",
+                                      "modelRef",
+                                      "configHash",
+                                      "capabilityHash",
+                                      "minDurationMs",
+                                      "maxDurationMs",
+                                      "normalizedCost",
+                                      "predictedSpeechRetention",
+                                      "predictedMusicRemoval",
+                                      "predictedIntegrity",
+                                      "billing"
+                                    ],
+                                    "properties": {
+                                      "adapterId": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "adapterVersion": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "provider": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "modelRef": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "configHash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "capabilityHash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "minDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 3600000
+                                      },
+                                      "maxDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 3600000
+                                      },
+                                      "normalizedCost": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1000000
+                                      },
+                                      "predictedSpeechRetention": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "predictedMusicRemoval": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "predictedIntegrity": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "billing": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "unit",
+                                          "quantity"
+                                        ],
+                                        "properties": {
+                                          "unit": {
+                                            "const": "provider-characters"
+                                          },
+                                          "quantity": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 60000
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "keepRangeMs",
+                                  "removedRangeMs"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "trim"
+                                  },
+                                  "keepRangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "removedRangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "crop",
+                                  "removedRegion"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "crop-reframe"
+                                  },
+                                  "crop": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  },
+                                  "removedRegion": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "rangeMs",
+                                  "region",
+                                  "color"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "cover"
+                                  },
+                                  "rangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "region": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  },
+                                  "color": {
+                                    "type": "string",
+                                    "pattern": "^#[A-F0-9]{6}$"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "reasonCodes"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "reject"
+                                  },
+                                  "reasonCodes": {
+                                    "type": "array",
+                                    "maxItems": 128,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Z0-9_]+$"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "selectedStrategy": {
+                      "enum": [
+                        "trim",
+                        "crop-reframe",
+                        "cover",
+                        "separation",
+                        "reject"
+                      ]
+                    },
+                    "selectedAction": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "rangeMs",
+                            "offer"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "separation"
+                            },
+                            "rangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "offer": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "adapterId",
+                                "adapterVersion",
+                                "provider",
+                                "modelRef",
+                                "configHash",
+                                "capabilityHash",
+                                "minDurationMs",
+                                "maxDurationMs",
+                                "normalizedCost",
+                                "predictedSpeechRetention",
+                                "predictedMusicRemoval",
+                                "predictedIntegrity",
+                                "billing"
+                              ],
+                              "properties": {
+                                "adapterId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "adapterVersion": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "modelRef": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "configHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "capabilityHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "minDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 3600000
+                                },
+                                "maxDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 3600000
+                                },
+                                "normalizedCost": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1000000
+                                },
+                                "predictedSpeechRetention": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "predictedMusicRemoval": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "predictedIntegrity": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "billing": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "unit",
+                                    "quantity"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "const": "provider-characters"
+                                    },
+                                    "quantity": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 60000
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "keepRangeMs",
+                            "removedRangeMs"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "trim"
+                            },
+                            "keepRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "removedRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "crop",
+                            "removedRegion"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "crop-reframe"
+                            },
+                            "crop": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            },
+                            "removedRegion": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "rangeMs",
+                            "region",
+                            "color"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "cover"
+                            },
+                            "rangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "region": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            },
+                            "color": {
+                              "type": "string",
+                              "pattern": "^#[A-F0-9]{6}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "reasonCodes"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "reject"
+                            },
+                            "reasonCodes": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Z0-9_]+$"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "decision": {
+                      "enum": [
+                        "execute",
+                        "reject"
+                      ]
+                    },
+                    "predictedResidualQuality": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "predictedIntegrity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "predictedCost": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "rightsSnapshotId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "rightsSnapshotHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "rightsDecision": {
+                      "enum": [
+                        "allow",
+                        "deny"
+                      ]
+                    },
+                    "rightsReasonCodes": {
+                      "type": "array",
+                      "maxItems": 128,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Z0-9_]+$"
+                      }
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "postCleanupReviewRequired": {
+                      "type": "boolean"
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "planHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "operation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "type",
+                    "status",
+                    "phase",
+                    "cancelable",
+                    "retryable",
+                    "target",
+                    "attempt",
+                    "maxAttempts",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "public-operation/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "type": {
+                      "enum": [
+                        "artifact-render",
+                        "media-ingest",
+                        "project-proxy-render",
+                        "project-final-export",
+                        "source-cleanup"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "waiting",
+                        "retrying",
+                        "succeeded",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "phase": {
+                      "enum": [
+                        "queued",
+                        "assembling",
+                        "probing",
+                        "normalizing",
+                        "transcribing",
+                        "materializing",
+                        "rendering",
+                        "verifying",
+                        "persisting",
+                        "waiting",
+                        "retrying",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "completed"
+                      ],
+                      "properties": {
+                        "completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "unit": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        }
+                      }
+                    },
+                    "cancelable": {
+                      "type": "boolean"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "resource"
+                      ],
+                      "properties": {
+                        "resource": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id",
+                            "manifestId"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "media-artifact"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "manifestId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "postCleanupReview": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "cleanupPlanId",
+                    "cleanupPlanHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "outputArtifactId",
+                    "outputArtifactSha256",
+                    "outputManifestId",
+                    "strategy",
+                    "visual",
+                    "rights",
+                    "passed",
+                    "reviewedAt",
+                    "reviewHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "post-cleanup-review/v1"
+                    },
+                    "cleanupPlanId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "cleanupPlanHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "outputArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "outputManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "strategy": {
+                      "enum": [
+                        "trim",
+                        "crop-reframe",
+                        "cover",
+                        "separation"
+                      ]
+                    },
+                    "visual": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "contaminationRemoved",
+                        "outputPlayable",
+                        "durationAligned",
+                        "framingPreserved",
+                        "residualQuality",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "contaminationRemoved": {
+                          "type": "boolean"
+                        },
+                        "outputPlayable": {
+                          "type": "boolean"
+                        },
+                        "durationAligned": {
+                          "type": "boolean"
+                        },
+                        "framingPreserved": {
+                          "type": "boolean"
+                        },
+                        "residualQuality": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "audio": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "providerBindingVerified",
+                        "isolatedSpeechPresent",
+                        "durationAligned",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "providerBindingVerified": {
+                          "type": "boolean"
+                        },
+                        "isolatedSpeechPresent": {
+                          "type": "boolean"
+                        },
+                        "durationAligned": {
+                          "type": "boolean"
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "rights": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "sourceRightsSnapshotId",
+                        "sourceRightsSnapshotHash",
+                        "outputRightsSnapshotId",
+                        "outputRightsSnapshotHash",
+                        "use",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "sourceRightsSnapshotId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sourceRightsSnapshotHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "outputRightsSnapshotId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "outputRightsSnapshotHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "use": {
+                          "const": "editing"
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "passed": {
+                      "type": "boolean"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/source-cleanup-page/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -171228,6 +172708,1491 @@
         }
       }
     },
+    "apollo://schemas/source-cleanup-page/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cleanups"
+          ],
+          "properties": {
+            "cleanups": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "plan"
+                ],
+                "properties": {
+                  "plan": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "policyVersion",
+                      "id",
+                      "workspaceId",
+                      "projectId",
+                      "contaminationReportId",
+                      "contaminationReportHash",
+                      "findingId",
+                      "findingHash",
+                      "sourceArtifactId",
+                      "sourceArtifactSha256",
+                      "sourceManifestId",
+                      "sourceDurationMs",
+                      "sourceImmutable",
+                      "policy",
+                      "candidates",
+                      "selectedStrategy",
+                      "selectedAction",
+                      "decision",
+                      "predictedResidualQuality",
+                      "predictedIntegrity",
+                      "predictedCost",
+                      "rightsDecision",
+                      "rightsReasonCodes",
+                      "postCleanupReviewRequired",
+                      "createdByClientId",
+                      "createdAt",
+                      "planHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "source-cleanup-plan/v1"
+                      },
+                      "policyVersion": {
+                        "const": "source-cleanup-mvp/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "contaminationReportId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "contaminationReportHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "findingId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "findingHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceManifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceDurationMs": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 86400000
+                      },
+                      "sourceImmutable": {
+                        "const": true
+                      },
+                      "policy": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "minResidualQuality",
+                          "minIntegrity",
+                          "maxCost",
+                          "edgeTolerance",
+                          "maxCropFraction",
+                          "maxCoverArea",
+                          "coverColor",
+                          "costs"
+                        ],
+                        "properties": {
+                          "minResidualQuality": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "minIntegrity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "maxCost": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000
+                          },
+                          "edgeTolerance": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 0.2
+                          },
+                          "maxCropFraction": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 0.4
+                          },
+                          "maxCoverArea": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 0.4
+                          },
+                          "coverColor": {
+                            "type": "string",
+                            "pattern": "^#[A-F0-9]{6}$"
+                          },
+                          "costs": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "trim",
+                              "crop-reframe",
+                              "cover"
+                            ],
+                            "properties": {
+                              "trim": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              },
+                              "crop-reframe": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              },
+                              "cover": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "candidates": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 4,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "eligible",
+                            "predictedResidualQuality",
+                            "predictedIntegrity",
+                            "cost",
+                            "score",
+                            "reasonCodes"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "enum": [
+                                "trim",
+                                "crop-reframe",
+                                "cover",
+                                "separation",
+                                "reject"
+                              ]
+                            },
+                            "eligible": {
+                              "type": "boolean"
+                            },
+                            "predictedResidualQuality": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "predictedIntegrity": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "cost": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "score": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "reasonCodes": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Z0-9_]+$"
+                              }
+                            },
+                            "action": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "strategy",
+                                    "rangeMs",
+                                    "offer"
+                                  ],
+                                  "properties": {
+                                    "strategy": {
+                                      "const": "separation"
+                                    },
+                                    "rangeMs": {
+                                      "type": "array",
+                                      "minItems": 2,
+                                      "maxItems": 2,
+                                      "prefixItems": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 86399999
+                                        },
+                                        {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 86400000
+                                        }
+                                      ],
+                                      "items": false
+                                    },
+                                    "offer": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "adapterId",
+                                        "adapterVersion",
+                                        "provider",
+                                        "modelRef",
+                                        "configHash",
+                                        "capabilityHash",
+                                        "minDurationMs",
+                                        "maxDurationMs",
+                                        "normalizedCost",
+                                        "predictedSpeechRetention",
+                                        "predictedMusicRemoval",
+                                        "predictedIntegrity",
+                                        "billing"
+                                      ],
+                                      "properties": {
+                                        "adapterId": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 128
+                                        },
+                                        "adapterVersion": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 128
+                                        },
+                                        "provider": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 128
+                                        },
+                                        "modelRef": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 128
+                                        },
+                                        "configHash": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "capabilityHash": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "minDurationMs": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 3600000
+                                        },
+                                        "maxDurationMs": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 3600000
+                                        },
+                                        "normalizedCost": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1000000
+                                        },
+                                        "predictedSpeechRetention": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "predictedMusicRemoval": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "predictedIntegrity": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "billing": {
+                                          "type": "object",
+                                          "additionalProperties": false,
+                                          "required": [
+                                            "unit",
+                                            "quantity"
+                                          ],
+                                          "properties": {
+                                            "unit": {
+                                              "const": "provider-characters"
+                                            },
+                                            "quantity": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 60000
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "strategy",
+                                    "keepRangeMs",
+                                    "removedRangeMs"
+                                  ],
+                                  "properties": {
+                                    "strategy": {
+                                      "const": "trim"
+                                    },
+                                    "keepRangeMs": {
+                                      "type": "array",
+                                      "minItems": 2,
+                                      "maxItems": 2,
+                                      "prefixItems": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 86399999
+                                        },
+                                        {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 86400000
+                                        }
+                                      ],
+                                      "items": false
+                                    },
+                                    "removedRangeMs": {
+                                      "type": "array",
+                                      "minItems": 2,
+                                      "maxItems": 2,
+                                      "prefixItems": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 86399999
+                                        },
+                                        {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 86400000
+                                        }
+                                      ],
+                                      "items": false
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "strategy",
+                                    "crop",
+                                    "removedRegion"
+                                  ],
+                                  "properties": {
+                                    "strategy": {
+                                      "const": "crop-reframe"
+                                    },
+                                    "crop": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "x",
+                                        "y",
+                                        "width",
+                                        "height"
+                                      ],
+                                      "properties": {
+                                        "x": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "y": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "width": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "height": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        }
+                                      }
+                                    },
+                                    "removedRegion": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "x",
+                                        "y",
+                                        "width",
+                                        "height"
+                                      ],
+                                      "properties": {
+                                        "x": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "y": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "width": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "height": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "strategy",
+                                    "rangeMs",
+                                    "region",
+                                    "color"
+                                  ],
+                                  "properties": {
+                                    "strategy": {
+                                      "const": "cover"
+                                    },
+                                    "rangeMs": {
+                                      "type": "array",
+                                      "minItems": 2,
+                                      "maxItems": 2,
+                                      "prefixItems": [
+                                        {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 86399999
+                                        },
+                                        {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 86400000
+                                        }
+                                      ],
+                                      "items": false
+                                    },
+                                    "region": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "x",
+                                        "y",
+                                        "width",
+                                        "height"
+                                      ],
+                                      "properties": {
+                                        "x": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "y": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "width": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "height": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 1
+                                        }
+                                      }
+                                    },
+                                    "color": {
+                                      "type": "string",
+                                      "pattern": "^#[A-F0-9]{6}$"
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "strategy",
+                                    "reasonCodes"
+                                  ],
+                                  "properties": {
+                                    "strategy": {
+                                      "const": "reject"
+                                    },
+                                    "reasonCodes": {
+                                      "type": "array",
+                                      "maxItems": 128,
+                                      "uniqueItems": true,
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Z0-9_]+$"
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "selectedStrategy": {
+                        "enum": [
+                          "trim",
+                          "crop-reframe",
+                          "cover",
+                          "separation",
+                          "reject"
+                        ]
+                      },
+                      "selectedAction": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "strategy",
+                              "rangeMs",
+                              "offer"
+                            ],
+                            "properties": {
+                              "strategy": {
+                                "const": "separation"
+                              },
+                              "rangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              },
+                              "offer": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "adapterId",
+                                  "adapterVersion",
+                                  "provider",
+                                  "modelRef",
+                                  "configHash",
+                                  "capabilityHash",
+                                  "minDurationMs",
+                                  "maxDurationMs",
+                                  "normalizedCost",
+                                  "predictedSpeechRetention",
+                                  "predictedMusicRemoval",
+                                  "predictedIntegrity",
+                                  "billing"
+                                ],
+                                "properties": {
+                                  "adapterId": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "adapterVersion": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "provider": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "modelRef": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 128
+                                  },
+                                  "configHash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "capabilityHash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "minDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3600000
+                                  },
+                                  "maxDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3600000
+                                  },
+                                  "normalizedCost": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1000000
+                                  },
+                                  "predictedSpeechRetention": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "predictedMusicRemoval": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "predictedIntegrity": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "billing": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "unit",
+                                      "quantity"
+                                    ],
+                                    "properties": {
+                                      "unit": {
+                                        "const": "provider-characters"
+                                      },
+                                      "quantity": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 60000
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "strategy",
+                              "keepRangeMs",
+                              "removedRangeMs"
+                            ],
+                            "properties": {
+                              "strategy": {
+                                "const": "trim"
+                              },
+                              "keepRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              },
+                              "removedRangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "strategy",
+                              "crop",
+                              "removedRegion"
+                            ],
+                            "properties": {
+                              "strategy": {
+                                "const": "crop-reframe"
+                              },
+                              "crop": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "x",
+                                  "y",
+                                  "width",
+                                  "height"
+                                ],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  }
+                                }
+                              },
+                              "removedRegion": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "x",
+                                  "y",
+                                  "width",
+                                  "height"
+                                ],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "strategy",
+                              "rangeMs",
+                              "region",
+                              "color"
+                            ],
+                            "properties": {
+                              "strategy": {
+                                "const": "cover"
+                              },
+                              "rangeMs": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "prefixItems": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 86399999
+                                  },
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 86400000
+                                  }
+                                ],
+                                "items": false
+                              },
+                              "region": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "x",
+                                  "y",
+                                  "width",
+                                  "height"
+                                ],
+                                "properties": {
+                                  "x": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "y": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 1
+                                  }
+                                }
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[A-F0-9]{6}$"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "strategy",
+                              "reasonCodes"
+                            ],
+                            "properties": {
+                              "strategy": {
+                                "const": "reject"
+                              },
+                              "reasonCodes": {
+                                "type": "array",
+                                "maxItems": 128,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z0-9_]+$"
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "decision": {
+                        "enum": [
+                          "execute",
+                          "reject"
+                        ]
+                      },
+                      "predictedResidualQuality": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "predictedIntegrity": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "predictedCost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      "rightsSnapshotId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "rightsSnapshotHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "rightsDecision": {
+                        "enum": [
+                          "allow",
+                          "deny"
+                        ]
+                      },
+                      "rightsReasonCodes": {
+                        "type": "array",
+                        "maxItems": 128,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Z0-9_]+$"
+                        }
+                      },
+                      "operationId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "outputArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "outputManifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "postCleanupReviewRequired": {
+                        "type": "boolean"
+                      },
+                      "createdByClientId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "planHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "operation": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "id",
+                      "type",
+                      "status",
+                      "phase",
+                      "cancelable",
+                      "retryable",
+                      "target",
+                      "attempt",
+                      "maxAttempts",
+                      "createdAt",
+                      "updatedAt"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "public-operation/v1"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "type": {
+                        "enum": [
+                          "artifact-render",
+                          "media-ingest",
+                          "project-proxy-render",
+                          "project-final-export",
+                          "source-cleanup"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "queued",
+                          "running",
+                          "waiting",
+                          "retrying",
+                          "succeeded",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "phase": {
+                        "enum": [
+                          "queued",
+                          "assembling",
+                          "probing",
+                          "normalizing",
+                          "transcribing",
+                          "materializing",
+                          "rendering",
+                          "verifying",
+                          "persisting",
+                          "waiting",
+                          "retrying",
+                          "completed",
+                          "failed",
+                          "canceled"
+                        ]
+                      },
+                      "progress": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "completed"
+                        ],
+                        "properties": {
+                          "completed": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "total": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "unit": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "cancelable": {
+                        "type": "boolean"
+                      },
+                      "retryable": {
+                        "type": "boolean"
+                      },
+                      "target": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "type",
+                          "id",
+                          "manifestId"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "media-artifact"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "manifestId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "result": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "resource"
+                        ],
+                        "properties": {
+                          "resource": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "type",
+                              "id",
+                              "manifestId"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "media-artifact"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              },
+                              "manifestId": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "error": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "code",
+                          "message",
+                          "retryable"
+                        ],
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                          },
+                          "message": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "retryable": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "attempt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxAttempts": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "startedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "completedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  },
+                  "postCleanupReview": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "cleanupPlanId",
+                      "cleanupPlanHash",
+                      "sourceArtifactId",
+                      "sourceArtifactSha256",
+                      "outputArtifactId",
+                      "outputArtifactSha256",
+                      "outputManifestId",
+                      "strategy",
+                      "visual",
+                      "rights",
+                      "passed",
+                      "reviewedAt",
+                      "reviewHash"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "post-cleanup-review/v1"
+                      },
+                      "cleanupPlanId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "cleanupPlanHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sourceArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "outputArtifactId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "outputArtifactSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "outputManifestId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "strategy": {
+                        "enum": [
+                          "trim",
+                          "crop-reframe",
+                          "cover",
+                          "separation"
+                        ]
+                      },
+                      "visual": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "passed",
+                          "contaminationRemoved",
+                          "outputPlayable",
+                          "durationAligned",
+                          "framingPreserved",
+                          "residualQuality",
+                          "reasonCodes"
+                        ],
+                        "properties": {
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "contaminationRemoved": {
+                            "type": "boolean"
+                          },
+                          "outputPlayable": {
+                            "type": "boolean"
+                          },
+                          "durationAligned": {
+                            "type": "boolean"
+                          },
+                          "framingPreserved": {
+                            "type": "boolean"
+                          },
+                          "residualQuality": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "maxItems": 128,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Z0-9_]+$"
+                            }
+                          }
+                        }
+                      },
+                      "audio": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "passed",
+                          "providerBindingVerified",
+                          "isolatedSpeechPresent",
+                          "durationAligned",
+                          "reasonCodes"
+                        ],
+                        "properties": {
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "providerBindingVerified": {
+                            "type": "boolean"
+                          },
+                          "isolatedSpeechPresent": {
+                            "type": "boolean"
+                          },
+                          "durationAligned": {
+                            "type": "boolean"
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "maxItems": 128,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Z0-9_]+$"
+                            }
+                          }
+                        }
+                      },
+                      "rights": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "passed",
+                          "sourceRightsSnapshotId",
+                          "sourceRightsSnapshotHash",
+                          "outputRightsSnapshotId",
+                          "outputRightsSnapshotHash",
+                          "use",
+                          "reasonCodes"
+                        ],
+                        "properties": {
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "sourceRightsSnapshotId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceRightsSnapshotHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "outputRightsSnapshotId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "outputRightsSnapshotHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "use": {
+                            "const": "editing"
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "maxItems": 128,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Z0-9_]+$"
+                            }
+                          }
+                        }
+                      },
+                      "passed": {
+                        "type": "boolean"
+                      },
+                      "reviewedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "reviewHash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "nextCursor": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/source-cleanup-read/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -172312,6 +175277,1482 @@
                           "type": "number",
                           "minimum": 0,
                           "maximum": 1
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "rights": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "sourceRightsSnapshotId",
+                        "sourceRightsSnapshotHash",
+                        "outputRightsSnapshotId",
+                        "outputRightsSnapshotHash",
+                        "use",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "sourceRightsSnapshotId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sourceRightsSnapshotHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "outputRightsSnapshotId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "outputRightsSnapshotHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "use": {
+                          "const": "editing"
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "passed": {
+                      "type": "boolean"
+                    },
+                    "reviewedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "reviewHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/source-cleanup-read/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cleanup"
+          ],
+          "properties": {
+            "cleanup": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan"
+              ],
+              "properties": {
+                "plan": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "policyVersion",
+                    "id",
+                    "workspaceId",
+                    "projectId",
+                    "contaminationReportId",
+                    "contaminationReportHash",
+                    "findingId",
+                    "findingHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "sourceManifestId",
+                    "sourceDurationMs",
+                    "sourceImmutable",
+                    "policy",
+                    "candidates",
+                    "selectedStrategy",
+                    "selectedAction",
+                    "decision",
+                    "predictedResidualQuality",
+                    "predictedIntegrity",
+                    "predictedCost",
+                    "rightsDecision",
+                    "rightsReasonCodes",
+                    "postCleanupReviewRequired",
+                    "createdByClientId",
+                    "createdAt",
+                    "planHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "source-cleanup-plan/v1"
+                    },
+                    "policyVersion": {
+                      "const": "source-cleanup-mvp/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contaminationReportId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "contaminationReportHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "findingId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "findingHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceDurationMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 86400000
+                    },
+                    "sourceImmutable": {
+                      "const": true
+                    },
+                    "policy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "minResidualQuality",
+                        "minIntegrity",
+                        "maxCost",
+                        "edgeTolerance",
+                        "maxCropFraction",
+                        "maxCoverArea",
+                        "coverColor",
+                        "costs"
+                      ],
+                      "properties": {
+                        "minResidualQuality": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "minIntegrity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "maxCost": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        },
+                        "edgeTolerance": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.2
+                        },
+                        "maxCropFraction": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.4
+                        },
+                        "maxCoverArea": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 0.4
+                        },
+                        "coverColor": {
+                          "type": "string",
+                          "pattern": "^#[A-F0-9]{6}$"
+                        },
+                        "costs": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "trim",
+                            "crop-reframe",
+                            "cover"
+                          ],
+                          "properties": {
+                            "trim": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "crop-reframe": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            },
+                            "cover": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1000000
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "minItems": 3,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "strategy",
+                          "eligible",
+                          "predictedResidualQuality",
+                          "predictedIntegrity",
+                          "cost",
+                          "score",
+                          "reasonCodes"
+                        ],
+                        "properties": {
+                          "strategy": {
+                            "enum": [
+                              "trim",
+                              "crop-reframe",
+                              "cover",
+                              "separation",
+                              "reject"
+                            ]
+                          },
+                          "eligible": {
+                            "type": "boolean"
+                          },
+                          "predictedResidualQuality": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "predictedIntegrity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "cost": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1000000
+                          },
+                          "score": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "reasonCodes": {
+                            "type": "array",
+                            "maxItems": 128,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Z0-9_]+$"
+                            }
+                          },
+                          "action": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "rangeMs",
+                                  "offer"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "separation"
+                                  },
+                                  "rangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "offer": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "adapterId",
+                                      "adapterVersion",
+                                      "provider",
+                                      "modelRef",
+                                      "configHash",
+                                      "capabilityHash",
+                                      "minDurationMs",
+                                      "maxDurationMs",
+                                      "normalizedCost",
+                                      "predictedSpeechRetention",
+                                      "predictedMusicRemoval",
+                                      "predictedIntegrity",
+                                      "billing"
+                                    ],
+                                    "properties": {
+                                      "adapterId": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "adapterVersion": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "provider": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "modelRef": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 128
+                                      },
+                                      "configHash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "capabilityHash": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "minDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 3600000
+                                      },
+                                      "maxDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 3600000
+                                      },
+                                      "normalizedCost": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1000000
+                                      },
+                                      "predictedSpeechRetention": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "predictedMusicRemoval": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "predictedIntegrity": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "billing": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "unit",
+                                          "quantity"
+                                        ],
+                                        "properties": {
+                                          "unit": {
+                                            "const": "provider-characters"
+                                          },
+                                          "quantity": {
+                                            "type": "integer",
+                                            "minimum": 1,
+                                            "maximum": 60000
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "keepRangeMs",
+                                  "removedRangeMs"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "trim"
+                                  },
+                                  "keepRangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "removedRangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "crop",
+                                  "removedRegion"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "crop-reframe"
+                                  },
+                                  "crop": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  },
+                                  "removedRegion": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "rangeMs",
+                                  "region",
+                                  "color"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "cover"
+                                  },
+                                  "rangeMs": {
+                                    "type": "array",
+                                    "minItems": 2,
+                                    "maxItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 86399999
+                                      },
+                                      {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 86400000
+                                      }
+                                    ],
+                                    "items": false
+                                  },
+                                  "region": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "x",
+                                      "y",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "properties": {
+                                      "x": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "y": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "width": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "height": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 1
+                                      }
+                                    }
+                                  },
+                                  "color": {
+                                    "type": "string",
+                                    "pattern": "^#[A-F0-9]{6}$"
+                                  }
+                                }
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "strategy",
+                                  "reasonCodes"
+                                ],
+                                "properties": {
+                                  "strategy": {
+                                    "const": "reject"
+                                  },
+                                  "reasonCodes": {
+                                    "type": "array",
+                                    "maxItems": 128,
+                                    "uniqueItems": true,
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Z0-9_]+$"
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "selectedStrategy": {
+                      "enum": [
+                        "trim",
+                        "crop-reframe",
+                        "cover",
+                        "separation",
+                        "reject"
+                      ]
+                    },
+                    "selectedAction": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "rangeMs",
+                            "offer"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "separation"
+                            },
+                            "rangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "offer": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "adapterId",
+                                "adapterVersion",
+                                "provider",
+                                "modelRef",
+                                "configHash",
+                                "capabilityHash",
+                                "minDurationMs",
+                                "maxDurationMs",
+                                "normalizedCost",
+                                "predictedSpeechRetention",
+                                "predictedMusicRemoval",
+                                "predictedIntegrity",
+                                "billing"
+                              ],
+                              "properties": {
+                                "adapterId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "adapterVersion": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "provider": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "modelRef": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "configHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "capabilityHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "minDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 3600000
+                                },
+                                "maxDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 3600000
+                                },
+                                "normalizedCost": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1000000
+                                },
+                                "predictedSpeechRetention": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "predictedMusicRemoval": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "predictedIntegrity": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "billing": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "unit",
+                                    "quantity"
+                                  ],
+                                  "properties": {
+                                    "unit": {
+                                      "const": "provider-characters"
+                                    },
+                                    "quantity": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 60000
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "keepRangeMs",
+                            "removedRangeMs"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "trim"
+                            },
+                            "keepRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "removedRangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "crop",
+                            "removedRegion"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "crop-reframe"
+                            },
+                            "crop": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            },
+                            "removedRegion": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "rangeMs",
+                            "region",
+                            "color"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "cover"
+                            },
+                            "rangeMs": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 2,
+                              "prefixItems": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 86399999
+                                },
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 86400000
+                                }
+                              ],
+                              "items": false
+                            },
+                            "region": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height"
+                              ],
+                              "properties": {
+                                "x": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "y": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                "width": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                },
+                                "height": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1
+                                }
+                              }
+                            },
+                            "color": {
+                              "type": "string",
+                              "pattern": "^#[A-F0-9]{6}$"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "strategy",
+                            "reasonCodes"
+                          ],
+                          "properties": {
+                            "strategy": {
+                              "const": "reject"
+                            },
+                            "reasonCodes": {
+                              "type": "array",
+                              "maxItems": 128,
+                              "uniqueItems": true,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Z0-9_]+$"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "decision": {
+                      "enum": [
+                        "execute",
+                        "reject"
+                      ]
+                    },
+                    "predictedResidualQuality": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "predictedIntegrity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "predictedCost": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    },
+                    "rightsSnapshotId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "rightsSnapshotHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "rightsDecision": {
+                      "enum": [
+                        "allow",
+                        "deny"
+                      ]
+                    },
+                    "rightsReasonCodes": {
+                      "type": "array",
+                      "maxItems": 128,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Z0-9_]+$"
+                      }
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "postCleanupReviewRequired": {
+                      "type": "boolean"
+                    },
+                    "createdByClientId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "planHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "operation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "id",
+                    "type",
+                    "status",
+                    "phase",
+                    "cancelable",
+                    "retryable",
+                    "target",
+                    "attempt",
+                    "maxAttempts",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "public-operation/v1"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "type": {
+                      "enum": [
+                        "artifact-render",
+                        "media-ingest",
+                        "project-proxy-render",
+                        "project-final-export",
+                        "source-cleanup"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "queued",
+                        "running",
+                        "waiting",
+                        "retrying",
+                        "succeeded",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "phase": {
+                      "enum": [
+                        "queued",
+                        "assembling",
+                        "probing",
+                        "normalizing",
+                        "transcribing",
+                        "materializing",
+                        "rendering",
+                        "verifying",
+                        "persisting",
+                        "waiting",
+                        "retrying",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "completed"
+                      ],
+                      "properties": {
+                        "completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "unit": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        }
+                      }
+                    },
+                    "cancelable": {
+                      "type": "boolean"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type",
+                        "id",
+                        "manifestId"
+                      ],
+                      "properties": {
+                        "type": {
+                          "const": "media-artifact"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "manifestId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "resource"
+                      ],
+                      "properties": {
+                        "resource": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "type",
+                            "id",
+                            "manifestId"
+                          ],
+                          "properties": {
+                            "type": {
+                              "const": "media-artifact"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "manifestId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      }
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "startedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "postCleanupReview": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "cleanupPlanId",
+                    "cleanupPlanHash",
+                    "sourceArtifactId",
+                    "sourceArtifactSha256",
+                    "outputArtifactId",
+                    "outputArtifactSha256",
+                    "outputManifestId",
+                    "strategy",
+                    "visual",
+                    "rights",
+                    "passed",
+                    "reviewedAt",
+                    "reviewHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "post-cleanup-review/v1"
+                    },
+                    "cleanupPlanId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "cleanupPlanHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "sourceArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sourceArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "outputArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "outputArtifactSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "outputManifestId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "strategy": {
+                      "enum": [
+                        "trim",
+                        "crop-reframe",
+                        "cover",
+                        "separation"
+                      ]
+                    },
+                    "visual": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "contaminationRemoved",
+                        "outputPlayable",
+                        "durationAligned",
+                        "framingPreserved",
+                        "residualQuality",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "contaminationRemoved": {
+                          "type": "boolean"
+                        },
+                        "outputPlayable": {
+                          "type": "boolean"
+                        },
+                        "durationAligned": {
+                          "type": "boolean"
+                        },
+                        "framingPreserved": {
+                          "type": "boolean"
+                        },
+                        "residualQuality": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "reasonCodes": {
+                          "type": "array",
+                          "maxItems": 128,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Z0-9_]+$"
+                          }
+                        }
+                      }
+                    },
+                    "audio": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "passed",
+                        "providerBindingVerified",
+                        "isolatedSpeechPresent",
+                        "durationAligned",
+                        "reasonCodes"
+                      ],
+                      "properties": {
+                        "passed": {
+                          "type": "boolean"
+                        },
+                        "providerBindingVerified": {
+                          "type": "boolean"
+                        },
+                        "isolatedSpeechPresent": {
+                          "type": "boolean"
+                        },
+                        "durationAligned": {
+                          "type": "boolean"
                         },
                         "reasonCodes": {
                           "type": "array",

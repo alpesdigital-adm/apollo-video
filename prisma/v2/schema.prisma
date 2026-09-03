@@ -8232,6 +8232,7 @@ model V2SourceCleanupResult {
   outputManifestId         String   @db.VarChar(128)
   strategy                 String   @db.VarChar(32)
   visualPassed             Boolean
+  audioPassed              Boolean?
   rightsPassed             Boolean
   passed                   Boolean
   residualQuality          Float

@@ -10728,8 +10728,51 @@ const sourceCleanupReasonCodesSchema = {
     pattern: '^[A-Z0-9_]+$',
   },
 }
+const sourceSeparationOfferSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'adapterId', 'adapterVersion', 'provider', 'modelRef',
+    'configHash', 'capabilityHash', 'minDurationMs', 'maxDurationMs',
+    'normalizedCost', 'predictedSpeechRetention',
+    'predictedMusicRemoval', 'predictedIntegrity', 'billing',
+  ],
+  properties: {
+    adapterId: idSchema,
+    adapterVersion: idSchema,
+    provider: idSchema,
+    modelRef: idSchema,
+    configHash: sha256Schema,
+    capabilityHash: sha256Schema,
+    minDurationMs: { type: 'integer', minimum: 1, maximum: 3_600_000 },
+    maxDurationMs: { type: 'integer', minimum: 1, maximum: 3_600_000 },
+    normalizedCost: { type: 'number', minimum: 0, maximum: 1_000_000 },
+    predictedSpeechRetention: { type: 'number', minimum: 0, maximum: 1 },
+    predictedMusicRemoval: { type: 'number', minimum: 0, maximum: 1 },
+    predictedIntegrity: { type: 'number', minimum: 0, maximum: 1 },
+    billing: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['unit', 'quantity'],
+      properties: {
+        unit: { const: 'provider-characters' },
+        quantity: { type: 'integer', minimum: 1, maximum: 60_000 },
+      },
+    },
+  },
+}
 const sourceCleanupActionSchema = {
   oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['strategy', 'rangeMs', 'offer'],
+      properties: {
+        strategy: { const: 'separation' },
+        rangeMs: contaminationRangeMsSchema,
+        offer: sourceSeparationOfferSchema,
+      },
+    },
     {
       type: 'object',
       additionalProperties: false,
@@ -10786,7 +10829,7 @@ const sourceCleanupCandidateSchema = {
   ],
   properties: {
     strategy: {
-      enum: ['trim', 'crop-reframe', 'cover', 'reject'],
+      enum: ['trim', 'crop-reframe', 'cover', 'separation', 'reject'],
     },
     eligible: { type: 'boolean' },
     predictedResidualQuality: {
@@ -10861,11 +10904,11 @@ const sourceCleanupPlanSchema = {
     candidates: {
       type: 'array',
       minItems: 3,
-      maxItems: 3,
+      maxItems: 4,
       items: sourceCleanupCandidateSchema,
     },
     selectedStrategy: {
-      enum: ['trim', 'crop-reframe', 'cover', 'reject'],
+      enum: ['trim', 'crop-reframe', 'cover', 'separation', 'reject'],
     },
     selectedAction: sourceCleanupActionSchema,
     decision: { enum: ['execute', 'reject'] },
@@ -10925,7 +10968,7 @@ const postCleanupReviewSchema = {
     outputArtifactId: idSchema,
     outputArtifactSha256: sha256Schema,
     outputManifestId: idSchema,
-    strategy: { enum: ['trim', 'crop-reframe', 'cover'] },
+    strategy: { enum: ['trim', 'crop-reframe', 'cover', 'separation'] },
     visual: {
       type: 'object',
       additionalProperties: false,
@@ -10949,6 +10992,21 @@ const postCleanupReviewSchema = {
           minimum: 0,
           maximum: 1,
         },
+        reasonCodes: sourceCleanupReasonCodesSchema,
+      },
+    },
+    audio: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'passed', 'providerBindingVerified', 'isolatedSpeechPresent',
+        'durationAligned', 'reasonCodes',
+      ],
+      properties: {
+        passed: { type: 'boolean' },
+        providerBindingVerified: { type: 'boolean' },
+        isolatedSpeechPresent: { type: 'boolean' },
+        durationAligned: { type: 'boolean' },
         reasonCodes: sourceCleanupReasonCodesSchema,
       },
     },
@@ -10979,7 +11037,50 @@ const postCleanupReviewSchema = {
     reviewHash: sha256Schema,
   },
 }
-const sourceCleanupRecordSchema = {
+const sourceCleanupActionSchemaV1 = {
+  oneOf: sourceCleanupActionSchema.oneOf.filter((entry) =>
+    entry.properties.strategy.const !== 'separation'),
+}
+const sourceCleanupCandidateSchemaV1 = {
+  ...sourceCleanupCandidateSchema,
+  properties: {
+    ...sourceCleanupCandidateSchema.properties,
+    strategy: { enum: ['trim', 'crop-reframe', 'cover', 'reject'] },
+    action: sourceCleanupActionSchemaV1,
+  },
+}
+const sourceCleanupPlanSchemaV1 = {
+  ...sourceCleanupPlanSchema,
+  properties: {
+    ...sourceCleanupPlanSchema.properties,
+    candidates: {
+      type: 'array', minItems: 3, maxItems: 3,
+      items: sourceCleanupCandidateSchemaV1,
+    },
+    selectedStrategy: { enum: ['trim', 'crop-reframe', 'cover', 'reject'] },
+    selectedAction: sourceCleanupActionSchemaV1,
+  },
+}
+const { audio: _sourceCleanupAudioV2, ...postCleanupReviewPropertiesV1 } =
+  postCleanupReviewSchema.properties
+const postCleanupReviewSchemaV1 = {
+  ...postCleanupReviewSchema,
+  properties: {
+    ...postCleanupReviewPropertiesV1,
+    strategy: { enum: ['trim', 'crop-reframe', 'cover'] },
+  },
+}
+const sourceCleanupRecordSchemaV1 = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['plan'],
+  properties: {
+    plan: sourceCleanupPlanSchemaV1,
+    operation: publicOperationSchemaV5,
+    postCleanupReview: postCleanupReviewSchemaV1,
+  },
+}
+const sourceCleanupRecordSchemaV2 = {
   type: 'object',
   additionalProperties: false,
   required: ['plan'],
@@ -19394,7 +19495,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['cleanup', 'replayed'],
       properties: {
-        cleanup: sourceCleanupRecordSchema,
+        cleanup: sourceCleanupRecordSchemaV1,
         replayed: { type: 'boolean' },
       },
     }),
@@ -19405,7 +19506,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['cleanup'],
       properties: {
-        cleanup: sourceCleanupRecordSchema,
+        cleanup: sourceCleanupRecordSchemaV1,
       },
     }),
   ),
@@ -19418,8 +19519,29 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         cleanups: {
           type: 'array',
           maxItems: 100,
-          items: sourceCleanupRecordSchema,
+          items: sourceCleanupRecordSchemaV1,
         },
+        nextCursor: idSchema,
+      },
+    }),
+  ),
+  defineSchema('source-cleanup-mutated', 2, 'Created, rejected or replayed source-cleanup plan with provider-bound separation',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['cleanup', 'replayed'],
+      properties: { cleanup: sourceCleanupRecordSchemaV2, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema('source-cleanup-read', 2, 'Read one source-cleanup plan, provider comparison, operation and mandatory review',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['cleanup'],
+      properties: { cleanup: sourceCleanupRecordSchemaV2 },
+    }),
+  ),
+  defineSchema('source-cleanup-page', 2, 'Cursor page of source-cleanup plans including provider-bound separation',
+    successSchema({
+      type: 'object', additionalProperties: false, required: ['cleanups'],
+      properties: {
+        cleanups: { type: 'array', maxItems: 100, items: sourceCleanupRecordSchemaV2 },
         nextCursor: idSchema,
       },
     }),

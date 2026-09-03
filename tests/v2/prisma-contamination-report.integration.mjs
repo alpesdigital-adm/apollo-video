@@ -9,6 +9,7 @@ import {
   rm,
 } from 'node:fs/promises'
 import net from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -84,7 +85,7 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
   skip:
     process.env.APOLLO_CONTAMINATION_E2E !== '1' &&
     'set APOLLO_CONTAMINATION_E2E=1 and use an isolated V2 database',
-  timeout: 120_000,
+  timeout: 180_000,
 }, async () => {
   assert.ok(
     process.env.V2_DATABASE_URL,
@@ -207,6 +208,9 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
   )
   let server
   let serverLogs = ''
+  let providerServer
+  let providerBaseUrl = ''
+  let providerCalls = 0
 
   try {
     await client.$executeRawUnsafe(
@@ -280,6 +284,29 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       resolve('tests/fixtures/contamination', fixture.file),
       artifactPath,
     )
+    providerServer = createHttpServer((request, response) => {
+      const chunks = []
+      request.on('data', (chunk) => chunks.push(chunk))
+      request.on('end', () => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/v1/audio-isolation')
+        assert.equal(request.headers['xi-api-key'], 'controlled-e2e-key')
+        assert.ok(Buffer.concat(chunks).byteLength > 1_024)
+        providerCalls += 1
+        response.writeHead(200, {
+          'content-type': 'audio/mpeg',
+          'request-id': `voice-isolation-e2e-${providerCalls}`,
+        })
+        response.end(readFileSync(artifactPath))
+      })
+    })
+    await new Promise((resolveListen, rejectListen) => {
+      providerServer.once('error', rejectListen)
+      providerServer.listen(0, '127.0.0.1', resolveListen)
+    })
+    const providerAddress = providerServer.address()
+    assert.ok(providerAddress && typeof providerAddress === 'object')
+    providerBaseUrl = `http://127.0.0.1:${providerAddress.port}`
     const mediaManifest = createMediaArtifactManifestV2({
       artifactKey,
       artifactSha256: fixture.sha256,
@@ -503,6 +530,11 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
           NODE_ENV: 'production',
           __NEXT_PROCESSED_ENV: 'true',
           APOLLO_API_ENVIRONMENT: 'production',
+          APOLLO_V2_ELEVENLABS_API_KEY: 'controlled-e2e-key',
+          APOLLO_V2_ELEVENLABS_BASE_URL: providerBaseUrl,
+          APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT:
+            join(artifactRoot, 'cleanup-work'),
+          APOLLO_V2_VOICE_ISOLATION_MIN_DURATION_MS: '1000',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -848,6 +880,9 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       APOLLO_V2_RENDER_HEARTBEAT_MS: '10000',
       APOLLO_V2_WORKER_RETRY_BASE_MS: '1',
       APOLLO_V2_WORKER_RETRY_MAX_MS: '2',
+      APOLLO_V2_ELEVENLABS_API_KEY: 'controlled-e2e-key',
+      APOLLO_V2_ELEVENLABS_BASE_URL: providerBaseUrl,
+      APOLLO_V2_VOICE_ISOLATION_MIN_DURATION_MS: '1000',
       APOLLO_PROTECTED_PAYLOAD_KEY_ID:
         'source-cleanup-e2e-key',
       APOLLO_PROTECTED_PAYLOAD_KEY:
@@ -1043,6 +1078,79 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
       { headers: { authorization } },
     )
     assert.equal(restoredResponse.status, 200)
+
+    const musicReportResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `contamination-separation-${suffix}`,
+      },
+      body: JSON.stringify({
+        ...requestBody,
+        observations: [{
+          id: `observation-separable-music-${suffix}`,
+          kind: 'music',
+          rangeMs: [0, 2_000],
+          region: null,
+          confidence: 0.99,
+          detector: {
+            provider: 'apollo',
+            model: 'source-separation-e2e',
+            version: '1.0.0',
+          },
+          signals: {
+            musicLikelihood: 0.99,
+            speechLikelihood: 0.9,
+            separableStem: true,
+            spectralPersistence: 0.9,
+          },
+        }],
+        protectedRegions: [],
+      }),
+    })
+    const musicReportPayload = await musicReportResponse.json()
+    assert.equal(musicReportResponse.status, 201, JSON.stringify(musicReportPayload))
+    const musicReport = musicReportPayload.data.report
+    const separationResponse = await fetch(cleanupEndpoint, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'idempotency-key': `source-separation-${suffix}`,
+      },
+      body: JSON.stringify({
+        contaminationReportId: musicReport.id,
+        expectedReportHash: musicReport.reportHash,
+        findingId: musicReport.findings[0].id,
+      }),
+    })
+    const separationPayload = await separationResponse.json()
+    assert.equal(separationResponse.status, 202, JSON.stringify(separationPayload))
+    assert.equal(separationPayload.data.cleanup.plan.selectedStrategy, 'separation')
+    assert.equal(separationPayload.data.cleanup.plan.candidates.length, 4)
+    assert.equal(separationPayload.data.cleanup.plan.selectedAction.offer.provider, 'elevenlabs')
+    assert.equal(providerCalls, 0, 'planning must not call the paid provider')
+    assert.deepEqual(
+      await runCleanupWorker(`source-separation-e2e-worker-${suffix}`),
+      {
+        operationId: separationPayload.data.cleanup.operation.id,
+        status: 'succeeded',
+      },
+    )
+    assert.equal(providerCalls, 1)
+    const separatedRead = await fetch(
+      `${cleanupEndpoint}/${separationPayload.data.cleanup.plan.id}`,
+      { headers: { authorization } },
+    )
+    const separatedPayload = await separatedRead.json()
+    assert.equal(separatedRead.status, 200, JSON.stringify(separatedPayload))
+    assert.equal(separatedPayload.data.cleanup.postCleanupReview.passed, true)
+    assert.equal(separatedPayload.data.cleanup.postCleanupReview.audio.passed, true)
+    assert.equal(separatedPayload.data.cleanup.postCleanupReview.audio.providerBindingVerified, true)
+    assert.equal(
+      await client.v2MediaArtifact.count({ where: { workspaceId } }),
+      artifactCountBefore + 2,
+      'visual cleanup and separation must each add one immutable derivative',
+    )
   } catch (error) {
     if (serverLogs) {
       error.message += `\nNext logs:\n${serverLogs.slice(-8_000)}`
@@ -1050,6 +1158,9 @@ test('T-FR-121/T-FR-122 diagnose contamination and plan source cleanup through p
     throw error
   } finally {
     await stopServer(server)
+    if (providerServer) {
+      await new Promise((resolveClose) => providerServer.close(resolveClose))
+    }
     await client.$disconnect()
     await rm(artifactRoot, { recursive: true, force: true })
   }

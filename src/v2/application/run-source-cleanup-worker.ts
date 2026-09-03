@@ -51,6 +51,7 @@ const NON_RETRYABLE_CODES = new Set([
   'PERSISTENCE_CONFLICT',
   'PERSISTENCE_NOT_CONFIGURED',
   'SOURCE_CLEANUP_NOT_FOUND',
+  'RENDER_OUTPUT_CONFLICT',
 ])
 
 function safeFailure(error: unknown) {
@@ -305,6 +306,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
       const processCleanup = () => dependencies.processor.process({
         operationId: operation.id,
         sourcePath,
+        sourceSha256: context.sourceArtifactSha256,
         sourceDurationMs: cleanup.plan.sourceDurationMs,
         action: cleanup.plan.selectedAction as Exclude<
           typeof cleanup.plan.selectedAction,
@@ -348,8 +350,11 @@ export function runNextSourceCleanupOperationService(dependencies: {
         extension: 'mp4',
         prefix: 'cleaned',
       })
+      const recipeVersion = cleanup.plan.selectedStrategy === 'separation'
+        ? '2.0.0'
+        : '1.0.0'
       const toolDigest = createHash('sha256')
-        .update('apollo-v2-ffmpeg-source-cleanup/1.0.0')
+        .update(`apollo-v2-ffmpeg-source-cleanup/${recipeVersion}`)
         .digest('hex')
       const manifest = createMediaArtifactManifestV2({
         artifactKey: stored.key,
@@ -359,13 +364,16 @@ export function runNextSourceCleanupOperationService(dependencies: {
         container: 'mp4',
         recipe: {
           id: 'source-cleanup',
-          version: '1.0.0',
+          version: recipeVersion,
           parameters: {
             cleanupPlanId: cleanup.plan.id,
             cleanupPlanHash: cleanup.plan.planHash,
             strategy: cleanup.plan.selectedStrategy,
             action: cleanup.plan.selectedAction,
             sourceImmutable: true,
+            ...(processed.separation
+              ? { separation: processed.separation }
+              : {}),
           },
         },
         sources: [{
@@ -519,6 +527,7 @@ export function runNextSourceCleanupOperationService(dependencies: {
         outputRightsSnapshotHash:
           outputRights.snapshot.snapshotHash,
         visual: processed.visual,
+        ...(processed.audio ? { audio: processed.audio } : {}),
         rightsReasonCodes:
           outputRightsDecision.outcome === 'allow'
             ? []

@@ -412,6 +412,7 @@ import {
 import { createFfmpegEditorialProxyRendererFromEnvironment } from './media/ffmpeg-editorial-proxy-renderer.ts'
 import { LocalProjectLutRenderMaterializer } from './media/local-project-lut-render-materializer.ts'
 import { createFfmpegSourceCleanupProcessorFromEnvironment } from './media/ffmpeg-source-cleanup-processor.ts'
+import { createElevenLabsVoiceIsolationProviderFromEnvironment } from './elevenlabs-voice-isolation-provider.ts'
 import {
   createFfmpegSpeakerDiarizationAudioPreparerFromEnvironment,
 } from './media/ffmpeg-speaker-diarization-audio-preparer.ts'
@@ -2073,6 +2074,8 @@ export function createSourceCleanupWorker(
   const configuredRetryMax = Number(
     environment.APOLLO_V2_WORKER_RETRY_MAX_MS,
   )
+  const separationProvider =
+    createElevenLabsVoiceIsolationProviderFromEnvironment(environment)
   return runNextSourceCleanupOperationService({
     operations: createPublicOperationRepository(telemetry),
     telemetry,
@@ -2083,7 +2086,10 @@ export function createSourceCleanupWorker(
     projects: createProjectWorkspaceQueryRepository(),
     storage: createVerifiedMediaStorage(environment),
     processor:
-      createFfmpegSourceCleanupProcessorFromEnvironment(environment),
+      createFfmpegSourceCleanupProcessorFromEnvironment(
+        environment,
+        separationProvider,
+      ),
     sources: createArtifactSourceMaterializer(environment),
     integrity: { sha256: calculateFileSha256 },
     clock,

@@ -2903,6 +2903,27 @@ const sourceCleanupRecordExample = {
   plan: sourceCleanupPlanExample,
   operation: queuedSourceCleanupOperationExample,
 }
+const sourceCleanupRecordV2Example = {
+  ...sourceCleanupRecordExample,
+  plan: {
+    ...sourceCleanupPlanExample,
+    candidates: [
+      ...sourceCleanupPlanExample.candidates,
+      {
+        strategy: 'separation',
+        eligible: false,
+        predictedResidualQuality: 0,
+        predictedIntegrity: 0,
+        cost: 0,
+        score: 0,
+        reasonCodes: [
+          'MUSIC_FINDING_REQUIRED',
+          'SOURCE_SEPARATION_PROVIDER_UNAVAILABLE',
+        ],
+      },
+    ],
+  },
+}
 const validationEnvelopeCreateRequestExample = {
   batchId: 'production-batch-validation-example-1',
   validatedSegmentId: validatedSegmentExample.id,
@@ -9624,6 +9645,27 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
       {
         data: {
           cleanups: [sourceCleanupRecordExample],
+          nextCursor: sourceCleanupPlanExample.id,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-cleanup-mutated/v2': [
+      {
+        data: { cleanup: sourceCleanupRecordV2Example, replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-cleanup-read/v2': [
+      {
+        data: { cleanup: sourceCleanupRecordV2Example },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/source-cleanup-page/v2': [
+      {
+        data: {
+          cleanups: [sourceCleanupRecordV2Example],
           nextCursor: sourceCleanupPlanExample.id,
         },
         meta: { apiVersion: 'v1' },
