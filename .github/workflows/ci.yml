@@ -100,29 +100,6 @@ jobs:
       - name: Apply database migrations
         run: npm run db:v2:migrate:deploy
 
-      - name: Provision and migrate isolated contamination E2E database
-        env:
-          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_contamination_e2e?schema=public&application_name=apollo-video-e2e-contamination-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
-        run: |
-          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
-          test -n "$postgres_container"
-          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" createdb -U apollo apollo_contamination_e2e
-          npm run db:v2:migrate:deploy
-
-      - name: Run contamination-to-source-separation journey
-        run: npm run test:integration:contamination-reports
-        env:
-          APOLLO_CONTAMINATION_E2E: "1"
-          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_contamination_e2e?schema=public&application_name=apollo-video-e2e-contamination-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
-
-      - name: Verify zero orphan contamination E2E backends
-        if: always()
-        run: |
-          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
-          test -n "$postgres_container"
-          orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-contamination-ci'")"
-          test "$orphans" = 0
-
       - name: Run source cleanup and separation FFmpeg goldens
         run: npm run test:integration:source-cleanup-goldens
 
@@ -168,6 +145,29 @@ jobs:
 
       - name: Build production application
         run: npm run build
+
+      - name: Provision and migrate isolated contamination E2E database
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_contamination_e2e?schema=public&application_name=apollo-video-e2e-contamination-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" createdb -U apollo apollo_contamination_e2e
+          npm run db:v2:migrate:deploy
+
+      - name: Run contamination-to-source-separation journey
+        run: npm run test:integration:contamination-reports
+        env:
+          APOLLO_CONTAMINATION_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_contamination_e2e?schema=public&application_name=apollo-video-e2e-contamination-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan contamination E2E backends
+        if: always()
+        run: |
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          orphans="$(docker exec -e PGPASSWORD=apollo-ci "$postgres_container" psql -U apollo -d postgres -Atc "select count(*) from pg_stat_activity where application_name = 'apollo-video-e2e-contamination-ci'")"
+          test "$orphans" = 0
 
       - name: Publish public API documentation artifact
         uses: actions/upload-artifact@v4
