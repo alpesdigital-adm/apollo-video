@@ -203,7 +203,7 @@ test('T-FR-102 block plan journey runs end to end through /v1, durable workers a
     })
     const profileInput = (version, voiceId, avatarRef, key, extra = {}) => ({
       workspaceId, profileId: 'block-journey-presenter', version, actorIdentityId: 'block-journey-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: avatarRef },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: avatarRef },
       voice: { id: voiceId, version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

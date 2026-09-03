@@ -106,7 +106,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
       clock: () => new Date(at(0)),
     })({
       workspaceId, profileId: 'critic-presenter', version: 1, actorIdentityId: 'critic-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_critic' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_critic' },
       voice: { id: 'voice_critic', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
@@ -176,7 +176,7 @@ test('T-FR-106 synthetic critic reports persist transactionally, stay queryable 
     ]
     const report = (overrides = {}) => createSyntheticCriticReport({
       id: 'critic-report-1', workspaceId, projectId, blockId: 'critic-block',
-      capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
       artifactId: 'critic-video', artifactSha256: artifacts['critic-video'][2],
       audioArtifactId: 'critic-audio', alignmentArtifactId: 'critic-alignment',
       scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_critic',

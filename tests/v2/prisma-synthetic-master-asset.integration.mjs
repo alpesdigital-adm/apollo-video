@@ -124,7 +124,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       clock: () => new Date(at(0)),
     })({
       workspaceId, profileId: 'master-presenter', version: 1, actorIdentityId: 'master-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_master' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_master' },
       voice: { id: 'voice_master', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
@@ -144,7 +144,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
-        schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+        schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
         providerJobId: 'heygen_job_master', inputJson: '{}', inputHash: hash('1'),
         authorizationJson: '{}', authorizationHash: hash('2'), status: 'approved',
         resultArtifactId: artifactIds['provider-original'], resultArtifactSha256: artifactShas['provider-original'],
@@ -195,7 +195,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
     })
     const criticReport = createSyntheticCriticReport({
       id: 'master-critic-report-1', workspaceId, projectId, blockId: 'master-block',
-      capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
       artifactId: artifactIds['provider-original'], artifactSha256: artifactShas['provider-original'],
       audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
       scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_master',
@@ -240,7 +240,7 @@ test('T-FR-104 synthetic masters persist transactionally, content-addressed and 
       alignmentHash: hash('6'), locale: 'pt-BR',
       durationMs: 4_000, audioDurationMs: 4_000, videoDurationMs: 4_000,
       provenance: {
-        adapterId: 'heygen-v3', adapterVersion: '3.0.0', capability: 'audio-avatar', modelRef: 'avatar-model-1',
+        adapterId: 'heygen-v3', adapterVersion: '3.1.0', capability: 'audio-avatar', modelRef: 'avatar-model-1',
         adapterConfigHash: hash('7'), providerJobId, providerJobRef: 'heygen_job_master',
       },
       cost: { currency: 'USD', minorUnits: 150, latencyMs: 8_400 },

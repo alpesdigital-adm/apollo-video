@@ -37,7 +37,7 @@ test('T-FR-101 HeyGen v3 adapter normalizes submit, polling and retrieval withou
   const capabilities = await adapter.getCapabilities()
   assert.deepEqual(capabilities.operations, ['audio-avatar'])
   assert.equal(capabilities.completion, 'polling')
-  assert.equal(capabilities.supportsIdempotency, false)
+  assert.equal(capabilities.supportsIdempotency, true)
   assert.equal(capabilities.supportsCancellation, false)
   assert.equal(typeof adapter.cancel, 'undefined')
   assert.equal(typeof adapter.verifyWebhook, 'undefined')
@@ -50,12 +50,13 @@ test('T-FR-101 HeyGen v3 adapter normalizes submit, polling and retrieval withou
   assert.equal(await adapter.getStatus(submitted.providerJobId), 'processing')
   assert.equal(await adapter.getStatus(submitted.providerJobId), 'completed')
   assert.deepEqual(await adapter.retrieve(submitted.providerJobId), { providerJobId: 'video_job_123', downloadUrl: 'https://files.heygen.ai/video/result.mp4?Expires=123', mediaType: 'video' })
-  assert.equal(requests[0].headers.has('idempotency-key'), false)
-  assert.equal(requests[1].headers.has('idempotency-key'), false)
+  assert.match(requests[0].headers.get('idempotency-key'), /^apollo:[a-f0-9]{64}$/)
+  assert.equal(requests[1].headers.get('idempotency-key'), requests[0].headers.get('idempotency-key'))
+  assert.notEqual(requests[0].headers.get('idempotency-key'), 'apollo-idempotency-one')
   assert.equal(requests[0].headers.get('x-api-key'), 'heygen-test-secret')
   assert.equal(JSON.stringify(requests.map(({ headers: _headers, ...request }) => request)).includes('heygen-test-secret'), false)
   assert.equal(requests[0].body instanceof FormData, true)
-  assert.deepEqual(JSON.parse(requests[1].body), { type: 'avatar', avatar_id: 'avatar_123', audio_asset_id: 'asset_audio_123', aspect_ratio: '9:16', output_format: 'mp4' })
+  assert.deepEqual(JSON.parse(requests[1].body), { type: 'avatar', avatar_id: 'avatar_123', audio_asset_id: 'asset_audio_123', aspect_ratio: '9:16', fit: 'cover', output_format: 'mp4' })
 })
 
 test('T-FR-101 HeyGen adapter fails closed on input, status, redirects, oversized bodies and normalized HTTP errors', async () => {
@@ -90,7 +91,7 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
   const profile = {
     snapshot: {
       id: 'presenter-one', snapshotHash: 'a'.repeat(64), status: 'active',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_authorized_123' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_authorized_123' },
     },
     profileSnapshotId: 'presenter-one:v1',
   }
@@ -111,7 +112,7 @@ test('T-FR-101 provider materializer derives identity from the authorized snapsh
     async extractAudioRange(input) { assert.deepEqual([input.startMs, input.endMs], [0, 2_000]); return bytes },
   })
   const job = {
-    id: 'provider-job-one', workspaceId: 'workspace-one', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+    id: 'provider-job-one', workspaceId: 'workspace-one', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
     input: { audioArtifactId: 'audio-one', durationMs: 2_000, aspectRatio: '9:16', audioMasterId: 'audio-master-one', audioMasterHash: 'c'.repeat(64), audioRange: { startMs: 0, endMs: 2_000, rangeHash: 'd'.repeat(64) } },
     authorization: {
       profileSnapshotId: profile.profileSnapshotId, profileSnapshotHash: profile.snapshot.snapshotHash,
@@ -136,7 +137,7 @@ test('T-FR-100 audio-first materializer extracts the exact approved range with r
     execFileSync(ffmpegPath, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=3', '-c:a', 'pcm_s16le', sourcePath], { windowsHide: true })
     const sourceBytes = await readFile(sourcePath)
     const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex')
-    const profile = { snapshot: { id: 'presenter-range', snapshotHash: 'a'.repeat(64), status: 'active', avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_range_123' } }, profileSnapshotId: 'presenter-range:v1' }
+    const profile = { snapshot: { id: 'presenter-range', snapshotHash: 'a'.repeat(64), status: 'active', avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_range_123' } }, profileSnapshotId: 'presenter-range:v1' }
     const artifact = {
       id: 'audio-range-master', workspaceId: 'workspace-range', artifactKey: 'audio/range-master.wav', sha256: sourceSha256,
       byteSize: BigInt(sourceBytes.length), mediaType: 'audio', container: 'wav', status: 'available', lifecycleRevision: 1,
@@ -148,7 +149,7 @@ test('T-FR-100 audio-first materializer extracts the exact approved range with r
       clock: () => new Date('2029-01-01T00:00:01.000Z'),
     })
     const result = await materializer.materialize({ job: {
-      id: 'provider-job-range', workspaceId: 'workspace-range', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      id: 'provider-job-range', workspaceId: 'workspace-range', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
       input: { audioArtifactId: artifact.id, durationMs: 1_500, aspectRatio: '9:16', audioMasterId: 'audio-master-range', audioMasterHash: 'b'.repeat(64), audioRange: { startMs: 500, endMs: 2_000, rangeHash: 'c'.repeat(64) } },
       authorization: { profileSnapshotId: profile.profileSnapshotId, profileSnapshotHash: profile.snapshot.snapshotHash, expiresAt: '2030-01-01T00:00:00.000Z', artifactDecisions: [{ artifactId: artifact.id, validUntil: '2030-01-01T00:00:00.000Z' }] },
     } })
@@ -177,7 +178,7 @@ test('T-FR-101 provider result is probed, promoted and persisted before its crit
   }
   const job = {
     id: 'provider-job-one', workspaceId: 'workspace-one', providerJobId: 'heygen-video-one', operation: 'audio-avatar',
-    adapterId: 'heygen-v3', adapterVersion: '3.0.0', input: { durationMs: 2_000, aspectRatio: '9:16' }, inputHash: 'c'.repeat(64),
+    adapterId: 'heygen-v3', adapterVersion: '3.1.0', input: { durationMs: 2_000, aspectRatio: '9:16' }, inputHash: 'c'.repeat(64),
     authorization: { authorizationHash: 'd'.repeat(64), profileSnapshotHash: 'e'.repeat(64), artifactDecisions: [{ artifactId: 'audio-one' }] },
   }
   const ingestor = new VerifiedProviderResultIngestor({

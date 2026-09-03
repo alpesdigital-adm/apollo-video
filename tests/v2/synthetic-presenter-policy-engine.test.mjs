@@ -12,7 +12,7 @@ const now = new Date('2026-08-29T12:00:00.000Z')
 
 const snapshot = (overrides = {}, consentOverrides = {}) => createSyntheticPresenterProfileSnapshot({
   id: 'policy-presenter', version: 1, actorIdentityId: 'policy-identity',
-  avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_policy' },
+  avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_policy' },
   voice: { id: 'voice_policy', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
   defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
   consent: {

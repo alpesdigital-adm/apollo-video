@@ -41,7 +41,7 @@ const baseMeasurements = [
 
 const base = {
   id: 'critic-report-1', workspaceId: 'workspace-1', projectId: 'project-1', blockId: 'block-1',
-  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
   artifactId: 'artifact-video', artifactSha256: digest('a'),
   audioArtifactId: 'artifact-audio', alignmentArtifactId: 'artifact-alignment',
   scriptHash: digest('b'), profileSnapshotId: 'ana:v2', expectedIdentityRef: 'avatar_ana',

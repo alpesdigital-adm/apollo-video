@@ -24,7 +24,7 @@ const master = createSyntheticMasterAsset({
   alignmentHash: digest('1'), locale: 'pt-BR',
   durationMs: 4_000, audioDurationMs: 4_000, videoDurationMs: 4_000,
   provenance: {
-    adapterId: 'heygen-v3', adapterVersion: '3.0.0', capability: 'audio-avatar', modelRef: null,
+    adapterId: 'heygen-v3', adapterVersion: '3.1.0', capability: 'audio-avatar', modelRef: null,
     adapterConfigHash: digest('2'), providerJobId: 'job-1', providerJobRef: 'heygen_job_1',
   },
   cost: { currency: 'USD', minorUnits: 150, latencyMs: 8_000 },

@@ -145,7 +145,7 @@ test('T-FR-102 approved block audio concatenates into a consolidated audio maste
     })
     const profile = await registerProfile({
       workspaceId, profileId: 'compile-presenter', version: 1, actorIdentityId: 'compile-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_compile' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_compile' },
       voice: { id: 'voice_compile', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

@@ -5464,7 +5464,7 @@ const scriptPlanCommandContextExample = {
 
 /** F3.007 — one sealed performance: four ingested roles, sanitized provenance and its cost. */
 const syntheticMasterProvenanceExample = {
-  adapterId: 'heygen-v3', adapterVersion: '3.0.0', capability: 'audio-avatar', modelRef: null,
+  adapterId: 'heygen-v3', adapterVersion: '3.1.0', capability: 'audio-avatar', modelRef: null,
   adapterConfigHash: '5'.repeat(64), providerJobId: 'provider-job-example-1',
   providerJobRef: 'heygen-run-example-1',
 }
@@ -5731,7 +5731,7 @@ const transformationCallbackRejectedExample = {
 const syntheticCriticReportExample = {
   schemaVersion: 'synthetic-critic-report/v1', id: 'synthetic-critic-report-example-1',
   workspaceId, projectId, blockId: 'script-block-example-1',
-  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+  capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
   artifactId: 'media-artifact-example-1', artifactSha256: 'a'.repeat(64),
   audioArtifactId: 'media-artifact-example-2', alignmentArtifactId: 'media-artifact-example-3',
   scriptHash: '7'.repeat(64), profileSnapshotId: 'presenter-example-1',

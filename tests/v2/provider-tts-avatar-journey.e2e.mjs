@@ -142,7 +142,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     })
     const registered = await registerProfile({
       workspaceId, profileId: 'journey-presenter', version: 1, actorIdentityId: 'journey-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_journey_123' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_journey_123' },
       voice: { id: 'voice_journey_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
@@ -182,7 +182,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const registry = {
       get: ({ adapterId, adapterVersion }) => {
         if (adapterId === 'elevenlabs-tts' && adapterVersion === '1.0.0') return elevenLabsAdapter
-        if (adapterId === 'heygen-v3' && adapterVersion === '3.0.0') return heygenAdapter
+        if (adapterId === 'heygen-v3' && adapterVersion === '3.1.0') return heygenAdapter
         return null
       },
     }
@@ -354,7 +354,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     const avatarEnqueued = await enqueue({
       workspaceId, projectId: project.project.id, projectVersionId: project.version.id,
       profileSnapshotId: registered.profile.snapshot.id, operation: 'audio-avatar',
-      adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+      adapterId: 'heygen-v3', adapterVersion: '3.1.0',
       providerInput: { aspectRatio: '9:16' },
       sourceArtifactIds: [audioEntry.artifactId],
       audioMasterId: masterCreated.value.master.id,
@@ -441,7 +441,7 @@ test('T-FR-101 durable TTS-to-avatar production journey survives worker restarts
     // Revoked consent blocks any new provider effect for that profile.
     const revoked = await registerProfile({
       workspaceId, profileId: 'journey-presenter-revoked', version: 1, actorIdentityId: 'journey-identity-revoked',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_revoked_123' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_revoked_123' },
       voice: { id: 'voice_revoked_123', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

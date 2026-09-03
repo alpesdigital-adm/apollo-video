@@ -150,7 +150,7 @@ test('T-FR-105 eligible reuse and precise invalidation on PostgreSQL', {
     })
     const profileInput = (version, key, extra = {}) => ({
       workspaceId, profileId: 'cacheinv-presenter', version, actorIdentityId: 'cacheinv-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_cacheinv' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_cacheinv' },
       voice: { id: 'voice_cacheinv', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

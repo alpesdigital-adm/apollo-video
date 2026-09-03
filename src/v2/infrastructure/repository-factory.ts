@@ -1183,7 +1183,7 @@ export function createProviderAdapterRegistry(environment: NodeJS.ProcessEnv = p
       // Adapters are constructed lazily per lookup so the application boots
       // without any provider credential; a job that targets an unconfigured
       // adapter fails closed at claim time instead of at startup.
-      if (input.adapterId === 'heygen-v3' && input.adapterVersion === '3.0.0') {
+      if (input.adapterId === 'heygen-v3' && input.adapterVersion === '3.1.0') {
         return new HeyGenV3AsyncMediaProviderAdapter({
           apiKey: environment.APOLLO_V2_HEYGEN_API_KEY ?? '',
           costMinorUnitsPerMinute: nonNegativeInteger(

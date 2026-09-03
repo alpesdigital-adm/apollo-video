@@ -47,7 +47,7 @@ const measurements = [
 function report(overrides = {}) {
   return createSyntheticCriticReport({
     id: 'critic-api-report-1', workspaceId, projectId, blockId: 'critic-api-block',
-    capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
+    capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
     artifactId: 'critic-api-video', artifactSha256: digest('a'),
     audioArtifactId: 'critic-api-audio', alignmentArtifactId: 'critic-api-alignment',
     scriptHash: digest('7'), profileSnapshotId: 'critic-api-presenter:v1',
