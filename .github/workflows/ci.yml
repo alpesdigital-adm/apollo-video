@@ -100,10 +100,16 @@ jobs:
       - name: Apply database migrations
         run: npm run db:v2:migrate:deploy
 
+      - name: Migrate isolated contamination E2E schema
+        run: npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=contamination_e2e&application_name=apollo-video-e2e-contamination-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
       - name: Run contamination-to-source-separation journey
         run: npm run test:integration:contamination-reports
         env:
           APOLLO_CONTAMINATION_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=contamination_e2e&application_name=apollo-video-e2e-contamination-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Run source cleanup and separation FFmpeg goldens
         run: npm run test:integration:source-cleanup-goldens
