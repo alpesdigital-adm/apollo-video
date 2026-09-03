@@ -67,13 +67,13 @@ export interface Timebase {
 // 64-bit signed range. Anything outside it cannot be persisted, so it must not
 // be constructible either — a value that only fails at write time fails in the
 // worst possible place.
-const INT64_MIN = -(2n ** 63n)
-const INT64_MAX = 2n ** 63n - 1n
+const INT64_MIN = -(BigInt(2) ** BigInt(63))
+const INT64_MAX = BigInt(2) ** BigInt(63) - BigInt(1)
 
 function gcd(a: bigint, b: bigint): bigint {
-  let x = a < 0n ? -a : a
-  let y = b < 0n ? -b : b
-  while (y !== 0n) {
+  let x = a < BigInt(0) ? -a : a
+  let y = b < BigInt(0) ? -b : b
+  while (y !== BigInt(0)) {
     const t = x % y
     x = y
     y = t
@@ -81,14 +81,14 @@ function gcd(a: bigint, b: bigint): bigint {
   return x
 }
 
-export function rational(num: bigint | number, den: bigint | number = 1n): Rational {
+export function rational(num: bigint | number, den: bigint | number = BigInt(1)): Rational {
   const n = typeof num === 'bigint' ? num : BigInt(assertSafeInteger(num, 'rational numerator'))
   const d = typeof den === 'bigint' ? den : BigInt(assertSafeInteger(den, 'rational denominator'))
-  assertDomain(d !== 0n, 'INVALID_ARGUMENT', 'A rational cannot have a zero denominator')
+  assertDomain(d !== BigInt(0), 'INVALID_ARGUMENT', 'A rational cannot have a zero denominator')
   // Normalize sign onto the numerator so equality is structural: 1/-2 and -1/2
   // must not be two different objects meaning the same number.
-  const sign = d < 0n ? -1n : 1n
-  const divisor = gcd(n, d) || 1n
+  const sign = d < BigInt(0) ? -BigInt(1) : BigInt(1)
+  const divisor = gcd(n, d) || BigInt(1)
   return Object.freeze({ num: (n / divisor) * sign, den: (d / divisor) * sign })
 }
 
@@ -106,7 +106,7 @@ export function multiplyRational(left: Rational, right: Rational): Rational {
 }
 
 export function divideRational(left: Rational, right: Rational): Rational {
-  assertDomain(right.num !== 0n, 'INVALID_ARGUMENT', 'Cannot divide a rational by zero')
+  assertDomain(right.num !== BigInt(0), 'INVALID_ARGUMENT', 'Cannot divide a rational by zero')
   return rational(left.num * right.den, left.den * right.num)
 }
 
@@ -126,15 +126,15 @@ export function compareRational(left: Rational, right: Rational): number {
 
 /** `1000000 * (rate - 1)`, truncated toward zero. The unit drift is reported in. */
 export function rationalToPpm(rate: Rational): number {
-  const delta = subtractRational(rate, rational(1n, 1n))
-  const scaled = (delta.num * 1_000_000n) / delta.den
+  const delta = subtractRational(rate, rational(BigInt(1), BigInt(1)))
+  const scaled = (delta.num * BigInt(1000000)) / delta.den
   assertInt64(scaled, 'ppm')
   return Number(scaled)
 }
 
 export function ppmToRate(ppm: number): Rational {
   assertSafeInteger(ppm, 'ppm')
-  return addRational(rational(1n, 1n), rational(BigInt(ppm), 1_000_000n))
+  return addRational(rational(BigInt(1), BigInt(1)), rational(BigInt(ppm), BigInt(1000000)))
 }
 
 export function assertInt64(value: bigint, field: string): bigint {
@@ -147,15 +147,15 @@ export function assertInt64(value: bigint, field: string): bigint {
 }
 
 export function createTimebase(secondsPerTick: Rational): Readonly<Timebase> {
-  assertDomain(secondsPerTick.num > 0n, 'INVALID_ARGUMENT', 'A timebase must advance forward in time')
+  assertDomain(secondsPerTick.num > BigInt(0), 'INVALID_ARGUMENT', 'A timebase must advance forward in time')
   return Object.freeze({ schemaVersion: SESSION_TIME_SCHEMA_VERSION, secondsPerTick })
 }
 
 /** `1/rate` seconds per tick — the form ffprobe reports. */
 export function timebaseFromRate(ticksPerSecond: bigint | number): Readonly<Timebase> {
   const ticks = typeof ticksPerSecond === 'bigint' ? ticksPerSecond : BigInt(assertSafeInteger(ticksPerSecond, 'ticksPerSecond'))
-  assertDomain(ticks > 0n, 'INVALID_ARGUMENT', 'ticksPerSecond must be positive')
-  return createTimebase(rational(1n, ticks))
+  assertDomain(ticks > BigInt(0), 'INVALID_ARGUMENT', 'ticksPerSecond must be positive')
+  return createTimebase(rational(BigInt(1), ticks))
 }
 
 export function createTickInterval(start: bigint, end: bigint): Readonly<TickInterval> {
@@ -208,23 +208,23 @@ export function compareIntervals(left: Readonly<TickInterval>, right: Readonly<T
 }
 
 function roundQuotient(numerator: bigint, denominator: bigint, policy: RoundingPolicy): bigint {
-  assertDomain(denominator !== 0n, 'INVALID_ARGUMENT', 'Cannot round a quotient with a zero denominator')
-  const negative = (numerator < 0n) !== (denominator < 0n)
-  const absNumerator = numerator < 0n ? -numerator : numerator
-  const absDenominator = denominator < 0n ? -denominator : denominator
+  assertDomain(denominator !== BigInt(0), 'INVALID_ARGUMENT', 'Cannot round a quotient with a zero denominator')
+  const negative = (numerator < BigInt(0)) !== (denominator < BigInt(0))
+  const absNumerator = numerator < BigInt(0) ? -numerator : numerator
+  const absDenominator = denominator < BigInt(0) ? -denominator : denominator
   const quotient = absNumerator / absDenominator
   const remainder = absNumerator % absDenominator
 
-  if (remainder === 0n) return negative ? -quotient : quotient
-  if (policy === 'floor') return negative ? -(quotient + 1n) : quotient
-  if (policy === 'ceil') return negative ? -quotient : quotient + 1n
+  if (remainder === BigInt(0)) return negative ? -quotient : quotient
+  if (policy === 'floor') return negative ? -(quotient + BigInt(1)) : quotient
+  if (policy === 'ceil') return negative ? -quotient : quotient + BigInt(1)
 
   // nearest-half-even: unbiased, so a long chain of conversions does not drift
   // in one direction the way half-up does.
-  const twice = remainder * 2n
+  const twice = remainder * BigInt(2)
   let magnitude = quotient
-  if (twice > absDenominator) magnitude = quotient + 1n
-  else if (twice === absDenominator) magnitude = quotient % 2n === 0n ? quotient : quotient + 1n
+  if (twice > absDenominator) magnitude = quotient + BigInt(1)
+  else if (twice === absDenominator) magnitude = quotient % BigInt(2) === BigInt(0) ? quotient : quotient + BigInt(1)
   return negative ? -magnitude : magnitude
 }
 
@@ -268,7 +268,7 @@ export function createAffineClockMap(input: {
   // A zero or negative rate would make time stop or run backwards, and the
   // inverse map would not exist. Refuse it here rather than producing a map
   // whose round-trip silently fails later.
-  assertDomain(input.rate.num > 0n, 'INVALID_ARGUMENT', 'A clock map rate must be strictly positive')
+  assertDomain(input.rate.num > BigInt(0), 'INVALID_ARGUMENT', 'A clock map rate must be strictly positive')
   assertInt64(input.offsetTicks, 'clock map offset')
   return Object.freeze({
     rate: input.rate,
