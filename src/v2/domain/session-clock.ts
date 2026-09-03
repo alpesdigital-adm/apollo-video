@@ -10,6 +10,7 @@ import {
   invertAffineClockMap,
   multiplyRational,
   rational,
+  rationalEquals,
   rationalToPpm,
   serializeRational,
   type AffineClockMap,
@@ -434,6 +435,28 @@ export function createSourceToSessionMapping(input: {
     input.evidenceRefs.map((ref) => assertEvidenceRef(ref, 'mapping evidenceRef')),
   )
   const driftRate = extractDriftRate({ rate, source: input.source.timebase, session: input.clock.timebase })
+
+  // ADR-130: return insufficient evidence rather than inventing precision.
+  //
+  // A mapping that claims nothing — no offset, no drift — is the reference
+  // track against itself, true by definition and needing no anchor to justify
+  // it. Any other mapping is an assertion about where two recordings line up,
+  // and an assertion nobody can audit is indistinguishable from a guess. Before
+  // this check the aggregate would happily produce a high-confidence mapping
+  // with a 45,000-tick offset and 120 ppm of drift backed by nothing at all.
+  const claimsAlignment = input.offsetTicks !== BigInt(0) || !rationalEquals(driftRate, rational(BigInt(1)))
+  if (claimsAlignment) {
+    assertDomain(
+      anchorIds.length > 0,
+      'INVALID_ARGUMENT',
+      'a mapping that claims an offset or a drift must name the anchors it was measured from',
+    )
+    assertDomain(
+      evidenceRefs.length > 0,
+      'INVALID_ARGUMENT',
+      'a mapping that claims an offset or a drift must name evidence that can be re-opened',
+    )
+  }
 
   return Object.freeze({
     schemaVersion: SESSION_CLOCK_SCHEMA_VERSION,
