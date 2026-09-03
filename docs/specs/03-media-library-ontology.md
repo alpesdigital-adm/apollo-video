@@ -518,6 +518,32 @@ Asset publicado, role desejado, validationScope e target composition.
 - 50–69: revisão/limpeza limitada.
 - < 50: rejeitar para auto-use; permitir manual.
 
+### 21.4 Source separation provider-bound
+
+`separation` é uma estratégia do mesmo `SourceCleanupPlan`, não um fluxo
+paralelo. Ela só concorre quando o finding é música, existe fala preservável e o
+detector declarou um stem separável. A oferta é calculada no servidor e sela
+adapter, versão, modelo, hashes de configuração/capability, limites de duração,
+custo normalizado, métricas previstas e unidade faturável. O cliente não escolhe
+provider nem altera a oferta.
+
+O plano mantém todos os candidatos e reason codes e escolhe por qualidade
+residual, integridade e custo antes da submissão. Ausência de provider, duração
+fora do contrato, orçamento excedido, baixa qualidade, baixa integridade ou
+source/hash divergente resultam em fallback ou rejeição, sem chamada paga.
+
+O adapter ElevenLabs Voice Isolator envia o master autorizado como multipart
+para `POST /v1/audio-isolation`; a chave existe apenas no ambiente do worker.
+Como o provider não declara idempotência para essa operação, o Apollo grava uma
+intenção antes da rede e nunca repete automaticamente um resultado ambíguo ou
+parcial. O resultado isolado é vinculado ao source e à oferta, remuxado em um
+novo derivative, e só é aprovado quando áudio, visual e rights passam. O master
+publicado permanece byte-idêntico.
+
+Referências consultadas em 2026-09-03:
+[Audio Isolation API](https://elevenlabs.io/docs/api-reference/audio-isolation/convert/)
+e [Voice Isolator](https://elevenlabs.io/docs/overview/capabilities/voice-isolator).
+
 ## 22. Search contract
 
 ```ts

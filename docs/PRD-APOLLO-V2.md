@@ -1096,9 +1096,14 @@ O resultado permanece um derivative e nunca substitui o source publicado.
 
 O caminho de inpainting a partir da máscara revisada, a persistência do
 derivative e o visual eval de legenda queimada, logo e fundo complexo foram
-aceitos em produção em 2026-09-02. A integração de source separation e a
-comparação medida de custo/qualidade contra crop, cover e reject continuam fora
-deste aceite e permanecem abertas em F3.017.
+aceitos em produção em 2026-09-02. Em 2026-09-03, source separation foi
+implementada localmente no plano de limpeza V2: somente um finding de música
+com stem separável e fala presente pode receber uma oferta imutável do adapter;
+o plano compara qualidade, integridade e custo contra crop, cover e reject antes
+de qualquer chamada paga. O worker produz um derivative com a faixa isolada e
+exige revisão de áudio, visual e direitos. A integração PostgreSQL/CI, o deploy
+e o aceite dessa extensão continuam fora do aceite anterior e mantêm as duas
+microtarefas restantes de F3.017 abertas.
 
 ### FR-124 — Validation envelope
 

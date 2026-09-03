@@ -212,9 +212,11 @@ jobs and revalidates the authorized source immediately before the adapter call.
 The final journey added the missing browser, source-byte materialization,
 derivative MP4, critic, fallback, deployment and acceptance evidence. F3.018 is
 therefore complete. F3.017 closes the pre-job mask/preserve/threshold boundary,
-immutable derivative storage and the three-case visual eval. It does **not**
-claim a source-separation adapter or a measured cost/quality comparison against
-crop, cover and reject; those two microtasks remain open.
+immutable derivative storage and the three-case visual eval. A subsequent local
+slice implements a provider-bound source-separation adapter and the measured
+comparison against crop, cover and reject in the source-cleanup pipeline. Those
+two microtasks remain open until their PostgreSQL/CI, merge, deploy and owner
+acceptance gates complete.
 
 No paid provider credential was used. HTTP and MCP adapters ran at their real
 contract boundaries against controlled loopback implementations, so transport,

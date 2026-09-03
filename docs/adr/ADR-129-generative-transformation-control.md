@@ -45,5 +45,7 @@ State after production acceptance on 2026-09-02: F3.013–F3.016 and F3.018 are
 implemented, integrated, exercised end to end, deployed and accepted. The
 reviewed inpaint path, immutable derivative and visual eval also close three of
 five F3.017 tasks. Source separation and the measured comparison against
-crop/cover/reject remain explicitly open. The complete evidence and operational
-boundaries are recorded in `docs/quality/transformation-control-plane-v1.md`.
+crop/cover/reject were implemented locally on 2026-09-03 under ADR-149 but remain
+open pending PostgreSQL/CI, merge, deployment and owner acceptance. The complete
+evidence and operational boundaries are recorded in
+`docs/quality/transformation-control-plane-v1.md`.

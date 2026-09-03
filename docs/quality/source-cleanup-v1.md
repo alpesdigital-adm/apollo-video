@@ -137,6 +137,32 @@ render, revisão pós-limpeza e persistência do derivative.
 - zero reinícios nos quatro containers e zero ocorrências críticas nos logs
   após o deploy.
 
+## Extensão local F3.017 — source separation
+
+O plano aceita uma quarta alternativa executável, `separation`, somente quando
+uma oferta imutável de provider acompanha um finding de música separável com
+fala. A decisão compara a alternativa com crop, cover e reject usando as mesmas
+dimensões de qualidade residual, integridade e custo. Planejamento e leitura não
+fazem chamada paga.
+
+O worker usa o Voice Isolator por port novo, valida SHA-256 e duração do source,
+remuxa o áudio isolado com o vídeo original e promove um novo derivative. A
+revisão pós-limpeza passa a exigir evidência de áudio: binding do provider,
+presença do stem e duração alinhada, além dos checks visuais e de direitos já
+existentes. A recipe `2.0.0` identifica essa semântica; recipes visuais antigas
+continuam em `1.0.0` e planos sem oferta preservam sua serialização histórica.
+
+Goldens FFmpeg medem a remoção de um stem de música e a preservação da fala. Um
+smoke com credencial viva em 2026-09-03 gerou 5,97 s uma única vez e mediu
+43,95 dB de supressão do tom musical, restando 0,63% de sua amplitude. A resposta
+foi recuperada pela API de histórico após interrupção do cliente, sem nova
+submissão paga. O adapter bloqueia replay automático quando existe intenção sem
+resultado, arquivo parcial, cache incompleto ou binding adulterado.
+
+Esta seção registra implementação e evidência local. PostgreSQL/CI, merge,
+deploy e aceite ainda são gates obrigatórios e não alteram o status entregue de
+F3.017 até concluídos.
+
 ## Limites deliberados
 
 - O MVP não faz separação de stems, inpainting generativo ou restauração
