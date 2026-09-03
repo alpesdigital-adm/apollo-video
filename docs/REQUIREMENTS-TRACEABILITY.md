@@ -399,7 +399,7 @@ Complemento local Wave 15 — `transformation-brief/v1` substitui o tipo solto a
 | FR-114 | Novelty budget | S1 | D2 | policy inteira e determinística; bloqueio antes de qualquer submissão paga | integração PostgreSQL + 3 goldens FFmpeg reais |
 | FR-115 | Fallback | S6 | D2,D4 | ladder canônica, ledger/custo append-only, melhor artifact válido e revisão pela API/UI | integração runtime + API + browser E2E |
 | FR-116 | Crítico | S1,S6 | D2,D4 | 14 dimensões medidas, comparação por região e hard gate protegido não compensável | eval FFmpeg/ffprobe + jornada com aprovação e rejeição |
-| FR-123 | Limpeza avançada | S3,S6 | D1,D4 | máscara revisada produz derivative inpaint imutável; separation e comparação crop/cover/reject continuam abertas | visual eval real de legenda, logo e fundo complexo — parcial 3/5 |
+| FR-123 | Limpeza avançada | S3,S6 | D1,D4 | máscara revisada produz derivative inpaint imutável; separation provider-bound e comparação crop/cover/reject estão implementadas localmente, ainda sem merge/deploy/aceite | visual eval real de legenda/logo/fundo + golden FFmpeg de voz/música + smoke ElevenLabs vivo — parcial 3/5 entregue, 2/5 em gate |
 | FR-218 | Mask future | S6,S7 | D3,D4,D6 | annotation region/refinements imutáveis viram mask input sem dados internos do revisor | PostgreSQL + provider boundary + MP4 + browser E2E |
 
 Aceite de produção 2026-09-02 — a jornada T-FR-113/114/115/116/123/218 percorreu

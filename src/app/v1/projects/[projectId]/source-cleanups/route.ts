@@ -15,6 +15,9 @@ import {
   createSourceCleanupRepository,
 } from '@/v2/infrastructure/repository-factory'
 import {
+  createElevenLabsVoiceIsolationProviderFromEnvironment,
+} from '@/v2/infrastructure/elevenlabs-voice-isolation-provider'
+import {
   authenticateExternalRequest,
 } from '@/v2/public-api/authentication'
 import {
@@ -92,6 +95,8 @@ export async function POST(
       projects: createProjectWorkspaceQueryRepository(),
       clock: () => new Date(),
       createId: () => `source-cleanup-${randomUUID()}`,
+      separationProvider:
+        createElevenLabsVoiceIsolationProviderFromEnvironment(),
     })({
       workspaceId: actor.workspaceId,
       projectId,

@@ -483,7 +483,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
       sourceCleanupDetail.planHash,
       sourceCleanupDetail.sourceArtifactSha256,
     ].every((value) => SHA256_PATTERN.test(value)) ||
-    !['trim', 'crop-reframe', 'cover'].includes(
+    !['trim', 'crop-reframe', 'cover', 'separation'].includes(
       sourceCleanupDetail.selectedStrategy,
     )
   )) {
@@ -816,7 +816,7 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         outputArtifactId: sourceCleanupDetail!.outputArtifactId!,
         outputManifestId: sourceCleanupDetail!.outputManifestId!,
         strategy: sourceCleanupDetail!.selectedStrategy as
-          'trim' | 'crop-reframe' | 'cover',
+          'trim' | 'crop-reframe' | 'cover' | 'separation',
       } : isLongFormIndex ? {
         kind: 'long-form-index' as const,
         projectId: longFormDetail!.projectId,

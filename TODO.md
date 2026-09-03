@@ -1688,6 +1688,15 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F3.017 — Limpeza avançada [FR-123]
 
+> Slice local 2026-09-03: `separation` entrou no mesmo plano de limpeza V2 como
+> opção provider-bound para música separável, com oferta content-addressed,
+> comparação explícita contra crop/cover/reject, derivative FFmpeg e revisão de
+> áudio. O adapter ElevenLabs Voice Isolator foi exercitado com credencial viva:
+> uma única geração de 5,97 s suprimiu o tom musical em 43,95 dB e foi recuperada
+> pelo histórico após interrupção local, sem repetir a chamada paga. Ambiguidade
+> de submissão e cache parcial agora falham fechado. Testes PostgreSQL/CI, merge,
+> deploy e aceite ainda pendem; por isso as duas caixas abaixo permanecem abertas.
+
 - [ ] Integrar separation/inpaint por adapter como opções após limpeza MVP. Evidência T-FR-123.
 - [x] Definir máscara, preserve regions e quality threshold antes do job. Evidência T-FR-123.
 - [x] Salvar resultado como derivative e nunca substituir source publicado. Evidência T-FR-123.

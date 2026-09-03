@@ -175,6 +175,7 @@ type SourceCleanupStrategy =
   | 'trim'
   | 'crop-reframe'
   | 'cover'
+  | 'separation'
   | 'reject'
 interface SourceCleanupData {
   plan: {
@@ -188,6 +189,22 @@ interface SourceCleanupData {
     predictedResidualQuality: number
     predictedIntegrity: number
     predictedCost: number
+    candidates: {
+      strategy: SourceCleanupStrategy
+      eligible: boolean
+      predictedResidualQuality: number
+      predictedIntegrity: number
+      cost: number
+      reasonCodes: string[]
+    }[]
+    selectedAction?: {
+      strategy: SourceCleanupStrategy
+      offer?: {
+        provider: string
+        modelRef: string
+        billing: { unit: 'provider-characters'; quantity: number }
+      }
+    }
     postCleanupReviewRequired: boolean
     outputArtifactId?: string
     createdAt: string
@@ -202,6 +219,13 @@ interface SourceCleanupData {
     }
     rights: {
       passed: boolean
+      reasonCodes: string[]
+    }
+    audio?: {
+      passed: boolean
+      providerBindingVerified: boolean
+      isolatedSpeechPresent: boolean
+      durationAligned: boolean
       reasonCodes: string[]
     }
     reviewedAt: string
@@ -877,6 +901,7 @@ const SOURCE_CLEANUP_STRATEGY_LABELS = Object.freeze({
   trim: 'Corte temporal',
   'crop-reframe': 'Recorte e reenquadramento',
   cover: 'Cobertura localizada',
+  separation: 'Voz isolada da trilha',
   reject: 'Fonte preservada',
 } satisfies Record<SourceCleanupStrategy, string>)
 
@@ -4834,12 +4859,28 @@ export default function ProjectWorkspacePage() {
                                   {SOURCE_CLEANUP_STRATEGY_LABELS[cleanup.plan.selectedStrategy]}
                                 </p>
                                 <p className="mt-1 font-mono text-[8px] uppercase tracking-[0.09em] text-[#69635b]">
-                                  qualidade {Math.round(cleanup.plan.predictedResidualQuality * 100)} · integridade {Math.round(cleanup.plan.predictedIntegrity * 100)}
+                                  qualidade {Math.round(cleanup.plan.predictedResidualQuality * 100)} · integridade {Math.round(cleanup.plan.predictedIntegrity * 100)} · custo {cleanup.plan.predictedCost.toFixed(2)}
                                 </p>
+                                {cleanup.plan.selectedStrategy === 'separation' ? (
+                                  <div className="mt-2 border-l border-[#8f6f32]/30 pl-2" data-testid="source-cleanup-comparison">
+                                    <p className="font-mono text-[8px] uppercase tracking-[0.09em] text-[#847b6f]">
+                                      {cleanup.plan.candidates.map((candidate) =>
+                                        `${SOURCE_CLEANUP_STRATEGY_LABELS[candidate.strategy]} ${candidate.eligible ? `${Math.round(candidate.predictedResidualQuality * 100)}% / ${candidate.cost.toFixed(2)}` : 'indisponível'}`,
+                                      ).join(' · ')}
+                                    </p>
+                                    <p className="mt-1 text-[9px] text-[#817a70]">
+                                      {cleanup.plan.selectedAction?.offer
+                                        ? `${cleanup.plan.selectedAction.offer.provider} · ${cleanup.plan.selectedAction.offer.billing.quantity} créditos previstos`
+                                        : 'Provider não vinculado'}
+                                    </p>
+                                  </div>
+                                ) : null}
                                 <p className="mt-1 text-[9px] text-[#817a70]">
                                   {cleanup.postCleanupReview
                                     ? cleanup.postCleanupReview.passed
-                                      ? 'Visual e direitos aprovados'
+                                      ? cleanup.postCleanupReview.audio
+                                        ? 'Vídeo, voz isolada e direitos aprovados'
+                                        : 'Visual e direitos aprovados'
                                       : 'Revisão pós-limpeza reprovada'
                                     : cleanup.plan.decision === 'reject'
                                       ? 'Original preservado; nenhum derivado criado'

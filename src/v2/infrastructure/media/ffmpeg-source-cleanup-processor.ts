@@ -7,6 +7,9 @@ import { promisify } from 'node:util'
 import type {
   SourceCleanupProcessor,
 } from '../../application/ports/source-cleanup-processor.ts'
+import type {
+  SourceSeparationProvider,
+} from '../../application/ports/source-separation-provider.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
@@ -41,14 +44,17 @@ export class FfmpegSourceCleanupProcessor
 implements SourceCleanupProcessor {
   private readonly workRoot: string
   private readonly ffmpegPath: string
+  private readonly separationProvider?: SourceSeparationProvider
 
   constructor(options: {
     workRoot: string
     ffmpegPath?: string
+    separationProvider?: SourceSeparationProvider
   }) {
     this.workRoot = resolve(options.workRoot)
     this.ffmpegPath =
       options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.separationProvider = options.separationProvider
   }
 
   private directory(operationId: string): string {
@@ -81,7 +87,7 @@ implements SourceCleanupProcessor {
     }
     const sourceProbe = await probeVideo(input.sourcePath, {
       signal: input.signal,
-      requireAudio: false,
+      requireAudio: input.action.strategy === 'separation',
     })
     const directory = this.directory(input.operationId)
     const outputPath = join(directory, 'cleaned-source.mp4')
@@ -90,7 +96,7 @@ implements SourceCleanupProcessor {
 
     const action = input.action
     if (
-      !['trim', 'crop-reframe', 'cover'].includes(action.strategy)
+      !['trim', 'crop-reframe', 'cover', 'separation'].includes(action.strategy)
     ) {
       throw new DomainError(
         'INVALID_RENDER_INPUT',
@@ -126,6 +132,23 @@ implements SourceCleanupProcessor {
         expectedDurationMs / input.sourceDurationMs
     }
     args.push('-i', input.sourcePath)
+    const separation = action.strategy === 'separation'
+      ? await this.separationProvider?.isolate({
+          operationId: input.operationId,
+          sourcePath: input.sourcePath,
+          sourceSha256: input.sourceSha256,
+          sourceDurationMs: input.sourceDurationMs,
+          expectedOffer: action.offer,
+          signal: input.signal,
+        })
+      : undefined
+    if (action.strategy === 'separation' && !separation) {
+      throw new DomainError(
+        'PERSISTENCE_NOT_CONFIGURED',
+        'Source separation provider is unavailable',
+      )
+    }
+    if (separation) args.push('-i', separation.isolatedAudioPath)
     if (action.strategy === 'crop-reframe') {
       const width = evenFloor(
         action.crop.width * sourceProbe.width,
@@ -192,7 +215,7 @@ implements SourceCleanupProcessor {
       '-map',
       '0:v:0',
       '-map',
-      '0:a?',
+      separation ? '1:a:0' : '0:a?',
       '-vf',
       videoFilter,
       '-c:v',
@@ -233,7 +256,7 @@ implements SourceCleanupProcessor {
     }
     const probe = await probeVideo(outputPath, {
       signal: input.signal,
-      requireAudio: false,
+      requireAudio: Boolean(separation),
     })
     const toleranceMs = Math.max(
       250,
@@ -253,7 +276,9 @@ implements SourceCleanupProcessor {
     const contaminationRemoved =
       action.strategy === 'trim'
         ? durationAligned
-        : framingPreserved
+        : action.strategy === 'separation'
+          ? Boolean(separation) && durationAligned
+          : framingPreserved
     const reasonCodes = [
       ...(!outputPlayable ? ['OUTPUT_NOT_PLAYABLE'] : []),
       ...(!durationAligned ? ['OUTPUT_DURATION_MISMATCH'] : []),
@@ -269,6 +294,16 @@ implements SourceCleanupProcessor {
         'Source cleanup output is empty',
       )
     }
+    const providerBindingVerified = Boolean(
+      separation && action.strategy === 'separation' &&
+      separation.offer.configHash === action.offer.configHash &&
+      separation.offer.capabilityHash === action.offer.capabilityHash,
+    )
+    const isolatedSpeechPresent = Boolean(
+      separation && separation.isolatedAudioByteSize > 0,
+    )
+    const isolatedAudioPassed =
+      durationAligned && providerBindingVerified && isolatedSpeechPresent
     return Object.freeze({
       outputPath,
       sha256: await calculateFileSha256(outputPath),
@@ -289,6 +324,27 @@ implements SourceCleanupProcessor {
         ),
         reasonCodes: Object.freeze(reasonCodes),
       }),
+      ...(separation && action.strategy === 'separation'
+        ? {
+            audio: Object.freeze({
+              passed: isolatedAudioPassed,
+              providerBindingVerified,
+              isolatedSpeechPresent,
+              durationAligned,
+              reasonCodes: Object.freeze([
+                ...(!durationAligned ? ['ISOLATED_AUDIO_DURATION_MISMATCH'] : []),
+                ...(!providerBindingVerified ? ['PROVIDER_BINDING_MISMATCH'] : []),
+                ...(!isolatedSpeechPresent ? ['ISOLATED_SPEECH_EMPTY'] : []),
+              ]),
+            }),
+            separation: Object.freeze({
+              providerRequestId: separation.providerRequestId,
+              isolatedAudioSha256: separation.isolatedAudioSha256,
+              isolatedAudioByteSize: separation.isolatedAudioByteSize,
+              offer: separation.offer,
+            }),
+          }
+        : {}),
     })
   }
 
@@ -300,6 +356,7 @@ implements SourceCleanupProcessor {
 
 export function createFfmpegSourceCleanupProcessorFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
+  separationProvider?: SourceSeparationProvider,
 ) {
   const workRoot =
     environment.APOLLO_V2_SOURCE_CLEANUP_WORK_ROOT?.trim() ||
@@ -315,5 +372,6 @@ export function createFfmpegSourceCleanupProcessorFromEnvironment(
     ...(environment.APOLLO_V2_FFMPEG_PATH?.trim()
       ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() }
       : {}),
+    ...(separationProvider ? { separationProvider } : {}),
   })
 }

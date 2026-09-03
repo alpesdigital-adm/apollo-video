@@ -331,6 +331,7 @@ function hydrateRecord(row: CleanupRow): Readonly<SourceCleanupRecord> {
       row.result.outputManifestId !== review.outputManifestId ||
       row.result.strategy !== review.strategy ||
       row.result.visualPassed !== review.visual.passed ||
+      row.result.audioPassed !== (review.audio?.passed ?? null) ||
       row.result.rightsPassed !== review.rights.passed ||
       row.result.passed !== review.passed ||
       row.result.residualQuality !==
@@ -794,6 +795,7 @@ implements SourceCleanupRepository {
             outputManifestId: review.outputManifestId,
             strategy: review.strategy,
             visualPassed: review.visual.passed,
+            audioPassed: review.audio?.passed,
             rightsPassed: review.rights.passed,
             passed: review.passed,
             residualQuality: review.visual.residualQuality,
