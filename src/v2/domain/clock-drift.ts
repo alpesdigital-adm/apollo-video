@@ -124,10 +124,10 @@ export interface DriftPolicy {
 }
 
 export const DEFAULT_DRIFT_POLICY: Readonly<DriftPolicy> = Object.freeze({
-  minimumSpanCoverage: rational(3n, 5n),
+  minimumSpanCoverage: rational(BigInt(3), BigInt(5)),
   minimumOccupiedThirds: 2,
-  toleranceWindowSeconds: 600n,
-  residualTargetFrames: 2n,
+  toleranceWindowSeconds: BigInt(600),
+  residualTargetFrames: BigInt(2),
   speechStretchLimitPpm: 1_000,
   minimumAnchorsForHoldOut: 6,
 })
@@ -260,11 +260,11 @@ export type ClockDriftFit =
     }>
 
 function absBigInt(value: bigint): bigint {
-  return value < 0n ? -value : value
+  return value < BigInt(0) ? -value : value
 }
 
 function absRational(value: Rational): Rational {
-  return value.num < 0n ? rational(-value.num, value.den) : value
+  return value.num < BigInt(0) ? rational(-value.num, value.den) : value
 }
 
 /**
@@ -276,16 +276,16 @@ function absRational(value: Rational): Rational {
  * so that a future change to one of them is a visible disagreement.
  */
 function roundRationalToTicks(value: Rational): bigint {
-  const negative = value.num < 0n
+  const negative = value.num < BigInt(0)
   const numerator = negative ? -value.num : value.num
   const denominator = value.den
   const quotient = numerator / denominator
   const remainder = numerator % denominator
-  if (remainder === 0n) return negative ? -quotient : quotient
-  const twice = remainder * 2n
+  if (remainder === BigInt(0)) return negative ? -quotient : quotient
+  const twice = remainder * BigInt(2)
   let magnitude = quotient
-  if (twice > denominator) magnitude = quotient + 1n
-  else if (twice === denominator) magnitude = quotient % 2n === 0n ? quotient : quotient + 1n
+  if (twice > denominator) magnitude = quotient + BigInt(1)
+  else if (twice === denominator) magnitude = quotient % BigInt(2) === BigInt(0) ? quotient : quotient + BigInt(1)
   return negative ? -magnitude : magnitude
 }
 
@@ -301,8 +301,8 @@ function describeDistribution(
   span: Readonly<TickInterval>,
 ): Readonly<AnchorDistribution> {
   const length = span.end - span.start
-  const firstBoundary = span.start + length / 3n
-  const secondBoundary = span.start + (length * 2n) / 3n
+  const firstBoundary = span.start + length / BigInt(3)
+  const secondBoundary = span.start + (length * BigInt(2)) / BigInt(3)
   let head = 0
   let middle = 0
   let tail = 0
@@ -313,7 +313,7 @@ function describeDistribution(
   }
   const ticks = anchors.map((anchor) => anchor.sourceTick)
   const anchorSpanTicks =
-    ticks.length === 0 ? 0n : ticks.reduce((a, b) => (b > a ? b : a)) - ticks.reduce((a, b) => (b < a ? b : a))
+    ticks.length === 0 ? BigInt(0) : ticks.reduce((a, b) => (b > a ? b : a)) - ticks.reduce((a, b) => (b < a ? b : a))
   return Object.freeze({
     head,
     middle,
@@ -341,10 +341,10 @@ function fitOrdinaryLeastSquares(
   points: readonly Readonly<{ x: bigint; y: bigint }>[],
 ): OrdinaryLeastSquares | null {
   const n = BigInt(points.length)
-  let sumX = 0n
-  let sumY = 0n
-  let sumXX = 0n
-  let sumXY = 0n
+  let sumX = BigInt(0)
+  let sumY = BigInt(0)
+  let sumXX = BigInt(0)
+  let sumXY = BigInt(0)
   for (const point of points) {
     sumX += point.x
     sumY += point.y
@@ -352,7 +352,7 @@ function fitOrdinaryLeastSquares(
     sumXY += point.x * point.y
   }
   const denominator = n * sumXX - sumX * sumX
-  if (denominator === 0n) return null
+  if (denominator === BigInt(0)) return null
   return {
     rate: rational(n * sumXY - sumX * sumY, denominator),
     offset: rational(sumY * sumXX - sumX * sumXY, denominator),
@@ -366,22 +366,22 @@ function summarizeResiduals(
   const values = residuals.map((entry) => entry.residualTicks)
   const absolute = [...values].map(absBigInt).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   const count = values.length
-  const total = absolute.reduce((sum, value) => sum + value, 0n)
-  const squares = absolute.reduce((sum, value) => sum + value * value, 0n)
+  const total = absolute.reduce((sum, value) => sum + value, BigInt(0))
+  const squares = absolute.reduce((sum, value) => sum + value * value, BigInt(0))
   const middle = absolute.length >>> 1
   const median =
     absolute.length % 2 === 1
       ? rational(absolute[middle]!)
-      : rational(absolute[middle - 1]! + absolute[middle]!, 2n)
+      : rational(absolute[middle - 1]! + absolute[middle]!, BigInt(2))
 
   // Buckets are fractions of a session frame, compared exactly. Only the
   // displayed bound is floored, and it is labelled as such.
   const fractions: readonly Readonly<{ label: string; multiple: Rational | null }>[] = Object.freeze([
-    { label: 'exact', multiple: rational(0n) },
-    { label: 'within-quarter-frame', multiple: rational(1n, 4n) },
-    { label: 'within-half-frame', multiple: rational(1n, 2n) },
-    { label: 'within-one-frame', multiple: rational(1n) },
-    { label: 'within-two-frames', multiple: rational(2n) },
+    { label: 'exact', multiple: rational(BigInt(0)) },
+    { label: 'within-quarter-frame', multiple: rational(BigInt(1), BigInt(4)) },
+    { label: 'within-half-frame', multiple: rational(BigInt(1), BigInt(2)) },
+    { label: 'within-one-frame', multiple: rational(BigInt(1)) },
+    { label: 'within-two-frames', multiple: rational(BigInt(2)) },
     { label: 'beyond-two-frames', multiple: null },
   ])
   const histogram = fractions.map((bucket, index) => {
@@ -402,12 +402,12 @@ function summarizeResiduals(
 
   return Object.freeze({
     count,
-    minTicks: values.reduce((a, b) => (b < a ? b : a), values[0] ?? 0n),
-    maxTicks: values.reduce((a, b) => (b > a ? b : a), values[0] ?? 0n),
-    maxAbsTicks: absolute[absolute.length - 1] ?? 0n,
-    meanAbsTicks: count === 0 ? rational(0n) : rational(total, BigInt(count)),
-    medianAbsTicks: count === 0 ? rational(0n) : median,
-    meanSquareTicks: count === 0 ? rational(0n) : rational(squares, BigInt(count)),
+    minTicks: values.reduce((a, b) => (b < a ? b : a), values[0] ?? BigInt(0)),
+    maxTicks: values.reduce((a, b) => (b > a ? b : a), values[0] ?? BigInt(0)),
+    maxAbsTicks: absolute[absolute.length - 1] ?? BigInt(0),
+    meanAbsTicks: count === 0 ? rational(BigInt(0)) : rational(total, BigInt(count)),
+    medianAbsTicks: count === 0 ? rational(BigInt(0)) : median,
+    meanSquareTicks: count === 0 ? rational(BigInt(0)) : rational(squares, BigInt(count)),
     histogram: Object.freeze(histogram),
   })
 }
@@ -440,7 +440,7 @@ function proposeSplit(
   if (residuals.length < 4) return null
   const values = residuals.map((entry) => entry.residualTicks)
   let bestIndex = -1
-  let bestJump = 0n
+  let bestJump = BigInt(0)
   for (let index = 0; index + 1 < values.length; index += 1) {
     const jump = absBigInt(values[index + 1]! - values[index]!)
     if (jump > bestJump) {
@@ -454,7 +454,7 @@ function proposeSplit(
   // residual that grows smoothly is a wrong rate, not a discontinuity, and
   // splitting it would hide a fit problem behind an invented recorder event.
   if (compareRational(rational(bestJump), targetTicks) <= 0) return null
-  if (bestJump * 2n < spread) return null
+  if (bestJump * BigInt(2) < spread) return null
   return Object.freeze({
     afterAnchorId: anchors[bestIndex]!.id,
     beforeAnchorId: anchors[bestIndex + 1]!.id,
@@ -463,9 +463,9 @@ function proposeSplit(
 }
 
 export function driftToleranceRate(clock: Readonly<SessionClock>, windowSeconds: bigint): Rational {
-  assertDomain(windowSeconds > 0n, 'INVALID_ARGUMENT', 'the drift tolerance window must be positive')
+  assertDomain(windowSeconds > BigInt(0), 'INVALID_ARGUMENT', 'the drift tolerance window must be positive')
   // One frame accumulated over the window: 1 / (framesPerSecond × seconds).
-  return divideRational(rational(1n), multiplyRational(clock.frameRate, rational(windowSeconds)))
+  return divideRational(rational(BigInt(1)), multiplyRational(clock.frameRate, rational(windowSeconds)))
 }
 
 export function fitClockDrift(input: {
@@ -583,7 +583,7 @@ export function fitClockDrift(input: {
       rejected: Object.freeze([...rejected]),
     } as const)
   }
-  if (solution.rate.num <= 0n) {
+  if (solution.rate.num <= BigInt(0)) {
     return Object.freeze({
       status: 'insufficient-evidence',
       schemaVersion: CLOCK_DRIFT_SCHEMA_VERSION,
@@ -607,7 +607,7 @@ export function fitClockDrift(input: {
   // how well it memorized, not how well it predicts.
   const holdOut = validateOnHeldOutAnchors(usable, ticksPerFrame, rounding, policy)
 
-  const holdOutMax = holdOut.status === 'validated' ? holdOut.maxAbsTicks : 0n
+  const holdOutMax = holdOut.status === 'validated' ? holdOut.maxAbsTicks : BigInt(0)
   const effectiveMaxResidual =
     residualDistribution.maxAbsTicks > holdOutMax ? residualDistribution.maxAbsTicks : holdOutMax
   const withinTarget = compareRational(rational(effectiveMaxResidual), targetTicks) <= 0
@@ -624,9 +624,9 @@ export function fitClockDrift(input: {
     session: input.clock.timebase,
   })
   const limitRate = driftToleranceRate(input.clock, policy.toleranceWindowSeconds)
-  const deviation = absRational(subtractRational(driftRate, rational(1n)))
+  const deviation = absRational(subtractRational(driftRate, rational(BigInt(1))))
   const withinTolerance = compareRational(deviation, limitRate) <= 0
-  const speechLimitRate = rational(BigInt(policy.speechStretchLimitPpm), 1_000_000n)
+  const speechLimitRate = rational(BigInt(policy.speechStretchLimitPpm), BigInt(1000000))
 
   const correction: Readonly<DriftCorrectionDecision> = Object.freeze(
     withinTolerance
@@ -678,7 +678,7 @@ export function fitClockDrift(input: {
     holdOut,
     tolerance: Object.freeze({
       limitRate,
-      limitPpm: rationalToPpm(addRational(rational(1n), limitRate)),
+      limitPpm: rationalToPpm(addRational(rational(BigInt(1)), limitRate)),
       withinTolerance,
     }),
     correction,
@@ -710,7 +710,7 @@ function validateOnHeldOutAnchors(
     return Object.freeze({ status: 'not-performed', reason: 'too-few-anchors' } as const)
   }
   const solution = fitOrdinaryLeastSquares(training.map((anchor) => ({ x: anchor.sourceTick, y: anchor.sessionTick })))
-  if (solution === null || solution.rate.num <= 0n) {
+  if (solution === null || solution.rate.num <= BigInt(0)) {
     return Object.freeze({ status: 'not-performed', reason: 'training-set-degenerate' } as const)
   }
   const offsetTicks = roundRationalToTicks(solution.offset)
@@ -758,7 +758,7 @@ export function createMappingFromDriftFit(input: {
     sourceCoverage: input.sourceCoverage,
     // A refused or withheld correction still yields a mapping — it simply
     // carries no rate correction, because the offset is evidence too.
-    driftRate: input.fit.correction.action === 'apply-rate' ? input.fit.driftRate : rational(1n),
+    driftRate: input.fit.correction.action === 'apply-rate' ? input.fit.driftRate : rational(BigInt(1)),
     offsetTicks: input.fit.offsetTicks,
     residualBoundTicks: input.fit.residualBoundTicks,
     confidence: input.confidence ?? confidenceFromDriftFit(input.fit.decision),

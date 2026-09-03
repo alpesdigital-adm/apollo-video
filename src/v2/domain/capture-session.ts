@@ -301,7 +301,7 @@ function assertPart(part: Readonly<CaptureTrackPart>, trackId: string): Readonly
     `track ${trackId} part ${part.partId} splitReason ${part.splitReason} is not a split reason`,
   )
   assertDomain(
-    part.timebase.secondsPerTick.num > 0n,
+    part.timebase.secondsPerTick.num > BigInt(0),
     'INVALID_ARGUMENT',
     `track ${trackId} part ${part.partId} timebase must advance forward`,
   )
@@ -353,7 +353,7 @@ function assertTrack(track: Readonly<CaptureTrack>): Readonly<CaptureTrack> {
     `track ${track.trackId} syncAudioPolicy ${track.syncAudioPolicy} is not a policy`,
   )
   assertDomain(
-    track.timebase.secondsPerTick.num > 0n,
+    track.timebase.secondsPerTick.num > BigInt(0),
     'INVALID_ARGUMENT',
     `track ${track.trackId} timebase must advance forward`,
   )
@@ -453,7 +453,7 @@ function assertTracks(tracks: readonly Readonly<CaptureTrack>[], referenceTrackI
 
 function assertClock(clock: Readonly<CaptureSessionClockPolicy>): Readonly<CaptureSessionClockPolicy> {
   assertDomain(
-    clock.timebase.secondsPerTick.num > 0n,
+    clock.timebase.secondsPerTick.num > BigInt(0),
     'INVALID_ARGUMENT',
     'the session clock must advance forward in time',
   )

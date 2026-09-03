@@ -73,7 +73,7 @@ export const SESSION_CLOCK_ROUNDING: RoundingPolicy = 'nearest-half-even'
  * Every precision bound in this module carries this term; a bound that ignored
  * it would claim an accuracy the integer representation cannot deliver.
  */
-export const SESSION_CLOCK_ROUNDING_BOUND_TICKS = 1n
+export const SESSION_CLOCK_ROUNDING_BOUND_TICKS = BigInt(1)
 
 /** How the session clock was chosen. Spec 05 §5, in the spec's priority order. */
 export const SESSION_CLOCK_ORIGINS = Object.freeze([
@@ -116,7 +116,7 @@ export const CLOCK_PRECISION_CLASSES = Object.freeze(['sub-frame', 'frame', 'mul
 export type ClockPrecisionClass = (typeof CLOCK_PRECISION_CLASSES)[number]
 
 /** Spec 05 §10: a linear map may only be called high confidence within two frames. */
-export const HIGH_CONFIDENCE_MAX_FRAMES = 2n
+export const HIGH_CONFIDENCE_MAX_FRAMES = BigInt(2)
 
 export interface ClockPrecision {
   /** Upper bound of the mapping error in session ticks. A bound, not an estimate. */
@@ -204,16 +204,16 @@ function assertInstant(value: string, field: string): string {
  * inputs are rational.
  */
 export function sessionTicksPerFrame(clock: Readonly<SessionClock>): Rational {
-  return divideRational(rational(1n), multiplyRational(clock.frameRate, clock.timebase.secondsPerTick))
+  return divideRational(rational(BigInt(1)), multiplyRational(clock.frameRate, clock.timebase.secondsPerTick))
 }
 
 export function classifyClockPrecision(clock: Readonly<SessionClock>, boundTicks: bigint): ClockPrecisionClass {
-  assertDomain(boundTicks >= 0n, 'INVALID_ARGUMENT', 'a precision bound cannot be negative')
+  assertDomain(boundTicks >= BigInt(0), 'INVALID_ARGUMENT', 'a precision bound cannot be negative')
   const perFrame = sessionTicksPerFrame(clock)
   const bound = rational(boundTicks)
-  if (compareRational(multiplyRational(bound, rational(2n)), perFrame) < 0) return 'sub-frame'
+  if (compareRational(multiplyRational(bound, rational(BigInt(2))), perFrame) < 0) return 'sub-frame'
   if (compareRational(bound, perFrame) <= 0) return 'frame'
-  if (compareRational(bound, multiplyRational(perFrame, rational(3n))) <= 0) return 'multi-frame'
+  if (compareRational(bound, multiplyRational(perFrame, rational(BigInt(3)))) <= 0) return 'multi-frame'
   return 'coarse'
 }
 
@@ -278,11 +278,11 @@ export function createSessionClock(
 ): Readonly<SessionClock> {
   assertId(input.sessionId, 'session clock sessionId')
   assertDomain(
-    input.timebase.secondsPerTick.num > 0n,
+    input.timebase.secondsPerTick.num > BigInt(0),
     'INVALID_ARGUMENT',
     'a session timebase must advance forward in time',
   )
-  assertDomain(input.frameRate.num > 0n, 'INVALID_ARGUMENT', 'a session frame rate must be strictly positive')
+  assertDomain(input.frameRate.num > BigInt(0), 'INVALID_ARGUMENT', 'a session frame rate must be strictly positive')
 
   const clock: Omit<SessionClock, 'clockHash'> = {
     schemaVersion: SESSION_CLOCK_SCHEMA_VERSION,
@@ -296,7 +296,7 @@ export function createSessionClock(
   // A timebase coarser than the frame grid cannot name a frame boundary, so
   // every "within one frame" claim made against it would be unverifiable.
   assertDomain(
-    compareRational(sessionTicksPerFrame(clock as SessionClock), rational(1n)) >= 0,
+    compareRational(sessionTicksPerFrame(clock as SessionClock), rational(BigInt(1))) >= 0,
     'INVALID_ARGUMENT',
     'the session timebase must resolve at least one tick per frame',
   )
@@ -321,7 +321,7 @@ export function createSourceClock(input: {
 }): Readonly<SourceClock> {
   assertId(input.sourceId, 'source clock sourceId')
   assertDomain(
-    input.timebase.secondsPerTick.num > 0n,
+    input.timebase.secondsPerTick.num > BigInt(0),
     'INVALID_ARGUMENT',
     'a source timebase must advance forward in time',
   )
@@ -357,7 +357,7 @@ export function composeClockRate(input: {
   session: Readonly<Timebase>
   driftRate: Rational
 }): Rational {
-  assertDomain(input.driftRate.num > 0n, 'INVALID_ARGUMENT', 'a drift rate must be strictly positive')
+  assertDomain(input.driftRate.num > BigInt(0), 'INVALID_ARGUMENT', 'a drift rate must be strictly positive')
   return multiplyRational(timebaseRatio(input.source, input.session), input.driftRate)
 }
 
@@ -373,7 +373,7 @@ export function createSourceToSessionMapping(input: {
   clock: Readonly<SessionClock>
   source: Readonly<SourceClock>
   sourceCoverage: Readonly<TickInterval>
-  /** Clock drift only. Use `rational(1n)` when the clocks are believed identical. */
+  /** Clock drift only. Use `rational(BigInt(1))` when the clocks are believed identical. */
   driftRate: Rational
   offsetTicks: bigint
   /** Largest residual measured against evidence, in session ticks. */
@@ -388,7 +388,7 @@ export function createSourceToSessionMapping(input: {
     'INVALID_ARGUMENT',
     `clock confidence ${input.confidence} is not a recognized level`,
   )
-  assertDomain(input.residualBoundTicks >= 0n, 'INVALID_ARGUMENT', 'a residual bound cannot be negative')
+  assertDomain(input.residualBoundTicks >= BigInt(0), 'INVALID_ARGUMENT', 'a residual bound cannot be negative')
 
   const rate = composeClockRate({
     source: input.source.timebase,
@@ -502,11 +502,11 @@ export function mapSessionTickToSource(
   }
   if (inverted >= end) {
     assertDomain(
-      inverted - end < SESSION_CLOCK_ROUNDING_BOUND_TICKS + 1n,
+      inverted - end < SESSION_CLOCK_ROUNDING_BOUND_TICKS + BigInt(1),
       'INVALID_ARGUMENT',
       'inverse mapping fell outside the source coverage by more than the rounding bound',
     )
-    return end - 1n
+    return end - BigInt(1)
   }
   return inverted
 }

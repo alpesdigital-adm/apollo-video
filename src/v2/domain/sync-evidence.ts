@@ -408,7 +408,7 @@ function clamp01(value: number): number {
 }
 
 function absBigInt(value: bigint): bigint {
-  return value < 0n ? -value : value
+  return value < BigInt(0) ? -value : value
 }
 
 /**
@@ -422,7 +422,7 @@ export function sessionTicksPerFrame(
   sessionTimebase: Readonly<Timebase>,
   sessionFrameRate: Rational,
 ): Rational {
-  assertDomain(sessionFrameRate.num > 0n, 'INVALID_ARGUMENT', 'Session frame rate must be strictly positive')
+  assertDomain(sessionFrameRate.num > BigInt(0), 'INVALID_ARGUMENT', 'Session frame rate must be strictly positive')
   const secondsPerFrame = rational(sessionFrameRate.den, sessionFrameRate.num)
   return divideRational(secondsPerFrame, sessionTimebase.secondsPerTick)
 }
@@ -431,7 +431,7 @@ export function sessionTicksPerFrame(
 function frameThresholdToTicks(ticksPerFrame: Rational, frames: number): bigint {
   const scaled = multiplyRational(ticksPerFrame, rational(Math.round(frames * 1_000_000), 1_000_000))
   const quotient = scaled.num / scaled.den
-  return scaled.num % scaled.den === 0n ? quotient : quotient + 1n
+  return scaled.num % scaled.den === BigInt(0) ? quotient : quotient + BigInt(1)
 }
 
 function ticksToFrames(ticksPerFrame: Rational, ticks: bigint): number {
@@ -456,14 +456,14 @@ function validateObservation(observation: Readonly<SyncSignalObservation>): void
     'INVALID_ARGUMENT',
     'Reported sync confidence must be a number in [0,1]',
   )
-  assertDomain(observation.residualTicks >= 0n, 'INVALID_ARGUMENT', 'A residual is a magnitude and cannot be negative')
+  assertDomain(observation.residualTicks >= BigInt(0), 'INVALID_ARGUMENT', 'A residual is a magnitude and cannot be negative')
   assertDomain(
     observation.anchors.length <= MAX_ANCHORS_PER_SIGNAL,
     'INVALID_ARGUMENT',
     'A sync signal carries more anchors than can be assessed',
   )
   if (observation.rate) {
-    assertDomain(observation.rate.num > 0n, 'INVALID_ARGUMENT', 'A measured clock rate must be strictly positive')
+    assertDomain(observation.rate.num > BigInt(0), 'INVALID_ARGUMENT', 'A measured clock rate must be strictly positive')
   }
   if (observation.ambiguity) {
     const { bestPeak, secondBestPeak, windowsConsidered, windowsAgreeing } = observation.ambiguity
@@ -512,12 +512,12 @@ function anchorDistribution(
     if (anchor.sessionTick < earliest) earliest = anchor.sessionTick
     if (anchor.sessionTick > latest) latest = anchor.sessionTick
     const offset = anchor.sessionTick - bounds.start
-    if (offset < 0n || offset >= total) continue
-    const third = Number((offset * 3n) / total)
+    if (offset < BigInt(0) || offset >= total) continue
+    const third = Number((offset * BigInt(3)) / total)
     thirds.add(third > 2 ? 2 : third)
   }
   const span = latest - earliest
-  const spanRatio = total > 0n ? Math.min(1, Number(span) / Number(total)) : 0
+  const spanRatio = total > BigInt(0) ? Math.min(1, Number(span) / Number(total)) : 0
   return Object.freeze({ thirdsOccupied: thirds.size, spanRatio: Math.round(spanRatio * 1e4) / 1e4 })
 }
 
@@ -528,11 +528,11 @@ function coverageOf(
   const clipped = coverage
     .map((interval) => intervalIntersection(interval, bounds))
     .filter((interval): interval is Readonly<TickInterval> => interval !== null)
-  if (clipped.length === 0) return Object.freeze({ coveredTicks: 0n, ratio: 0 })
+  if (clipped.length === 0) return Object.freeze({ coveredTicks: BigInt(0), ratio: 0 })
   const { merged } = canonicalizeIntervals(clipped)
-  const coveredTicks = merged.reduce((total, interval) => total + intervalDuration(interval), 0n)
+  const coveredTicks = merged.reduce((total, interval) => total + intervalDuration(interval), BigInt(0))
   const total = intervalDuration(bounds)
-  const ratio = total > 0n ? Math.min(1, Number(coveredTicks) / Number(total)) : 0
+  const ratio = total > BigInt(0) ? Math.min(1, Number(coveredTicks) / Number(total)) : 0
   return Object.freeze({ coveredTicks, ratio: Math.round(ratio * 1e6) / 1e6 })
 }
 
@@ -656,7 +656,7 @@ export function evaluateSyncEvidence(input: EvaluateSyncEvidenceInput): Readonly
       sessionOffsetTicks,
       residualSessionTicks,
       residualFrames,
-      rate: observation.rate ?? rational(1n, 1n),
+      rate: observation.rate ?? rational(BigInt(1), BigInt(1)),
       rateMeasured: observation.rate !== undefined,
       peakRatio,
       thirdsOccupied: distribution.thirdsOccupied,

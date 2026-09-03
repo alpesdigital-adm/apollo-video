@@ -71,6 +71,16 @@ export const DOMAIN_ERROR_CODES = [
   'PUBLIC_OPERATION_NOT_FOUND',
   'PUBLIC_OPERATION_RETRY_REJECTED',
   'WORKSPACE_NOT_FOUND',
+  // F4.002/F4.005 — capture sessions and track coverage. Each of these is a
+  // refusal an operator has to be able to act on, which is why none of them is
+  // a generic INVALID_ARGUMENT: "this range is not covered" and "this range is
+  // covered but unverified" call for different actions, and collapsing them
+  // would leave the UI unable to say which.
+  'CAPTURE_TRACK_NOT_FOUND',
+  'CAPTURE_COVERAGE_NOT_AVAILABLE',
+  'CAPTURE_COVERAGE_UNVERIFIED',
+  'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED',
+  'CAPTURE_SESSION_DERIVATION_STALE',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',

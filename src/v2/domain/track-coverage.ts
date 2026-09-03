@@ -328,7 +328,7 @@ function assertClaims(claims: readonly Readonly<CoverageClaim>[]): readonly Read
 }
 
 function overlapKey(left: string, right: string): string {
-  return left < right ? `${left} ${right}` : `${right} ${left}`
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`
 }
 
 function assertDecision(
@@ -790,7 +790,7 @@ export function isAutoEditable(
 
 /** Total ticks a track actually holds, for diagnostics that must not guess. */
 export function coveredDuration(coverage: Readonly<TrackCoverage>): bigint {
-  return coverage.available.reduce((total, entry) => total + intervalDuration(entry.interval), 0n)
+  return coverage.available.reduce((total, entry) => total + intervalDuration(entry.interval), BigInt(0))
 }
 
 /**
