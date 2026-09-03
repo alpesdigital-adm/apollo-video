@@ -86,7 +86,7 @@ test('T-FR-103 presenter profiles version, activate, deactivate and expire under
     // 1. Registering v1 creates the head; new optional fields are hash-bound.
     const v1 = await register({
       workspaceId, profileId: 'lifecycle-presenter', version: 1, actorIdentityId: 'lifecycle-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_lifecycle' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_lifecycle' },
       voice: { id: 'voice_lifecycle_a', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: consent(),

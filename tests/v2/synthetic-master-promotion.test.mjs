@@ -16,7 +16,7 @@ const snapshot = createSyntheticPresenterProfileSnapshot({
   id: 'promotion-presenter',
   version: 3,
   actorIdentityId: 'promotion-identity',
-  avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_promotion' },
+  avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_promotion' },
   voice: { id: 'voice_promotion', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
   defaultLocale: 'pt-BR',
   status: 'active',
@@ -77,7 +77,7 @@ function criticReport(overrides = {}) {
     blockId: 'promotion-block-1',
     capability: 'audio-avatar',
     adapterId: 'heygen-v3',
-    adapterVersion: '3.1.0',
+    adapterVersion: '3.0.0',
     artifactId: 'artifact-original',
     artifactSha256: digest('a'),
     audioArtifactId: 'artifact-audio',
@@ -164,7 +164,7 @@ function harness(overrides = {}) {
     jobs: {
       read: async () => ({
         id: providerJobId, workspaceId, projectId, originProjectVersionId: 'project-version-1',
-        operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
+        operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         providerJobId: 'heygen_job_promotion', status: 'approved', criticResultHash: digest('f'),
         authorizationHash: digest('2'), submittedAt: '2029-05-01T00:00:00.000Z', completedAt: '2029-05-01T00:00:08.000Z',
         ...overrides.job,

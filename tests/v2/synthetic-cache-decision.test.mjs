@@ -25,7 +25,7 @@ const voice = createSyntheticVoiceIdentity({
   modelRef: null, outputFormat: 'mp3', synthesisConfig: { outputFormat: 'mp3' },
 })
 const avatar = createSyntheticAvatarIdentity({
-  adapterId: 'heygen-v3', adapterVersion: '3.1.0', avatarIdentityRef: 'avatar_a', presenterVersion: 2,
+  adapterId: 'heygen-v3', adapterVersion: '3.0.0', avatarIdentityRef: 'avatar_a', presenterVersion: 2,
   modelRef: null, outputFormat: 'mp4', audioChecksum: digest('c'),
   renderConfig: { outputFormat: 'mp4' }, direction: null, background: null,
 })

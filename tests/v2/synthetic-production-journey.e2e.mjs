@@ -370,7 +370,7 @@ test('T-FR-104/105/106 synthetic TTS production, criticism and cache reuse run e
     })
     const profileInput = (version, voiceId, avatarRef, key, extra = {}) => ({
       workspaceId, profileId: 'production-journey-presenter', version, actorIdentityId: 'production-journey-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: avatarRef },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: avatarRef },
       voice: { id: voiceId, version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

@@ -40,7 +40,7 @@ const base = {
   videoDurationMs: 4_010,
   provenance: {
     adapterId: 'heygen-v3',
-    adapterVersion: '3.1.0',
+    adapterVersion: '3.0.0',
     capability: 'audio-avatar',
     modelRef: 'avatar-model-1',
     adapterConfigHash: digest('2'),

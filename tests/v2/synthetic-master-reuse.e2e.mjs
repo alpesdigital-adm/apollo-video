@@ -304,7 +304,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
       clock: () => new Date(at(0)),
     })({
       workspaceId, profileId: 'master-reuse-presenter', version: 1, actorIdentityId: 'master-reuse-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_reuse' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_reuse' },
       voice: { id: 'voice_reuse', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
@@ -322,7 +322,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     await client.v2ProviderJob.create({
       data: {
         id: providerJobId, workspaceId, projectId, originProjectVersionId: projectVersionId,
-        schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
+        schemaVersion: 'provider-job/v1', operation: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         providerJobId: 'heygen_job_reuse', inputJson: '{}', inputHash: hash('1'),
         authorizationJson: '{}', authorizationHash: hash('2'), status: 'approved',
         resultArtifactId: artifactIds['provider-original'], resultArtifactSha256: bytes['provider-original'].sha256,
@@ -348,7 +348,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
           artifactId: artifactIds[masterRole], artifactSha256: bytes[masterRole].sha256,
           byteSize: BigInt(bytes[masterRole].byteSize),
           mediaType: roleFiles[masterRole].mediaType, container: roleFiles[masterRole].container,
-          adapterId: 'heygen-v3', adapterVersion: '3.1.0', modelRef: 'avatar-model-1',
+          adapterId: 'heygen-v3', adapterVersion: '3.0.0', modelRef: 'avatar-model-1',
           adapterConfigHash: hash('7'), inputHash: hash('1'), authorizationHash: hash('2'),
           completedAt: new Date(at(6)), createdAt: new Date(at(6)),
         },
@@ -397,7 +397,7 @@ test('T-FR-104 a sealed synthetic master is reused across projects through /v1 w
     const criticVerdict = await new PrismaSyntheticCriticReportRepository(client).record({
       report: createSyntheticCriticReport({
         id: 'master-reuse-critic-report', workspaceId, projectId, blockId: 'master-reuse-block',
-        capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.1.0',
+        capability: 'audio-avatar', adapterId: 'heygen-v3', adapterVersion: '3.0.0',
         artifactId: artifactIds['provider-original'], artifactSha256: bytes['provider-original'].sha256,
         audioArtifactId: artifactIds['final-audio'], alignmentArtifactId: artifactIds.alignment,
         scriptHash: hash('7'), profileSnapshotId, expectedIdentityRef: 'avatar_reuse',

@@ -87,7 +87,7 @@ test('T-FR-102 synthetic script plan commands persist stable block identities on
     })
     const profileInput = (version, voiceId, key) => ({
       workspaceId, profileId: 'script-plan-presenter', version, actorIdentityId: 'script-plan-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_plan_123' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_plan_123' },
       voice: { id: voiceId, version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

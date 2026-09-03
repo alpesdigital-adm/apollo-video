@@ -117,7 +117,7 @@ test('T-FR-105 synthetic cache decisions persist idempotently, summarize by outc
       clock: () => new Date(at(0)),
     })({
       workspaceId, profileId: 'cache-decision-presenter', version: 1, actorIdentityId: 'cache-decision-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_ledger' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_ledger' },
       voice: { id: 'voice_ledger', version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {

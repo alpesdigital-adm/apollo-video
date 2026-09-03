@@ -150,7 +150,7 @@ test('T-FR-102 per-block provider jobs cache, retry and supersede in isolation o
     })
     const profileInput = (version, voiceId, key, extra = {}) => ({
       workspaceId, profileId: 'blockgen-presenter', version, actorIdentityId: 'blockgen-identity',
-      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.1.0', identityRef: 'avatar_blockgen' },
+      avatar: { adapterId: 'heygen-v3', adapterVersion: '3.0.0', identityRef: 'avatar_blockgen' },
       voice: { id: voiceId, version: 1, adapterId: 'elevenlabs-tts', adapterVersion: '1.0.0' },
       defaultLocale: 'pt-BR', status: 'active', disclosure: 'Conteúdo gerado com IA',
       consent: {
