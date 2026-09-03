@@ -49,3 +49,19 @@ crop/cover/reject were implemented locally on 2026-09-03 under ADR-149 but remai
 open pending PostgreSQL/CI, merge, deployment and owner acceptance. The complete
 evidence and operational boundaries are recorded in
 `docs/quality/transformation-control-plane-v1.md`.
+
+## Synthetic phase gate evidence
+
+The F3 phase gate is a separate content-addressed verdict. It cannot infer
+delivery from the presence of adapters, isolated fixtures or a successful paid
+HTTP response. `synthetic-phase/v1` requires exact server-owned references for
+three live-provider outcomes (TTS with alignment, avatar from generated audio
+and avatar from ready audio), approved raw-block cataloguing, cross-project
+reuse with zero provider work, rejection followed by an approved fallback, and
+provider-neutral EditPlan/renderer behavior.
+
+Each check declares the evidence resource types it needs. Missing or malformed
+references turn the check into a failure; client-authored prose cannot replace
+them. The first implementation slice defines and tests the immutable evaluator.
+Repository-derived evidence, public API, production execution and owner
+acceptance remain mandatory before any F3.019 checkbox can close.
