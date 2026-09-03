@@ -213,6 +213,19 @@ model V2Workspace {
   transformationCriticIssues             V2TransformationCriticIssue[]
   providerCallbackEvents                 V2ProviderCallbackEvent[]
   transformationBriefs                   V2TransformationBrief[]
+  captureSessions                        V2CaptureSession[]
+  captureTracks                          V2CaptureTrack[]
+  captureTrackParts                      V2CaptureTrackPart[]
+  captureSessionClocks                   V2CaptureSessionClock[]
+  captureClockMaps                       V2CaptureClockMap[]
+  captureClockMapPieces                  V2CaptureClockMapPiece[]
+  captureTrackCoverages                  V2CaptureTrackCoverage[]
+  captureSyncEvidence                    V2CaptureSyncEvidence[]
+  captureDriftFits                       V2CaptureDriftFit[]
+  captureDriftAnchors                    V2CaptureDriftAnchor[]
+  editorialSyntheses                     V2EditorialSynthesis[]
+  editorialSynthesisRanges               V2EditorialSynthesisRange[]
+  editorialSynthesisJoins                V2EditorialSynthesisJoin[]
   transformationProviders                V2TransformationProviderDefinition[]
   transformationProviderCapabilities     V2TransformationProviderCapability[]
   transformationProviderHealth           V2TransformationProviderHealth[]
@@ -710,6 +723,8 @@ model V2Project {
   noveltyBudgetDecisions                 V2NoveltyBudgetDecision[]
   transformationFallbackLedgers          V2TransformationFallbackLedger[]
   transformationCriticReports            V2TransformationCriticReport[]
+  captureSessions                        V2CaptureSession[]
+  editorialSyntheses                     V2EditorialSynthesis[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -8398,4 +8413,373 @@ model V2SyntheticCriticIssue {
   @@index([workspaceId, blockId, dimension], map: "synthetic_critic_issues_workspace_block_idx")
   @@index([workspaceId, dimension, severity], map: "synthetic_critic_issues_workspace_dimension_idx")
   @@map("synthetic_critic_issues")
+}
+
+// ---------------------------------------------------------------------------
+// Wave 18 — F4.001-F4.008: capture sessions, session time, editorial synthesis.
+//
+// Ticks are BigInt because a Float represents every integer only up to 2^53,
+// and rates are stored as numerator/denominator pairs because 30000/1001 is
+// exactly two integers and is not a float at all. The migration carries CHECK
+// and EXCLUDE constraints Prisma cannot express; they are the domain
+// invariants written where a backfill script cannot route around them.
+// ---------------------------------------------------------------------------
+
+model V2CaptureSession {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  projectId            String   @db.VarChar(128)
+  schemaVersion        String   @db.VarChar(64)
+  label                String   @db.VarChar(256)
+  status               String   @db.VarChar(24)
+  version              Int
+  previousVersionHash  String?  @db.Char(64)
+  referenceTrackId     String?  @db.VarChar(128)
+  referenceEpoch       Int
+  staleDerivationsJson String   @default("[]") @db.Text
+  recordedAt           DateTime @db.Timestamptz(3)
+  sessionHash          String   @db.Char(64)
+  createdAt            DateTime @db.Timestamptz(3)
+  updatedAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project           @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  tracks    V2CaptureTrack[]
+  clock     V2CaptureSessionClock?
+  clockMaps V2CaptureClockMap[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectId])
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("capture_sessions")
+}
+
+model V2CaptureTrack {
+  id                String   @id @db.VarChar(128)
+  workspaceId       String   @db.VarChar(128)
+  sessionId         String   @db.VarChar(128)
+  role              String   @db.VarChar(24)
+  label             String   @db.VarChar(256)
+  sourceId          String   @db.VarChar(128)
+  timebaseNum       BigInt
+  timebaseDen       BigInt
+  provenance        String   @db.VarChar(32)
+  carriesAudio      Boolean
+  carriesSpeech     Boolean
+  syncAudioPolicy   String   @db.VarChar(24)
+  includeInFinalMix Boolean
+  trackHash         String   @db.Char(64)
+  createdAt         DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session      V2CaptureSession        @relation(fields: [sessionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  parts        V2CaptureTrackPart[]
+  coverage     V2CaptureTrackCoverage?
+  syncEvidence V2CaptureSyncEvidence[]
+  driftFits    V2CaptureDriftFit[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, sourceId])
+  @@index([workspaceId, sessionId, role])
+  @@map("capture_tracks")
+}
+
+model V2CaptureTrackPart {
+  id             String   @id @db.VarChar(128)
+  workspaceId    String   @db.VarChar(128)
+  sessionId      String   @db.VarChar(128)
+  trackId        String   @db.VarChar(128)
+  ordinal        Int
+  artifactId     String   @db.VarChar(128)
+  artifactSha256 String   @db.Char(64)
+  startTicks     BigInt
+  endTicks       BigInt
+  ptsOffsetTicks BigInt   @default(0)
+  openedBy       String?  @db.VarChar(32)
+  partHash       String   @db.Char(64)
+  createdAt      DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  track     V2CaptureTrack @relation(fields: [trackId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, trackId, ordinal])
+  @@index([workspaceId, sessionId])
+  @@map("capture_track_parts")
+}
+
+model V2CaptureSessionClock {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  sessionId           String   @db.VarChar(128)
+  schemaVersion       String   @db.VarChar(64)
+  timebaseNum         BigInt
+  timebaseDen         BigInt
+  frameRateNum        BigInt
+  frameRateDen        BigInt
+  authorityOrigin     String   @db.VarChar(32)
+  authoritySourceId   String?  @db.VarChar(128)
+  authorityProvenance String   @db.VarChar(32)
+  authorityEvidence   String   @db.VarChar(512)
+  rounding            String   @db.VarChar(24)
+  establishedAt       DateTime @db.Timestamptz(3)
+  clockHash           String   @db.Char(64)
+  createdAt           DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSession @relation(fields: [sessionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([sessionId, workspaceId])
+  @@map("capture_session_clocks")
+}
+
+model V2CaptureClockMap {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  sessionId             String   @db.VarChar(128)
+  sourceId              String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  derivedSessionVersion Int
+  derivedReferenceEpoch Int
+  sourceBoundsStart     BigInt
+  sourceBoundsEnd       BigInt
+  uncoveredJson         String   @default("[]") @db.Text
+  mapHash               String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSession         @relation(fields: [sessionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  pieces    V2CaptureClockMapPiece[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, sourceId])
+  @@map("capture_clock_maps")
+}
+
+model V2CaptureClockMapPiece {
+  id                 String  @id @db.VarChar(128)
+  workspaceId        String  @db.VarChar(128)
+  mapId              String  @db.VarChar(128)
+  ordinal            Int
+  sourceStartTicks   BigInt
+  sourceEndTicks     BigInt
+  sessionStartTicks  BigInt
+  sessionEndTicks    BigInt
+  rateNum            BigInt
+  rateDen            BigInt
+  offsetTicks        BigInt
+  rounding           String  @db.VarChar(24)
+  driftPpm           Int
+  confidence         String  @db.VarChar(16)
+  residualBoundTicks BigInt
+  openedBy           String? @db.VarChar(32)
+  openedByDetail     String? @db.VarChar(512)
+  anchorIdsJson      String  @default("[]") @db.Text
+  evidenceRefsJson   String  @default("[]") @db.Text
+  anchorCount        Int     @default(0)
+  evidenceCount      Int     @default(0)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  map       V2CaptureClockMap @relation(fields: [mapId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, mapId, ordinal])
+  @@map("capture_clock_map_pieces")
+}
+
+model V2CaptureTrackCoverage {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  sessionId             String   @db.VarChar(128)
+  trackId               String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  derivedSessionVersion Int
+  derivedReferenceEpoch Int
+  spansJson             String   @db.Text
+  coveredTicks          BigInt
+  gapTicks              BigInt
+  confidenceBps         Int
+  autoEditable          Boolean
+  overlapResolution     String?  @db.VarChar(24)
+  coverageHash          String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  track     V2CaptureTrack @relation(fields: [trackId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([trackId, workspaceId])
+  @@index([workspaceId, sessionId])
+  @@map("capture_track_coverages")
+}
+
+model V2CaptureSyncEvidence {
+  id                String   @id @db.VarChar(128)
+  workspaceId       String   @db.VarChar(128)
+  sessionId         String   @db.VarChar(128)
+  trackId           String   @db.VarChar(128)
+  schemaVersion     String   @db.VarChar(64)
+  outcome           String   @db.VarChar(32)
+  selectedMethod    String?  @db.VarChar(24)
+  selectedTier      Int?
+  offsetTicks       BigInt?
+  confidence        String?  @db.VarChar(16)
+  peakRatioBps      Int?
+  independenceGroup String?  @db.VarChar(64)
+  attemptsJson      String   @db.Text
+  refusalReason     String?  @db.VarChar(64)
+  evidenceHash      String   @db.Char(64)
+  createdAt         DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  track     V2CaptureTrack @relation(fields: [trackId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, sessionId, trackId])
+  @@map("capture_sync_evidence")
+}
+
+model V2CaptureDriftFit {
+  id                  String   @id @db.VarChar(128)
+  workspaceId         String   @db.VarChar(128)
+  sessionId           String   @db.VarChar(128)
+  trackId             String   @db.VarChar(128)
+  schemaVersion       String   @db.VarChar(64)
+  status              String   @db.VarChar(24)
+  driftRateNum        BigInt?
+  driftRateDen        BigInt?
+  driftPpm            Int?
+  offsetTicks         BigInt?
+  residualBoundTicks  BigInt?
+  residualMaxAbsTicks BigInt?
+  withinTolerance     Boolean?
+  correctionAction    String?  @db.VarChar(24)
+  correctionReason    String?  @db.VarChar(64)
+  carriesSpeech       Boolean
+  decision            String?  @db.VarChar(24)
+  refusalReason       String?  @db.VarChar(32)
+  holdOutStatus       String   @db.VarChar(24)
+  splitProposalJson   String?  @db.Text
+  residualsJson       String   @default("[]") @db.Text
+  fitHash             String   @db.Char(64)
+  createdAt           DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  track     V2CaptureTrack         @relation(fields: [trackId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  anchors   V2CaptureDriftAnchor[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, sessionId, trackId])
+  @@map("capture_drift_fits")
+}
+
+model V2CaptureDriftAnchor {
+  id            String  @id @db.VarChar(128)
+  workspaceId   String  @db.VarChar(128)
+  fitId         String  @db.VarChar(128)
+  anchorId      String  @db.VarChar(128)
+  sourceTick    BigInt
+  sessionTick   BigInt
+  method        String  @db.VarChar(24)
+  confidence    String  @db.VarChar(16)
+  evidenceRef   String  @db.VarChar(512)
+  residualTicks BigInt?
+  usedInFit     Boolean
+  isOutlier     Boolean @default(false)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  fit       V2CaptureDriftFit @relation(fields: [fitId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, fitId, anchorId])
+  @@map("capture_drift_anchors")
+}
+
+model V2EditorialSynthesis {
+  id                    String   @id @db.VarChar(128)
+  workspaceId           String   @db.VarChar(128)
+  projectId             String   @db.VarChar(128)
+  schemaVersion         String   @db.VarChar(64)
+  objective             String   @db.VarChar(512)
+  targetDurationMs      Int
+  toleranceMs           Int
+  synthesizedDurationMs Int
+  sourceDurationMs      Int
+  droppedMs             Int
+  chronologyPreserved   Boolean
+  reorderReason         String?  @db.VarChar(512)
+  contextProofJson      String   @db.Text
+  storyPlanId           String   @db.VarChar(128)
+  editPlanId            String   @db.VarChar(128)
+  editPlanJson          String   @db.Text
+  editPlanSelectionHash String   @db.Char(64)
+  frameRateNum          BigInt
+  frameRateDen          BigInt
+  synthesisHash         String   @db.Char(64)
+  createdAt             DateTime @db.Timestamptz(3)
+  updatedAt             DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  ranges    V2EditorialSynthesisRange[]
+  joins     V2EditorialSynthesisJoin[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectId, updatedAt(sort: Desc)])
+  @@map("editorial_syntheses")
+}
+
+model V2EditorialSynthesisRange {
+  id                   String @id @db.VarChar(128)
+  workspaceId          String @db.VarChar(128)
+  synthesisId          String @db.VarChar(128)
+  rangeId              String @db.VarChar(128)
+  ordinal              Int
+  startMs              Int
+  endMs                Int
+  sourceArtifactId     String @db.VarChar(128)
+  sourceArtifactSha256 String @db.Char(64)
+  sourceManifestId     String @db.VarChar(128)
+  sourceManifestHash   String @db.Char(64)
+  indexRunId           String @db.VarChar(128)
+  momentId             String @db.VarChar(128)
+  momentHash           String @db.Char(64)
+  evaluationId         String @db.VarChar(128)
+  evaluationHash       String @db.Char(64)
+  rightsSnapshotId     String @db.VarChar(128)
+  rightsStatus         String @db.VarChar(16)
+  consentStatus        String @db.VarChar(16)
+  claimIdsJson         String @default("[]") @db.Text
+  qualifierIdsJson     String @default("[]") @db.Text
+  proofContextIdsJson  String @default("[]") @db.Text
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  synthesis V2EditorialSynthesis @relation(fields: [synthesisId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, synthesisId, ordinal])
+  @@index([workspaceId, momentId])
+  @@map("editorial_synthesis_ranges")
+}
+
+model V2EditorialSynthesisJoin {
+  id                  String @id @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  synthesisId         String @db.VarChar(128)
+  ordinal             Int
+  beforeRangeId       String @db.VarChar(128)
+  afterRangeId        String @db.VarChar(128)
+  kind                String @db.VarChar(16)
+  droppedMs           Int
+  timelineMs          Int
+  justification       String @db.VarChar(1024)
+  continuityRisksJson String @default("[]") @db.Text
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  synthesis V2EditorialSynthesis @relation(fields: [synthesisId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, synthesisId, ordinal])
+  @@map("editorial_synthesis_joins")
 }
