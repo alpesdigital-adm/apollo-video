@@ -83,7 +83,7 @@ const STATUS_LABEL: Record<PresenterSummary['status'], string> = {
 }
 
 const emptyCreateForm = {
-  profileId: '', actorIdentityId: '', avatarAdapterId: 'heygen-v3', avatarAdapterVersion: '3.0.0', avatarIdentityRef: '',
+  profileId: '', actorIdentityId: '', avatarAdapterId: 'heygen-v3', avatarAdapterVersion: '3.1.0', avatarIdentityRef: '',
   voiceId: '', voiceAdapterId: 'elevenlabs-tts', voiceAdapterVersion: '1.0.0',
   defaultLocale: 'pt-BR', disclosure: 'Conteúdo gerado com IA',
   consentId: '', consentEvidenceArtifactId: '', consentUses: 'ads', consentMarkets: 'BRA',

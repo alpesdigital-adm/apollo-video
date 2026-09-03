@@ -106,6 +106,7 @@
     "test:e2e:mvp-core-full": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env --test tests/v2/mvp-core-full-journey.e2e.mjs",
     "test:e2e:export-matrix": "node node_modules/tsx/dist/cli.mjs --test tests/v2/export-matrix.e2e.mjs",
     "test:e2e:provider-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/provider-tts-avatar-journey.e2e.mjs",
+    "test:e2e:provider-live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/provider-live-contract.e2e.mjs",
     "test:e2e:block-plan-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-block-plan-journey.e2e.mjs",
     "test:e2e:presenter-lifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-presenter-profile.e2e.mjs",
     "test:e2e:synthetic-master-reuse": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthetic-master-reuse.e2e.mjs",

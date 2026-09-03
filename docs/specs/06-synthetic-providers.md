@@ -258,12 +258,13 @@ Fonte: `https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-tim
 - Erros: 401/403 → `PROVIDER_AUTHENTICATION_FAILED` (não retryable); 429 → `PROVIDER_RATE_LIMITED` + Retry-After; 5xx → `PROVIDER_UNAVAILABLE`; 422 → `PROVIDER_REQUEST_REJECTED`. Corpo malformado, contêiner divergente da assinatura binária (RIFF/WAVE, ID3/frame-sync) e payload acima do teto configurado falham fechado.
 - O adapter re-verifica `sha256(text) === scriptHash` antes da chamada paga e rejeita alignment cujos caracteres não reconstroem o texto aprovado (`PROVIDER_ALIGNMENT_MISMATCH`); monotonicidade dos timestamps é obrigatória.
 
-### 9.3 HeyGen — fatos oficiais (consultados em 2026-08-27)
+### 9.3 HeyGen — fatos oficiais (revalidados em 2026-09-02)
 
-Fonte: `https://developers.heygen.com/reference/create-video`, `.../upload-asset`, `.../get-video` (revalidada em 2026-08-28).
+Fonte: `https://developers.heygen.com/reference/create-video`, `.../upload-asset`, `.../get-video` e `.../list-avatar-looks`.
 
 - `POST /v3/assets` (multipart, máx 32MB, mp3/wav) → `data.asset_id`; `POST /v3/videos` (`type: 'avatar'` + `audio_asset_id`, mutuamente exclusivo com `script`) → `data.video_id`; `GET /v3/videos/{id}` → `data.status` + `data.video_url`. Autenticação `X-Api-Key`.
-- As referências oficiais de `POST /v3/assets` e `POST /v3/videos` não documentam `Idempotency-Key`, embora outros endpoints HeyGen o façam explicitamente. O adapter declara `supportsIdempotency: false` e não envia o header. Antes da chamada externa, o worker persiste a transição `estimated → submitting` e incrementa a tentativa sob o mesmo lease. Se o processo cair depois da chamada e antes de persistir o resultado, o job fica com resultado ambíguo e termina em `PROVIDER_SUBMISSION_OUTCOME_UNKNOWN`, sem retry automático nem nova cobrança potencial. Neste contrato, a retomada nunca reenvia uma submissão ambígua.
+- `POST /v3/assets` e `POST /v3/videos` aceitam `Idempotency-Key` com janela de 24 horas. O adapter 3.1.0 declara `supportsIdempotency: true`, deriva um valor opaco do idempotency key interno e envia o mesmo valor a ambos os endpoints; o escopo por endpoint separa upload e criação do vídeo. A ledger persistida continua sendo a autoridade da Apollo e uma submissão de resultado ambíguo continua sem retry automático fora da garantia upstream.
+- O request explicita `fit: 'cover'`: uma identidade pública horizontal usada em output vertical preenche o quadro sem barras, mantendo o crop sob responsabilidade do provider e do critic visual posterior.
 - `VideoStatus` oficial é exatamente `pending | processing | completed | failed`; qualquer outro valor falha fechado (`PROVIDER_STATUS_UNKNOWN`).
 - Não há cancelamento documentado de vídeo em processamento (Delete Video destrói artefatos prontos) → `supportsCancellation: false`, sem método `cancel`.
 - Webhooks existem upstream, mas o adapter não implementa verificação → `completion: 'polling'` apenas.
