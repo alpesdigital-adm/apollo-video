@@ -1,7 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import { assertDomain } from './errors.ts'
 import type { SyncCeiling } from './capture-protocol.ts'
-import type { TickInterval } from './session-time.ts'
+import { serializeTickInterval, type TickInterval } from './session-time.ts'
 
 /**
  * F4.011 — the versioned synchronization diagnostic (FR-149, spec 05 §18).
@@ -230,6 +230,28 @@ export function anchorsContradict(
   return !Number.isFinite(rate) || rate <= 0 || Math.abs(rate - 1) > 0.01
 }
 
+/**
+ * The bytes a diagnostic's hash is taken over.
+ *
+ * Coverage gaps are tick intervals, and a tick is a bigint. The canonical
+ * hasher refuses bigints outright — correctly, because there is no one obvious
+ * rendering of one — so they are serialised the way Wave 18 already serialises
+ * every tick it hashes. Without this a diagnostic that HAS gaps cannot be
+ * created at all, which is precisely the session worth diagnosing.
+ *
+ * Used by the constructor and by the integrity check, so the two can never
+ * disagree about what was hashed.
+ */
+function diagnosticHashBody(body: Omit<SyncDiagnostic, 'diagnosticHash'>) {
+  return {
+    ...body,
+    tracks: body.tracks.map((track) => ({
+      ...track,
+      gaps: track.gaps.map(serializeTickInterval),
+    })),
+  }
+}
+
 export function createSyncDiagnostic(input: {
   workspaceId: string
   sessionId: string
@@ -339,7 +361,7 @@ export function createSyncDiagnostic(input: {
     protocolCeiling: input.protocolCeiling ?? null,
     generatedAt: input.generatedAt,
   }
-  return Object.freeze({ ...body, diagnosticHash: calculateCanonicalHash(body) })
+  return Object.freeze({ ...body, diagnosticHash: calculateCanonicalHash(diagnosticHashBody(body)) })
 }
 
 /**
@@ -379,7 +401,7 @@ export function assertSyncDiagnosticIntegrity(diagnostic: Readonly<SyncDiagnosti
   )
   const { diagnosticHash, ...body } = diagnostic
   assertDomain(
-    calculateCanonicalHash(body) === diagnosticHash,
+    calculateCanonicalHash(diagnosticHashBody(body)) === diagnosticHash,
     'PERSISTENCE_CONFLICT',
     'stored sync diagnostic hash does not match its body',
   )

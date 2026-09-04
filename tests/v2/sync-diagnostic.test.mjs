@@ -9,6 +9,7 @@ import {
   deriveTrackStatus,
   DIAGNOSTIC_POLICY,
 } from '../../src/v2/domain/sync-diagnostic.ts'
+import { createTickInterval } from '../../src/v2/domain/session-time.ts'
 import {
   applyAnchorEdit,
   fitAnchors,
@@ -312,4 +313,55 @@ test('T-FR-149 a diagnostic is tamper-evident and a refit advances the version',
   assert.equal(refit.version, 2)
   assert.equal(refit.previousVersionHash, first.diagnosticHash)
   assert.ok(refit.globalConfidence >= DIAGNOSTIC_POLICY.mediumConfidence)
+})
+
+test('T-FR-149 a diagnostic with coverage gaps can be hashed at all', () => {
+  // Ticks are bigints and the canonical hasher refuses them, so a diagnostic
+  // carrying gaps could not be constructed — the exact session worth
+  // diagnosing. Every earlier test here passed an empty gap list, which is why
+  // nothing caught it until a browser fixture put a real gap in one.
+  const sec = (n) => BigInt(90_000) * BigInt(n)
+  const withGaps = (gaps) => createSyncDiagnostic({
+    workspaceId: 'workspace-1',
+    sessionId: 'capture-session-1',
+    referenceTrackId: 'track-camera-main',
+    version: 1,
+    previousVersionHash: null,
+    sessionVersion: 1,
+    referenceEpoch: 1,
+    tracks: [{
+      trackId: 'track-screen',
+      methods: [],
+      confidence: 0,
+      offsetMs: null,
+      residualMs: null,
+      driftPpm: null,
+      coverageBps: null,
+      gaps,
+      automaticAnchors: [],
+      manualAnchors: [],
+      pieceIds: [],
+      status: deriveTrackStatus({
+        offsetMs: null, residualMs: null, coverageBps: null,
+        confidence: 0, hasContradictoryAnchors: false,
+      }),
+      warnings: ['insufficient-evidence'],
+      previewSampleMs: [],
+    }],
+    protocolCeiling: 'manual-anchors-required',
+    generatedAt: '2029-04-01T09:00:00.000Z',
+  })
+
+  const one = withGaps([createTickInterval(sec(120), sec(130))])
+  assert.match(one.diagnosticHash, /^[a-f0-9]{64}$/)
+  // Round trips: what the constructor hashed is what the check recomputes.
+  assert.equal(assertSyncDiagnosticIntegrity(one).diagnosticHash, one.diagnosticHash)
+
+  // And serialising the ticks did not collapse them into the same digest: a
+  // gap that ends one tick later is a different document.
+  const other = withGaps([createTickInterval(sec(120), sec(130) + BigInt(1))])
+  assert.notEqual(one.diagnosticHash, other.diagnosticHash)
+  // The ticks themselves survive as bigints on the aggregate.
+  assert.equal(one.tracks[0].gaps[0].end, sec(130))
+  assert.equal(typeof one.tracks[0].gaps[0].end, 'bigint')
 })

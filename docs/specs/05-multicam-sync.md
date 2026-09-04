@@ -522,6 +522,15 @@ local aponta para a raiz de artefatos e não copia nada, que é exatamente por q
 o esquecimento era invisível em desenvolvimento. `resolve` agora devolve
 `{ path, release }` e todo chamador libera no `finally`.
 
+**Ticks são serializados antes de entrar no hash.** Buracos de cobertura são
+intervalos de tick, e tick é `bigint`; o hasher canônico recusa `bigint` de
+propósito, porque não existe uma renderização óbvia. O resultado é que um
+diagnóstico **com** buracos não podia sequer ser construído — exatamente a
+sessão que vale a pena diagnosticar. Todo teste anterior passava `gaps: []`, e
+por isso nada pegou. Serializados como a Wave 18 já serializa qualquer tick que
+entra em hash, e o teste de regressão confirma que dois buracos diferentes
+continuam produzindo digests diferentes.
+
 ### 28.3 O que continua aberto
 
 - O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for
