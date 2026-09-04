@@ -4,6 +4,7 @@ import type {
   MarkerArtifactRef,
   SyncDiagnosticRepository,
 } from '../../application/ports/sync-diagnostic-repository.ts'
+import { parseWithTicks, stringifyWithTicks } from './bigint-json.ts'
 import { DomainError } from '../../domain/errors.ts'
 import {
   assertMarkerDetectionIntegrity,
@@ -41,6 +42,15 @@ function isPrismaCode(error: unknown, code: string): boolean {
 function parse<T>(json: string, what: string): T {
   try {
     return JSON.parse(json) as T
+  } catch {
+    throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${what} is not valid JSON`)
+  }
+}
+
+/** The same, for the one payload whose leaves include ticks. */
+function parseTicks<T>(json: string, what: string): T {
+  try {
+    return parseWithTicks(json) as T
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${what} is not valid JSON`)
   }
@@ -178,7 +188,7 @@ function hydrateDiagnostic(row: {
     referenceEpoch: row.referenceEpoch,
     status: row.status as DiagnosticStatus,
     globalConfidence: row.globalConfidence,
-    tracks: Object.freeze(parse<TrackDiagnostic[]>(row.tracksJson, 'diagnostic tracks')),
+    tracks: Object.freeze(parseTicks<TrackDiagnostic[]>(row.tracksJson, 'diagnostic tracks')),
     warnings: Object.freeze(parse<DiagnosticWarning[]>(row.warningsJson, 'diagnostic warnings')),
     recommendedActions: Object.freeze(
       parse<RecommendedAction[]>(row.recommendedActionsJson, 'recommended actions'),
@@ -336,7 +346,11 @@ export class PrismaSyncDiagnosticRepository implements SyncDiagnosticRepository 
             schemaVersion: diagnostic.schemaVersion,
             status: diagnostic.status,
             globalConfidence: diagnostic.globalConfidence,
-            tracksJson: JSON.stringify(diagnostic.tracks),
+            // Coverage gaps are tick intervals, and a tick is a bigint that
+            // JSON.stringify refuses outright. The tagged codec Wave 18 already
+            // uses for exactly this writes them as {"$tick": "…"} and sorts
+            // keys, so two machines produce identical bytes beside the hash.
+            tracksJson: stringifyWithTicks(diagnostic.tracks),
             trackCount: diagnostic.tracks.length,
             warningsJson: JSON.stringify(diagnostic.warnings),
             recommendedActionsJson: JSON.stringify(diagnostic.recommendedActions),

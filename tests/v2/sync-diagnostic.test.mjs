@@ -11,6 +11,10 @@ import {
 } from '../../src/v2/domain/sync-diagnostic.ts'
 import { createTickInterval } from '../../src/v2/domain/session-time.ts'
 import {
+  parseWithTicks,
+  stringifyWithTicks,
+} from '../../src/v2/infrastructure/prisma/bigint-json.ts'
+import {
   applyAnchorEdit,
   fitAnchors,
   refitDiagnostic,
@@ -364,4 +368,56 @@ test('T-FR-149 a diagnostic with coverage gaps can be hashed at all', () => {
   // The ticks themselves survive as bigints on the aggregate.
   assert.equal(one.tracks[0].gaps[0].end, sec(130))
   assert.equal(typeof one.tracks[0].gaps[0].end, 'bigint')
+})
+
+test('T-FR-149 the stored form of a track survives the round trip the hash covers', () => {
+  // The repository writes tracks as JSON beside the hash of the aggregate. A
+  // coverage gap is a tick interval and JSON.stringify refuses bigints, so
+  // without the tagged codec a diagnostic with gaps cannot be stored at all —
+  // the same defect as the hash, one layer down, and invisible until a real
+  // database was involved.
+  const sec = (n) => BigInt(90_000) * BigInt(n)
+  const built = createSyncDiagnostic({
+    workspaceId: 'workspace-1',
+    sessionId: 'capture-session-1',
+    referenceTrackId: 'track-camera-main',
+    version: 1,
+    previousVersionHash: null,
+    sessionVersion: 2,
+    referenceEpoch: 1,
+    tracks: [{
+      trackId: 'track-phone',
+      methods: ['marker-correlation'],
+      confidence: 0.95,
+      offsetMs: -1_240,
+      residualMs: 4,
+      driftPpm: null,
+      coverageBps: 9_800,
+      gaps: [createTickInterval(sec(120), sec(130))],
+      automaticAnchors: [],
+      manualAnchors: [],
+      pieceIds: ['track-phone-piece-0'],
+      status: deriveTrackStatus({
+        offsetMs: -1_240, residualMs: 4, coverageBps: 9_800,
+        confidence: 0.95, hasContradictoryAnchors: false,
+      }),
+      warnings: [],
+      previewSampleMs: [0, 60_000],
+    }],
+    protocolCeiling: 'automatic',
+    generatedAt: '2029-04-01T09:00:00.000Z',
+  })
+
+  const stored = stringifyWithTicks(built.tracks)
+  assert.ok(stored.includes('"$tick"'), 'the tick was written as a plain number and will come back rounded')
+  const restored = parseWithTicks(stored)
+  assert.equal(typeof restored[0].gaps[0].end, 'bigint')
+  assert.equal(restored[0].gaps[0].end, sec(130))
+
+  // What matters is not that the bytes round trip but that the aggregate
+  // rebuilt from them still verifies against the hash stored beside it.
+  assert.equal(
+    assertSyncDiagnosticIntegrity({ ...built, tracks: Object.freeze(restored) }).diagnosticHash,
+    built.diagnosticHash,
+  )
 })

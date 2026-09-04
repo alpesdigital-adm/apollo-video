@@ -522,7 +522,7 @@ local aponta para a raiz de artefatos e não copia nada, que é exatamente por q
 o esquecimento era invisível em desenvolvimento. `resolve` agora devolve
 `{ path, release }` e todo chamador libera no `finally`.
 
-**Ticks são serializados antes de entrar no hash.** Buracos de cobertura são
+**Ticks são serializados antes de entrar no hash — e antes de entrar no banco.** Buracos de cobertura são
 intervalos de tick, e tick é `bigint`; o hasher canônico recusa `bigint` de
 propósito, porque não existe uma renderização óbvia. O resultado é que um
 diagnóstico **com** buracos não podia sequer ser construído — exatamente a
@@ -530,6 +530,12 @@ sessão que vale a pena diagnosticar. Todo teste anterior passava `gaps: []`, e
 por isso nada pegou. Serializados como a Wave 18 já serializa qualquer tick que
 entra em hash, e o teste de regressão confirma que dois buracos diferentes
 continuam produzindo digests diferentes.
+
+O mesmo defeito existia uma camada abaixo: o repositório escrevia
+`tracksJson` com `JSON.stringify`, que recusa `bigint` do mesmo jeito. Agora usa
+o codec com tag `{"$tick": "…"}` que a Wave 18 já tinha para exatamente isso, e
+o teste verifica o que importa — não que os bytes voltem, mas que o agregado
+reconstruído a partir deles ainda confira contra o hash guardado ao lado.
 
 ### 28.3 O que continua aberto
 
