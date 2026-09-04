@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
@@ -131,6 +131,17 @@ export default function SyncDiagnosticPage() {
   const project = useMemo(() => encodeURIComponent(projectId.trim()), [projectId])
   const session = useMemo(() => encodeURIComponent(sessionId.trim()), [sessionId])
 
+  // The session list links here with the session already chosen. Ignoring
+  // those would make the link land on an empty form and quietly ask the
+  // operator to retype what they just clicked.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const linkedProject = params.get('projeto')
+    const linkedSession = params.get('sessao')
+    if (linkedProject) setProjectId(linkedProject)
+    if (linkedSession) setSessionId(linkedSession)
+  }, [])
+
   const load = useCallback(async () => {
     if (projectId.trim().length === 0 || sessionId.trim().length === 0) return
     setBusy(true)
@@ -171,6 +182,13 @@ export default function SyncDiagnosticPage() {
       setBusy(false)
     }
   }, [project, projectId, session, sessionId])
+
+  const linkedRef = useRef(false)
+  useEffect(() => {
+    if (linkedRef.current || projectId.length === 0 || sessionId.length === 0) return
+    linkedRef.current = true
+    void load()
+  }, [load, projectId, sessionId])
 
   const editAnchor = useCallback(
     async (track: TrackDiagnostic, deltaMs: number) => {

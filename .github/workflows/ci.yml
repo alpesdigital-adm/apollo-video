@@ -225,6 +225,12 @@ jobs:
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 
+      - name: Run Wave 19 capture protocol and diagnostic browser journey
+        run: npm run test:e2e:sync-diagnostic-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-sync-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_SYNC_DIAGNOSTIC_BROWSER_E2E: "1"
+
       - name: Run Wave 19 sync diagnostic persistence against PostgreSQL
         run: npm run test:e2e:sync-diagnostic-persistence
         env:
