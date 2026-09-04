@@ -498,6 +498,14 @@ reinício está no arquivo de reinício e em nenhum outro. Procurar no primeiro
 reportaria ausência do que foi gravado; procurar em todos deixaria um marcador
 de início ser creditado a um reinício.
 
+**"Cada câmera" quer dizer cada uma.** A checagem
+`track-carries-sync-audio` aceitava uma faixa do papel com áudio utilizável e
+declarava o requisito cumprido. O requisito diz "cada câmera grava o próprio
+áudio de referência", e uma câmera que jogou o áudio fora não pode ser alinhada
+por impressão digital, independentemente do que a câmera ao lado fez. A leitura
+permissiva reportava `audio-fingerprint` intacta numa sessão que já a tinha
+perdido em um gravador — o teto mentindo na direção mais cara.
+
 ### 28.3 O que continua aberto
 
 - O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for
@@ -517,6 +525,15 @@ de início ser creditado a um reinício.
 
 ### 28.4 Não medido
 
-O round trip contra PostgreSQL não foi executado nesta máquina: não há runtime
-de contêiner aqui. O teste existe, está ligado ao job de CI que tem um banco, e
-é medido lá — não aqui.
+O round trip contra PostgreSQL e a jornada de navegador não foram executados
+nesta máquina: não há runtime de contêiner aqui. Os testes existem, estão
+ligados ao job de CI que tem banco e build de produção, e são medidos lá — não
+aqui.
+
+Registro de um erro de método que custou tempo: dois suites de mídia estavam
+registrados no `package.json` sob `tsx`, que transpila os módulos `.ts` para
+CJS e torna os exports nomeados invisíveis ao importador ESM. Toda invocação
+morria em `does not provide an export named FfmpegSyncMarkerRenderer`. Eu vinha
+rodando os arquivos direto com `node` e lendo isso como "o suite passa" —
+verificando o arquivo, não o comando. Ambos rodam com `node` agora e estão no
+CI.
