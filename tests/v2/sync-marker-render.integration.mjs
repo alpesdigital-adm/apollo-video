@@ -37,7 +37,6 @@ test('T-FR-148 a marker renders to a real MP4 whose streams match what it declar
 
   const renderer = new FfmpegSyncMarkerRenderer({
     workRoot,
-    ffprobePath: process.env.FFPROBE_PATH?.trim() || 'ffprobe',
   })
   const artifact = await renderer.render(marker)
 
@@ -78,7 +77,6 @@ test('T-FR-148 the same marker renders to the same bytes', async (t) => {
   })
   const renderer = new FfmpegSyncMarkerRenderer({
     workRoot,
-    ffprobePath: process.env.FFPROBE_PATH?.trim() || 'ffprobe',
   })
 
   const first = await renderer.render(marker)

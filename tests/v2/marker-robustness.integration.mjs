@@ -21,7 +21,6 @@ import { FfmpegSyncMarkerRenderer } from '../../src/v2/infrastructure/media/ffmp
 
 const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
-const FFPROBE = process.env.FFPROBE_PATH?.trim() || 'ffprobe'
 
 /**
  * F4.010 — the detectors against recordings that are not ideal (FR-148).
@@ -133,7 +132,7 @@ async function buildRecording(input) {
 }
 
 async function detectBoth(marker, mediaPath, trackId, workRoot, tag) {
-  const options = { workRoot, ffprobePath: FFPROBE }
+  const options = { workRoot }
   // Started apart and never told each other's answer: two detectors that agree
   // because one read the other are one detector wearing a disguise.
   const [visual, audio] = await Promise.all([
@@ -147,7 +146,7 @@ test('T-FR-148 two recorders at different sample rates yield the offset between 
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-hetero-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE }).render(MARKER)
+  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot }).render(MARKER)
 
   // The same marker, filmed by two recorders that share nothing else: one at
   // 48 kHz mono 640x360, the other at 44.1 kHz stereo 960x540. They saw it at
@@ -204,7 +203,7 @@ test('T-FR-148 a marker crushed by compression is degraded honestly, not confide
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-degraded-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE }).render(MARKER)
+  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot }).render(MARKER)
   const OFFSET_MS = 900
   // Shrunk to a quarter, blurred, then squeezed through a low bitrate: the
   // flash survives, the code almost certainly does not.
@@ -262,7 +261,7 @@ test('T-FR-148 a recorder whose clock runs fast is found late, by an amount that
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-drift-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE }).render(MARKER)
+  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot }).render(MARKER)
   const OFFSET_MS = 2_000
   const SPEED = 1.02
 
@@ -302,7 +301,7 @@ test('T-FR-148 a marker filmed only after a restart is absent from the first fil
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-restart-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const renderer = new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE })
+  const renderer = new FfmpegSyncMarkerRenderer({ workRoot })
   const restartMarker = createSyncMarker({
     markerId: 'marker-restart-1',
     workspaceId: 'workspace-1',
@@ -358,7 +357,7 @@ test('T-FR-148 a marker filmed at the wrong apparent size is refused, not guesse
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-rescale-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE }).render(MARKER)
+  const artifact = await new FfmpegSyncMarkerRenderer({ workRoot }).render(MARKER)
   // The same marker, shown at 1.5x — a camera further back, or a slate filling
   // less of the frame. The flash is unmistakable; the code is not readable,
   // because the decoder crops the code square at the pixel size the marker

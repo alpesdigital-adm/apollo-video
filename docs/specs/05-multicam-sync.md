@@ -546,7 +546,17 @@ nesta máquina: não há runtime de contêiner aqui. Os testes existem, estão
 ligados ao job de CI que tem banco e build de produção, e são medidos lá — não
 aqui.
 
-Registro de um erro de método que custou tempo: dois suites de mídia estavam
+Dois erros de método registrados porque a forma se repete.
+
+O primeiro: os módulos de mídia da Wave 19 resolviam `ffprobe` pelo nome nu.
+`ffmpeg-static` empacota só o ffmpeg; o ffprobe existe no meu PATH e não no
+runner. O repositório já depende de `ffprobe-static` e todo outro módulo de
+mídia resolve por ele — eu adotei a conveniência da minha máquina em vez do
+padrão que já existia, e o suite passava aqui e falhava em qualquer outro
+lugar. Os testes também passavam `ffprobePath` explícito, o que forçava o valor
+quebrado; agora deixam o módulo resolver, como a produção faz.
+
+O segundo: dois suites de mídia estavam
 registrados no `package.json` sob `tsx`, que transpila os módulos `.ts` para
 CJS e torna os exports nomeados invisíveis ao importador ESM. Toda invocação
 morria em `does not provide an export named FfmpegSyncMarkerRenderer`. Eu vinha

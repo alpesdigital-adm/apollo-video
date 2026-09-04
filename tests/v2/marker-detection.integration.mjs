@@ -21,7 +21,6 @@ import {
 
 const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
-const FFPROBE = process.env.FFPROBE_PATH?.trim() || 'ffprobe'
 
 /**
  * F4.010 — the detectors against real recordings with a known offset.
@@ -104,14 +103,14 @@ test('T-FR-148 both detectors find a planted marker at its known offset', async 
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-detect-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const renderer = new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE })
+  const renderer = new FfmpegSyncMarkerRenderer({ workRoot })
   const artifact = await renderer.render(MARKER)
   const OFFSET_MS = 800
   const recording = await buildRecording({
     workRoot, name: 'clean', offsetMs: OFFSET_MS, markerPath: artifact.filePath,
   })
 
-  const options = { workRoot, ffprobePath: FFPROBE }
+  const options = { workRoot }
   // Run them separately and never pass one result to the other. Two detectors
   // that agree because one was told the answer are one detector in disguise.
   const visual = await detectVisualMarker({
@@ -160,7 +159,7 @@ test('T-FR-148 a lone bright frame does not pass for the marker', async (t) => {
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-false-flash-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const renderer = new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE })
+  const renderer = new FfmpegSyncMarkerRenderer({ workRoot })
   const artifact = await renderer.render(MARKER)
   // The marker is present at 1800 ms; a single bright frame sits at 1000 ms.
   // The alternation has to win over the impostor.
@@ -170,7 +169,7 @@ test('T-FR-148 a lone bright frame does not pass for the marker', async (t) => {
 
   const visual = await detectVisualMarker({
     marker: MARKER, mediaPath: recording, trackId: 'track-a',
-    observationId: 'obs-v-2', options: { workRoot, ffprobePath: FFPROBE },
+    observationId: 'obs-v-2', options: { workRoot },
   })
   assert.ok(visual)
   console.log(`false-flash fixture: visual settled at ${visual.atMs} ms with score ${visual.patternScore.toFixed(2)}`)
@@ -184,7 +183,7 @@ test('T-FR-148 a chirp under noise is still found, and a foreign chirp is not th
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-noise-'))
   t.after(async () => { await rm(workRoot, { recursive: true, force: true }) })
 
-  const renderer = new FfmpegSyncMarkerRenderer({ workRoot, ffprobePath: FFPROBE })
+  const renderer = new FfmpegSyncMarkerRenderer({ workRoot })
   const artifact = await renderer.render(MARKER)
   const recording = await buildRecording({
     workRoot, name: 'noisy', offsetMs: 1_200, markerPath: artifact.filePath, noise: true,
@@ -192,7 +191,7 @@ test('T-FR-148 a chirp under noise is still found, and a foreign chirp is not th
 
   const audio = await detectAudioMarker({
     marker: MARKER, mediaPath: recording, trackId: 'track-a',
-    observationId: 'obs-a-3', options: { workRoot, ffprobePath: FFPROBE },
+    observationId: 'obs-a-3', options: { workRoot },
   })
   assert.ok(audio, 'the chirp was lost in noise')
   console.log(`noisy fixture: audio at ${audio.atMs.toFixed(1)} ms, peak ${audio.correlationPeak.toFixed(3)}`)
@@ -208,7 +207,7 @@ test('T-FR-148 a chirp under noise is still found, and a foreign chirp is not th
   })
   const wrongReference = await detectAudioMarker({
     marker: foreign, mediaPath: recording, trackId: 'track-a',
-    observationId: 'obs-a-4', options: { workRoot, ffprobePath: FFPROBE },
+    observationId: 'obs-a-4', options: { workRoot },
   })
   assert.ok(wrongReference)
   console.log(`foreign chirp: peak ${wrongReference.correlationPeak.toFixed(3)} vs ${wrongReference.secondPeak.toFixed(3)}`)

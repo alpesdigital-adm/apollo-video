@@ -4,7 +4,12 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
+import { createRequire } from 'node:module'
+
 import ffmpegStatic from 'ffmpeg-static'
+
+const require = createRequire(import.meta.url)
+const ffprobeStatic = require('ffprobe-static') as { path?: string }
 
 import { DomainError } from '../../domain/errors.ts'
 import { visualPatternDurationMs, type SyncMarker } from '../../domain/sync-marker.ts'
@@ -160,6 +165,24 @@ export function synthesizeChirp(input: {
   return buffer
 }
 
+/**
+ * Where ffprobe is.
+ *
+ * ffmpeg-static ships ffmpeg and nothing else, so a bare 'ffprobe' resolves
+ * only on a machine that happens to have one installed — mine, and not a CI
+ * runner. The repository already depends on ffprobe-static for exactly this
+ * reason and every other media module resolves it the same way.
+ */
+export function resolveFfprobeBinary(
+  configured?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const explicit = configured?.trim() || environment.FFPROBE_PATH?.trim()
+  if (explicit) return explicit
+  const bundled = typeof ffprobeStatic?.path === 'string' ? ffprobeStatic.path.trim() : ''
+  return bundled || 'ffprobe'
+}
+
 export class FfmpegSyncMarkerRenderer {
   private readonly ffmpegPath: string
   private readonly ffprobePath: string
@@ -168,7 +191,7 @@ export class FfmpegSyncMarkerRenderer {
   constructor(options: { workRoot: string; ffmpegPath?: string; ffprobePath?: string }) {
     this.workRoot = options.workRoot
     this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
-    this.ffprobePath = options.ffprobePath?.trim() || 'ffprobe'
+    this.ffprobePath = resolveFfprobeBinary(options.ffprobePath)
   }
 
   /**
