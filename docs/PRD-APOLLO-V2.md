@@ -1405,6 +1405,14 @@ registro e o replay do resultado.
 
 Montar vários ranges preservando contexto e lineage.
 
+
+Entregue localmente em 2026-09-03: o golden monta seis janelas de um master de
+7.200 s em um corte de 120.000 ms — 167 pontos-base do original sobrevivem — com
+linha do tempo de saída contínua, lineage até moment, avaliação e rights, e
+prova registrada de que nenhuma claim ficou sem o seu qualifier. Emendar é
+tratado como afirmação: cada splice carrega justificativa, reordenar exige
+motivo declarado, e sobreposição é recusada. Persistência, API `/v1` e quatro
+jornadas E2E existem; execução contra PostgreSQL, deploy e aceite pendentes.
 ### FR-136 — Repositório semântico
 
 Busca cross-library por assunto, história, prova, objeção, frase, pessoa e função.
@@ -1423,30 +1431,64 @@ PostgreSQL, com drift/stale fail-closed e isolamento cross-workspace.
 
 Agrupar tracks do mesmo evento.
 
+
+Entregue localmente em 2026-09-03: a sessão é uma cadeia imutável mais um
+ponteiro, cada operação devolvendo versão+1 com o hash da anterior. Quatro
+gravadores a 90 kHz, 48 kHz, 44,1 kHz e 600/s coexistem sem que nenhum timebase
+seja reescrito. Comando calculado sobre versão vencida é recusado nomeando a
+atual.
 ### FR-141 — Session clock
 
 Mapear cada fonte para relógio canônico.
 
+
+Entregue localmente em 2026-09-03: relógio declarado, nunca um arquivo
+normalizado; ticks inteiros em `bigint`, taxas racionais, arredondamento
+half-to-even declarado uma vez. Drift é o resíduo depois de dividir fora a razão
+de timebase.
 ### FR-142 — Estratégias de sync
 
 Timecode → shared audio → fingerprint → transcript/visual/lip → Apollo Marker → manual anchors.
 
+
+Entregue localmente em 2026-09-03: cascata por precedência com preconditions por
+método e grupos de independência. `insufficient-evidence` não emite mapa, e a
+run termina com sucesso — a pergunta foi respondida.
 ### FR-143 — TrackCoverage
 
 Fontes podem começar depois, terminar antes, possuir gaps e múltiplos clips.
 
+
+Entregue localmente em 2026-09-03: disponível, gap, corrompido e não verificado
+como estados distintos; sobreposição sem decisão recusada; corte automático
+exige piso de confiança e nenhuma sobreposição pendente.
 ### FR-144 — Drift
 
 Corrigir clock drift apenas em intervalos comuns; nunca esticar para igualar duração.
 
+
+Entregue localmente em 2026-09-03: ajuste por mínimos quadrados sobre todos os
+anchors, com hold-out, distribuição de resíduos e proposta de split quando um
+degrau aparece. Esticar fala além do limite é recusado sem invalidar o
+alinhamento por offset.
 ### FR-145 — Piecewise maps
 
 Suportar stop/resume, VFR, pause/rewind de react e mapping não linear.
 
+
+Entregue localmente em 2026-09-03: um tick entre duas peças devolve
+`uncovered`, sem número junto — interpolar ali é como uma edição longa termina
+um quadro fora na segunda metade. Duas peças nunca reivindicam o mesmo tick, e a
+causa registrada da fronteira precisa bater com a evidência medida.
 ### FR-146 — Sync audio separado
 
 Scratch audio pode servir para sync e ser descartado no mix final.
 
+
+Entregue localmente em 2026-09-03: `syncAudioPolicy` separa evidência de mix, e
+áudio fora da rota de sync não pode ser mixado porque o seu offset nunca foi
+medido. Master a 48 kHz e scratch a 44,1 kHz coexistem com vídeo a 90 kHz sem
+normalizar nenhum.
 ### FR-147 — Capture Protocol
 
 Exibir pré-requisitos por cenário antes da gravação.
