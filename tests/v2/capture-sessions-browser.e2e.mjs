@@ -89,6 +89,9 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
     await client.v2CaptureSessionVersion.deleteMany({ where: { workspaceId } })
     await client.v2CaptureSessionHead.deleteMany({ where: { workspaceId } })
     await client.v2Project.deleteMany({ where: { workspaceId } })
+    // Before the client, not after: the bootstrap login provisions a UI
+    // principal pointing at it, and that relation is onDelete: Restrict.
+    await client.v2WorkspaceUiPrincipal.deleteMany({ where: { workspaceId } })
     await client.v2ApiClient.deleteMany({ where: { workspaceId } })
     await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
   }
@@ -298,7 +301,15 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
       await new Promise((resolve) => setTimeout(resolve, 500))
       if (server.exitCode === null) server.kill('SIGKILL')
     }
-    await cleanup()
+    // Report, never rethrow. A finally that throws replaces whatever the test
+    // was actually failing on, and the diagnosis is lost — which is exactly
+    // what happened when the cleanup order was wrong: the foreign key error
+    // stood in for a failure nobody got to see.
+    try {
+      await cleanup()
+    } catch (cleanupError) {
+      console.error('capture sessions E2E cleanup failed:', cleanupError)
+    }
     await client.$disconnect()
   }
 })
