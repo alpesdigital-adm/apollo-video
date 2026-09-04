@@ -223,6 +223,8 @@ model V2Workspace {
   captureDriftFits                       V2CaptureDriftFit[]
   captureDriftAnchors                    V2CaptureDriftAnchor[]
   captureSyncRuns                        V2CaptureSyncRun[]
+  captureProtocolEvaluations             V2CaptureProtocolEvaluation[]
+  captureSessionProtocols                V2CaptureSessionProtocol[]
   editorialSyntheses                     V2EditorialSynthesis[]
   editorialSynthesisRanges               V2EditorialSynthesisRange[]
   editorialSynthesisJoins                V2EditorialSynthesisJoin[]
@@ -8487,6 +8489,8 @@ model V2CaptureSessionHead {
   syncEvidence  V2CaptureSyncEvidence[]
   driftFits     V2CaptureDriftFit[]
   syncRuns      V2CaptureSyncRun[]
+  protocolEvaluations V2CaptureProtocolEvaluation[]
+  attachedProtocol    V2CaptureSessionProtocol?
 
   @@unique([id, workspaceId])
   @@unique([sessionId, workspaceId])
@@ -8840,4 +8844,83 @@ model V2EditorialSynthesisJoin {
   @@unique([id, workspaceId])
   @@unique([workspaceId, synthesisId, ordinal])
   @@map("editorial_synthesis_joins")
+}
+
+// ---------------------------------------------------------------------------
+// F4.009 / FR-147 — capture protocols.
+//
+// V2CaptureProtocol is a published catalogue entry: append-only and versioned,
+// so a session judged last month stays readable against the protocol it was
+// actually judged by. V2CaptureProtocolEvaluation is a derivation bound to one
+// exact session version and carries the session hash it read.
+// ---------------------------------------------------------------------------
+
+model V2CaptureProtocol {
+  id                 String   @id @db.VarChar(128)
+  protocolId         String   @db.VarChar(64)
+  scenario           String   @db.VarChar(32)
+  version            Int
+  schemaVersion      String   @db.VarChar(64)
+  title              String   @db.VarChar(128)
+  summary            String   @db.VarChar(512)
+  requirementsJson   String   @db.Text
+  expectedTracksJson String   @db.Text
+  requiredCount      Int
+  bestCeiling        String   @db.VarChar(32)
+  protocolHash       String   @unique @db.Char(64)
+  publishedAt        DateTime @db.Timestamptz(3)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  @@unique([protocolId, version])
+  @@index([scenario, version(sort: Desc)])
+  @@map("capture_protocols")
+}
+
+model V2CaptureProtocolEvaluation {
+  id                       String   @id @db.VarChar(160)
+  workspaceId              String   @db.VarChar(128)
+  sessionId                String   @db.VarChar(128)
+  sessionVersion           Int
+  sessionHash              String   @db.Char(64)
+  protocolId               String   @db.VarChar(64)
+  protocolVersion          Int
+  protocolHash             String   @db.Char(64)
+  schemaVersion            String   @db.VarChar(64)
+  findingsJson             String   @db.Text
+  lostCapabilitiesJson     String   @default("[]") @db.Text
+  attestedRequirementsJson String   @default("[]") @db.Text
+  ceiling                  String   @db.VarChar(32)
+  blocksAutoEdit           Boolean
+  unmetRequiredCount       Int
+  evaluationHash           String   @db.Char(64)
+  evaluatedAt              DateTime @db.Timestamptz(3)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, sessionVersion, protocolId, protocolVersion], map: "capture_protocol_evaluations_session_protocol_key")
+  @@index([workspaceId, sessionId, evaluatedAt(sort: Desc)])
+  @@map("capture_protocol_evaluations")
+}
+
+model V2CaptureSessionProtocol {
+  id              String   @id @db.VarChar(128)
+  workspaceId     String   @db.VarChar(128)
+  sessionId       String   @db.VarChar(128)
+  protocolId      String   @db.VarChar(64)
+  protocolVersion Int
+  protocolHash    String   @db.Char(64)
+  attachedByKind  String   @db.VarChar(16)
+  attachedById    String   @db.VarChar(128)
+  attachedAt      DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([sessionId, workspaceId])
+  @@map("capture_session_protocols")
 }

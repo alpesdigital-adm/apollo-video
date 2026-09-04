@@ -61,6 +61,7 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
+import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -228,6 +229,7 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
+import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2220,4 +2222,8 @@ export function createCaptureSyncRunRepository(): CaptureSyncRunRepository {
 
 export function createEditorialSynthesisRepository(): EditorialSynthesisRepository {
   return new PrismaEditorialSynthesisRepository(resolveV2Client())
+}
+
+export function createCaptureProtocolRepository(): CaptureProtocolRepository {
+  return new PrismaCaptureProtocolRepository(resolveV2Client())
 }
