@@ -287,7 +287,6 @@ CREATE TABLE "capture_track_coverages" (
   "schemaVersion"         VARCHAR(64) NOT NULL,
   "derivedSessionVersion" INTEGER NOT NULL,
   "derivedReferenceEpoch" INTEGER NOT NULL,
-  "derivedSessionHash"    CHAR(64) NOT NULL,
   "timebaseNum"           BIGINT NOT NULL,
   "timebaseDen"           BIGINT NOT NULL,
   "boundsStart"           BIGINT NOT NULL,
@@ -364,7 +363,7 @@ CREATE TABLE "capture_sync_evidence" (
 
   CONSTRAINT "capture_sync_evidence_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "capture_sync_evidence_outcome_check"
-    CHECK ("outcome" IN ('resolved', 'insufficient-evidence', 'conflicting-evidence', 'manual-required')),
+    CHECK ("outcome" IN ('auto-apply', 'review', 'insufficient-evidence')),
   CONSTRAINT "capture_sync_evidence_method_check"
     CHECK ("selectedMethod" IS NULL OR "selectedMethod" IN ('shared-timecode', 'trusted-metadata',
       'apollo-marker', 'audio-fingerprint', 'visual-event', 'transcript-lip', 'manual-anchor')),
@@ -378,17 +377,24 @@ CREATE TABLE "capture_sync_evidence" (
   -- construction and would prove nothing about the recording.
   CONSTRAINT "capture_sync_evidence_reference_check"
     CHECK ("trackId" <> "referenceTrackId"),
-  -- "We could not tell" must not be stored as an offset of zero. A resolved
-  -- outcome carries the whole map; every other outcome carries none of it.
+  -- "We could not tell" must not be stored as an offset of zero. The cascade
+  -- emits a whole clock map when it decided anything at all -- whether it can
+  -- be applied unattended (auto-apply) or needs a human to look (review) -- and
+  -- emits none of it when the evidence never got there.
   CONSTRAINT "capture_sync_evidence_resolution_check"
     CHECK (
-      ("outcome" = 'resolved' AND "selectedMethod" IS NOT NULL AND "selectedSignalId" IS NOT NULL
-        AND "mapRateNum" IS NOT NULL AND "mapRateDen" IS NOT NULL
-        AND "mapOffsetTicks" IS NOT NULL AND "mapRounding" IS NOT NULL) OR
-      ("outcome" <> 'resolved' AND "selectedMethod" IS NULL AND "selectedSignalId" IS NULL
-        AND "mapRateNum" IS NULL AND "mapRateDen" IS NULL
-        AND "mapOffsetTicks" IS NULL AND "mapRounding" IS NULL)
+      ("outcome" <> 'insufficient-evidence' AND "selectedMethod" IS NOT NULL
+        AND "selectedSignalId" IS NOT NULL AND "mapRateNum" IS NOT NULL
+        AND "mapRateDen" IS NOT NULL AND "mapOffsetTicks" IS NOT NULL
+        AND "mapRounding" IS NOT NULL) OR
+      ("outcome" = 'insufficient-evidence' AND "selectedMethod" IS NULL
+        AND "selectedSignalId" IS NULL AND "mapRateNum" IS NULL
+        AND "mapRateDen" IS NULL AND "mapOffsetTicks" IS NULL AND "mapRounding" IS NULL)
     ),
+  -- Only a review outcome can require a human; the other two have already
+  -- decided, and "decided, but also needs a decision" is not a state.
+  CONSTRAINT "capture_sync_evidence_manual_check"
+    CHECK (NOT "manualRequired" OR "outcome" <> 'auto-apply'),
   CONSTRAINT "capture_sync_evidence_map_rate_check"
     CHECK ("mapRateNum" IS NULL OR ("mapRateNum" > 0 AND "mapRateDen" > 0))
 );

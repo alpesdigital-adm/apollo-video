@@ -8582,7 +8582,6 @@ model V2CaptureTrackCoverage {
   schemaVersion         String   @db.VarChar(64)
   derivedSessionVersion Int
   derivedReferenceEpoch Int
-  derivedSessionHash    String   @db.Char(64)
   timebaseNum           BigInt
   timebaseDen           BigInt
   boundsStart           BigInt
