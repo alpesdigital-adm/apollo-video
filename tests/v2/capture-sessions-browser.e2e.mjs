@@ -220,6 +220,12 @@ test('E2E-FR-140 the capture sessions page renders a refusal as a refusal', {
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        // Without these the login page resolves to 'unavailable' and renders no
+        // password form at all — the system fails closed when no auth mode is
+        // declared, which is correct, and which a test has to opt into.
+        APOLLO_AUTH_MODE: 'bootstrap',
+        APOLLO_ALLOW_BOOTSTRAP_AUTH: 'true',
+        APOLLO_UI_BOOTSTRAP_ROLE: 'operator',
         APOLLO_UI_USERNAME: uiUsername,
         APOLLO_UI_PASSWORD_HASH: createUiPasswordHash(uiPassword, `capture-salt-${suffix}`),
         APOLLO_UI_SESSION_SECRET: uiSessionSecret,
