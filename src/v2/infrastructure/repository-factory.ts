@@ -213,6 +213,8 @@ import {
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
+import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
 import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
@@ -2232,4 +2234,25 @@ export function createCaptureProtocolRepository(): CaptureProtocolRepository {
 
 export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
   return new PrismaSyncDiagnosticRepository(resolveV2Client())
+}
+
+/**
+ * The media side of sync markers (F4.010).
+ *
+ * Assembled here rather than inside a route because it needs three things the
+ * route has no business knowing: where FFmpeg is, where scratch space lives,
+ * and which storage driver this deployment uses.
+ */
+export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.env) {
+  return createMarkerMediaAdapter(createVerifiedMediaStorage(environment), environment)
+}
+
+/**
+ * Turns a capture track's file into a path a detector can open.
+ *
+ * The materializer verifies the bytes against the artifact's recorded hash, so
+ * a detector never reads a file whose identity nobody checked.
+ */
+export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
+  return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
 }

@@ -275,6 +275,30 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Re-anchors every other track in the session and invalidates all existing maps, coverage and diagnostics, so a human confirms rather than an agent deciding which recording defines time.',
     },
+    'apollo.projects.capture-sessions.protocol.attach': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Records which published protocol a shoot was held to; it appends no session version, invalidates no derivation and changes no media bytes.',
+    },
+    'apollo.projects.capture-sessions.protocol.evaluate': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Derives compliance from the session and from stored marker detections only; attestations are recorded as claims and never counted as observations, and it starts no provider or render work.',
+    },
+    'apollo.projects.capture-sessions.sync-markers.generate': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Renders one short marker clip locally with FFmpeg and stores it as an artifact; it invokes no paid provider, touches no existing recording and assigns the sequence itself so repeats cannot collide.',
+    },
+    'apollo.projects.capture-sessions.sync-markers.detect': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Decodes an already ingested file whose identity it verifies against the session hash, writes one detection row and no media; the request cannot name the file, the outcome or the instant.',
+    },
+    'apollo.projects.capture-sessions.sync-diagnostic.generate': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Assembles one immutable diagnostic version from stored detections and coverage, preserving manual anchors; it derives every number and accepts none from the caller.',
+    },
+    'apollo.projects.capture-sessions.sync-diagnostic.anchors.edit': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Overrides what the detectors measured about where a recording sits in time, so a person confirms rather than an agent deciding that its own reading of a waveform beats the evidence.',
+    },
     'apollo.projects.capture-sessions.sync.request': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Runs the local evidence cascade over already ingested media and persists maps and coverage against one exact session version; it invokes no paid provider and produces no media.',

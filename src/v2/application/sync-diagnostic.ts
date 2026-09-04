@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { DomainError } from '../domain/errors.ts'
 import {
   applyAnchorEdit,
@@ -24,6 +26,7 @@ import {
   type FusionMode,
   type MarkerDetection,
 } from '../domain/sync-marker-detection.ts'
+import type { CaptureSession, CaptureTrack, CaptureTrackPart } from '../domain/capture-session.ts'
 import type { CaptureSessionRepository } from './ports/capture-session-repository.ts'
 import type { CaptureProtocolRepository } from './ports/capture-protocol-repository.ts'
 import type {
@@ -46,6 +49,17 @@ export interface SyncActor {
   readonly workspaceId: string
   readonly kind: 'human' | 'api-client' | 'director'
   readonly id: string
+  /**
+   * Everything else that identifies who is asking.
+   *
+   * Present so an idempotency key can be bound to the whole credential rather
+   * than to a workspace and a client id. Two credentials of the same client
+   * are two callers; letting one replay the other's key would hand it a
+   * marker it never generated and hide that a second one was wanted.
+   */
+  readonly credentialId?: string
+  readonly authenticationKind?: string
+  readonly delegatedUserId?: string
 }
 
 /** What the media layer does with a marker, kept behind a port. */
@@ -59,11 +73,43 @@ export interface MarkerMediaPort {
   }): Promise<Readonly<MarkerDetection>>
 }
 
+/**
+ * The marker id a given caller's key maps to.
+ *
+ * Bound to the full credential, not just the workspace: two credentials of one
+ * client are two callers, and letting one replay the other's key would hand it
+ * a marker it never asked for. The session, position and kind are in the
+ * digest too, so the same key used for a different request is a conflict the
+ * caller is told about rather than a silent substitution.
+ */
+export function deriveMarkerIdempotentId(input: {
+  actor: SyncActor
+  sessionId: string
+  position: MarkerPosition
+  kind: MarkerKind
+  idempotencyKey: string
+}): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([
+      input.actor.workspaceId,
+      input.actor.kind,
+      input.actor.id,
+      input.actor.credentialId ?? '',
+      input.actor.authenticationKind ?? '',
+      input.actor.delegatedUserId ?? '',
+      input.sessionId,
+      input.position,
+      input.kind,
+      input.idempotencyKey,
+    ]))
+    .digest('hex')
+  return `sync-marker-${digest.slice(0, 32)}`
+}
+
 export function generateSyncMarkerService(dependencies: {
   repository: SyncDiagnosticRepository
   sessions: CaptureSessionRepository
   media: MarkerMediaPort
-  createId: () => string
   clock: () => Date
 }) {
   return async (input: {
@@ -71,7 +117,47 @@ export function generateSyncMarkerService(dependencies: {
     sessionId: string
     position: MarkerPosition
     kind?: MarkerKind
+    idempotencyKey: string
   }): Promise<Readonly<{ marker: Readonly<SyncMarker>; artifact: Readonly<MarkerArtifactRef>; replayed: boolean }>> => {
+    if (input.idempotencyKey.trim().length === 0) {
+      throw new DomainError(
+        'INVALID_ARGUMENT',
+        'Generating a marker needs an idempotency key: a retry without one renders a second marker and burns a second sequence number',
+      )
+    }
+    const markerId = deriveMarkerIdempotentId({
+      actor: input.actor,
+      sessionId: input.sessionId,
+      position: input.position,
+      kind: input.kind ?? 'audiovisual',
+      idempotencyKey: input.idempotencyKey.trim(),
+    })
+    // Checked before anything is rendered. Recovering the first marker costs a
+    // lookup; not checking costs a second render, a second artifact and a
+    // sequence number that makes "which marker was filmed" ambiguous forever.
+    const replayedMarker = await dependencies.repository.readMarker({
+      workspaceId: input.actor.workspaceId,
+      markerId,
+    })
+    if (replayedMarker) {
+      if (replayedMarker.marker.sessionId !== input.sessionId) {
+        throw new DomainError(
+          'IDEMPOTENCY_PAYLOAD_MISMATCH',
+          'This idempotency key was already used for a different capture session',
+        )
+      }
+      if (!replayedMarker.artifact) {
+        throw new DomainError(
+          'SYNC_MARKER_NOT_FOUND',
+          `Marker ${markerId} exists but its media was never stored; it cannot be filmed`,
+        )
+      }
+      return Object.freeze({
+        marker: replayedMarker.marker,
+        artifact: replayedMarker.artifact,
+        replayed: true,
+      })
+    }
     const session = await dependencies.sessions.readHead({
       workspaceId: input.actor.workspaceId,
       sessionId: input.sessionId,
@@ -89,7 +175,7 @@ export function generateSyncMarkerService(dependencies: {
     const sequence = existing.reduce((highest, entry) => Math.max(highest, entry.marker.sequence), 0) + 1
 
     const marker = createSyncMarker({
-      markerId: dependencies.createId(),
+      markerId,
       workspaceId: input.actor.workspaceId,
       sessionId: input.sessionId,
       kind: input.kind ?? 'audiovisual',
@@ -110,6 +196,43 @@ export function generateSyncMarkerService(dependencies: {
 }
 
 /**
+ * The file a marker of this position would have been recorded into.
+ *
+ * A recorder that stopped and restarted leaves several files. A marker emitted
+ * after the restart is in the restart file and nowhere else, so searching the
+ * first file would report absence for something that was recorded, and
+ * searching every file would let a start marker be credited to a restart.
+ *
+ * When the position names a file that does not exist, that is refused rather
+ * than approximated: "no restart happened" is a fact about the session, not a
+ * reason to guess.
+ */
+function partForPosition(
+  track: Readonly<CaptureTrack>,
+  position: MarkerPosition,
+): Readonly<CaptureTrackPart> {
+  const ordered = [...track.parts].sort((left, right) => left.ordinal - right.ordinal)
+  if (position === 'after-restart') {
+    const restart = ordered.find((entry) => entry.splitReason === 'recorder-restart')
+    if (!restart) {
+      throw new DomainError(
+        'CAPTURE_TRACK_PART_NOT_FOUND',
+        `Track ${track.trackId} has no restart file, so an after-restart marker cannot be in it`,
+      )
+    }
+    return restart
+  }
+  const chosen = position === 'end' ? ordered.at(-1) : ordered[0]
+  if (!chosen) {
+    throw new DomainError(
+      'CAPTURE_TRACK_PART_NOT_FOUND',
+      `Track ${track.trackId} has no files to search`,
+    )
+  }
+  return chosen
+}
+
+/**
  * Run detection for one track against one marker.
  *
  * The media path comes from the track's own ingested part, never from the
@@ -120,7 +243,10 @@ export function detectSyncMarkerService(dependencies: {
   repository: SyncDiagnosticRepository
   sessions: CaptureSessionRepository
   media: MarkerMediaPort
-  resolveMediaPath: (input: { workspaceId: string; sourceAssetId: string }) => Promise<string>
+  resolveMediaPath: (input: {
+    workspaceId: string
+    part: Readonly<CaptureTrackPart>
+  }) => Promise<string>
   clock: () => Date
 }) {
   return async (input: {
@@ -157,9 +283,14 @@ export function detectSyncMarkerService(dependencies: {
       )
     }
 
+    // Which file to search is decided from the marker's position, not from
+    // the request. A track can be several files; searching the wrong one would
+    // report "not found" for a marker that is plainly there, and searching all
+    // of them would let a marker emitted at the start be credited to a restart.
+    const part = partForPosition(track, stored.marker.position)
     const mediaPath = await dependencies.resolveMediaPath({
       workspaceId: input.actor.workspaceId,
-      sourceAssetId: track.sourceAssetId,
+      part,
     })
     const detection = await dependencies.media.detect({
       marker: stored.marker,
@@ -193,6 +324,8 @@ export function generateSyncDiagnosticService(dependencies: {
   return async (input: {
     actor: SyncActor
     sessionId: string
+    baseVersionId: string
+    baseHash: string
   }): Promise<Readonly<{ diagnostic: Readonly<SyncDiagnostic>; replayed: boolean }>> => {
     const session = await dependencies.sessions.readHead({
       workspaceId: input.actor.workspaceId,
@@ -201,6 +334,10 @@ export function generateSyncDiagnosticService(dependencies: {
     if (!session) {
       throw new DomainError('CAPTURE_SESSION_NOT_FOUND', `Capture session ${input.sessionId} does not exist`)
     }
+    // A diagnostic describes one exact version of a session. Deriving it
+    // against whatever happens to be current would silently produce a document
+    // about a session the operator never saw.
+    assertSessionUnmoved(session, input)
 
     const [detections, coverages, maps, evaluations] = await Promise.all([
       dependencies.repository.listDetections({
@@ -341,6 +478,34 @@ export function generateSyncDiagnosticService(dependencies: {
 }
 
 /** Add, move or remove a manual anchor under a version fence. */
+/**
+ * The session version a derivation is allowed to be computed against.
+ *
+ * The pair, not the number: a version number alone can be reused after a
+ * failed write, so a caller naming only "version 3" could be describing a
+ * different version 3 than the one it read. The hash cannot be reused.
+ *
+ * The refusal carries the current version so a UI can offer a reload instead of
+ * making the operator work out what changed.
+ */
+function assertSessionUnmoved(
+  session: Readonly<CaptureSession>,
+  base: Readonly<{ baseVersionId: string; baseHash: string }>,
+): void {
+  const expectedId = `${session.sessionId}:v${session.version}`
+  if (base.baseVersionId !== expectedId || base.baseHash !== session.sessionHash) {
+    throw new DomainError(
+      'CAPTURE_SESSION_VERSION_STALE',
+      `Capture session ${session.sessionId} has moved to version ${session.version}; re-read it and retry`,
+      {
+        currentVersionId: expectedId,
+        currentVersion: session.version,
+        currentHash: session.sessionHash,
+      },
+    )
+  }
+}
+
 export function editSyncAnchorService(dependencies: {
   repository: SyncDiagnosticRepository
   clock: () => Date
@@ -348,7 +513,8 @@ export function editSyncAnchorService(dependencies: {
   return async (input: {
     actor: SyncActor
     sessionId: string
-    expectedVersion: number
+    baseVersionId: string
+    baseHash: string
     edit: Omit<AnchorEdit, 'editedAt'>
   }): Promise<Readonly<{ diagnostic: Readonly<SyncDiagnostic>; replayed: boolean }>> => {
     const current = await dependencies.repository.readHead({
@@ -361,9 +527,24 @@ export function editSyncAnchorService(dependencies: {
         `Capture session ${input.sessionId} has no diagnostic to edit`,
       )
     }
+    // The pair, not the number. Two edits can both name version 3 if the
+    // first attempt failed and was retried, and the hash is what tells them
+    // apart — the same reason the capture chain is addressed this way.
+    const expectedId = `${current.sessionId}:diagnostic:v${current.version}`
+    if (input.baseVersionId !== expectedId || input.baseHash !== current.diagnosticHash) {
+      throw new DomainError(
+        'SYNC_DIAGNOSTIC_VERSION_STALE',
+        `The diagnostic for ${input.sessionId} has moved to version ${current.version}; re-read it and retry`,
+        {
+          currentVersionId: expectedId,
+          currentVersion: current.version,
+          currentHash: current.diagnosticHash,
+        },
+      )
+    }
     const next = applyAnchorEdit({
       diagnostic: current,
-      expectedVersion: input.expectedVersion,
+      expectedVersion: current.version,
       edit: { ...input.edit, editedAt: dependencies.clock().toISOString() },
       actorId: input.actor.id,
     })

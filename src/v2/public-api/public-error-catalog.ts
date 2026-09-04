@@ -102,10 +102,17 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE'],
   },
   {
+    // Not a 404: the artifact exists. Not a stale version: the request is
+    // current. The bytes behind it are no longer the bytes the session was
+    // built from, and no retry of the same request can fix that.
+    status: 409, category: 'conflict', codes: ['MEDIA_ARTIFACT_IDENTITY_MISMATCH'],
+  },
+  {
     status: 404, category: 'validation', codes: [
       'CAPTURE_PROTOCOL_NOT_FOUND', 'CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND',
       'SYNC_MARKER_NOT_FOUND', 'SYNC_DIAGNOSTIC_NOT_FOUND',
       'CAPTURE_SESSION_NOT_FOUND', 'CAPTURE_TRACK_NOT_FOUND',
+      'CAPTURE_TRACK_PART_NOT_FOUND',
       'CAPTURE_SYNC_RUN_NOT_FOUND', 'EDITORIAL_SYNTHESIS_NOT_FOUND',
       'MEDIA_UPLOAD_NOT_FOUND', 'MEDIA_DOWNLOAD_GRANT_NOT_FOUND',
       'MEDIA_ARTIFACT_NOT_FOUND', 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',

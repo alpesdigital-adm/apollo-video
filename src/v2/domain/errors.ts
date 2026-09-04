@@ -87,6 +87,13 @@ export const DOMAIN_ERROR_CODES = [
   'CAPTURE_SESSION_NOT_FOUND',
   'CAPTURE_SESSION_VERSION_STALE',
   'CAPTURE_TRACK_NOT_FOUND',
+  // A track exists but has no file the request could be about: a marker
+  // emitted after a restart, in a track whose recorder never restarted.
+  'CAPTURE_TRACK_PART_NOT_FOUND',
+  // The session was built from one file; the artifact registry now holds
+  // another. Detecting against the substituted bytes would produce a
+  // confident offset for a recording that never existed.
+  'MEDIA_ARTIFACT_IDENTITY_MISMATCH',
   'CAPTURE_SYNC_RUN_NOT_FOUND',
   'EDITORIAL_SYNTHESIS_NOT_FOUND',
   'CAPTURE_COVERAGE_NOT_AVAILABLE',

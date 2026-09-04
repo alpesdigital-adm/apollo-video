@@ -9,6 +9,7 @@ import {
   type CaptureProtocolEvaluation,
   type ObservedMarkerFacts,
 } from '../domain/capture-protocol-evaluation.ts'
+import type { CaptureSession } from '../domain/capture-session.ts'
 import { DomainError } from '../domain/errors.ts'
 import type {
   AttachedCaptureProtocol,
@@ -64,6 +65,49 @@ export function listCaptureProtocolsService(dependencies: { repository: CaptureP
     // useful on a workspace whose seed has not run: an operator about to shoot
     // needs the requirements now, and they are the same document either way.
     return stored.length > 0 ? stored : PUBLISHED_CAPTURE_PROTOCOLS
+  }
+}
+
+/**
+ * Read one published protocol.
+ *
+ * Same fallback as the list, for the same reason: an operator reading the
+ * requirements before a shoot needs the document, and the code's catalogue and
+ * the persisted row are the same content-addressed document.
+ */
+/**
+ * The session version a derivation is allowed to be computed against.
+ *
+ * The pair, not the number: a version number alone can be reused after a
+ * failed write, so a caller naming only "version 3" could be describing a
+ * different version 3 than the one it read. The hash cannot be reused.
+ *
+ * The refusal carries the current version so a UI can offer a reload instead of
+ * making the operator work out what changed.
+ */
+async function assertSessionUnmoved(
+  session: Readonly<CaptureSession>,
+  base: Readonly<{ baseVersionId: string; baseHash: string }>,
+): Promise<Readonly<CaptureSession>> {
+  const expectedId = `${session.sessionId}:v${session.version}`
+  if (base.baseVersionId !== expectedId || base.baseHash !== session.sessionHash) {
+    throw new DomainError(
+      'CAPTURE_SESSION_VERSION_STALE',
+      `Capture session ${session.sessionId} has moved to version ${session.version}; re-read it and retry`,
+      {
+        currentVersionId: expectedId,
+        currentVersion: session.version,
+        currentHash: session.sessionHash,
+      },
+    )
+  }
+  return session
+}
+
+export function readCaptureProtocolService(dependencies: { repository: CaptureProtocolRepository }) {
+  return async (input: { protocolId: string }): Promise<Readonly<CaptureProtocol>> => {
+    const stored = await dependencies.repository.read({ protocolId: input.protocolId })
+    return stored ?? findCaptureProtocol(input.protocolId)
   }
 }
 
@@ -125,6 +169,8 @@ export function evaluateCaptureProtocolService(dependencies: {
   return async (input: {
     actor: CaptureProtocolActor
     sessionId: string
+    baseVersionId: string
+    baseHash: string
     protocolId?: string
     scenario?: CaptureScenario
     attestedRequirementIds?: readonly string[]
@@ -139,6 +185,10 @@ export function evaluateCaptureProtocolService(dependencies: {
         `Capture session ${input.sessionId} does not exist`,
       )
     }
+    // A verdict about a session must name the session it judged. Evaluating
+    // whatever is current would let a track added a second ago change the
+    // answer an operator is about to act on, with nothing to say it happened.
+    await assertSessionUnmoved(session, input)
 
     const attachment = await dependencies.repository.readAttachment({
       workspaceId: input.actor.workspaceId,

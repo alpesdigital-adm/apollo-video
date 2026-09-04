@@ -24,6 +24,30 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'Wave18 claims the sync operation with a lease and fencing token bound to the exact session version, so a worker restarted between claim and settle cannot write a result for a session that has since moved',
   },
+  'apollo.projects.capture-sessions.protocol.attach': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 upserts the attachment on the session key, so two operators attaching at once converge on one row rather than both appending; it deliberately does not advance the session version, because declaring what a shoot was meant to be does not change what was recorded',
+  },
+  'apollo.projects.capture-sessions.protocol.evaluate': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 keys the evaluation on the exact session version and hash it judged, so two concurrent evaluations of the same version converge on the identical evaluation hash and one made against an older version is recognisable as stale rather than overwriting a newer one',
+  },
+  'apollo.projects.capture-sessions.sync-markers.generate': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 derives the marker id from an idempotency key bound to the full credential and looks it up before rendering, so a retry returns the first marker and renders nothing; a stored marker whose hash differs is refused instead of being overwritten',
+  },
+  'apollo.projects.capture-sessions.sync-markers.detect': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 stores one detection per marker and track, replacing an earlier attempt on the same pair, so two concurrent detections of one track leave exactly one verdict rather than two that a reader would have to choose between',
+  },
+  'apollo.projects.capture-sessions.sync-diagnostic.generate': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 appends the diagnostic under the same head compare-and-set as the capture chain, so two concurrent generations cannot both write version N+1 and the loser is told which version it lost to',
+  },
+  'apollo.projects.capture-sessions.sync-diagnostic.anchors.edit': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 puts the expected version in the append predicate rather than in a preceding read, so an anchor nudge computed against a diagnostic somebody else has already changed is refused instead of silently discarding their correction',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'durable-covered',
     evidence: 'Wave18 writes the cut, its ranges and its joins in one transaction; a duplicate id with the same hash replays and a duplicate id with different content is refused, so reviewed splice justifications are never overwritten',
@@ -509,7 +533,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    147,
+    153,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

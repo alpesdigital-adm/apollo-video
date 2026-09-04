@@ -1544,6 +1544,68 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.capture-protocols.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-protocol-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/capture-protocols"
+      },
+      "toolName": "apollo.capture-protocols.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "scenario",
+          "description": "Return only the protocol for this capture scenario.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "teacher-and-screen",
+              "podcast",
+              "react",
+              "multicam"
+            ]
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.capture-protocols.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-protocol-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/capture-protocols/{protocolId}"
+      },
+      "toolName": "apollo.capture-protocols.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.clients.create": {
       "version": "2.0.0",
       "exposure": "workspace-admin",
@@ -3170,6 +3232,80 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.capture-sessions.protocol.attach": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/attach-capture-protocol-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-protocol-attached/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/protocol"
+      },
+      "toolName": "apollo.projects.capture-sessions.protocol.attach",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.protocol.evaluate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/evaluate-capture-protocol-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-protocol-evaluated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/protocol/evaluations"
+      },
+      "toolName": "apollo.projects.capture-sessions.protocol.evaluate",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.protocol.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-session-protocol-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/protocol"
+      },
+      "toolName": "apollo.projects.capture-sessions.protocol.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.capture-sessions.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -3228,6 +3364,226 @@
       ],
       "idempotency": "required",
       "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-diagnostic.anchors.edit": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/edit-sync-anchor-request/v1",
+      "outputSchemaRef": "apollo://schemas/sync-diagnostic-generated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic/anchors"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-diagnostic.anchors.edit",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-diagnostic.generate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/generate-sync-diagnostic-request/v1",
+      "outputSchemaRef": "apollo://schemas/sync-diagnostic-generated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-diagnostic.generate",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-diagnostic.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/sync-diagnostic-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-diagnostic.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "version",
+          "description": "Read this exact link of the diagnostic chain instead of the current one, so a cut can be inspected against the diagnostic it was actually approved under.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-diagnostic.versions.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/sync-diagnostic-version-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic/versions"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-diagnostic.versions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum diagnostic versions to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-markers.detect": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "job",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/detect-sync-marker-request/v1",
+      "outputSchemaRef": "apollo://schemas/sync-marker-detected/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-markers/{markerId}/detections"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-markers.detect",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-markers.detections.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/sync-marker-detection-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-markers/{markerId}/detections"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-markers.detections.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-markers.generate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/generate-sync-marker-request/v1",
+      "outputSchemaRef": "apollo://schemas/sync-marker-generated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-markers"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-markers.generate",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync-markers.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/sync-marker-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-markers"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync-markers.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
     "apollo.projects.capture-sessions.sync.read": {
@@ -16981,6 +17337,20 @@
         }
       }
     },
+    "apollo://schemas/attach-capture-protocol-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolId"
+      ],
+      "properties": {
+        "protocolId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        }
+      }
+    },
     "apollo://schemas/attach-synthetic-presenter-consent-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -25013,6 +25383,584 @@
         }
       }
     },
+    "apollo://schemas/capture-protocol-attached/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attachment"
+          ],
+          "properties": {
+            "attachment": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "protocolId",
+                "protocolVersion",
+                "protocolHash",
+                "attachedAt"
+              ],
+              "properties": {
+                "protocolId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "protocolVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "protocolHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "attachedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-protocol-evaluated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evaluation",
+            "replayed"
+          ],
+          "properties": {
+            "evaluation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "sessionId",
+                "sessionVersion",
+                "sessionHash",
+                "protocolId",
+                "protocolVersion",
+                "protocolHash",
+                "findings",
+                "lostCapabilities",
+                "ceiling",
+                "blocksAutoEdit",
+                "attestedRequirementIds",
+                "evaluatedAt",
+                "evaluationHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "capture-protocol-evaluation/v1"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "sessionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "protocolId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "protocolVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "protocolHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requirementId",
+                      "level",
+                      "outcome",
+                      "observation",
+                      "losesCapabilities",
+                      "consequence"
+                    ],
+                    "properties": {
+                      "requirementId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "level": {
+                        "type": "string",
+                        "enum": [
+                          "required",
+                          "recommended"
+                        ]
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "met",
+                          "unmet",
+                          "attested",
+                          "attestation-missing"
+                        ]
+                      },
+                      "observation": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "losesCapabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "shared-clock",
+                            "audio-fingerprint",
+                            "marker-correlation",
+                            "drift-measurement",
+                            "continuous-piecewise-map",
+                            "reference-cross-check"
+                          ]
+                        }
+                      },
+                      "consequence": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    }
+                  }
+                },
+                "lostCapabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "shared-clock",
+                      "audio-fingerprint",
+                      "marker-correlation",
+                      "drift-measurement",
+                      "continuous-piecewise-map",
+                      "reference-cross-check"
+                    ]
+                  }
+                },
+                "ceiling": {
+                  "type": "string",
+                  "enum": [
+                    "automatic",
+                    "automatic-with-review",
+                    "manual-anchors-required",
+                    "not-synchronizable"
+                  ]
+                },
+                "blocksAutoEdit": {
+                  "type": "boolean"
+                },
+                "attestedRequirementIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  }
+                },
+                "evaluatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "evaluationHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-protocol-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocols"
+          ],
+          "properties": {
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "protocolId",
+                  "scenario",
+                  "version",
+                  "title",
+                  "summary",
+                  "bestCeiling",
+                  "requirementCount",
+                  "publishedAt",
+                  "protocolHash"
+                ],
+                "properties": {
+                  "protocolId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "scenario": {
+                    "type": "string",
+                    "enum": [
+                      "teacher-and-screen",
+                      "podcast",
+                      "react",
+                      "multicam"
+                    ]
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "bestCeiling": {
+                    "type": "string",
+                    "enum": [
+                      "automatic",
+                      "automatic-with-review",
+                      "manual-anchors-required",
+                      "not-synchronizable"
+                    ]
+                  },
+                  "requirementCount": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "publishedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "protocolHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-protocol-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocol"
+          ],
+          "properties": {
+            "protocol": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "protocolId",
+                "scenario",
+                "version",
+                "title",
+                "summary",
+                "bestCeiling",
+                "requirementCount",
+                "publishedAt",
+                "protocolHash",
+                "schemaVersion",
+                "requirements",
+                "expectedTracks"
+              ],
+              "properties": {
+                "protocolId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "scenario": {
+                  "type": "string",
+                  "enum": [
+                    "teacher-and-screen",
+                    "podcast",
+                    "react",
+                    "multicam"
+                  ]
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "bestCeiling": {
+                  "type": "string",
+                  "enum": [
+                    "automatic",
+                    "automatic-with-review",
+                    "manual-anchors-required",
+                    "not-synchronizable"
+                  ]
+                },
+                "requirementCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "publishedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "protocolHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "schemaVersion": {
+                  "const": "capture-protocol/v1"
+                },
+                "requirements": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "requirementId",
+                      "level",
+                      "verification",
+                      "checkKind",
+                      "statement",
+                      "losesCapabilities",
+                      "consequence"
+                    ],
+                    "properties": {
+                      "requirementId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "level": {
+                        "type": "string",
+                        "enum": [
+                          "required",
+                          "recommended"
+                        ]
+                      },
+                      "verification": {
+                        "type": "string",
+                        "enum": [
+                          "observed",
+                          "attested"
+                        ]
+                      },
+                      "checkKind": {
+                        "enum": [
+                          "track-present",
+                          "track-carries-sync-audio",
+                          "track-excluded-from-mix",
+                          "single-continuous-recording",
+                          "marker-observed",
+                          "distinct-devices",
+                          "operator-attestation"
+                        ]
+                      },
+                      "statement": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "losesCapabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "shared-clock",
+                            "audio-fingerprint",
+                            "marker-correlation",
+                            "drift-measurement",
+                            "continuous-piecewise-map",
+                            "reference-cross-check"
+                          ]
+                        }
+                      },
+                      "consequence": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    }
+                  }
+                },
+                "expectedTracks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "role",
+                      "minimum",
+                      "maximum",
+                      "mustCarryAudio",
+                      "note"
+                    ],
+                    "properties": {
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "camera-main",
+                          "camera-alt",
+                          "screen",
+                          "phone",
+                          "reaction",
+                          "reference-video",
+                          "microphone",
+                          "master-audio",
+                          "scratch-audio"
+                        ]
+                      },
+                      "minimum": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maximum": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "mustCarryAudio": {
+                        "type": "boolean"
+                      },
+                      "note": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/capture-session-list/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -25202,6 +26150,450 @@
               }
             },
             "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-session-protocol-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessionVersion",
+            "attachment",
+            "protocol",
+            "evaluation",
+            "evaluationIsForCurrentVersion"
+          ],
+          "properties": {
+            "sessionVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attachment": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "protocolId",
+                    "protocolVersion",
+                    "protocolHash",
+                    "attachedAt"
+                  ],
+                  "properties": {
+                    "protocolId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "protocolVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "protocolHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "attachedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "protocol": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "protocolId",
+                    "scenario",
+                    "version",
+                    "title",
+                    "summary",
+                    "bestCeiling",
+                    "requirementCount",
+                    "publishedAt",
+                    "protocolHash",
+                    "schemaVersion",
+                    "requirements",
+                    "expectedTracks"
+                  ],
+                  "properties": {
+                    "protocolId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "scenario": {
+                      "type": "string",
+                      "enum": [
+                        "teacher-and-screen",
+                        "podcast",
+                        "react",
+                        "multicam"
+                      ]
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "bestCeiling": {
+                      "type": "string",
+                      "enum": [
+                        "automatic",
+                        "automatic-with-review",
+                        "manual-anchors-required",
+                        "not-synchronizable"
+                      ]
+                    },
+                    "requirementCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "publishedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "protocolHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "schemaVersion": {
+                      "const": "capture-protocol/v1"
+                    },
+                    "requirements": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "requirementId",
+                          "level",
+                          "verification",
+                          "checkKind",
+                          "statement",
+                          "losesCapabilities",
+                          "consequence"
+                        ],
+                        "properties": {
+                          "requirementId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "level": {
+                            "type": "string",
+                            "enum": [
+                              "required",
+                              "recommended"
+                            ]
+                          },
+                          "verification": {
+                            "type": "string",
+                            "enum": [
+                              "observed",
+                              "attested"
+                            ]
+                          },
+                          "checkKind": {
+                            "enum": [
+                              "track-present",
+                              "track-carries-sync-audio",
+                              "track-excluded-from-mix",
+                              "single-continuous-recording",
+                              "marker-observed",
+                              "distinct-devices",
+                              "operator-attestation"
+                            ]
+                          },
+                          "statement": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "losesCapabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "shared-clock",
+                                "audio-fingerprint",
+                                "marker-correlation",
+                                "drift-measurement",
+                                "continuous-piecewise-map",
+                                "reference-cross-check"
+                              ]
+                            }
+                          },
+                          "consequence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "expectedTracks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "role",
+                          "minimum",
+                          "maximum",
+                          "mustCarryAudio",
+                          "note"
+                        ],
+                        "properties": {
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "camera-main",
+                              "camera-alt",
+                              "screen",
+                              "phone",
+                              "reaction",
+                              "reference-video",
+                              "microphone",
+                              "master-audio",
+                              "scratch-audio"
+                            ]
+                          },
+                          "minimum": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "maximum": {
+                            "oneOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "mustCarryAudio": {
+                            "type": "boolean"
+                          },
+                          "note": {
+                            "type": "string",
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evaluation": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "sessionId",
+                    "sessionVersion",
+                    "sessionHash",
+                    "protocolId",
+                    "protocolVersion",
+                    "protocolHash",
+                    "findings",
+                    "lostCapabilities",
+                    "ceiling",
+                    "blocksAutoEdit",
+                    "attestedRequirementIds",
+                    "evaluatedAt",
+                    "evaluationHash"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "capture-protocol-evaluation/v1"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sessionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sessionHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "protocolId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "protocolVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "protocolHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "findings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "requirementId",
+                          "level",
+                          "outcome",
+                          "observation",
+                          "losesCapabilities",
+                          "consequence"
+                        ],
+                        "properties": {
+                          "requirementId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "level": {
+                            "type": "string",
+                            "enum": [
+                              "required",
+                              "recommended"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "met",
+                              "unmet",
+                              "attested",
+                              "attestation-missing"
+                            ]
+                          },
+                          "observation": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "losesCapabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "shared-clock",
+                                "audio-fingerprint",
+                                "marker-correlation",
+                                "drift-measurement",
+                                "continuous-piecewise-map",
+                                "reference-cross-check"
+                              ]
+                            }
+                          },
+                          "consequence": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "lostCapabilities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "shared-clock",
+                          "audio-fingerprint",
+                          "marker-correlation",
+                          "drift-measurement",
+                          "continuous-piecewise-map",
+                          "reference-cross-check"
+                        ]
+                      }
+                    },
+                    "ceiling": {
+                      "type": "string",
+                      "enum": [
+                        "automatic",
+                        "automatic-with-review",
+                        "manual-anchors-required",
+                        "not-synchronizable"
+                      ]
+                    },
+                    "blocksAutoEdit": {
+                      "type": "boolean"
+                    },
+                    "attestedRequirementIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "evaluatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "evaluationHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evaluationIsForCurrentVersion": {
               "type": "boolean"
             }
           }
@@ -42491,6 +43883,27 @@
         }
       }
     },
+    "apollo://schemas/detect-sync-marker-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trackId"
+      ],
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "both-channels",
+            "either-channel"
+          ]
+        }
+      }
+    },
     "apollo://schemas/director-budget-action-request/v1": {
       "type": "object",
       "required": [
@@ -47964,6 +49377,60 @@
         }
       }
     },
+    "apollo://schemas/edit-sync-anchor-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "trackId",
+        "action",
+        "anchorId"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "action": {
+          "enum": [
+            "add",
+            "move",
+            "remove"
+          ]
+        },
+        "anchorId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "sourceMs": {
+          "type": "number",
+          "minimum": -86400000,
+          "maximum": 86400000
+        },
+        "sessionMs": {
+          "type": "number",
+          "minimum": -86400000,
+          "maximum": 86400000
+        },
+        "evidenceRef": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        }
+      }
+    },
     "apollo://schemas/editorial-beat-adjustment-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -51292,9 +52759,19 @@
                 "PUBLIC_OPERATION_NOT_FOUND",
                 "PUBLIC_OPERATION_RETRY_REJECTED",
                 "WORKSPACE_NOT_FOUND",
+                "CAPTURE_PROTOCOL_NOT_FOUND",
+                "SYNC_MARKER_NOT_FOUND",
+                "SYNC_MARKER_CHECKSUM_INVALID",
+                "SYNC_MARKER_FOREIGN_SESSION",
+                "SYNC_DIAGNOSTIC_NOT_FOUND",
+                "SYNC_DIAGNOSTIC_VERSION_STALE",
+                "SYNC_ANCHOR_CONTRADICTORY",
+                "CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND",
                 "CAPTURE_SESSION_NOT_FOUND",
                 "CAPTURE_SESSION_VERSION_STALE",
                 "CAPTURE_TRACK_NOT_FOUND",
+                "CAPTURE_TRACK_PART_NOT_FOUND",
+                "MEDIA_ARTIFACT_IDENTITY_MISMATCH",
                 "CAPTURE_SYNC_RUN_NOT_FOUND",
                 "EDITORIAL_SYNTHESIS_NOT_FOUND",
                 "CAPTURE_COVERAGE_NOT_AVAILABLE",
@@ -51688,9 +53165,19 @@
                 "PUBLIC_OPERATION_NOT_FOUND",
                 "PUBLIC_OPERATION_RETRY_REJECTED",
                 "WORKSPACE_NOT_FOUND",
+                "CAPTURE_PROTOCOL_NOT_FOUND",
+                "SYNC_MARKER_NOT_FOUND",
+                "SYNC_MARKER_CHECKSUM_INVALID",
+                "SYNC_MARKER_FOREIGN_SESSION",
+                "SYNC_DIAGNOSTIC_NOT_FOUND",
+                "SYNC_DIAGNOSTIC_VERSION_STALE",
+                "SYNC_ANCHOR_CONTRADICTORY",
+                "CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND",
                 "CAPTURE_SESSION_NOT_FOUND",
                 "CAPTURE_SESSION_VERSION_STALE",
                 "CAPTURE_TRACK_NOT_FOUND",
+                "CAPTURE_TRACK_PART_NOT_FOUND",
+                "MEDIA_ARTIFACT_IDENTITY_MISMATCH",
                 "CAPTURE_SYNC_RUN_NOT_FOUND",
                 "EDITORIAL_SYNTHESIS_NOT_FOUND",
                 "CAPTURE_COVERAGE_NOT_AVAILABLE",
@@ -51990,6 +53477,48 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "apollo://schemas/evaluate-capture-protocol-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "protocolId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "scenario": {
+          "type": "string",
+          "enum": [
+            "teacher-and-screen",
+            "podcast",
+            "react",
+            "multicam"
+          ]
+        },
+        "attestedRequirementIds": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
           }
         }
       }
@@ -55468,6 +56997,50 @@
           "type": "string",
           "minLength": 3,
           "maxLength": 128
+        }
+      }
+    },
+    "apollo://schemas/generate-sync-diagnostic-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/generate-sync-marker-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position"
+      ],
+      "properties": {
+        "position": {
+          "type": "string",
+          "enum": [
+            "start",
+            "end",
+            "after-restart"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "audiovisual",
+            "spoken-code"
+          ],
+          "default": "audiovisual"
         }
       }
     },
@@ -193673,6 +195246,1774 @@
         "registryHash": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/sync-diagnostic-generated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "diagnostic",
+            "replayed"
+          ],
+          "properties": {
+            "diagnostic": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "sessionId",
+                "referenceTrackId",
+                "version",
+                "previousVersionHash",
+                "sessionVersion",
+                "referenceEpoch",
+                "status",
+                "globalConfidence",
+                "tracks",
+                "warnings",
+                "recommendedActions",
+                "manualRequired",
+                "protocolCeiling",
+                "generatedAt",
+                "diagnosticHash",
+                "autoEdit"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "sync-diagnostic/v1"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "referenceTrackId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previousVersionHash": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sessionVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "referenceEpoch": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "synced-high",
+                    "synced-medium",
+                    "partial",
+                    "needs-input",
+                    "failed"
+                  ]
+                },
+                "globalConfidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "tracks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "trackId",
+                      "methods",
+                      "confidence",
+                      "offsetMs",
+                      "residualMs",
+                      "driftPpm",
+                      "coverageBps",
+                      "gaps",
+                      "automaticAnchors",
+                      "manualAnchors",
+                      "pieceIds",
+                      "status",
+                      "warnings",
+                      "previewSampleMs"
+                    ],
+                    "properties": {
+                      "trackId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "methods": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 120
+                        }
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "offsetMs": {
+                        "oneOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "residualMs": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "driftPpm": {
+                        "oneOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "coverageBps": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "gaps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "properties": {
+                            "start": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            },
+                            "end": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            }
+                          }
+                        }
+                      },
+                      "automaticAnchors": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "anchorId",
+                            "origin",
+                            "sourceMs",
+                            "sessionMs",
+                            "method",
+                            "confidence",
+                            "residualMs",
+                            "evidenceRef",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "anchorId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "origin": {
+                              "type": "string",
+                              "enum": [
+                                "automatic",
+                                "manual"
+                              ]
+                            },
+                            "sourceMs": {
+                              "type": "number"
+                            },
+                            "sessionMs": {
+                              "type": "number"
+                            },
+                            "method": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "residualMs": {
+                              "oneOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "evidenceRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      },
+                      "manualAnchors": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "anchorId",
+                            "origin",
+                            "sourceMs",
+                            "sessionMs",
+                            "method",
+                            "confidence",
+                            "residualMs",
+                            "evidenceRef",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "anchorId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "origin": {
+                              "type": "string",
+                              "enum": [
+                                "automatic",
+                                "manual"
+                              ]
+                            },
+                            "sourceMs": {
+                              "type": "number"
+                            },
+                            "sessionMs": {
+                              "type": "number"
+                            },
+                            "method": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "residualMs": {
+                              "oneOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "evidenceRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      },
+                      "pieceIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "synced-high",
+                          "synced-medium",
+                          "partial",
+                          "needs-input",
+                          "failed"
+                        ]
+                      },
+                      "warnings": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "insufficient-evidence",
+                            "residual-above-target",
+                            "coverage-below-floor",
+                            "drift-uncorrectable",
+                            "anchors-contradictory",
+                            "protocol-requirements-unmet",
+                            "single-channel-marker-only",
+                            "reference-track-changed"
+                          ]
+                        }
+                      },
+                      "previewSampleMs": {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "insufficient-evidence",
+                      "residual-above-target",
+                      "coverage-below-floor",
+                      "drift-uncorrectable",
+                      "anchors-contradictory",
+                      "protocol-requirements-unmet",
+                      "single-channel-marker-only",
+                      "reference-track-changed"
+                    ]
+                  }
+                },
+                "recommendedActions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "add-manual-anchor",
+                      "move-manual-anchor",
+                      "reshoot-with-marker",
+                      "select-different-reference",
+                      "accept-and-review-manually",
+                      "split-into-piecewise-segment"
+                    ]
+                  }
+                },
+                "manualRequired": {
+                  "type": "boolean"
+                },
+                "protocolCeiling": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "automatic",
+                        "automatic-with-review",
+                        "manual-anchors-required",
+                        "not-synchronizable"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "generatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "diagnosticHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "autoEdit": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "allowed",
+                    "blockedBy"
+                  ],
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "blockedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 300
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-diagnostic-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "diagnostic"
+          ],
+          "properties": {
+            "diagnostic": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "sessionId",
+                "referenceTrackId",
+                "version",
+                "previousVersionHash",
+                "sessionVersion",
+                "referenceEpoch",
+                "status",
+                "globalConfidence",
+                "tracks",
+                "warnings",
+                "recommendedActions",
+                "manualRequired",
+                "protocolCeiling",
+                "generatedAt",
+                "diagnosticHash",
+                "autoEdit"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "sync-diagnostic/v1"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "referenceTrackId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previousVersionHash": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sessionVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "referenceEpoch": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "synced-high",
+                    "synced-medium",
+                    "partial",
+                    "needs-input",
+                    "failed"
+                  ]
+                },
+                "globalConfidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "tracks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "trackId",
+                      "methods",
+                      "confidence",
+                      "offsetMs",
+                      "residualMs",
+                      "driftPpm",
+                      "coverageBps",
+                      "gaps",
+                      "automaticAnchors",
+                      "manualAnchors",
+                      "pieceIds",
+                      "status",
+                      "warnings",
+                      "previewSampleMs"
+                    ],
+                    "properties": {
+                      "trackId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "methods": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 120
+                        }
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "offsetMs": {
+                        "oneOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "residualMs": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "driftPpm": {
+                        "oneOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "coverageBps": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "gaps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "properties": {
+                            "start": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            },
+                            "end": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            }
+                          }
+                        }
+                      },
+                      "automaticAnchors": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "anchorId",
+                            "origin",
+                            "sourceMs",
+                            "sessionMs",
+                            "method",
+                            "confidence",
+                            "residualMs",
+                            "evidenceRef",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "anchorId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "origin": {
+                              "type": "string",
+                              "enum": [
+                                "automatic",
+                                "manual"
+                              ]
+                            },
+                            "sourceMs": {
+                              "type": "number"
+                            },
+                            "sessionMs": {
+                              "type": "number"
+                            },
+                            "method": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "residualMs": {
+                              "oneOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "evidenceRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      },
+                      "manualAnchors": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "anchorId",
+                            "origin",
+                            "sourceMs",
+                            "sessionMs",
+                            "method",
+                            "confidence",
+                            "residualMs",
+                            "evidenceRef",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "anchorId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "origin": {
+                              "type": "string",
+                              "enum": [
+                                "automatic",
+                                "manual"
+                              ]
+                            },
+                            "sourceMs": {
+                              "type": "number"
+                            },
+                            "sessionMs": {
+                              "type": "number"
+                            },
+                            "method": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "residualMs": {
+                              "oneOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "evidenceRef": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      },
+                      "pieceIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "synced-high",
+                          "synced-medium",
+                          "partial",
+                          "needs-input",
+                          "failed"
+                        ]
+                      },
+                      "warnings": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "insufficient-evidence",
+                            "residual-above-target",
+                            "coverage-below-floor",
+                            "drift-uncorrectable",
+                            "anchors-contradictory",
+                            "protocol-requirements-unmet",
+                            "single-channel-marker-only",
+                            "reference-track-changed"
+                          ]
+                        }
+                      },
+                      "previewSampleMs": {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "insufficient-evidence",
+                      "residual-above-target",
+                      "coverage-below-floor",
+                      "drift-uncorrectable",
+                      "anchors-contradictory",
+                      "protocol-requirements-unmet",
+                      "single-channel-marker-only",
+                      "reference-track-changed"
+                    ]
+                  }
+                },
+                "recommendedActions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "add-manual-anchor",
+                      "move-manual-anchor",
+                      "reshoot-with-marker",
+                      "select-different-reference",
+                      "accept-and-review-manually",
+                      "split-into-piecewise-segment"
+                    ]
+                  }
+                },
+                "manualRequired": {
+                  "type": "boolean"
+                },
+                "protocolCeiling": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "automatic",
+                        "automatic-with-review",
+                        "manual-anchors-required",
+                        "not-synchronizable"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "generatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "diagnosticHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "autoEdit": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "allowed",
+                    "blockedBy"
+                  ],
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "blockedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 300
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-diagnostic-version-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "versions"
+          ],
+          "properties": {
+            "versions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "previousVersionHash",
+                  "sessionVersion",
+                  "status",
+                  "globalConfidence",
+                  "manualAnchorCount",
+                  "generatedAt",
+                  "diagnosticHash"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "previousVersionHash": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sessionVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "synced-high",
+                      "synced-medium",
+                      "partial",
+                      "needs-input",
+                      "failed"
+                    ]
+                  },
+                  "globalConfidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "manualAnchorCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "generatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "diagnosticHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-marker-detected/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "detection",
+            "replayed"
+          ],
+          "properties": {
+            "detection": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "markerId",
+                "sessionId",
+                "trackId",
+                "position",
+                "mode",
+                "outcome",
+                "rejection",
+                "atMs",
+                "errorMs",
+                "visualObservationId",
+                "audioObservationId",
+                "confidence",
+                "reasons",
+                "detectionHash"
+              ],
+              "properties": {
+                "markerId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "trackId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "position": {
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "end",
+                    "after-restart"
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "both-channels",
+                    "either-channel"
+                  ]
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "confirmed",
+                    "single-channel-only",
+                    "rejected"
+                  ]
+                },
+                "rejection": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "no-usable-observation",
+                        "visual-rejected",
+                        "audio-rejected",
+                        "channels-disagree-on-time",
+                        "ambiguous-audio-peak",
+                        "single-channel-not-permitted",
+                        "foreign-session"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "atMs": {
+                  "oneOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "errorMs": {
+                  "oneOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "visualObservationId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "audioObservationId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                },
+                "detectionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-marker-detection-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "detections"
+          ],
+          "properties": {
+            "detections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "markerId",
+                  "sessionId",
+                  "trackId",
+                  "position",
+                  "mode",
+                  "outcome",
+                  "rejection",
+                  "atMs",
+                  "errorMs",
+                  "visualObservationId",
+                  "audioObservationId",
+                  "confidence",
+                  "reasons",
+                  "detectionHash"
+                ],
+                "properties": {
+                  "markerId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "trackId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "position": {
+                    "type": "string",
+                    "enum": [
+                      "start",
+                      "end",
+                      "after-restart"
+                    ]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "both-channels",
+                      "either-channel"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "confirmed",
+                      "single-channel-only",
+                      "rejected"
+                    ]
+                  },
+                  "rejection": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "no-usable-observation",
+                          "visual-rejected",
+                          "audio-rejected",
+                          "channels-disagree-on-time",
+                          "ambiguous-audio-peak",
+                          "single-channel-not-permitted",
+                          "foreign-session"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "atMs": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "errorMs": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "visualObservationId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "audioObservationId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 300
+                    }
+                  },
+                  "detectionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-marker-generated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "marker",
+            "replayed"
+          ],
+          "properties": {
+            "marker": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "markerId",
+                "sessionId",
+                "kind",
+                "position",
+                "sequence",
+                "sessionCode",
+                "emittedAt",
+                "payload",
+                "checksum",
+                "markerHash",
+                "visual",
+                "audio",
+                "artifact"
+              ],
+              "properties": {
+                "markerId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "audiovisual",
+                    "spoken-code"
+                  ]
+                },
+                "position": {
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "end",
+                    "after-restart"
+                  ]
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "sessionCode": {
+                  "type": "string",
+                  "minLength": 6,
+                  "maxLength": 6
+                },
+                "emittedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "payload": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "checksum": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{16}$"
+                },
+                "markerHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "visual": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "patternFrames",
+                    "frameRate",
+                    "codeSizePx"
+                  ],
+                  "properties": {
+                    "patternFrames": {
+                      "type": "array",
+                      "minItems": 3,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "black",
+                          "white"
+                        ]
+                      }
+                    },
+                    "frameRate": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*/[1-9][0-9]*$"
+                    },
+                    "codeSizePx": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "audio": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "startHz",
+                    "endHz",
+                    "durationMs",
+                    "sampleRate"
+                  ],
+                  "properties": {
+                    "startHz": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "endHz": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "durationMs": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "sampleRate": {
+                      "type": "integer",
+                      "minimum": 8000
+                    }
+                  }
+                },
+                "artifact": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "artifactId",
+                        "sha256",
+                        "byteSize"
+                      ],
+                      "properties": {
+                        "artifactId": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "byteSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/sync-marker-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "markers"
+          ],
+          "properties": {
+            "markers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "markerId",
+                  "sessionId",
+                  "kind",
+                  "position",
+                  "sequence",
+                  "sessionCode",
+                  "emittedAt",
+                  "payload",
+                  "checksum",
+                  "markerHash",
+                  "visual",
+                  "audio",
+                  "artifact"
+                ],
+                "properties": {
+                  "markerId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "audiovisual",
+                      "spoken-code"
+                    ]
+                  },
+                  "position": {
+                    "type": "string",
+                    "enum": [
+                      "start",
+                      "end",
+                      "after-restart"
+                    ]
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sessionCode": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 6
+                  },
+                  "emittedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "payload": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "checksum": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{16}$"
+                  },
+                  "markerHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "visual": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "patternFrames",
+                      "frameRate",
+                      "codeSizePx"
+                    ],
+                    "properties": {
+                      "patternFrames": {
+                        "type": "array",
+                        "minItems": 3,
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "black",
+                            "white"
+                          ]
+                        }
+                      },
+                      "frameRate": {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]*/[1-9][0-9]*$"
+                      },
+                      "codeSizePx": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    }
+                  },
+                  "audio": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "startHz",
+                      "endHz",
+                      "durationMs",
+                      "sampleRate"
+                    ],
+                    "properties": {
+                      "startHz": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "endHz": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "durationMs": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "sampleRate": {
+                        "type": "integer",
+                        "minimum": 8000
+                      }
+                    }
+                  },
+                  "artifact": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "artifactId",
+                          "sha256",
+                          "byteSize"
+                        ],
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "byteSize": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },

@@ -1,3 +1,22 @@
+import { PUBLISHED_CAPTURE_PROTOCOLS } from '../domain/capture-protocol-catalog.ts'
+import { evaluateCaptureProtocol } from '../domain/capture-protocol-evaluation.ts'
+import { createCaptureSession } from '../domain/capture-session.ts'
+import { createTickInterval, createTimebase, rational } from '../domain/session-time.ts'
+import { canAutoEdit, createSyncDiagnostic, deriveTrackStatus } from '../domain/sync-diagnostic.ts'
+import { fuseMarkerDetections } from '../domain/sync-marker-detection.ts'
+import { createSyncMarker } from '../domain/sync-marker.ts'
+import {
+  presentCaptureProtocol,
+  presentCaptureProtocolEvaluation,
+  presentCaptureProtocolSummary,
+  presentCaptureSessionProtocol,
+} from './capture-protocol-contract.ts'
+import {
+  presentMarkerDetection,
+  presentSyncDiagnostic,
+  presentSyncDiagnosticVersion,
+  presentSyncMarker,
+} from './sync-diagnostic-contract.ts'
 import type { PublicSchemaDefinition } from './schema-registry.ts'
 import { createCompareActionImpact } from '../domain/compare-action-impact.ts'
 import { createProjectPolicyOverridesImpact } from '../domain/project-policy-overrides-impact.ts'
@@ -24,6 +43,8 @@ import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitl
 import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
+
+
 /** Built by the real factory so the published example carries a real impact hash. */
 const compareActionImpactExample = createCompareActionImpact({
   commandId: 'compare-command-example-3',
@@ -37,6 +58,158 @@ const clientId = 'client-example-1'
 const credentialId = 'credential-example-1'
 const artifactId = 'artifact-example-1'
 const projectVersionId = 'project-version-example-5'
+// ---------------------------------------------------------------------------
+// Wave 19 — F4.009-F4.011.
+//
+// Every example below is produced by the same factory and presenter the
+// endpoint uses. A hand-written example is a second source of truth that
+// nothing keeps honest; this one cannot describe a response the code does not
+// actually produce.
+// ---------------------------------------------------------------------------
+const w19ProtocolExample = PUBLISHED_CAPTURE_PROTOCOLS[0]
+const w19MarkerExample = createSyncMarker({
+  markerId: 'sync-marker-example-1',
+  workspaceId,
+  sessionId: 'capture-session-founder-interview',
+  kind: 'audiovisual',
+  position: 'start',
+  sequence: 1,
+  emittedAt: '2026-07-12T20:00:00.000Z',
+})
+const w19MarkerArtifactExample = Object.freeze({
+  artifactId: 'artifact-sync-marker-example-1',
+  sha256: 'e'.repeat(64),
+  byteSize: 19_650,
+})
+const w19DetectionExample = fuseMarkerDetections({
+  marker: w19MarkerExample,
+  trackId: 'track-camera-main',
+  mode: 'both-channels',
+  visual: {
+    channel: 'visual',
+    observationId: 'observation-visual-1',
+    trackId: 'track-camera-main',
+    atMs: 800,
+    errorMs: 17,
+    decodedPayload: w19MarkerExample.payload,
+    patternScore: 1,
+    confidence: 0.97,
+    evidenceRef: 'frame-scan-1',
+  },
+  audio: {
+    channel: 'audio',
+    observationId: 'observation-audio-1',
+    trackId: 'track-camera-main',
+    atMs: 800,
+    errorMs: 2,
+    correlationPeak: 0.86,
+    secondPeak: 0.11,
+    confidence: 0.95,
+    evidenceRef: 'chirp-correlation-1',
+  },
+})
+const w19SessionExample = createCaptureSession({
+  workspaceId,
+  projectId,
+  sessionId: 'capture-session-founder-interview',
+  clock: { timebase: createTimebase(rational(1, 90_000)), rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-camera-main',
+  tracks: [
+    {
+      trackId: 'track-camera-main',
+      role: 'camera-main',
+      device: { deviceId: 'device-a', recorderId: 'recorder-a', make: null, model: null, serial: null },
+      sourceAssetId: 'asset-camera-main',
+      timebase: createTimebase(rational(1, 90_000)),
+      streamIndex: 0,
+      syncAudioPolicy: 'final-candidate',
+      includeInFinalMix: true,
+      parts: [
+        {
+          partId: 'part-camera-main-1',
+          ordinal: 0,
+          sourceAssetId: 'asset-camera-main',
+          timebase: createTimebase(rational(1, 90_000)),
+          coverage: createTickInterval(BigInt(0), BigInt(90_000) * BigInt(600)),
+          streamIndex: 0,
+          splitReason: 'single-file',
+          evidence: {
+            ingestArtifactId: 'artifact-camera-main',
+            ingestSha256: 'a'.repeat(64),
+            probeHash: 'b'.repeat(64),
+            probeSource: 'packet-scan',
+            observedAt: '2026-07-12T19:59:00.000Z',
+          },
+        },
+      ],
+    },
+  ],
+  lineage: {
+    commandId: 'command-open-session-1',
+    operation: 'create-session',
+    actorKind: 'human',
+    actorId: 'user-editor-1',
+    occurredAt: '2026-07-12T20:00:00.000Z',
+    note: null,
+  },
+  createdAt: '2026-07-12T20:00:00.000Z',
+})
+const w19EvaluationExample = evaluateCaptureProtocol({
+  workspaceId,
+  protocol: w19ProtocolExample,
+  session: w19SessionExample,
+  markers: { confirmedPositions: ['start'] },
+  evaluatedAt: '2026-07-12T20:00:45.000Z',
+})
+const w19DiagnosticExample = createSyncDiagnostic({
+  workspaceId,
+  sessionId: 'capture-session-founder-interview',
+  referenceTrackId: 'track-camera-main',
+  version: 1,
+  previousVersionHash: null,
+  sessionVersion: 4,
+  referenceEpoch: 2,
+  tracks: [
+    {
+      trackId: 'track-phone',
+      methods: ['marker-correlation'],
+      confidence: 0.95,
+      offsetMs: -1_240,
+      residualMs: 4,
+      driftPpm: null,
+      coverageBps: 9_800,
+      gaps: [],
+      automaticAnchors: [
+        {
+          anchorId: 'anchor-marker-start',
+          origin: 'automatic',
+          sourceMs: 800,
+          sessionMs: 2_040,
+          method: 'marker-correlation',
+          confidence: 0.95,
+          residualMs: 4,
+          evidenceRef: 'sync-marker-example-1',
+          createdAt: '2026-07-12T20:01:00.000Z',
+        },
+      ],
+      manualAnchors: [],
+      pieceIds: ['track-phone-piece-0'],
+      // Derived, not asserted — the same call the diagnostic itself makes, so
+      // the published example cannot show a status the rules would not give.
+      status: deriveTrackStatus({
+        offsetMs: -1_240,
+        residualMs: 4,
+        coverageBps: 9_800,
+        confidence: 0.95,
+        hasContradictoryAnchors: false,
+      }),
+      warnings: [],
+      previewSampleMs: [0, 60_000, 120_000],
+    },
+  ],
+  protocolCeiling: 'automatic',
+  generatedAt: '2026-07-12T20:01:00.000Z',
+})
 /** FR-175 — a sidecar exported from the alignment of the rendered proxy. */
 const subtitleSidecarExample = {
   id: 'subtitle-sidecar-example-1',
@@ -10066,6 +10239,138 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           },
           replayed: false,
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-protocol-list/v1': [
+      { data: { protocols: [presentCaptureProtocolSummary(w19ProtocolExample)] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/capture-protocol-read/v1': [
+      { data: { protocol: presentCaptureProtocol(w19ProtocolExample) }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/attach-capture-protocol-request/v1': [
+      { protocolId: w19ProtocolExample.protocolId },
+    ],
+    'apollo://schemas/capture-protocol-attached/v1': [
+      {
+        data: {
+          attachment: {
+            protocolId: w19ProtocolExample.protocolId,
+            protocolVersion: w19ProtocolExample.version,
+            protocolHash: w19ProtocolExample.protocolHash,
+            attachedAt: '2026-07-12T20:00:30.000Z',
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/evaluate-capture-protocol-request/v1': [
+      {
+        baseVersionId: 'capture-session-founder-interview:v4',
+        baseHash: 'd'.repeat(64),
+        protocolId: w19ProtocolExample.protocolId,
+        attestedRequirementIds: [],
+      },
+    ],
+    'apollo://schemas/capture-protocol-evaluated/v1': [
+      {
+        data: {
+          evaluation: presentCaptureProtocolEvaluation(w19EvaluationExample),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-session-protocol-read/v1': [
+      {
+        data: presentCaptureSessionProtocol({
+          attachment: {
+            protocolId: w19ProtocolExample.protocolId,
+            protocolVersion: w19ProtocolExample.version,
+            protocolHash: w19ProtocolExample.protocolHash,
+            attachedAt: '2026-07-12T20:00:30.000Z',
+          },
+          protocol: w19ProtocolExample,
+          evaluation: w19EvaluationExample,
+          sessionVersion: 4,
+          evaluationIsForCurrentVersion: true,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/generate-sync-marker-request/v1': [
+      { position: 'start', kind: 'audiovisual' },
+    ],
+    'apollo://schemas/sync-marker-generated/v1': [
+      {
+        data: {
+          marker: presentSyncMarker({ marker: w19MarkerExample, artifact: w19MarkerArtifactExample }),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/sync-marker-list/v1': [
+      {
+        data: {
+          markers: [presentSyncMarker({ marker: w19MarkerExample, artifact: w19MarkerArtifactExample })],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/detect-sync-marker-request/v1': [
+      { trackId: 'track-camera-main', mode: 'both-channels' },
+    ],
+    'apollo://schemas/sync-marker-detected/v1': [
+      {
+        data: { detection: presentMarkerDetection(w19DetectionExample), replayed: false },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/sync-marker-detection-list/v1': [
+      { data: { detections: [presentMarkerDetection(w19DetectionExample)] }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/generate-sync-diagnostic-request/v1': [
+      { baseVersionId: 'capture-session-founder-interview:v4', baseHash: 'd'.repeat(64) },
+    ],
+    'apollo://schemas/sync-diagnostic-read/v1': [
+      {
+        data: {
+          diagnostic: presentSyncDiagnostic({
+            diagnostic: w19DiagnosticExample,
+            autoEdit: canAutoEdit(w19DiagnosticExample),
+          }),
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/sync-diagnostic-generated/v1': [
+      {
+        data: {
+          diagnostic: presentSyncDiagnostic({
+            diagnostic: w19DiagnosticExample,
+            autoEdit: canAutoEdit(w19DiagnosticExample),
+          }),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/edit-sync-anchor-request/v1': [
+      {
+        baseVersionId: `capture-session-founder-interview:diagnostic:v${w19DiagnosticExample.version}`,
+        baseHash: w19DiagnosticExample.diagnosticHash,
+        trackId: 'track-phone',
+        action: 'add',
+        anchorId: 'anchor-manual-1',
+        sourceMs: 61_200,
+        sessionMs: 62_440,
+        evidenceRef: 'operator-nudge-1',
+      },
+    ],
+    'apollo://schemas/sync-diagnostic-version-list/v1': [
+      {
+        data: { versions: [presentSyncDiagnosticVersion(w19DiagnosticExample)] },
         meta: { apiVersion: 'v1' },
       },
     ],

@@ -221,9 +221,10 @@ function memoryProtocols() {
 }
 
 /** Media that finds the marker where the fixture says it is. */
-function fakeMedia(plan) {
+function fakeMedia(plan, counters = {}) {
   return {
     async render(marker) {
+      counters.renders = (counters.renders ?? 0) + 1
       return { artifactId: `artifact-${marker.markerId}`, sha256: h(7), byteSize: 19_650 }
     },
     async detect({ marker, trackId, mode }) {
@@ -261,14 +262,14 @@ function wire(session, options = {}) {
   const repository = memoryDiagnostics()
   const protocols = memoryProtocols()
   const sessions = fakeSessions(session, options)
-  const media = fakeMedia(options.plan ?? {})
-  let created = 0
-  const createId = () => `marker-${(created += 1)}`
+  const counters = {}
+  const media = fakeMedia(options.plan ?? {}, counters)
   return {
+    counters,
     repository,
     protocols,
     sessions,
-    generateMarker: generateSyncMarkerService({ repository, sessions, media, createId, clock }),
+    generateMarker: generateSyncMarkerService({ repository, sessions, media, clock }),
     detect: detectSyncMarkerService({
       repository, sessions, media,
       resolveMediaPath: async () => '/fixtures/track.mp4',
@@ -289,6 +290,19 @@ function wire(session, options = {}) {
 }
 
 const ACTOR = { workspaceId: 'workspace-1', kind: 'human', id: 'user-editor-1' }
+
+/** The diagnostic base a caller that just read it would send. */
+function diagBase(diagnostic) {
+  return {
+    baseVersionId: `${diagnostic.sessionId}:diagnostic:v${diagnostic.version}`,
+    baseHash: diagnostic.diagnosticHash,
+  }
+}
+
+/** The base a caller that just read the session would send. */
+function base(session) {
+  return { baseVersionId: `${session.sessionId}:v${session.version}`, baseHash: session.sessionHash }
+}
 
 /** Coverage as the track-coverage derivation would have produced it. */
 function fullCoverage(trackId) {
@@ -324,8 +338,8 @@ test('E2E-FR-147/148/149 teacher and screen: markers detected, protocol met, aut
 
   await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'teacher-and-screen-v1' })
 
-  const start = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
-  const end = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'end' })
+  const start = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
+  const end = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'end', idempotencyKey: 'key-end' })
   assert.equal(start.marker.sequence, 1)
   // The sequence is assigned by the service, never requested: a caller
   // choosing its own could collide and make "which marker" undecidable.
@@ -342,12 +356,12 @@ test('E2E-FR-147/148/149 teacher and screen: markers detected, protocol met, aut
   }
 
   const evaluation = await services.evaluate({
-    actor: ACTOR, sessionId: session.sessionId, attestedRequirementIds: ['headphones'],
+    actor: ACTOR, sessionId: session.sessionId, ...base(session), attestedRequirementIds: ['headphones'],
   })
   assert.equal(evaluation.evaluation.ceiling, 'automatic')
   assert.equal(evaluation.evaluation.blocksAutoEdit, false)
 
-  const { diagnostic } = await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId })
+  const { diagnostic } = await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId, ...base(session) })
   assert.equal(diagnostic.version, 1)
   assert.equal(diagnostic.tracks.length, 1, 'the reference track is the clock, not a diagnosed track')
   assert.equal(diagnostic.status, 'synced-high')
@@ -366,7 +380,7 @@ test('E2E-FR-147/149 a limited capture blocks auto-edit before anything is cut',
   })
   await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'teacher-and-screen-v1' })
 
-  const start = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
+  const start = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
   const onScreen = await services.detect({
     actor: ACTOR, sessionId: session.sessionId, markerId: start.marker.markerId, trackId: 'track-screen',
   })
@@ -376,11 +390,13 @@ test('E2E-FR-147/149 a limited capture blocks auto-edit before anything is cut',
   assert.equal(onScreen.detection.outcome, 'rejected')
   assert.equal(onScreen.detection.atMs, null)
 
-  const evaluation = await services.evaluate({ actor: ACTOR, sessionId: session.sessionId })
+  const evaluation = await services.evaluate({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
   assert.equal(evaluation.evaluation.blocksAutoEdit, true)
   assert.ok(evaluation.evaluation.lostCapabilities.includes('audio-fingerprint'))
 
-  const { diagnostic } = await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId })
+  const { diagnostic } = await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId, ...base(session) })
   assert.equal(diagnostic.status, 'needs-input')
   assert.equal(diagnostic.manualRequired, true)
   assert.ok(diagnostic.warnings.includes('insufficient-evidence'))
@@ -400,18 +416,18 @@ test('E2E-FR-149 manual correction refits, preserves automatic anchors and fence
     },
   })
   await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'teacher-and-screen-v1' })
-  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
+  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
   for (const trackId of ['track-camera-main', 'track-screen']) {
     await services.detect({ actor: ACTOR, sessionId: session.sessionId, markerId: marker.marker.markerId, trackId })
   }
-  const v1 = (await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId })).diagnostic
+  const v1 = (await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId, ...base(session) })).diagnostic
   const automaticBefore = v1.tracks[0].automaticAnchors.map((entry) => entry.anchorId)
   assert.equal(automaticBefore.length, 1)
 
   const v2 = (await services.editAnchor({
     actor: ACTOR,
     sessionId: session.sessionId,
-    expectedVersion: 1,
+    ...diagBase(v1),
     edit: { trackId: 'track-screen', action: 'add', anchorId: 'manual-1', sourceMs: 300_000, sessionMs: 300_600 },
   })).diagnostic
   assert.equal(v2.version, 2)
@@ -426,10 +442,11 @@ test('E2E-FR-149 manual correction refits, preserves automatic anchors and fence
     () => services.editAnchor({
       actor: ACTOR,
       sessionId: session.sessionId,
-      expectedVersion: 1,
+      // Deliberately still v1: this is the operator whose page went stale.
+      ...diagBase(v1),
       edit: { trackId: 'track-screen', action: 'add', anchorId: 'manual-2', sourceMs: 10, sessionMs: 610 },
     }),
-    /version 2; the edit was computed against 1/,
+    /has moved to version 2/,
   )
 
   // The old version is still readable: a cut approved against v1 keeps its
@@ -444,21 +461,23 @@ test('E2E-FR-149 regenerating a diagnostic keeps manual corrections', async () =
   const services = wire(session, {
     plan: { 'track-camera-main:start': { atMs: 1_000 }, 'track-screen:start': { atMs: 400 } },
   })
-  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
+  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
   for (const trackId of ['track-camera-main', 'track-screen']) {
     await services.detect({ actor: ACTOR, sessionId: session.sessionId, markerId: marker.marker.markerId, trackId })
   }
-  await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId })
+  const first = (await services.generateDiagnostic({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })).diagnostic
   await services.editAnchor({
     actor: ACTOR,
     sessionId: session.sessionId,
-    expectedVersion: 1,
+    ...diagBase(first),
     edit: { trackId: 'track-screen', action: 'add', anchorId: 'manual-1', sourceMs: 300_000, sessionMs: 300_600 },
   })
 
   // Re-running detection and regenerating must not silently discard a
   // correction a person made.
-  const regenerated = (await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId })).diagnostic
+  const regenerated = (await services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId, ...base(session) })).diagnostic
   assert.equal(regenerated.version, 3)
   assert.equal(regenerated.tracks[0].manualAnchors.length, 1)
   assert.equal(regenerated.tracks[0].manualAnchors[0].anchorId, 'manual-1')
@@ -467,7 +486,7 @@ test('E2E-FR-149 regenerating a diagnostic keeps manual corrections', async () =
 test('E2E-FR-148 a marker from another session is refused before detection runs', async () => {
   const session = teacherSession()
   const services = wire(session, { plan: {} })
-  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
+  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
 
   // Rewrite the stored marker's session: the identity says it belongs to
   // another shoot, and no detector result can make it this session's.
@@ -490,7 +509,7 @@ test('E2E-FR-147 only confirmed detections count as observed markers', async () 
     // The camera sees the marker; the screen does not.
     plan: { 'track-camera-main:start': { atMs: 1_000 } },
   })
-  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start' })
+  const marker = await services.generateMarker({ actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start' })
   await services.detect({ actor: ACTOR, sessionId: session.sessionId, markerId: marker.marker.markerId, trackId: 'track-camera-main' })
   await services.detect({ actor: ACTOR, sessionId: session.sessionId, markerId: marker.marker.markerId, trackId: 'track-screen' })
 
@@ -498,4 +517,65 @@ test('E2E-FR-147 only confirmed detections count as observed markers', async () 
   // A rejected detection is not a marker emitted badly; it is a marker nobody
   // can prove was emitted at all. But the camera's confirmation stands.
   assert.deepEqual([...facts.confirmedPositions], ['start'])
+})
+
+test('E2E-FR-148 a retry with the same key returns the first marker instead of making another', async () => {
+  const session = teacherSession()
+  const services = wire(session, { plan: { 'track-camera-main:start': { atMs: 800 } } })
+  const credentialA = { ...ACTOR, credentialId: 'credential-a' }
+
+  const first = await services.generateMarker({
+    actor: credentialA, sessionId: session.sessionId, position: 'start', idempotencyKey: 'shoot-1',
+  })
+  const retry = await services.generateMarker({
+    actor: credentialA, sessionId: session.sessionId, position: 'start', idempotencyKey: 'shoot-1',
+  })
+
+  assert.equal(retry.replayed, true)
+  assert.equal(retry.marker.markerId, first.marker.markerId)
+  assert.equal(retry.marker.sequence, 1)
+  // The point of the lookup: a retry must not render a second clip. Equal ids
+  // alone would not prove that — the render could have run and been discarded.
+  assert.equal(services.counters.renders, 1)
+
+  // A second credential of the same client is a second caller. Reusing its key
+  // must not hand it a marker it never generated.
+  const credentialB = { ...ACTOR, credentialId: 'credential-b' }
+  const other = await services.generateMarker({
+    actor: credentialB, sessionId: session.sessionId, position: 'start', idempotencyKey: 'shoot-1',
+  })
+  assert.equal(other.replayed, false)
+  assert.notEqual(other.marker.markerId, first.marker.markerId)
+  assert.equal(other.marker.sequence, 2)
+  assert.equal(services.counters.renders, 2)
+
+  // The same key aimed at a different request is a conflict the caller is told
+  // about, not a silent substitution.
+  await assert.rejects(
+    () => services.generateMarker({
+      actor: credentialA, sessionId: session.sessionId, position: 'start', idempotencyKey: '   ',
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  )
+})
+
+test('E2E-FR-147/149 a derivation of a session that moved is refused, not silently re-aimed', async () => {
+  const session = teacherSession()
+  const services = wire(session, { plan: { 'track-camera-main:start': { atMs: 800 } } })
+  // What a caller read a moment ago, before somebody else added a track.
+  const stale = { baseVersionId: `${session.sessionId}:v1`, baseHash: session.sessionHash }
+
+  for (const call of [
+    () => services.evaluate({ actor: ACTOR, sessionId: session.sessionId, ...stale }),
+    () => services.generateDiagnostic({ actor: ACTOR, sessionId: session.sessionId, ...stale }),
+  ]) {
+    await assert.rejects(call, (error) => {
+      assert.equal(error.code, 'CAPTURE_SESSION_VERSION_STALE')
+      // The refusal carries where to go, so a UI can offer a reload instead of
+      // making the operator work out what changed.
+      assert.equal(error.details.currentVersion, session.version)
+      assert.equal(error.details.currentHash, session.sessionHash)
+      return true
+    })
+  }
 })
