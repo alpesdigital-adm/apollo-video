@@ -5802,7 +5802,7 @@ const captureCameraPartExample = Object.freeze({
     ingestArtifactId: 'artifact-camera-main-a001',
     ingestSha256: '1'.repeat(64),
     probeHash: '2'.repeat(64),
-    probeSource: 'ffprobe',
+    probeSource: 'packet-scan',
     observedAt: '2029-04-01T09:00:05.000Z',
   },
 })
@@ -5838,7 +5838,7 @@ const capturePhoneFirstPartExample = Object.freeze({
     ingestArtifactId: 'artifact-phone-clip-1',
     ingestSha256: '3'.repeat(64),
     probeHash: '4'.repeat(64),
-    probeSource: 'ffprobe',
+    probeSource: 'packet-scan',
     observedAt: '2029-04-01T09:00:07.000Z',
   },
 })
@@ -5857,7 +5857,7 @@ const capturePhoneSecondPartExample = Object.freeze({
     ingestArtifactId: 'artifact-phone-clip-2',
     ingestSha256: '5'.repeat(64),
     probeHash: '6'.repeat(64),
-    probeSource: 'ffprobe',
+    probeSource: 'packet-scan',
     observedAt: '2029-04-01T09:20:11.000Z',
   },
 })

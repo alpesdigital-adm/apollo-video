@@ -165,7 +165,10 @@ function parseTrackPart(value: unknown, field: string): Readonly<CaptureTrackPar
       ingestArtifactId: text(evidence.ingestArtifactId, `${field}.evidence.ingestArtifactId`, 128),
       ingestSha256: text(evidence.ingestSha256, `${field}.evidence.ingestSha256`, 64),
       probeHash: text(evidence.probeHash, `${field}.evidence.probeHash`, 64),
-      probeSource: text(evidence.probeSource, `${field}.evidence.probeSource`, 64) as CaptureTrackPart['evidence']['probeSource'],
+      probeSource: member(evidence.probeSource,
+        ['container-index', 'packet-scan', 'decoder-walk',
+          'declared-metadata', 'operator-report'] as const,
+        `${field}.evidence.probeSource`),
       observedAt: text(evidence.observedAt, `${field}.evidence.observedAt`, 64),
     }),
   })

@@ -14222,7 +14222,13 @@ const captureTrackPartInputSchema = {
         ingestArtifactId: idSchema,
         ingestSha256: sha256Schema,
         probeHash: sha256Schema,
-        probeSource: { type: 'string', minLength: 1, maxLength: 64 },
+        // How the interval was measured. A packet scan and a declared
+        // metadata field are both 'a duration', and only one of them was
+        // read off the media.
+        probeSource: {
+          enum: ['container-index', 'packet-scan', 'decoder-walk',
+            'declared-metadata', 'operator-report'],
+        },
         observedAt: { type: 'string', format: 'date-time' },
       },
     },
