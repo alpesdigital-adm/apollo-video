@@ -3108,6 +3108,265 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.capture-sessions.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-capture-session-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-session-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions"
+      },
+      "toolName": "apollo.projects.capture-sessions.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-session-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions"
+      },
+      "toolName": "apollo.projects.capture-sessions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum capture sessions to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-session-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}"
+      },
+      "toolName": "apollo.projects.capture-sessions.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "version",
+          "description": "Read this exact link of the immutable chain instead of the current one, so a cut can be inspected against the session it was actually made from.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.reference-track.change": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/change-capture-reference-track-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-session-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/reference-track"
+      },
+      "toolName": "apollo.projects.capture-sessions.reference-track.change",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-sync-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.sync.request": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "job",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/request-capture-sync-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-sync-run-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/sync-runs"
+      },
+      "toolName": "apollo.projects.capture-sessions.sync.request",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "none",
+      "successStatuses": [
+        202,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.track-parts.add": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/add-capture-track-part-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-session-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/track-parts"
+      },
+      "toolName": "apollo.projects.capture-sessions.track-parts.add",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.tracks.add": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/add-capture-track-request/v1",
+      "outputSchemaRef": "apollo://schemas/capture-session-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/tracks"
+      },
+      "toolName": "apollo.projects.capture-sessions.tracks.add",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.capture-sessions.versions.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/capture-session-version-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/versions"
+      },
+      "toolName": "apollo.projects.capture-sessions.versions.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum versions of the chain to return, newest first.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 25
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.color-pipeline-compilations.create": {
       "version": "1.0.0",
       "exposure": "public",
@@ -3745,6 +4004,91 @@
         "path": "/v1/projects/{projectId}/editorial-beats/{beatSetId}"
       },
       "toolName": "apollo.projects.editorial-beats.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-syntheses.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/create-editorial-synthesis-request/v1",
+      "outputSchemaRef": "apollo://schemas/editorial-synthesis-mutated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/editorial-syntheses"
+      },
+      "toolName": "apollo.projects.editorial-syntheses.create",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-syntheses.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/editorial-synthesis-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/editorial-syntheses"
+      },
+      "toolName": "apollo.projects.editorial-syntheses.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum multi-range cuts to return.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-syntheses.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/editorial-synthesis-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/editorial-syntheses/{synthesisId}"
+      },
+      "toolName": "apollo.projects.editorial-syntheses.read",
       "supportsDryRun": false,
       "costClass": "free",
       "confirmation": "none",
@@ -9608,6 +9952,433 @@
         "baseRevision": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/add-capture-track-part-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "trackId",
+        "part",
+        "lineage"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "part": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "partId",
+            "ordinal",
+            "sourceAssetId",
+            "timebase",
+            "coverage",
+            "streamIndex",
+            "splitReason",
+            "evidence"
+          ],
+          "properties": {
+            "partId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "ordinal": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "sourceAssetId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "timebase": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+            },
+            "coverage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "start",
+                "end"
+              ],
+              "properties": {
+                "start": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]{1,19}$"
+                },
+                "end": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]{1,19}$"
+                }
+              }
+            },
+            "streamIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1024
+            },
+            "splitReason": {
+              "enum": [
+                "single-file",
+                "recorder-restart",
+                "file-size-limit",
+                "card-change",
+                "clip-duration-limit",
+                "unknown"
+              ]
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ingestArtifactId",
+                "ingestSha256",
+                "probeHash",
+                "probeSource",
+                "observedAt"
+              ],
+              "properties": {
+                "ingestArtifactId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "ingestSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "probeHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "probeSource": {
+                  "enum": [
+                    "container-index",
+                    "packet-scan",
+                    "decoder-walk",
+                    "declared-metadata",
+                    "operator-report"
+                  ]
+                },
+                "observedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commandId",
+            "actorKind",
+            "actorId"
+          ],
+          "properties": {
+            "commandId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actorKind": {
+              "enum": [
+                "human",
+                "api-client",
+                "director"
+              ]
+            },
+            "actorId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1024
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/add-capture-track-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "track",
+        "lineage"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "track": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trackId",
+            "role",
+            "device",
+            "timebase",
+            "streamIndex",
+            "syncAudioPolicy",
+            "includeInFinalMix",
+            "firstPart"
+          ],
+          "properties": {
+            "trackId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "role": {
+              "enum": [
+                "camera-main",
+                "camera-alt",
+                "screen",
+                "phone",
+                "reaction",
+                "reference-video",
+                "microphone",
+                "master-audio",
+                "scratch-audio"
+              ]
+            },
+            "device": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deviceId",
+                "recorderId"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "recorderId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "make": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "serial": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                }
+              }
+            },
+            "timebase": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+            },
+            "streamIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1024
+            },
+            "syncAudioPolicy": {
+              "enum": [
+                "available",
+                "none",
+                "sync-only",
+                "final-candidate"
+              ]
+            },
+            "includeInFinalMix": {
+              "type": "boolean"
+            },
+            "firstPart": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "partId",
+                "ordinal",
+                "sourceAssetId",
+                "timebase",
+                "coverage",
+                "streamIndex",
+                "splitReason",
+                "evidence"
+              ],
+              "properties": {
+                "partId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "ordinal": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "sourceAssetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "timebase": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                },
+                "coverage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "pattern": "^-?[0-9]{1,19}$"
+                    },
+                    "end": {
+                      "type": "string",
+                      "pattern": "^-?[0-9]{1,19}$"
+                    }
+                  }
+                },
+                "streamIndex": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1024
+                },
+                "splitReason": {
+                  "enum": [
+                    "single-file",
+                    "recorder-restart",
+                    "file-size-limit",
+                    "card-change",
+                    "clip-duration-limit",
+                    "unknown"
+                  ]
+                },
+                "evidence": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ingestArtifactId",
+                    "ingestSha256",
+                    "probeHash",
+                    "probeSource",
+                    "observedAt"
+                  ],
+                  "properties": {
+                    "ingestArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "ingestSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "probeHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "probeSource": {
+                      "enum": [
+                        "container-index",
+                        "packet-scan",
+                        "decoder-walk",
+                        "declared-metadata",
+                        "operator-report"
+                      ]
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commandId",
+            "actorKind",
+            "actorId"
+          ],
+          "properties": {
+            "commandId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actorKind": {
+              "enum": [
+                "human",
+                "api-client",
+                "director"
+              ]
+            },
+            "actorId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1024
+            }
+          }
         }
       }
     },
@@ -24242,6 +25013,1122 @@
         }
       }
     },
+    "apollo://schemas/capture-session-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sessionId",
+                  "version",
+                  "status",
+                  "sessionHash",
+                  "referenceTrackId",
+                  "referenceEpoch",
+                  "trackCount"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "previousVersionHash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "status": {
+                    "enum": [
+                      "draft",
+                      "analyzing",
+                      "needs-input",
+                      "synced",
+                      "partial",
+                      "failed"
+                    ]
+                  },
+                  "sessionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "referenceTrackId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "referenceEpoch": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "trackCount": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "staleDerivations": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "track-coverage",
+                        "session-clock-map",
+                        "sync-diagnostic",
+                        "edit-plan"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-session-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session",
+            "replayed"
+          ],
+          "properties": {
+            "session": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "version",
+                "status",
+                "sessionHash",
+                "referenceTrackId",
+                "referenceEpoch",
+                "trackCount"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previousVersionHash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "draft",
+                    "analyzing",
+                    "needs-input",
+                    "synced",
+                    "partial",
+                    "failed"
+                  ]
+                },
+                "sessionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "referenceTrackId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "referenceEpoch": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "trackCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "staleDerivations": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "track-coverage",
+                      "session-clock-map",
+                      "sync-diagnostic",
+                      "edit-plan"
+                    ]
+                  }
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-session-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "session"
+          ],
+          "properties": {
+            "session": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "projectId",
+                "version",
+                "status",
+                "clock",
+                "referenceTrackId",
+                "referenceEpoch",
+                "tracks",
+                "lineage",
+                "sessionHash",
+                "createdAt"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "previousVersionHash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "enum": [
+                    "draft",
+                    "analyzing",
+                    "needs-input",
+                    "synced",
+                    "partial",
+                    "failed"
+                  ]
+                },
+                "clock": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "timebase",
+                    "rounding"
+                  ],
+                  "properties": {
+                    "timebase": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                    },
+                    "rounding": {
+                      "enum": [
+                        "nearest-half-even",
+                        "floor",
+                        "ceil"
+                      ]
+                    }
+                  }
+                },
+                "referenceTrackId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "referenceEpoch": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "tracks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "trackId",
+                      "role",
+                      "device",
+                      "sourceAssetId",
+                      "timebase",
+                      "streamIndex",
+                      "syncAudioPolicy",
+                      "includeInFinalMix",
+                      "parts"
+                    ],
+                    "properties": {
+                      "trackId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "role": {
+                        "enum": [
+                          "camera-main",
+                          "camera-alt",
+                          "screen",
+                          "phone",
+                          "reaction",
+                          "reference-video",
+                          "microphone",
+                          "master-audio",
+                          "scratch-audio"
+                        ]
+                      },
+                      "device": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "deviceId",
+                          "recorderId"
+                        ],
+                        "properties": {
+                          "deviceId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "recorderId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "make": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 128
+                          },
+                          "model": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 128
+                          },
+                          "serial": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 128
+                          }
+                        }
+                      },
+                      "sourceAssetId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "timebase": {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                      },
+                      "streamIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1024
+                      },
+                      "syncAudioPolicy": {
+                        "enum": [
+                          "available",
+                          "none",
+                          "sync-only",
+                          "final-candidate"
+                        ]
+                      },
+                      "includeInFinalMix": {
+                        "type": "boolean"
+                      },
+                      "parts": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "partId",
+                            "ordinal",
+                            "sourceAssetId",
+                            "timebase",
+                            "coverage",
+                            "streamIndex",
+                            "splitReason",
+                            "evidence"
+                          ],
+                          "properties": {
+                            "partId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "ordinal": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 100000
+                            },
+                            "sourceAssetId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "timebase": {
+                              "type": "string",
+                              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "start",
+                                "end"
+                              ],
+                              "properties": {
+                                "start": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                },
+                                "end": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                }
+                              }
+                            },
+                            "streamIndex": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 1024
+                            },
+                            "splitReason": {
+                              "enum": [
+                                "single-file",
+                                "recorder-restart",
+                                "file-size-limit",
+                                "card-change",
+                                "clip-duration-limit",
+                                "unknown"
+                              ]
+                            },
+                            "evidence": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "ingestArtifactId",
+                                "ingestSha256",
+                                "probeHash",
+                                "probeSource",
+                                "observedAt"
+                              ],
+                              "properties": {
+                                "ingestArtifactId": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 128
+                                },
+                                "ingestSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "probeHash": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "probeSource": {
+                                  "enum": [
+                                    "container-index",
+                                    "packet-scan",
+                                    "decoder-walk",
+                                    "declared-metadata",
+                                    "operator-report"
+                                  ]
+                                },
+                                "observedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "lineage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "commandId",
+                    "operation",
+                    "actorKind",
+                    "actorId",
+                    "occurredAt"
+                  ],
+                  "properties": {
+                    "commandId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "operation": {
+                      "enum": [
+                        "create-session",
+                        "add-track",
+                        "add-track-part",
+                        "change-reference-track",
+                        "change-status"
+                      ]
+                    },
+                    "actorKind": {
+                      "enum": [
+                        "human",
+                        "api-client",
+                        "director"
+                      ]
+                    },
+                    "actorId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 1024
+                    }
+                  }
+                },
+                "staleDerivations": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "track-coverage",
+                      "session-clock-map",
+                      "sync-diagnostic",
+                      "edit-plan"
+                    ]
+                  }
+                },
+                "sessionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-session-version-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "versions"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "versions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "sessionHash",
+                  "operation",
+                  "actorKind",
+                  "actorId",
+                  "occurredAt"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "previousVersionHash": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "sessionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "operation": {
+                    "enum": [
+                      "create-session",
+                      "add-track",
+                      "add-track-part",
+                      "change-reference-track",
+                      "change-status"
+                    ]
+                  },
+                  "actorKind": {
+                    "enum": [
+                      "human",
+                      "api-client",
+                      "director"
+                    ]
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "occurredAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1024
+                  },
+                  "staleDerivations": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "track-coverage",
+                        "session-clock-map",
+                        "sync-diagnostic",
+                        "edit-plan"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-sync-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "sessionVersion",
+            "referenceTrackId",
+            "tracks"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "sessionVersion": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "referenceEpoch": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "referenceTrackId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "tracks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "trackId",
+                  "outcome"
+                ],
+                "properties": {
+                  "trackId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "outcome": {
+                    "enum": [
+                      "auto-apply",
+                      "review",
+                      "insufficient-evidence"
+                    ]
+                  },
+                  "manualRequired": {
+                    "type": "boolean"
+                  },
+                  "selectedMethod": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "shared-timecode",
+                      "trusted-metadata",
+                      "apollo-marker",
+                      "audio-fingerprint",
+                      "visual-event",
+                      "transcript-lip",
+                      "manual-anchor",
+                      null
+                    ]
+                  },
+                  "outcomeReasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "map": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "required": [
+                      "sourceBounds",
+                      "pieces"
+                    ],
+                    "properties": {
+                      "sourceBounds": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "start",
+                          "end"
+                        ],
+                        "properties": {
+                          "start": {
+                            "type": "string",
+                            "pattern": "^-?[0-9]{1,19}$"
+                          },
+                          "end": {
+                            "type": "string",
+                            "pattern": "^-?[0-9]{1,19}$"
+                          }
+                        }
+                      },
+                      "uncovered": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "start",
+                            "end"
+                          ],
+                          "properties": {
+                            "start": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            },
+                            "end": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            }
+                          }
+                        }
+                      },
+                      "pieces": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "pieceId",
+                            "ordinal",
+                            "sourceCoverage",
+                            "sessionCoverage",
+                            "rate",
+                            "offsetTicks",
+                            "driftPpm",
+                            "confidence",
+                            "residualBoundTicks"
+                          ],
+                          "properties": {
+                            "pieceId": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 128
+                            },
+                            "ordinal": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sourceCoverage": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "start",
+                                "end"
+                              ],
+                              "properties": {
+                                "start": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                },
+                                "end": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                }
+                              }
+                            },
+                            "sessionCoverage": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "start",
+                                "end"
+                              ],
+                              "properties": {
+                                "start": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                },
+                                "end": {
+                                  "type": "string",
+                                  "pattern": "^-?[0-9]{1,19}$"
+                                }
+                              }
+                            },
+                            "rate": {
+                              "type": "string",
+                              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                            },
+                            "offsetTicks": {
+                              "type": "string",
+                              "pattern": "^-?[0-9]{1,19}$"
+                            },
+                            "driftPpm": {
+                              "type": "integer"
+                            },
+                            "confidence": {
+                              "enum": [
+                                "high",
+                                "medium",
+                                "low"
+                              ]
+                            },
+                            "residualBoundTicks": {
+                              "type": "string",
+                              "pattern": "^[0-9]{1,19}$"
+                            },
+                            "openedBy": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "recorder-restart",
+                                "pts-regression",
+                                "seek",
+                                "rewind",
+                                "file-split",
+                                "coverage-gap",
+                                "residual-exceeded",
+                                "manual-anchor-conflict",
+                                null
+                              ]
+                            },
+                            "openedByDetail": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 512
+                            },
+                            "anchorIds": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128
+                              }
+                            },
+                            "evidenceRefs": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "maxLength": 512
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "coverage": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "required": [
+                      "bounds",
+                      "coveredTicks",
+                      "gapTicks",
+                      "autoEditable"
+                    ],
+                    "properties": {
+                      "bounds": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "start",
+                          "end"
+                        ],
+                        "properties": {
+                          "start": {
+                            "type": "string",
+                            "pattern": "^-?[0-9]{1,19}$"
+                          },
+                          "end": {
+                            "type": "string",
+                            "pattern": "^-?[0-9]{1,19}$"
+                          }
+                        }
+                      },
+                      "coveredTicks": {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,19}$"
+                      },
+                      "gapTicks": {
+                        "type": "string",
+                        "pattern": "^[0-9]{1,19}$"
+                      },
+                      "minConfidenceBps": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10000
+                      },
+                      "autoEditable": {
+                        "type": "boolean"
+                      },
+                      "unresolvedOverlaps": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/capture-sync-run-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "operationId",
+                "state",
+                "sessionVersion"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "operationId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "state": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "succeeded",
+                    "failed"
+                  ]
+                },
+                "sessionVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/catalog-evidence-segment-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -25380,6 +27267,67 @@
         "expiresAt": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "apollo://schemas/change-capture-reference-track-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "referenceTrackId",
+        "lineage"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "referenceTrackId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commandId",
+            "actorKind",
+            "actorId"
+          ],
+          "properties": {
+            "commandId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actorKind": {
+              "enum": [
+                "human",
+                "api-client",
+                "director"
+              ]
+            },
+            "actorId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1024
+            }
+          }
         }
       }
     },
@@ -34358,6 +36306,281 @@
         }
       }
     },
+    "apollo://schemas/create-capture-session-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clock",
+        "referenceTrack",
+        "lineage"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "timebase",
+            "rounding"
+          ],
+          "properties": {
+            "timebase": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+            },
+            "rounding": {
+              "enum": [
+                "nearest-half-even",
+                "floor",
+                "ceil"
+              ]
+            }
+          }
+        },
+        "referenceTrack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trackId",
+            "role",
+            "device",
+            "timebase",
+            "streamIndex",
+            "syncAudioPolicy",
+            "includeInFinalMix",
+            "firstPart"
+          ],
+          "properties": {
+            "trackId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "role": {
+              "enum": [
+                "camera-main",
+                "camera-alt",
+                "screen",
+                "phone",
+                "reaction",
+                "reference-video",
+                "microphone",
+                "master-audio",
+                "scratch-audio"
+              ]
+            },
+            "device": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deviceId",
+                "recorderId"
+              ],
+              "properties": {
+                "deviceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "recorderId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "make": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                },
+                "serial": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 128
+                }
+              }
+            },
+            "timebase": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+            },
+            "streamIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1024
+            },
+            "syncAudioPolicy": {
+              "enum": [
+                "available",
+                "none",
+                "sync-only",
+                "final-candidate"
+              ]
+            },
+            "includeInFinalMix": {
+              "type": "boolean"
+            },
+            "firstPart": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "partId",
+                "ordinal",
+                "sourceAssetId",
+                "timebase",
+                "coverage",
+                "streamIndex",
+                "splitReason",
+                "evidence"
+              ],
+              "properties": {
+                "partId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "ordinal": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "sourceAssetId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "timebase": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                },
+                "coverage": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "pattern": "^-?[0-9]{1,19}$"
+                    },
+                    "end": {
+                      "type": "string",
+                      "pattern": "^-?[0-9]{1,19}$"
+                    }
+                  }
+                },
+                "streamIndex": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1024
+                },
+                "splitReason": {
+                  "enum": [
+                    "single-file",
+                    "recorder-restart",
+                    "file-size-limit",
+                    "card-change",
+                    "clip-duration-limit",
+                    "unknown"
+                  ]
+                },
+                "evidence": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "ingestArtifactId",
+                    "ingestSha256",
+                    "probeHash",
+                    "probeSource",
+                    "observedAt"
+                  ],
+                  "properties": {
+                    "ingestArtifactId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "ingestSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "probeHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "probeSource": {
+                      "enum": [
+                        "container-index",
+                        "packet-scan",
+                        "decoder-walk",
+                        "declared-metadata",
+                        "operator-report"
+                      ]
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commandId",
+            "actorKind",
+            "actorId"
+          ],
+          "properties": {
+            "commandId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "actorKind": {
+              "enum": [
+                "human",
+                "api-client",
+                "director"
+              ]
+            },
+            "actorId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 1024
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/create-color-pipeline-compilation-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -35313,6 +37536,258 @@
             "criticRounds": {
               "type": "integer",
               "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/create-editorial-synthesis-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "synthesisId",
+        "objective",
+        "targetDurationMs",
+        "toleranceMs",
+        "sourceDurationMs",
+        "frameRate",
+        "storyPlanId",
+        "editPlanId",
+        "ranges",
+        "joins"
+      ],
+      "properties": {
+        "synthesisId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "targetDurationMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "toleranceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "sourceDurationMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "frameRate": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+        },
+        "storyPlanId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "editPlanId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "allowReorder": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 12,
+              "maxLength": 512
+            }
+          }
+        },
+        "ranges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "rangeId",
+              "startMs",
+              "endMs",
+              "lineage",
+              "rightsSnapshotId",
+              "rightsStatus",
+              "consentStatus"
+            ],
+            "properties": {
+              "rangeId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "startMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "endMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "lineage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sourceArtifactId",
+                  "sourceArtifactSha256",
+                  "sourceManifestId",
+                  "sourceManifestHash",
+                  "indexRunId",
+                  "momentId",
+                  "momentHash",
+                  "evaluationId",
+                  "evaluationHash"
+                ],
+                "properties": {
+                  "sourceArtifactId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceArtifactSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "sourceManifestId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceManifestHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "indexRunId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "momentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "momentHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "evaluationId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "evaluationHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "rightsSnapshotId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "rightsStatus": {
+                "enum": [
+                  "approved",
+                  "blocked"
+                ]
+              },
+              "consentStatus": {
+                "enum": [
+                  "approved",
+                  "not-required",
+                  "blocked"
+                ]
+              },
+              "claimIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              },
+              "qualifierIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              },
+              "proofContextIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        },
+        "joins": {
+          "type": "array",
+          "maxItems": 255,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "beforeRangeId",
+              "afterRangeId",
+              "kind",
+              "justification"
+            ],
+            "properties": {
+              "beforeRangeId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "afterRangeId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "kind": {
+                "enum": [
+                  "contiguous",
+                  "spliced"
+                ]
+              },
+              "justification": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "continuityRisks": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "argument",
+                    "audio",
+                    "eye-line",
+                    "position",
+                    "color"
+                  ]
+                }
+              }
             }
           }
         }
@@ -47229,6 +49704,585 @@
         }
       }
     },
+    "apollo://schemas/editorial-synthesis-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "syntheses"
+          ],
+          "properties": {
+            "syntheses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "synthesisId",
+                  "objective",
+                  "synthesizedDurationMs",
+                  "sourceDurationMs",
+                  "rangeCount",
+                  "spliceCount",
+                  "chronologyPreserved",
+                  "synthesisHash"
+                ],
+                "properties": {
+                  "synthesisId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "objective": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "synthesizedDurationMs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sourceDurationMs": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "droppedMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "compressionBps": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "rangeCount": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "spliceCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "chronologyPreserved": {
+                    "type": "boolean"
+                  },
+                  "reorderReason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 512
+                  },
+                  "durationFrames": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "editPlanSelectionHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "synthesisHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/editorial-synthesis-mutated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "synthesis",
+            "replayed"
+          ],
+          "properties": {
+            "synthesis": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "synthesisId",
+                "objective",
+                "synthesizedDurationMs",
+                "sourceDurationMs",
+                "rangeCount",
+                "spliceCount",
+                "chronologyPreserved",
+                "synthesisHash"
+              ],
+              "properties": {
+                "synthesisId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "objective": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "synthesizedDurationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "sourceDurationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "droppedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "compressionBps": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10000
+                },
+                "rangeCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "spliceCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "chronologyPreserved": {
+                  "type": "boolean"
+                },
+                "reorderReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 512
+                },
+                "durationFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "editPlanSelectionHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "synthesisHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/editorial-synthesis-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "synthesis"
+          ],
+          "properties": {
+            "synthesis": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "synthesisId",
+                "projectId",
+                "objective",
+                "targetDurationMs",
+                "toleranceMs",
+                "synthesizedDurationMs",
+                "sourceDurationMs",
+                "droppedMs",
+                "chronologyPreserved",
+                "storyPlanId",
+                "editPlanId",
+                "frameRate",
+                "ranges",
+                "joins",
+                "contextProof",
+                "synthesisHash",
+                "createdAt"
+              ],
+              "properties": {
+                "synthesisId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "objective": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "targetDurationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "toleranceMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "synthesizedDurationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "sourceDurationMs": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "droppedMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "chronologyPreserved": {
+                  "type": "boolean"
+                },
+                "reorderReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 512
+                },
+                "storyPlanId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "editPlanId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "frameRate": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+                },
+                "durationFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "ranges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "rangeId",
+                      "startMs",
+                      "endMs",
+                      "lineage",
+                      "rightsSnapshotId",
+                      "rightsStatus",
+                      "consentStatus"
+                    ],
+                    "properties": {
+                      "rangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "startMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endMs": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "lineage": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "sourceArtifactId",
+                          "sourceArtifactSha256",
+                          "sourceManifestId",
+                          "sourceManifestHash",
+                          "indexRunId",
+                          "momentId",
+                          "momentHash",
+                          "evaluationId",
+                          "evaluationHash"
+                        ],
+                        "properties": {
+                          "sourceArtifactId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceArtifactSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "sourceManifestId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "sourceManifestHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "indexRunId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "momentId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "momentHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "evaluationId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "evaluationHash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          }
+                        }
+                      },
+                      "rightsSnapshotId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "rightsStatus": {
+                        "enum": [
+                          "approved",
+                          "blocked"
+                        ]
+                      },
+                      "consentStatus": {
+                        "enum": [
+                          "approved",
+                          "not-required",
+                          "blocked"
+                        ]
+                      },
+                      "claimIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "qualifierIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      },
+                      "proofContextIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "joins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "beforeRangeId",
+                      "afterRangeId",
+                      "kind",
+                      "droppedMs",
+                      "timelineMs",
+                      "justification"
+                    ],
+                    "properties": {
+                      "beforeRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "afterRangeId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "kind": {
+                        "enum": [
+                          "contiguous",
+                          "spliced"
+                        ]
+                      },
+                      "justification": {
+                        "type": "string",
+                        "maxLength": 1024
+                      },
+                      "continuityRisks": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "argument",
+                            "audio",
+                            "eye-line",
+                            "position",
+                            "color"
+                          ]
+                        }
+                      },
+                      "droppedMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "timelineMs": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "contextProof": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "claimsIncluded",
+                    "qualifiersIncluded",
+                    "proofContextsIncluded",
+                    "claimsRequiringQualifiers",
+                    "claimsRequiringProof"
+                  ],
+                  "properties": {
+                    "claimsIncluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "qualifiersIncluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "proofContextsIncluded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "claimsRequiringQualifiers": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "claimsRequiringProof": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "lineageRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "synthesisHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/enqueue-artifact-render-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -48238,6 +51292,15 @@
                 "PUBLIC_OPERATION_NOT_FOUND",
                 "PUBLIC_OPERATION_RETRY_REJECTED",
                 "WORKSPACE_NOT_FOUND",
+                "CAPTURE_SESSION_NOT_FOUND",
+                "CAPTURE_SESSION_VERSION_STALE",
+                "CAPTURE_TRACK_NOT_FOUND",
+                "CAPTURE_SYNC_RUN_NOT_FOUND",
+                "EDITORIAL_SYNTHESIS_NOT_FOUND",
+                "CAPTURE_COVERAGE_NOT_AVAILABLE",
+                "CAPTURE_COVERAGE_UNVERIFIED",
+                "CAPTURE_COVERAGE_OVERLAP_UNRESOLVED",
+                "CAPTURE_SESSION_DERIVATION_STALE",
                 "PROJECT_NOT_FOUND",
                 "PRODUCTION_BATCH_NOT_FOUND",
                 "PRODUCTION_BATCH_ITEM_NOT_FOUND",
@@ -48625,6 +51688,15 @@
                 "PUBLIC_OPERATION_NOT_FOUND",
                 "PUBLIC_OPERATION_RETRY_REJECTED",
                 "WORKSPACE_NOT_FOUND",
+                "CAPTURE_SESSION_NOT_FOUND",
+                "CAPTURE_SESSION_VERSION_STALE",
+                "CAPTURE_TRACK_NOT_FOUND",
+                "CAPTURE_SYNC_RUN_NOT_FOUND",
+                "EDITORIAL_SYNTHESIS_NOT_FOUND",
+                "CAPTURE_COVERAGE_NOT_AVAILABLE",
+                "CAPTURE_COVERAGE_UNVERIFIED",
+                "CAPTURE_COVERAGE_OVERLAP_UNRESOLVED",
+                "CAPTURE_SESSION_DERIVATION_STALE",
                 "PROJECT_NOT_FOUND",
                 "PRODUCTION_BATCH_NOT_FOUND",
                 "PRODUCTION_BATCH_ITEM_NOT_FOUND",
@@ -153270,6 +156342,29 @@
           "type": "string",
           "minLength": 2,
           "maxLength": 64
+        }
+      }
+    },
+    "apollo://schemas/request-capture-sync-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "force": {
+          "type": "boolean",
+          "default": false
         }
       }
     },
