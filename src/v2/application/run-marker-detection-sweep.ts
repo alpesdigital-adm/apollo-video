@@ -71,7 +71,10 @@ function partForPosition(
 ): Readonly<CaptureTrackPart> | null {
   const ordered = [...track.parts].sort((left, right) => left.ordinal - right.ordinal)
   if (position === 'after-restart') {
-    return ordered.find((entry) => entry.splitReason === 'recorder-restart') ?? null
+    // The ordinal, not the split reason. Wave 18 re-stamps the first part as
+    // 'recorder-restart' once a second file arrives, so the reason says the
+    // track is split and never which file came after the break.
+    return ordered.find((entry) => entry.ordinal > 0) ?? null
   }
   return (position === 'end' ? ordered.at(-1) : ordered[0]) ?? null
 }

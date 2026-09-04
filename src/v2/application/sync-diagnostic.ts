@@ -213,11 +213,16 @@ function partForPosition(
 ): Readonly<CaptureTrackPart> {
   const ordered = [...track.parts].sort((left, right) => left.ordinal - right.ordinal)
   if (position === 'after-restart') {
-    const restart = ordered.find((entry) => entry.splitReason === 'recorder-restart')
+    // The file that FOLLOWS a restart, which is the ordinal and not the split
+    // reason. Wave 18 re-stamps the first part as 'recorder-restart' the moment
+    // a second file arrives — deliberately, because a first file that still
+    // called itself 'single-file' would be lying — so the reason says the track
+    // is split, never which file came after the break.
+    const restart = ordered.find((entry) => entry.ordinal > 0)
     if (!restart) {
       throw new DomainError(
         'CAPTURE_TRACK_PART_NOT_FOUND',
-        `Track ${track.trackId} has no restart file, so an after-restart marker cannot be in it`,
+        `Track ${track.trackId} is a single unbroken file, so an after-restart marker cannot be in it`,
       )
     }
     return restart

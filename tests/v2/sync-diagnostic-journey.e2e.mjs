@@ -855,3 +855,61 @@ test('E2E-FR-149 a caller note never displaces who moved the anchor', async () =
   })).diagnostic
   assert.match(v3.tracks[0].manualAnchors[0].evidenceRef, /operator:user-editor-2/)
 })
+
+test('E2E-FR-148 after a restart, a marker is looked for in the restart file and nowhere else', async () => {
+  // The screen recorder stopped and started: two files, the second beginning
+  // at 610 s of session time.
+  const session = teacherSession({ restart: true })
+  const screen = session.tracks.find((entry) => entry.trackId === 'track-screen')
+  assert.equal(screen.parts.length, 2)
+  // Wave 18 re-stamps BOTH parts once a track is split, because a first file
+  // still calling itself 'single-file' would be lying. So the reason says the
+  // track is split and cannot say which file came after the break — the
+  // ordinal is what does.
+  assert.deepEqual(screen.parts.map((entry) => entry.splitReason), ['recorder-restart', 'recorder-restart'])
+  assert.deepEqual(screen.parts.map((entry) => entry.ordinal), [0, 1])
+
+  const searched = []
+  const services = wire(session, {
+    plan: {
+      'track-camera-main:after-restart': { atMs: 900 },
+      'track-screen:after-restart': { atMs: 500 },
+    },
+  })
+  const sweepWithTrace = services.sweep({
+    resolveMediaPath: async ({ part }) => {
+      searched.push(part.partId)
+      return `/fixtures/${part.partId}.mp4`
+    },
+  })
+
+  await services.generateMarker({
+    actor: ACTOR, sessionId: session.sessionId, position: 'after-restart', idempotencyKey: 'key-restart',
+  })
+  const sweep = await sweepWithTrace({ actor: ACTOR, sessionId: session.sessionId })
+
+  // The screen track was searched in its restart file, not its first one.
+  // Searching the first would report absence for something that was recorded;
+  // searching both would let a start marker be credited to a restart.
+  assert.ok(
+    searched.includes('part-screen-2'),
+    `the restart file was never opened; searched ${searched.join(', ')}`,
+  )
+  assert.ok(
+    !searched.includes('part-screen-1'),
+    'the pre-restart file was searched for a marker that could not be in it',
+  )
+
+  // The camera never restarted, so an after-restart marker has nowhere to be
+  // in it. That is a fact about the session, recorded as such — not a failure,
+  // and not a guess at the first file.
+  const camera = sweep.outcomes.find((entry) => entry.trackId === 'track-camera-main')
+  assert.equal(camera.state, 'skipped-no-file')
+  assert.match(camera.detail, /no after-restart file/)
+  assert.equal(sweep.failed, 0, 'a track with nothing to search was counted as a failure')
+
+  // And the sweep is finished: every pair either produced a detection or had
+  // nowhere to look.
+  assert.equal(sweep.complete, true)
+  assert.equal(sweep.detected, 1)
+})

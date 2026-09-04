@@ -493,10 +493,18 @@ respostas. O id do marcador é derivado de workspace, cliente, credencial, tipo
 de autenticação e usuário delegado — duas credenciais do mesmo cliente são dois
 chamadores.
 
-**O arquivo procurado vem da posição do marcador.** Um marcador emitido após
-reinício está no arquivo de reinício e em nenhum outro. Procurar no primeiro
-reportaria ausência do que foi gravado; procurar em todos deixaria um marcador
-de início ser creditado a um reinício.
+**O arquivo procurado vem da posição do marcador — pelo ordinal, não pelo
+`splitReason`.** Um marcador emitido após reinício está no arquivo de reinício e
+em nenhum outro. Procurar no primeiro reportaria ausência do que foi gravado;
+procurar em todos deixaria um marcador de início ser creditado a um reinício.
+
+O sinal certo é o ordinal. A Wave 18 recarimba **a primeira** parte como
+`recorder-restart` no instante em que uma segunda chega — de propósito, porque
+uma primeira parte que continuasse dizendo `single-file` estaria mentindo. Ou
+seja: o `splitReason` diz que a faixa está partida, nunca qual arquivo veio
+depois da quebra. Ler o campo como se dissesse a segunda coisa fazia todo
+marcador de reinício ser procurado no arquivo anterior ao reinício, onde ele
+nunca poderia estar.
 
 **"Cada câmera" quer dizer cada uma.** A checagem
 `track-carries-sync-audio` aceitava uma faixa do papel com áudio utilizável e
