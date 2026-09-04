@@ -92,6 +92,8 @@ export const FUSION_REJECTIONS = Object.freeze([
   'channels-disagree-on-time',
   'ambiguous-audio-peak',
   'single-channel-not-permitted',
+  // A marker was filmed here and nothing said which one.
+  'identity-unverified',
   'foreign-session',
 ] as const)
 export type FusionRejection = (typeof FUSION_REJECTIONS)[number]
@@ -336,6 +338,16 @@ export function fuseMarkerDetections(input: {
   if (input.mode === 'both-channels') {
     if (!visualUsable) return reject('visual-rejected')
     if (!audioUsable) return reject('audio-rejected')
+    // Two channels corroborate the *instant*. Only one of them carries the
+    // marker's *identity*: every marker of a session alternates the same way
+    // and sweeps the same chirp, so without a decoded code "both channels
+    // agree" says a marker was filmed here, not which one. A session with a
+    // start marker and an after-restart marker would otherwise find either in
+    // either file, confidently and wrongly.
+    if (input.visual!.decodedPayload === null) {
+      reasons.push('the code was unreadable, so nothing established which marker this is')
+      return reject('identity-unverified')
+    }
     const disagreement = Math.abs(input.visual!.atMs - input.audio!.atMs)
     if (disagreement > MAX_CHANNEL_DISAGREEMENT_MS) {
       reasons.push(`channels disagree by ${disagreement.toFixed(0)} ms, past what acoustic delay explains`)

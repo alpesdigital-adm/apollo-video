@@ -54,6 +54,17 @@ export type MarkerKind = (typeof MARKER_KINDS)[number]
  * flash across the room, or a cut in the screen recording. A specific
  * alternation is something a room does not produce by accident.
  */
+/**
+ * The visual half of a marker.
+ *
+ * A stated limit: the code is read by cropping a `codeSizePx` square from the
+ * centre of the frame at exactly that pixel size, so the marker has to reach
+ * the recorder at its native scale — played full-frame on a screen, or
+ * composited. Filmed smaller or larger, the flash is still unmistakable but
+ * the code is not readable, and the detector reports that rather than guessing.
+ * A recording in that state can still be timed; it cannot prove *which* marker
+ * it saw, and the fusion refuses to confirm on that basis.
+ */
 export interface MarkerVisualSpec {
   readonly patternFrames: readonly ('black' | 'white')[]
   readonly frameRateNum: number

@@ -196362,6 +196362,7 @@
                         "channels-disagree-on-time",
                         "ambiguous-audio-peak",
                         "single-channel-not-permitted",
+                        "identity-unverified",
                         "foreign-session"
                       ]
                     },
@@ -196538,6 +196539,7 @@
                           "channels-disagree-on-time",
                           "ambiguous-audio-peak",
                           "single-channel-not-permitted",
+                          "identity-unverified",
                           "foreign-session"
                         ]
                       },

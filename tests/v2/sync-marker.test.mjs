@@ -153,6 +153,22 @@ test('T-FR-148 a readable pattern with an unreadable code is a time, not an iden
   assert.equal(alone.outcome, 'rejected')
   assert.equal(alone.rejection, 'single-channel-not-permitted')
   assert.equal(alone.atMs, null)
+
+  // Nor does a corroborating chirp rescue it. Every marker of a session
+  // alternates the same way and sweeps the same chirp, so a second channel
+  // agreeing about *when* says nothing about *which* — the exact hole that let
+  // a start marker be found in a file that only ever held the restart one.
+  const withAudio = fuseMarkerDetections({
+    marker: m,
+    trackId: 'track-camera',
+    mode: 'both-channels',
+    visual: visual(m, { decodedPayload: null }),
+    audio: audio(),
+  })
+  assert.equal(withAudio.outcome, 'rejected')
+  assert.equal(withAudio.rejection, 'identity-unverified')
+  assert.equal(withAudio.atMs, null)
+  assert.ok(withAudio.reasons.some((reason) => reason.includes('unreadable')))
 })
 
 test('T-FR-148 both channels agreeing confirms, and the instant is the flash', () => {

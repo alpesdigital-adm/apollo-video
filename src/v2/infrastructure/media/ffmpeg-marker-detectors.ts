@@ -53,6 +53,14 @@ function resolveFfmpeg(options: DetectorOptions): string {
  * decoder run everywhere would occasionally hallucinate a payload out of
  * texture, and the pattern score is a far cheaper way to know where to look.
  */
+/**
+ * The most a flash alone is worth.
+ *
+ * Below the fusion's confirmation floor on purpose: an unreadable code leaves
+ * the marker's identity unproven, and no amount of pattern clarity fixes that.
+ */
+const UNIDENTIFIED_VISUAL_CONFIDENCE = 0.6
+
 export async function detectVisualMarker(input: {
   marker: Readonly<SyncMarker>
   mediaPath: string
@@ -110,9 +118,14 @@ export async function detectVisualMarker(input: {
       errorMs: Math.ceil(frameMs / 2),
       decodedPayload: decoded,
       patternScore: best.score,
-      // Confidence follows the pattern score rather than being asserted: it is
-      // the only thing this detector actually measured about its own certainty.
-      confidence: Math.min(0.99, best.score),
+      // Confidence follows what was actually read, not just the flash. A
+      // perfect alternation with an unreadable code proves that *a* marker was
+      // filmed here, never *which* one — and every marker of a session
+      // alternates the same way. Reporting 0.99 for that would let a caller
+      // treat "something flashed" as "the marker I asked about".
+      confidence: decoded === null
+        ? Math.min(UNIDENTIFIED_VISUAL_CONFIDENCE, best.score)
+        : Math.min(0.99, best.score),
       evidenceRef: `visual-scan:${input.mediaPath}#${best.startIndex}`,
     })
   } finally {
