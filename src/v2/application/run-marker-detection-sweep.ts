@@ -86,7 +86,7 @@ export function runMarkerDetectionSweep(dependencies: {
   resolveMediaPath: (input: {
     workspaceId: string
     part: Readonly<CaptureTrackPart>
-  }) => Promise<string>
+  }) => Promise<Readonly<{ path: string; release: () => Promise<void> }>>
   clock: () => Date
   /** Stop after this many decodes so one pass has a bounded cost. */
   maxPairs?: number
@@ -126,7 +126,6 @@ export function runMarkerDetectionSweep(dependencies: {
     let skipped = 0
     let failed = 0
     let confirmed = existing.filter((entry) => entry.outcome === 'confirmed').length
-    let considered = 0
     let complete = true
 
     const record = (outcome: MarkerDetectionOutcome) => {
@@ -137,7 +136,6 @@ export function runMarkerDetectionSweep(dependencies: {
     for (const entry of markers) {
       const marker: Readonly<SyncMarker> = entry.marker
       for (const track of session.tracks) {
-        considered += 1
         const key = `${marker.markerId}:${track.trackId}`
         if (done.has(key)) {
           skipped += 1
@@ -179,15 +177,16 @@ export function runMarkerDetectionSweep(dependencies: {
           break
         }
 
+        let media
         try {
-          const mediaPath = await dependencies.resolveMediaPath({
+          media = await dependencies.resolveMediaPath({
             workspaceId: input.actor.workspaceId,
             part,
           })
           const detection = await dependencies.media.detect({
             marker,
             trackId: track.trackId,
-            mediaPath,
+            mediaPath: media.path,
             // A recorder that captured no usable audio can only ever produce
             // one channel; holding it to both refuses it for something that is
             // not its fault.
@@ -227,6 +226,10 @@ export function runMarkerDetectionSweep(dependencies: {
             atMs: null,
             detail: error instanceof Error ? error.message : String(error),
           })
+        } finally {
+          // On the S3 driver each pair materializes a whole recording. Left
+          // unreleased, one sweep of a six-track session leaks six of them.
+          if (media) await media.release()
         }
       }
       if (!complete && detected >= maxPairs) break
@@ -235,7 +238,10 @@ export function runMarkerDetectionSweep(dependencies: {
     return Object.freeze({
       sessionId: input.sessionId,
       sessionVersion: session.version,
-      pairsConsidered: considered,
+      // Every pair that was actually resolved records an outcome, and the one
+      // that trips the per-pass budget records none. Counting at the top of the
+      // loop instead made this one too high whenever a pass stopped early.
+      pairsConsidered: outcomes.length,
       detected,
       skipped,
       failed,

@@ -273,13 +273,14 @@ function wire(session, options = {}) {
     generateMarker: generateSyncMarkerService({ repository, sessions, media, clock }),
     sweep: (options = {}) => runMarkerDetectionSweep({
       repository, sessions, media,
-      resolveMediaPath: options.resolveMediaPath ?? (async () => '/fixtures/track.mp4'),
+      resolveMediaPath: options.resolveMediaPath
+        ?? (async () => ({ path: '/fixtures/track.mp4', release: async () => {} })),
       clock,
       ...options,
     }),
     detect: detectSyncMarkerService({
       repository, sessions, media,
-      resolveMediaPath: async () => '/fixtures/track.mp4',
+      resolveMediaPath: async () => ({ path: '/fixtures/track.mp4', release: async () => {} }),
       clock,
     }),
     generateDiagnostic: generateSyncDiagnosticService({ repository, sessions, protocols, clock }),
@@ -682,7 +683,7 @@ test('E2E-FR-148 one unreadable file does not end the sweep', async () => {
   const result = await services.sweep({
     resolveMediaPath: async ({ part }) => {
       if (part.sourceAssetId === 'asset-screen') throw new Error('the disk went away')
-      return '/fixtures/track.mp4'
+      return { path: '/fixtures/track.mp4', release: async () => {} }
     },
   })({ actor: ACTOR, sessionId: session.sessionId })
 
@@ -870,6 +871,7 @@ test('E2E-FR-148 after a restart, a marker is looked for in the restart file and
   assert.deepEqual(screen.parts.map((entry) => entry.ordinal), [0, 1])
 
   const searched = []
+  const released = []
   const services = wire(session, {
     plan: {
       'track-camera-main:after-restart': { atMs: 900 },
@@ -879,7 +881,7 @@ test('E2E-FR-148 after a restart, a marker is looked for in the restart file and
   const sweepWithTrace = services.sweep({
     resolveMediaPath: async ({ part }) => {
       searched.push(part.partId)
-      return `/fixtures/${part.partId}.mp4`
+      return { path: `/fixtures/${part.partId}.mp4`, release: async () => { released.push(part.partId) } }
     },
   })
 
@@ -912,4 +914,7 @@ test('E2E-FR-148 after a restart, a marker is looked for in the restart file and
   // nowhere to look.
   assert.equal(sweep.complete, true)
   assert.equal(sweep.detected, 1)
+  // Every file opened was given back. On the S3 driver each one is a full copy
+  // of the recording, so a sweep that forgets fills the disk.
+  assert.deepEqual(released, searched)
 })

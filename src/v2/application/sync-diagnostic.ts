@@ -251,7 +251,7 @@ export function detectSyncMarkerService(dependencies: {
   resolveMediaPath: (input: {
     workspaceId: string
     part: Readonly<CaptureTrackPart>
-  }) => Promise<string>
+  }) => Promise<Readonly<{ path: string; release: () => Promise<void> }>>
   clock: () => Date
 }) {
   return async (input: {
@@ -293,24 +293,30 @@ export function detectSyncMarkerService(dependencies: {
     // report "not found" for a marker that is plainly there, and searching all
     // of them would let a marker emitted at the start be credited to a restart.
     const part = partForPosition(track, stored.marker.position)
-    const mediaPath = await dependencies.resolveMediaPath({
+    const media = await dependencies.resolveMediaPath({
       workspaceId: input.actor.workspaceId,
       part,
     })
-    const detection = await dependencies.media.detect({
-      marker: stored.marker,
-      trackId: input.trackId,
-      mediaPath,
-      // A track whose recorder captured no usable audio can only ever produce
-      // one channel; demanding both would refuse it for a reason that is not
-      // its fault.
-      mode: input.mode ?? (track.syncAudioPolicy === 'none' ? 'either-channel' : 'both-channels'),
-    })
-    return dependencies.repository.persistDetection({
-      workspaceId: input.actor.workspaceId,
-      detection,
-      detectedAt: dependencies.clock().toISOString(),
-    })
+    try {
+      const detection = await dependencies.media.detect({
+        marker: stored.marker,
+        trackId: input.trackId,
+        mediaPath: media.path,
+        // A track whose recorder captured no usable audio can only ever produce
+        // one channel; demanding both would refuse it for a reason that is not
+        // its fault.
+        mode: input.mode ?? (track.syncAudioPolicy === 'none' ? 'either-channel' : 'both-channels'),
+      })
+      return await dependencies.repository.persistDetection({
+        workspaceId: input.actor.workspaceId,
+        detection,
+        detectedAt: dependencies.clock().toISOString(),
+      })
+    } finally {
+      // On the S3 driver this is a full copy of the recording. Released
+      // whether the detection succeeded, failed or threw.
+      await media.release()
+    }
   }
 }
 

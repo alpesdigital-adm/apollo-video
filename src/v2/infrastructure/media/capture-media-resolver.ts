@@ -47,10 +47,20 @@ export class CaptureMediaResolver {
     this.materializer = materializer
   }
 
+  /**
+   * A path a detector can open, and the way to give it back.
+   *
+   * `release` is not optional politeness. The S3 driver materializes by
+   * downloading the whole recording into a per-operation directory; a caller
+   * that forgets leaves a complete copy of every file it detected against, and
+   * a sweep over a six-track session leaks six recordings a pass. The local
+   * driver points at the artifact root and copies nothing, which is precisely
+   * why forgetting is invisible in development.
+   */
   async resolve(input: {
     workspaceId: string
     part: Readonly<CaptureTrackPart>
-  }): Promise<string> {
+  }): Promise<Readonly<{ path: string; release: () => Promise<void> }>> {
     const artifact = await this.client.v2MediaArtifact.findFirst({
       where: { id: input.part.evidence.ingestArtifactId, workspaceId: input.workspaceId },
       select: { artifactKey: true, sha256: true, byteSize: true },
@@ -74,12 +84,21 @@ export class CaptureMediaResolver {
         `Artifact ${input.part.evidence.ingestArtifactId} has no usable byte size`,
       )
     }
+    const operationId = `marker-detect-${randomUUID()}`
     const materialized = await this.materializer.materialize({
-      operationId: `marker-detect-${randomUUID()}`,
+      operationId,
       artifactKey: artifact.artifactKey,
       sha256: artifact.sha256,
       byteSize,
     })
-    return materialized.path
+    return Object.freeze({
+      path: materialized.path,
+      // Swallowed on purpose: failing to tidy up must not turn a completed
+      // detection into a failed one. The disk filling is a real problem and a
+      // lost verdict is a worse one.
+      release: async () => {
+        await this.materializer.cleanup(operationId).catch(() => undefined)
+      },
+    })
   }
 }

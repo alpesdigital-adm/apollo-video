@@ -514,6 +514,14 @@ por impressão digital, independentemente do que a câmera ao lado fez. A leitur
 permissiva reportava `audio-fingerprint` intacta numa sessão que já a tinha
 perdido em um gravador — o teto mentindo na direção mais cara.
 
+**Mídia materializada é devolvida no `finally`.** O resolvedor chamava
+`materialize` e nunca `cleanup`. No driver S3 isso baixa a gravação inteira para
+um diretório por operação, então cada detecção deixava uma cópia completa em
+disco — uma varredura de seis faixas vaza seis gravações por passada. O driver
+local aponta para a raiz de artefatos e não copia nada, que é exatamente por que
+o esquecimento era invisível em desenvolvimento. `resolve` agora devolve
+`{ path, release }` e todo chamador libera no `finally`.
+
 ### 28.3 O que continua aberto
 
 - O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for

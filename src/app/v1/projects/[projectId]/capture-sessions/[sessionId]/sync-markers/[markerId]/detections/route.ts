@@ -70,7 +70,8 @@ export async function POST(
       sessions: createCaptureSessionRepository(),
       media: createMarkerMediaPort(),
       // The path comes from the track's own ingested file, verified against
-      // the hash the session recorded. Nothing in the request names a file.
+      // the hash the session recorded, and is released once the detector is
+      // done with it. Nothing in the request names a file.
       resolveMediaPath: (input) => resolver.resolve(input),
       clock: () => new Date(),
     })({
