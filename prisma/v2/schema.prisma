@@ -99,6 +99,8 @@ model V2Workspace {
   assetSelections                        V2AssetSelection[]
   qualityIterations                      V2QualityIteration[]
   mvpCoreGates                           V2MvpCoreGate[]
+  syntheticPhaseGates                    V2SyntheticPhaseGate[]
+  syntheticPhaseGateEvidence             V2SyntheticPhaseGateEvidence[]
   speechCatalogRuns                      V2SpeechSegmentCatalogRun[]
   speechSegments                         V2SpeechSegment[]
   evidenceSegments                       V2EvidenceSegment[]
@@ -262,6 +264,7 @@ model V2ApiClient {
   proxyReviewDecisions                  V2ProxyReviewDecision[]
   qualityIterations                     V2QualityIteration[]
   mvpCoreGates                          V2MvpCoreGate[]
+  syntheticPhaseGates                   V2SyntheticPhaseGate[]
   speechCatalogRuns                     V2SpeechSegmentCatalogRun[]
   editorialBeatSets                     V2EditorialBeatSet[]
   editorialBeatAdjustments              V2EditorialBeatAdjustment[]
@@ -627,6 +630,7 @@ model V2Project {
   qualityIterations                      V2QualityIteration[]
   mvpCoreGatesAsPrimary                  V2MvpCoreGate[]                           @relation("MvpCoreGatePrimaryProject")
   mvpCoreGatesAsCompanion                V2MvpCoreGate[]                           @relation("MvpCoreGateCompanionProject")
+  syntheticPhaseGates                    V2SyntheticPhaseGate[]
   speechCatalogRuns                      V2SpeechSegmentCatalogRun[]
   speechSegments                         V2SpeechSegment[]
   evidenceSegments                       V2EvidenceSegment[]
@@ -898,6 +902,7 @@ model V2ProjectVersion {
   perceptionTimelines              V2PerceptionTimeline[]
   mvpCoreGatesAsPrimary            V2MvpCoreGate[]                     @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion          V2MvpCoreGate[]                     @relation("MvpCoreGateCompanionVersion")
+  syntheticPhaseGates              V2SyntheticPhaseGate[]
   lutSelectionsAsBase              V2ProjectLutSelection[]             @relation("ProjectLutSelectionBase")
   lutSelectionAsResult             V2ProjectLutSelection?              @relation("ProjectLutSelectionResult")
   colorPlansAsBase                 V2ProjectColorPlan[]                @relation("ProjectColorPlanBase")
@@ -2637,6 +2642,69 @@ model V2MvpCoreGate {
   @@index([workspaceId, companionVersionId])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
   @@map("mvp_core_gates")
+}
+
+model V2SyntheticPhaseGate {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  projectVersionHash      String   @db.Char(64)
+  schemaVersion           String   @db.VarChar(64)
+  approved                Boolean
+  covered                 Int
+  passed                  Int
+  total                   Int
+  reportJson              String   @db.Text
+  reportFingerprint       String   @db.Char(64)
+  recordHash              String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  createdByType           String   @db.VarChar(32)
+  createdById             String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace      V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  projectVersion V2ProjectVersion               @relation(fields: [projectVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy      V2ApiClient                    @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  evidence       V2SyntheticPhaseGateEvidence[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, createdById, actorContextHash, idempotencyKey], map: "synthetic_phase_gates_workspace_actor_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "synthetic_phase_gates_workspace_project_created_idx")
+  @@index([workspaceId, projectVersionId], map: "synthetic_phase_gates_workspace_version_idx")
+  @@index([workspaceId, approved, createdAt(sort: Desc)], map: "synthetic_phase_gates_workspace_approved_idx")
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "synthetic_phase_gates_workspace_actor_created_idx")
+  @@map("synthetic_phase_gates")
+}
+
+model V2SyntheticPhaseGateEvidence {
+  gateId       String  @db.VarChar(128)
+  workspaceId  String  @db.VarChar(128)
+  criterion    String  @db.VarChar(32)
+  checkCode    String  @db.VarChar(96)
+  passed       Boolean
+  evidenceType String  @db.VarChar(48)
+  resourceId   String  @db.VarChar(192)
+  resourceHash String  @db.Char(64)
+  ordinal      Int
+
+  gate      V2SyntheticPhaseGate @relation(fields: [gateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@id([gateId, criterion, checkCode, ordinal])
+  @@unique([gateId, criterion, checkCode, evidenceType, resourceId, resourceHash], map: "synthetic_phase_gate_evidence_resource_key")
+  @@index([workspaceId, evidenceType, resourceId], map: "synthetic_phase_gate_evidence_workspace_resource_idx")
+  @@index([workspaceId, criterion, checkCode], map: "synthetic_phase_gate_evidence_workspace_check_idx")
+  @@map("synthetic_phase_gate_evidence")
 }
 
 model V2AssetRightsSnapshot {

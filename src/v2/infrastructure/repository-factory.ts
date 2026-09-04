@@ -104,6 +104,7 @@ import type { SyntheticCacheSubmissionClaimRepository } from '../application/por
 import type { SyntheticCriticReportRepository } from '../application/ports/synthetic-critic-report-repository.ts'
 import type { SyntheticMasterAssetRepository } from '../application/ports/synthetic-master-asset-repository.ts'
 import type { SyntheticSpeechSegmentRepository } from '../application/ports/synthetic-speech-segment-repository.ts'
+import type { SyntheticPhaseGateRepository } from '../application/ports/synthetic-phase-gate-repository.ts'
 import type { ProviderJobRepository } from '../application/ports/provider-job-repository.ts'
 import type { ProviderAdapterRegistry } from '../application/ports/provider-job-runtime.ts'
 import type { MaterializationAuthorizationRepository } from '../application/ports/materialization-authorization-repository.ts'
@@ -293,6 +294,7 @@ import { PrismaSyntheticCriticReportRepository } from './prisma/synthetic-critic
 import { PrismaSyntheticCacheSubmissionClaimRepository } from './prisma/synthetic-cache-submission-claim-repository.ts'
 import { PrismaSyntheticMasterAssetRepository } from './prisma/synthetic-master-asset-repository.ts'
 import { PrismaSyntheticSpeechSegmentRepository } from './prisma/synthetic-speech-segment-repository.ts'
+import { PrismaSyntheticPhaseGateRepository } from './prisma/synthetic-phase-gate-repository.ts'
 import {
   PrismaPromotableProviderJobReader,
   PrismaStoredArtifactIdentityReader,
@@ -702,6 +704,10 @@ export function createProofModeRepository(): ProofModeRepository {
 
 export function createSyntheticProductionRepository(): SyntheticProductionRepository {
   return new PrismaSyntheticProductionRepository(resolveV2Client())
+}
+
+export function createSyntheticPhaseGateRepository(): SyntheticPhaseGateRepository {
+  return new PrismaSyntheticPhaseGateRepository(resolveV2Client())
 }
 
 export function createSyntheticAudioMasterRepository(): SyntheticAudioMasterRepository {
