@@ -132,7 +132,7 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.3 | ImageAsset | Media | table | V2MediaArtifact | type=image; id |
 | 10.3 | DocumentAsset | Media | planned | gap: first-class document contract | workspace artifact identity |
 | 10.3 | MediaDerivative | Media | table | V2MediaArtifact,V2MediaArtifactLineage | derived artifact+lineage |
-| 10.3 | MediaSegment | Media | value-object | src/v2/domain/canonical-types.ts#MediaSegment | sourceId+frame range |
+| 10.3 | MediaSegment | Media | value-object | src/v2/domain/media-segment.ts#MediaSegment | sourceId+frame range |
 | 10.3 | SpeechSegment | Media | table | V2SpeechSegment | catalog run+segment id |
 | 10.3 | EvidenceSegment | Media | table | V2EvidenceSegment | project+source+range |
 | 10.3 | ValidatedSegment | Media | table | V2ValidatedSegment | immutable validation envelope |
@@ -140,13 +140,13 @@ Os IDs de output na operacao de ingest, proxy e export final sao reservas determ
 | 10.3 | ImageAnalysis | Media | table | V2ImageAnalysis | workspace+artifact+manifest; analysis hash |
 | 10.3 | MediaEmbedding | Media | table | V2SemanticSearchDocument | workspace+document id |
 | 10.3 | AssetRights | Media | table | V2AssetRightsSnapshot | artifact+rights revision |
-| 10.4 | CaptureSession | Capture | value-object | src/v2/domain/capture-synchronization.ts#CaptureSession | workspace session id |
-| 10.4 | SourceTrack | Capture | value-object | src/v2/domain/capture-synchronization.ts#CaptureTrack | session+track id |
+| 10.4 | CaptureSession | Capture | value-object | src/v2/domain/capture-session.ts#CaptureSession | workspace session id |
+| 10.4 | SourceTrack | Capture | value-object | src/v2/domain/capture-session.ts#CaptureTrack | session+track id |
 | 10.4 | TrackClip | Capture | planned | gap: persisted track clip contract | session+track+clip id |
-| 10.4 | SyncAnchor | Capture | value-object | src/v2/domain/capture-synchronization.ts#SyncSignal | source/session time pair |
-| 10.4 | SyncMap | Capture | value-object | src/v2/domain/capture-synchronization.ts#ClockPiece | track+ordered clock pieces |
-| 10.4 | TrackCoverage | Capture | value-object | src/v2/domain/capture-synchronization.ts#CaptureTrack | track+covered ranges |
-| 10.4 | SyncDiagnostic | Capture | value-object | src/v2/domain/capture-direction.ts#SyncDiagnostic | session+diagnostic version |
+| 10.4 | SyncAnchor | Capture | value-object | src/v2/domain/sync-diagnostic.ts#DiagnosticAnchor | source/session time pair |
+| 10.4 | SyncMap | Capture | value-object | src/v2/domain/piecewise-clock-map.ts#PiecewiseClockMap | track+ordered clock pieces |
+| 10.4 | TrackCoverage | Capture | value-object | src/v2/domain/track-coverage.ts#TrackCoverage | track+covered ranges |
+| 10.4 | SyncDiagnostic | Capture | value-object | src/v2/domain/sync-diagnostic.ts#SyncDiagnostic | session+diagnostic version |
 | 10.5 | PresenterProfile | Synthetic | planned | gap: presenter profile aggregate | workspace+presenter id |
 | 10.5 | VoiceProfile | Synthetic | planned | gap: voice profile aggregate | presenter+voice id |
 | 10.5 | ConsentRecord | Synthetic | planned | gap: immutable consent record | subject+scope+version |
