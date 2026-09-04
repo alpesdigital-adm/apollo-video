@@ -458,7 +458,7 @@ Implementado localmente em 2026-09-04. Deploy e aceite pendentes.
 | §18 SyncDiagnostic | `src/v2/domain/sync-diagnostic.ts` | T-FR-149, 13 casos |
 | §17 Contrato de UX de sync manual | `src/v2/domain/sync-diagnostic-anchors.ts` + `/sync-diagnostic` | E2E de jornada |
 
-Persistência em sete tabelas; API `/v1` com treze capabilities e nove rotas;
+Persistência em sete tabelas; API `/v1` com catorze capabilities e dez rotas;
 duas páginas operáveis (`/capture-protocols` antes de gravar, `/sync-diagnostic`
 depois).
 
@@ -504,8 +504,13 @@ de início ser creditado a um reinício.
   fixo, o teto de robustez do marcador é o teto de legibilidade do código.
 - O código só é lido em escala nativa (recorte central de `codeSizePx`). Filmado
   maior ou menor, o flash aparece e o código some.
-- Não há fila durável para detecção: a rota executa a detecção na requisição.
-  Um lote grande de faixas ainda não tem retomada por trabalhador.
+- A varredura de detecção é retomável e observável, mas **não é fenced**. O
+  progresso é a própria tabela de detecções, então uma passada que morre
+  recomeça exatamente onde parou; dois trabalhadores na mesma sessão duplicam
+  decodificação e convergem em linhas idênticas, porque cada par é chaveado por
+  marcador e faixa. Isso custa CPU, não correção — diferente da run de
+  sincronização da Wave 18, onde liquidar um resultado obsoleto atribuiria um
+  mapa à versão errada e por isso exige token de fencing.
 - `spoken-code` existe como tipo e carrega um piso de erro de 120 ms; nenhum
   reconhecedor de fala foi escrito, e a spec é explícita em não prometer
   precisão de quadro para ele.

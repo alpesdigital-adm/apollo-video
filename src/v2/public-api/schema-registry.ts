@@ -25194,6 +25194,52 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
     }),
   ),
   defineSchema(
+    'marker-detection-sweep',
+    1,
+    'What one bounded detection pass did, pair by pair',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sweep'],
+      properties: {
+        sweep: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sessionId', 'sessionVersion', 'pairsConsidered', 'detected', 'skipped', 'failed', 'confirmed', 'outcomes', 'complete'],
+          properties: {
+            sessionId: idSchema,
+            sessionVersion: { type: 'integer', minimum: 1 },
+            pairsConsidered: { type: 'integer', minimum: 0 },
+            detected: { type: 'integer', minimum: 0 },
+            skipped: { type: 'integer', minimum: 0 },
+            failed: { type: 'integer', minimum: 0 },
+            confirmed: { type: 'integer', minimum: 0 },
+            outcomes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['markerId', 'trackId', 'position', 'state', 'outcome', 'rejection', 'atMs', 'detail'],
+                properties: {
+                  markerId: idSchema,
+                  trackId: idSchema,
+                  position: { type: 'string', enum: [...MARKER_POSITIONS] },
+                  state: { type: 'string', enum: ['detected', 'skipped-existing', 'skipped-no-file', 'failed'] },
+                  outcome: { oneOf: [{ type: 'string', enum: [...FUSION_OUTCOMES] }, { type: 'null' }] },
+                  rejection: { oneOf: [{ type: 'string', enum: [...FUSION_REJECTIONS] }, { type: 'null' }] },
+                  atMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+                  detail: { type: 'string', maxLength: 1000 },
+                },
+              },
+            },
+            // False means another pass would find more work.
+            complete: { type: 'boolean' },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
     'sync-diagnostic-read',
     1,
     'One version of a capture session sync diagnostic',

@@ -3232,6 +3232,30 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.capture-sessions.marker-detections.sweep": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "job",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/marker-detection-sweep/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/marker-detections"
+      },
+      "toolName": "apollo.projects.capture-sessions.marker-detections.sweep",
+      "supportsDryRun": false,
+      "costClass": "medium",
+      "confirmation": "none",
+      "successStatuses": [
+        202,
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.capture-sessions.protocol.attach": {
       "version": "1.0.0",
       "exposure": "public",
@@ -71082,6 +71106,181 @@
             },
             "replayed": {
               "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/marker-detection-sweep/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sweep"
+          ],
+          "properties": {
+            "sweep": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "sessionVersion",
+                "pairsConsidered",
+                "detected",
+                "skipped",
+                "failed",
+                "confirmed",
+                "outcomes",
+                "complete"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "pairsConsidered": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "detected": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "skipped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "confirmed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "outcomes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "markerId",
+                      "trackId",
+                      "position",
+                      "state",
+                      "outcome",
+                      "rejection",
+                      "atMs",
+                      "detail"
+                    ],
+                    "properties": {
+                      "markerId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "trackId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "position": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end",
+                          "after-restart"
+                        ]
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "detected",
+                          "skipped-existing",
+                          "skipped-no-file",
+                          "failed"
+                        ]
+                      },
+                      "outcome": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "confirmed",
+                              "single-channel-only",
+                              "rejected"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "no-usable-observation",
+                              "visual-rejected",
+                              "audio-rejected",
+                              "channels-disagree-on-time",
+                              "ambiguous-audio-peak",
+                              "single-channel-not-permitted",
+                              "identity-unverified",
+                              "foreign-session"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "atMs": {
+                        "oneOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "detail": {
+                        "type": "string",
+                        "maxLength": 1000
+                      }
+                    }
+                  }
+                },
+                "complete": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         },

@@ -10333,6 +10333,45 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     'apollo://schemas/generate-sync-diagnostic-request/v1': [
       { baseVersionId: 'capture-session-founder-interview:v4', baseHash: 'd'.repeat(64) },
     ],
+    'apollo://schemas/marker-detection-sweep/v1': [
+      {
+        data: {
+          sweep: {
+            sessionId: 'capture-session-founder-interview',
+            sessionVersion: 4,
+            pairsConsidered: 4,
+            detected: 2,
+            skipped: 1,
+            failed: 1,
+            confirmed: 2,
+            outcomes: [
+              {
+                markerId: 'sync-marker-example-1',
+                trackId: 'track-phone',
+                position: 'start',
+                state: 'detected',
+                outcome: 'confirmed',
+                rejection: null,
+                atMs: 800,
+                detail: 'both channels agree within 2 ms',
+              },
+              {
+                markerId: 'sync-marker-example-1',
+                trackId: 'track-lav',
+                position: 'start',
+                state: 'failed',
+                outcome: null,
+                rejection: null,
+                atMs: null,
+                detail: 'the recorder file could not be read',
+              },
+            ],
+            complete: false,
+          },
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
     'apollo://schemas/sync-diagnostic-read/v1': [
       {
         data: {

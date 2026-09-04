@@ -7,6 +7,7 @@ import type {
   TrackDiagnostic,
 } from '../domain/sync-diagnostic.ts'
 import type { AnchorEdit } from '../domain/sync-diagnostic-anchors.ts'
+import type { MarkerDetectionSweepResult } from '../application/run-marker-detection-sweep.ts'
 import type { MarkerDetection } from '../domain/sync-marker-detection.ts'
 import { FUSION_MODES, type FusionMode } from '../domain/sync-marker-detection.ts'
 import type { SyncMarker } from '../domain/sync-marker.ts'
@@ -275,5 +276,33 @@ export function presentSyncDiagnosticVersion(diagnostic: Readonly<SyncDiagnostic
     manualAnchorCount: diagnostic.tracks.reduce((total, track) => total + track.manualAnchors.length, 0),
     generatedAt: diagnostic.generatedAt,
     diagnosticHash: diagnostic.diagnosticHash,
+  })
+}
+
+export function presentMarkerDetectionSweep(result: Readonly<MarkerDetectionSweepResult>) {
+  return Object.freeze({
+    sessionId: result.sessionId,
+    sessionVersion: result.sessionVersion,
+    pairsConsidered: result.pairsConsidered,
+    detected: result.detected,
+    skipped: result.skipped,
+    failed: result.failed,
+    confirmed: result.confirmed,
+    // Per pair, not just totalled. A caller told only "3 of 8" cannot find
+    // which recording is the one refusing to yield a marker, which is the one
+    // question worth asking when the total is wrong.
+    outcomes: result.outcomes.map((outcome) => Object.freeze({
+      markerId: outcome.markerId,
+      trackId: outcome.trackId,
+      position: outcome.position,
+      state: outcome.state,
+      outcome: outcome.outcome,
+      rejection: outcome.rejection,
+      atMs: outcome.atMs,
+      detail: outcome.detail,
+    })),
+    // False means calling again would find more work. Treating a bounded pass
+    // as finished would build a diagnostic from half the evidence.
+    complete: result.complete,
   })
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { runMarkerDetectionSweep } from '../../src/v2/application/run-marker-detection-sweep.ts'
 import {
   detectSyncMarkerService,
   editSyncAnchorService,
@@ -270,6 +271,12 @@ function wire(session, options = {}) {
     protocols,
     sessions,
     generateMarker: generateSyncMarkerService({ repository, sessions, media, clock }),
+    sweep: (options = {}) => runMarkerDetectionSweep({
+      repository, sessions, media,
+      resolveMediaPath: options.resolveMediaPath ?? (async () => '/fixtures/track.mp4'),
+      clock,
+      ...options,
+    }),
     detect: detectSyncMarkerService({
       repository, sessions, media,
       resolveMediaPath: async () => '/fixtures/track.mp4',
@@ -578,4 +585,78 @@ test('E2E-FR-147/149 a derivation of a session that moved is refused, not silent
       return true
     })
   }
+})
+
+test('E2E-FR-148 a detection sweep resumes from what is already stored', async () => {
+  const session = teacherSession()
+  const services = wire(session, {
+    plan: {
+      'track-camera-main:start': { atMs: 1_000 },
+      'track-screen:start': { atMs: 400 },
+      'track-camera-main:end': { atMs: 590_000 },
+      'track-screen:end': { atMs: 589_400 },
+    },
+  })
+  for (const position of ['start', 'end']) {
+    await services.generateMarker({
+      actor: ACTOR, sessionId: session.sessionId, position, idempotencyKey: `key-${position}`,
+    })
+  }
+
+  // First pass, bounded to one decode. Two markers over two tracks is four
+  // pairs; a pass that stops early must say it did not finish.
+  const seen = []
+  const first = await services.sweep({ maxPairs: 1, onOutcome: (o) => seen.push(o) })({
+    actor: ACTOR, sessionId: session.sessionId,
+  })
+  assert.equal(first.detected, 1)
+  assert.equal(first.complete, false, 'a bounded pass claimed it had finished')
+  // Observability is per pair, not per sweep: a total alone cannot say which
+  // recording is the one refusing to yield a marker.
+  assert.equal(seen.length, first.outcomes.length)
+  assert.ok(seen.every((entry) => entry.markerId && entry.trackId))
+
+  // Second pass skips what the first stored rather than decoding it again.
+  const second = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
+  assert.equal(second.skipped >= 1, true, 'the sweep re-decoded work it had already done')
+  assert.equal(second.complete, true)
+
+  // And a third pass has nothing left to do, which is what makes it safe to
+  // run on a timer.
+  const third = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
+  assert.equal(third.detected, 0)
+  assert.equal(third.skipped, third.pairsConsidered)
+  assert.equal(third.complete, true)
+})
+
+test('E2E-FR-148 one unreadable file does not end the sweep', async () => {
+  const session = teacherSession()
+  const services = wire(session, {
+    plan: { 'track-camera-main:start': { atMs: 1_000 }, 'track-screen:start': { atMs: 400 } },
+  })
+  await services.generateMarker({
+    actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start',
+  })
+
+  const result = await services.sweep({
+    resolveMediaPath: async ({ part }) => {
+      if (part.sourceAssetId === 'asset-screen') throw new Error('the disk went away')
+      return '/fixtures/track.mp4'
+    },
+  })({ actor: ACTOR, sessionId: session.sessionId })
+
+  // The good track was measured; the bad one is recorded as failed and named.
+  assert.equal(result.detected, 1)
+  assert.equal(result.failed, 1)
+  assert.equal(result.complete, false, 'a sweep with a failed pair claimed it had finished')
+  const failure = result.outcomes.find((entry) => entry.state === 'failed')
+  assert.equal(failure.trackId, 'track-screen')
+  assert.match(failure.detail, /disk went away/)
+
+  // The failed pair is absent from storage, so the next pass tries it again —
+  // right for a disk that was briefly unavailable, harmless for one that is
+  // permanently gone.
+  const retry = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
+  assert.equal(retry.detected, 1)
+  assert.equal(retry.complete, true)
 })

@@ -4,9 +4,9 @@
     "uiActions": 128,
     "capabilities": 116,
     "endpoints": 116,
-    "registeredCapabilities": 324,
-    "operableCapabilities": 324,
-    "publicContractCapabilities": 324,
+    "registeredCapabilities": 325,
+    "operableCapabilities": 325,
+    "publicContractCapabilities": 325,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -1612,7 +1612,7 @@
       ]
     },
     {
-      "uiAction": "src/app/sync-diagnostic/page.tsx:140",
+      "uiAction": "src/app/sync-diagnostic/page.tsx:151",
       "capabilityId": "apollo.projects.capture-sessions.sync-diagnostic.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic",
@@ -1632,7 +1632,7 @@
       ]
     },
     {
-      "uiAction": "src/app/sync-diagnostic/page.tsx:155",
+      "uiAction": "src/app/sync-diagnostic/page.tsx:166",
       "capabilityId": "apollo.projects.capture-sessions.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}",
@@ -1652,7 +1652,7 @@
       ]
     },
     {
-      "uiAction": "src/app/sync-diagnostic/page.tsx:187",
+      "uiAction": "src/app/sync-diagnostic/page.tsx:205",
       "capabilityId": "apollo.projects.capture-sessions.sync-diagnostic.anchors.edit",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/sync-diagnostic/anchors",
@@ -3709,6 +3709,17 @@
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/sync-markers/{markerId}/detections",
       "inputSchemaRef": "apollo://schemas/detect-sync-marker-request/v1",
       "outputSchemaRef": "apollo://schemas/sync-marker-detected/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.marker-detections.sweep",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/marker-detections",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/marker-detection-sweep/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

@@ -291,6 +291,10 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Decodes an already ingested file whose identity it verifies against the session hash, writes one detection row and no media; the request cannot name the file, the outcome or the instant.',
     },
+    'apollo.projects.capture-sessions.marker-detections.sweep': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Decodes already ingested files whose identity it verifies, writes one detection row per pair and no media; repeating it skips what is stored and converges, so a retry costs CPU rather than correctness.',
+    },
     'apollo.projects.capture-sessions.sync-diagnostic.generate': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Assembles one immutable diagnostic version from stored detections and coverage, preserving manual anchors; it derives every number and accepts none from the caller.',

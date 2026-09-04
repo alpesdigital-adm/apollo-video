@@ -41,6 +41,10 @@ const coverage = Object.freeze({
     mode: 'natural-idempotent-create',
     evidence: 'Wave19 keys the detection on the marker and track, so re-running detection after better evidence arrives replaces the earlier verdict rather than leaving two, and the file searched is chosen from the marker position and verified against the hash the session recorded',
   },
+  'apollo.projects.capture-sessions.marker-detections.sweep': {
+    mode: 'natural-idempotent-create',
+    evidence: 'Wave19 skips any pair that already has a stored detection and replaces by marker and track otherwise, so repeating a pass is free and a partial pass reports complete:false rather than pretending it finished',
+  },
   'apollo.projects.capture-sessions.sync-diagnostic.generate': {
     mode: 'base-version-bound-action',
     evidence: 'Wave19 derives the diagnostic from stored detections, coverage and maps against one exact session version, carrying manual anchors forward, so regenerating never invents a number and never discards a correction a person made',
@@ -727,7 +731,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
     'idempotent-create': 68,
-    'natural-idempotent-create': 9,
+    'natural-idempotent-create': 10,
     'state-machine-action': 16,
     'single-flight-action': 4,
     'revision-bound-action': 16,

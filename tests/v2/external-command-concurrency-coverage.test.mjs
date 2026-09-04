@@ -40,6 +40,10 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'Wave19 stores one detection per marker and track, replacing an earlier attempt on the same pair, so two concurrent detections of one track leave exactly one verdict rather than two that a reader would have to choose between',
   },
+  'apollo.projects.capture-sessions.marker-detections.sweep': {
+    mode: 'durable-covered',
+    evidence: 'Wave19 keeps progress in the detections table rather than a cursor, so a pass that dies resumes exactly where it stopped; two workers on one session converge on identical rows because each pair is keyed on marker and track, which costs duplicate decoding and never a wrong verdict',
+  },
   'apollo.projects.capture-sessions.sync-diagnostic.generate': {
     mode: 'durable-covered',
     evidence: 'Wave19 appends the diagnostic under the same head compare-and-set as the capture chain, so two concurrent generations cannot both write version N+1 and the loser is told which version it lost to',
@@ -533,7 +537,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    153,
+    154,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
