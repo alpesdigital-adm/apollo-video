@@ -42,6 +42,7 @@ test(
     const { PrismaCaptureProtocolRepository } = await import(
       '../../src/v2/infrastructure/prisma/capture-protocol-repository.ts'
     )
+    const { addCaptureSessionTrack } = await import('../../src/v2/domain/capture-session.ts')
     const { PrismaCaptureSessionRepository } = await import(
       '../../src/v2/infrastructure/prisma/capture-session-repository.ts'
     )
@@ -114,7 +115,7 @@ test(
     })
 
     const timebase = createTimebase(rational(1, 90_000))
-    const session = createCaptureSession({
+    const base = createCaptureSession({
       workspaceId,
       projectId,
       sessionId,
@@ -164,7 +165,44 @@ test(
     })
 
     const sessions = new PrismaCaptureSessionRepository(client)
-    await sessions.appendVersion({ session, occurredAt: at(3) })
+    await sessions.appendVersion({ session: base, occurredAt: at(3) })
+    const session = addCaptureSessionTrack(base, {
+      track: {
+        trackId: 'track-phone',
+        role: 'phone',
+        device: { deviceId: 'device-phone', recorderId: 'recorder-phone', make: null, model: null, serial: null },
+        sourceAssetId: 'asset-phone',
+        timebase,
+        streamIndex: 0,
+        syncAudioPolicy: 'sync-only',
+        includeInFinalMix: false,
+        parts: [{
+          partId: 'part-phone-1',
+          ordinal: 0,
+          sourceAssetId: 'asset-phone',
+          timebase,
+          coverage: createTickInterval(BigInt(0), BigInt(90_000) * BigInt(600)),
+          streamIndex: 0,
+          splitReason: 'single-file',
+          evidence: {
+            ingestArtifactId: 'artifact-phone',
+            ingestSha256: 'c'.repeat(64),
+            probeHash: 'd'.repeat(64),
+            probeSource: 'packet-scan',
+            observedAt: at(1),
+          },
+        }],
+      },
+      lineage: {
+        commandId: 'command-2',
+        operation: 'add-track',
+        actorKind: 'human',
+        actorId: 'user-1',
+        occurredAt: at(3),
+        note: null,
+      },
+    })
+    await sessions.appendVersion({ session, expectedVersion: 1, occurredAt: at(4) })
 
     // ---- protocols -------------------------------------------------------
     const protocols = new PrismaCaptureProtocolRepository(client)
@@ -288,7 +326,7 @@ test(
     // ---- the diagnostic chain -------------------------------------------
     const gap = createTickInterval(BigInt(90_000) * BigInt(120), BigInt(90_000) * BigInt(130))
     const trackDiagnostic = {
-      trackId: 'track-camera-main',
+      trackId: 'track-phone',
       methods: ['marker-correlation'],
       confidence: 0.95,
       offsetMs: -1_240,
@@ -310,7 +348,7 @@ test(
         },
       ],
       manualAnchors: [],
-      pieceIds: ['track-camera-main-piece-0'],
+      pieceIds: ['track-phone-piece-0'],
       status: deriveTrackStatus({
         offsetMs: -1_240,
         residualMs: 4,
