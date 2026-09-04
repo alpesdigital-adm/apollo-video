@@ -105,11 +105,14 @@ test('dashboard exposes the V2 production-batch control room as a first-class de
   assert.doesNotMatch(architectureLintSource, /['"]src\/app\/batches['"]/)
 })
 
-test('F0.031 shell declares six canonical destinations and retains fail-closed unavailable rendering', () => {
-  for (const id of ['projects', 'batches', 'library', 'presenters', 'brand', 'settings']) {
+test('F0.031 shell declares seven canonical destinations and retains fail-closed unavailable rendering', () => {
+  // Wave 18 adds capture-sessions. It is an operable page with its own state
+  // machine rather than a capability listing, so it appears here and is
+  // deliberately absent from the capability hub.
+  for (const id of ['projects', 'batches', 'library', 'presenters', 'capture-sessions', 'brand', 'settings']) {
     assert.match(appShellRegistrySource, new RegExp(`id: '${id}'`))
   }
-  assert.equal((appShellRegistrySource.match(/available: true/g) ?? []).length, 6)
+  assert.equal((appShellRegistrySource.match(/available: true/g) ?? []).length, 7)
   assert.match(appShellSource, /if \(!destination\.available\)/)
   assert.match(appShellSource, /aria-disabled="true"/)
   assert.match(appShellSource, /Capability V2 ainda não integrada/)
