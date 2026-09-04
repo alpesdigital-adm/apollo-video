@@ -4,6 +4,30 @@ import test from 'node:test'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.projects.capture-sessions.create': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 writes the genesis link of the immutable chain and its head pointer in one transaction, with actor-bound idempotency converging a replayed create on the identical session hash',
+  },
+  'apollo.projects.capture-sessions.tracks.add': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 advances the head only where it still names the base version, so two operators adding tracks concurrently cannot both write version N+1; the loser is told which version it lost to',
+  },
+  'apollo.projects.capture-sessions.track-parts.add': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 appends one immutable link under the same single-statement head CAS, and a duplicate version number with a different hash is refused rather than silently discarding one command',
+  },
+  'apollo.projects.capture-sessions.reference-track.change': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 bumps the reference epoch inside the head CAS and records every derivation the change invalidated, so no stale map can be read as current',
+  },
+  'apollo.projects.capture-sessions.sync.request': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 claims the sync operation with a lease and fencing token bound to the exact session version, so a worker restarted between claim and settle cannot write a result for a session that has since moved',
+  },
+  'apollo.projects.editorial-syntheses.create': {
+    mode: 'durable-covered',
+    evidence: 'Wave18 writes the cut, its ranges and its joins in one transaction; a duplicate id with the same hash replays and a duplicate id with different content is refused, so reviewed splice justifications are never overwritten',
+  },
   'apollo.director-tools.execute': {
     mode: 'durable-covered',
     evidence: 'Wave7 preflights the complete tool batch before serializable budget reservation, then settles realized usage or cancellation against the reserved revision',
@@ -485,7 +509,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    141,
+    147,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

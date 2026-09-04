@@ -5780,6 +5780,269 @@ const syntheticCriticRejectedReportExample = {
   decision: 'rejected', recommendedAction: 'retry', reportHash: '5'.repeat(64),
 }
 
+// ---------------------------------------------------------------------------
+// Wave 18 examples — one twenty-minute founder interview.
+//
+// An A camera with timecode is the reference; a phone recorded the same room
+// on a cheaper oscillator and filled its card partway through. The numbers
+// below are internally consistent so that reading them teaches the shape of a
+// real session: 90 kHz session ticks, 20 minutes = 108,000,000 ticks, and the
+// phone's second file starting exactly ten seconds after its first ended.
+// ---------------------------------------------------------------------------
+
+const captureCameraPartExample = Object.freeze({
+  partId: 'part-camera-main-1',
+  ordinal: 0,
+  sourceAssetId: 'asset-camera-main-a001',
+  timebase: '1/90000',
+  coverage: { start: '0', end: '108000000' },
+  streamIndex: 0,
+  splitReason: 'single-file',
+  evidence: {
+    ingestArtifactId: 'artifact-camera-main-a001',
+    ingestSha256: '1'.repeat(64),
+    probeHash: '2'.repeat(64),
+    probeSource: 'packet-scan',
+    observedAt: '2029-04-01T09:00:05.000Z',
+  },
+})
+
+const captureReferenceTrackExample = Object.freeze({
+  trackId: 'track-camera-main',
+  role: 'camera-main',
+  device: {
+    deviceId: 'device-camera-a',
+    recorderId: 'recorder-camera-a-card-1',
+    make: 'ExampleCam',
+    model: 'C-1000',
+    serial: null,
+  },
+  timebase: '1/90000',
+  streamIndex: 0,
+  syncAudioPolicy: 'final-candidate',
+  includeInFinalMix: true,
+  firstPart: captureCameraPartExample,
+})
+
+const capturePhoneFirstPartExample = Object.freeze({
+  partId: 'part-phone-1',
+  ordinal: 0,
+  sourceAssetId: 'asset-phone-clip-1',
+  // The phone counts in 600 ticks per second, not the session's 90 kHz. The
+  // recorder's own timebase is preserved exactly as written.
+  timebase: '1/600',
+  coverage: { start: '0', end: '360000' },
+  streamIndex: 0,
+  splitReason: 'single-file',
+  evidence: {
+    ingestArtifactId: 'artifact-phone-clip-1',
+    ingestSha256: '3'.repeat(64),
+    probeHash: '4'.repeat(64),
+    probeSource: 'packet-scan',
+    observedAt: '2029-04-01T09:00:07.000Z',
+  },
+})
+
+const capturePhoneSecondPartExample = Object.freeze({
+  partId: 'part-phone-2',
+  ordinal: 1,
+  sourceAssetId: 'asset-phone-clip-2',
+  timebase: '1/600',
+  // Six thousand ticks — ten seconds at 600/s — of nothing between the two
+  // files. The session refuses to resolve anything inside that gap.
+  coverage: { start: '366000', end: '720000' },
+  streamIndex: 0,
+  splitReason: 'recorder-restart',
+  evidence: {
+    ingestArtifactId: 'artifact-phone-clip-2',
+    ingestSha256: '5'.repeat(64),
+    probeHash: '6'.repeat(64),
+    probeSource: 'packet-scan',
+    observedAt: '2029-04-01T09:20:11.000Z',
+  },
+})
+
+const capturePhoneTrackExample = Object.freeze({
+  trackId: 'track-phone',
+  role: 'phone',
+  device: {
+    deviceId: 'device-phone-1',
+    recorderId: 'recorder-phone-1-app',
+    make: 'ExamplePhone',
+    model: 'P-14',
+    serial: null,
+  },
+  timebase: '1/600',
+  streamIndex: 0,
+  syncAudioPolicy: 'sync-only',
+  includeInFinalMix: false,
+  firstPart: capturePhoneFirstPartExample,
+})
+
+const captureSessionExample = Object.freeze({
+  sessionId: 'capture-session-founder-interview',
+  projectId: 'project-founder-interview',
+  version: 3,
+  previousVersionHash: 'b'.repeat(64),
+  status: 'draft',
+  clock: { timebase: '1/90000', rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-camera-main',
+  referenceEpoch: 1,
+  tracks: [
+    {
+      trackId: 'track-camera-main',
+      role: 'camera-main',
+      device: captureReferenceTrackExample.device,
+      sourceAssetId: 'asset-camera-main-a001',
+      timebase: '1/90000',
+      streamIndex: 0,
+      syncAudioPolicy: 'final-candidate',
+      includeInFinalMix: true,
+      parts: [captureCameraPartExample],
+    },
+    {
+      trackId: 'track-phone',
+      role: 'phone',
+      device: capturePhoneTrackExample.device,
+      sourceAssetId: 'asset-phone-clip-1',
+      timebase: '1/600',
+      streamIndex: 0,
+      syncAudioPolicy: 'sync-only',
+      includeInFinalMix: false,
+      parts: [capturePhoneFirstPartExample, capturePhoneSecondPartExample],
+    },
+  ],
+  lineage: {
+    commandId: 'command-add-phone-part-2',
+    operation: 'add-track-part',
+    actorKind: 'human',
+    actorId: 'user-editor-1',
+    occurredAt: '2029-04-01T09:21:00.000Z',
+    note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+  },
+  staleDerivations: ['track-coverage', 'session-clock-map'],
+  sessionHash: 'c'.repeat(64),
+  createdAt: '2029-04-01T09:21:00.000Z',
+})
+
+// ---------------------------------------------------------------------------
+// F4.001 — two hours of master cut to two minutes across six windows.
+//
+// The claim, its qualifier and its proof context live in three different
+// windows on purpose: that is the arrangement a topical selector produces, and
+// the one where dropping a window quietly changes what the speaker said.
+// ---------------------------------------------------------------------------
+
+const synthesisLineageExample = Object.freeze({
+  sourceArtifactId: 'artifact-master-interview',
+  sourceArtifactSha256: '7'.repeat(64),
+  sourceManifestId: 'manifest-master-interview',
+  sourceManifestHash: '8'.repeat(64),
+  indexRunId: 'index-run-master-1',
+  momentId: 'moment-master-1',
+  momentHash: '9'.repeat(64),
+  evaluationId: 'evaluation-master-1',
+  evaluationHash: 'a'.repeat(64),
+})
+
+const synthesisRangeExamples = Object.freeze([
+  { rangeId: 'range-1', startMs: 120_000, endMs: 145_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-2', startMs: 900_000, endMs: 918_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-3', startMs: 1_800_000, endMs: 1_822_000, claimIds: ['claim-1'], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-4', startMs: 3_600_000, endMs: 3_615_000, claimIds: [], qualifierIds: ['qualifier-1'], proofContextIds: [] },
+  { rangeId: 'range-5', startMs: 5_400_000, endMs: 5_425_000, claimIds: [], qualifierIds: [], proofContextIds: ['proof-1'] },
+  { rangeId: 'range-6', startMs: 7_000_000, endMs: 7_015_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+].map((range) => Object.freeze({
+  ...range,
+  lineage: synthesisLineageExample,
+  rightsSnapshotId: 'rights-master-interview',
+  rightsStatus: 'approved',
+  consentStatus: 'approved',
+})))
+
+const synthesisJoinExamples = Object.freeze([
+  'the founder finishes naming the problem here and starts naming the cause next',
+  'the cause lands here and the first evidence for it begins next',
+  'the claim closes here and the words that qualify it open next',
+  'the qualifier closes here and the customer who proves it speaks next',
+  'the proof closes here and the ask begins next',
+].map((justification, index) => Object.freeze({
+  beforeRangeId: `range-${index + 1}`,
+  afterRangeId: `range-${index + 2}`,
+  kind: 'spliced',
+  justification,
+  continuityRisks: ['argument'],
+})))
+
+const editorialSynthesisRequestExample = Object.freeze({
+  synthesisId: 'synthesis-founder-two-minute',
+  objective: 'two-minute cut of the founder interview',
+  targetDurationMs: 120_000,
+  toleranceMs: 2_000,
+  sourceDurationMs: 7_200_000,
+  frameRate: '30000/1001',
+  storyPlanId: 'story-plan-founder-1',
+  editPlanId: 'edit-plan-founder-1',
+  ranges: synthesisRangeExamples,
+  joins: synthesisJoinExamples,
+})
+
+const editorialSynthesisSummaryExample = Object.freeze({
+  synthesisId: 'synthesis-founder-two-minute',
+  objective: 'two-minute cut of the founder interview',
+  synthesizedDurationMs: 120_000,
+  sourceDurationMs: 7_200_000,
+  droppedMs: 7_080_000,
+  // 120 s of 7200 s survived: one part in sixty.
+  compressionBps: 167,
+  rangeCount: 6,
+  spliceCount: 5,
+  chronologyPreserved: true,
+  reorderReason: null,
+  durationFrames: 3_596,
+  editPlanSelectionHash: 'b'.repeat(64),
+  synthesisHash: 'c'.repeat(64),
+})
+
+const editorialSynthesisExample = Object.freeze({
+  synthesisId: 'synthesis-founder-two-minute',
+  projectId: 'project-founder-interview',
+  objective: 'two-minute cut of the founder interview',
+  targetDurationMs: 120_000,
+  toleranceMs: 2_000,
+  synthesizedDurationMs: 120_000,
+  sourceDurationMs: 7_200_000,
+  droppedMs: 7_080_000,
+  chronologyPreserved: true,
+  reorderReason: null,
+  storyPlanId: 'story-plan-founder-1',
+  editPlanId: 'edit-plan-founder-1',
+  frameRate: '30000/1001',
+  durationFrames: 3_596,
+  ranges: synthesisRangeExamples,
+  joins: synthesisJoinExamples.map((join, index) => Object.freeze({
+    ...join,
+    droppedMs: [755_000, 882_000, 1_778_000, 1_785_000, 1_575_000][index],
+    timelineMs: [25_000, 43_000, 65_000, 80_000, 105_000][index],
+  })),
+  contextProof: {
+    claimsIncluded: ['claim-1'],
+    qualifiersIncluded: ['qualifier-1'],
+    proofContextsIncluded: ['proof-1'],
+    claimsRequiringQualifiers: 1,
+    claimsRequiringProof: 1,
+  },
+  lineageRefs: [
+    'evaluation:evaluation-master-1',
+    'index-run:index-run-master-1',
+    'manifest:manifest-master-interview',
+    'moment:moment-master-1',
+    'rights:rights-master-interview',
+  ],
+  synthesisHash: 'c'.repeat(64),
+  createdAt: '2029-04-02T14:30:00.000Z',
+})
+
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
     'apollo://schemas/create-transformation-brief-request/v1': [transformationBriefRequestExample],
@@ -9702,6 +9965,278 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           reuses: [validationEnvelopeRecordExample],
           nextCursor: validationEnvelopePlanExample.id,
         },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -------------------------------------------------------------------------
+    // Wave 18 — a two-camera interview where the phone drifted and restarted.
+    //
+    // The numbers are consistent with each other on purpose: 90 kHz session
+    // ticks, NTSC 30000/1001, and a phone whose second file begins ten seconds
+    // after the first ended. Reading these examples should teach the shape of
+    // a real session, not just satisfy the schema.
+    // -------------------------------------------------------------------------
+    'apollo://schemas/create-capture-session-request/v1': [
+      {
+        sessionId: 'capture-session-founder-interview',
+        clock: { timebase: '1/90000', rounding: 'nearest-half-even' },
+        referenceTrack: captureReferenceTrackExample,
+        lineage: {
+          commandId: 'command-open-session-1',
+          actorKind: 'human',
+          actorId: 'user-editor-1',
+          note: 'Two cameras, one phone, one lav recorder.',
+        },
+      },
+    ],
+    'apollo://schemas/add-capture-track-request/v1': [
+      {
+        baseVersionId: 'capture-session-founder-interview:v1',
+        baseHash: 'a'.repeat(64),
+        track: capturePhoneTrackExample,
+        lineage: {
+          commandId: 'command-add-phone-1',
+          actorKind: 'human',
+          actorId: 'user-editor-1',
+          note: null,
+        },
+      },
+    ],
+    'apollo://schemas/add-capture-track-part-request/v1': [
+      {
+        baseVersionId: 'capture-session-founder-interview:v2',
+        baseHash: 'b'.repeat(64),
+        trackId: 'track-phone',
+        part: capturePhoneSecondPartExample,
+        lineage: {
+          commandId: 'command-add-phone-part-2',
+          actorKind: 'human',
+          actorId: 'user-editor-1',
+          note: 'Card filled at 10:09:58; the recorder wrote a second file.',
+        },
+      },
+    ],
+    'apollo://schemas/change-capture-reference-track-request/v1': [
+      {
+        baseVersionId: 'capture-session-founder-interview:v3',
+        baseHash: 'c'.repeat(64),
+        referenceTrackId: 'track-camera-main',
+        lineage: {
+          commandId: 'command-change-reference-1',
+          actorKind: 'human',
+          actorId: 'user-editor-1',
+          note: 'The lav recorder was the reference by mistake; the A camera has timecode.',
+        },
+      },
+    ],
+    'apollo://schemas/request-capture-sync-request/v1': [
+      {
+        baseVersionId: 'capture-session-founder-interview:v4',
+        baseHash: 'd'.repeat(64),
+        force: false,
+      },
+    ],
+    'apollo://schemas/capture-session-mutated/v1': [
+      {
+        data: {
+          session: {
+            sessionId: 'capture-session-founder-interview',
+            version: 2,
+            previousVersionHash: 'a'.repeat(64),
+            status: 'draft',
+            sessionHash: 'b'.repeat(64),
+            referenceTrackId: 'track-camera-main',
+            referenceEpoch: 1,
+            trackCount: 2,
+            staleDerivations: [],
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-sync-run-mutated/v1': [
+      {
+        data: {
+          run: {
+            sessionId: 'capture-session-founder-interview',
+            operationId: 'operation-capture-sync-1',
+            state: 'queued',
+            sessionVersion: 4,
+          },
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-session-read/v1': [
+      {
+        data: { session: captureSessionExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-session-list/v1': [
+      {
+        data: {
+          sessions: [
+            {
+              sessionId: 'capture-session-founder-interview',
+              version: 4,
+              previousVersionHash: 'c'.repeat(64),
+              status: 'partial',
+              sessionHash: 'd'.repeat(64),
+              referenceTrackId: 'track-camera-main',
+              referenceEpoch: 2,
+              trackCount: 3,
+              staleDerivations: ['track-coverage', 'session-clock-map'],
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-session-version-list/v1': [
+      {
+        data: {
+          sessionId: 'capture-session-founder-interview',
+          versions: [
+            {
+              version: 2,
+              previousVersionHash: 'a'.repeat(64),
+              sessionHash: 'b'.repeat(64),
+              operation: 'add-track',
+              actorKind: 'human',
+              actorId: 'user-editor-1',
+              occurredAt: '2029-04-01T09:12:00.000Z',
+              note: null,
+              staleDerivations: [],
+            },
+            {
+              version: 1,
+              previousVersionHash: null,
+              sessionHash: 'a'.repeat(64),
+              operation: 'create-session',
+              actorKind: 'human',
+              actorId: 'user-editor-1',
+              note: 'Two cameras, one phone, one lav recorder.',
+              occurredAt: '2029-04-01T09:00:00.000Z',
+              staleDerivations: [],
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/capture-sync-read/v1': [
+      {
+        data: {
+          sessionId: 'capture-session-founder-interview',
+          sessionVersion: 4,
+          referenceEpoch: 1,
+          referenceTrackId: 'track-camera-main',
+          tracks: [
+            {
+              // The phone: +120 ppm and a ten-second restart, so the map has
+              // two pieces and refuses the ten seconds between them.
+              trackId: 'track-phone',
+              outcome: 'auto-apply',
+              manualRequired: false,
+              selectedMethod: 'audio-fingerprint',
+              outcomeReasons: [
+                'audio fingerprint peak is 8.4x the second peak across 12 anchors',
+              ],
+              map: {
+                sourceBounds: { start: '0', end: '108000000' },
+                uncovered: [{ start: '54000000', end: '54900000' }],
+                pieces: [
+                  {
+                    pieceId: 'piece-phone-1',
+                    ordinal: 0,
+                    sourceCoverage: { start: '0', end: '54000000' },
+                    sessionCoverage: { start: '4500', end: '54011980' },
+                    rate: '1000120/1000000',
+                    offsetTicks: '4500',
+                    driftPpm: 120,
+                    confidence: 'high',
+                    residualBoundTicks: '31',
+                    openedBy: null,
+                    openedByDetail: null,
+                    anchorIds: ['anchor-phone-1', 'anchor-phone-2'],
+                    evidenceRefs: ['probe-phone-fingerprint-1'],
+                  },
+                  {
+                    pieceId: 'piece-phone-2',
+                    ordinal: 1,
+                    sourceCoverage: { start: '54900000', end: '108000000' },
+                    sessionCoverage: { start: '55811980', end: '108918356' },
+                    rate: '1000120/1000000',
+                    offsetTicks: '911980',
+                    driftPpm: 120,
+                    confidence: 'high',
+                    residualBoundTicks: '44',
+                    openedBy: 'recorder-restart',
+                    openedByDetail: 'card full at 10:09:58; the recorder wrote a new file ten seconds later',
+                    anchorIds: ['anchor-phone-7', 'anchor-phone-8'],
+                    evidenceRefs: ['probe-phone-fingerprint-2'],
+                  },
+                ],
+              },
+              coverage: {
+                bounds: { start: '0', end: '108000000' },
+                coveredTicks: '107100000',
+                gapTicks: '900000',
+                minConfidenceBps: 9_100,
+                autoEditable: true,
+                unresolvedOverlaps: 0,
+              },
+            },
+            {
+              // The scratch recorder: no common acoustic event survived, so the
+              // cascade says so instead of emitting an offset of zero.
+              trackId: 'track-scratch-audio',
+              outcome: 'insufficient-evidence',
+              manualRequired: true,
+              selectedMethod: null,
+              outcomeReasons: [
+                'audio-fingerprint: no common acoustic event above the ambiguity floor',
+                'transcript-lip: no speech present in the reference range',
+              ],
+              map: null,
+              coverage: {
+                bounds: { start: '0', end: '108000000' },
+                coveredTicks: '108000000',
+                gapTicks: '0',
+                minConfidenceBps: 0,
+                autoEditable: false,
+                unresolvedOverlaps: 0,
+              },
+            },
+          ],
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/create-editorial-synthesis-request/v1': [
+      editorialSynthesisRequestExample,
+    ],
+    'apollo://schemas/editorial-synthesis-mutated/v1': [
+      {
+        data: {
+          synthesis: editorialSynthesisSummaryExample,
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/editorial-synthesis-read/v1': [
+      {
+        data: { synthesis: editorialSynthesisExample },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/editorial-synthesis-list/v1': [
+      {
+        data: { syntheses: [editorialSynthesisSummaryExample] },
         meta: { apiVersion: 'v1' },
       },
     ],

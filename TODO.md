@@ -1793,6 +1793,29 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Detectar canal silencioso, mix diferente e sample-rate mismatch. Evidência T-FR-146.
 - [ ] Testar câmera ruim + gravador bom + tela sem áudio útil. Evidência T-FR-146.
 
+> **Nota de execução — Wave 18 (F4.001–F4.008), 2026-09-03.**
+>
+> Implementado localmente na branch `claude/integration-wave18-f4001-f4008`,
+> com typecheck, lint, suíte unitária e três jornadas E2E verdes na máquina de
+> desenvolvimento. Nenhuma caixa acima é marcada: implementação, CI e E2E não
+> equivalem a implantado e aceito pelo proprietário.
+>
+> **Entregue:** kernel temporal (`session-time.ts`), CaptureSession versionada,
+> session clock, cascata de evidência, TrackCoverage, drift, piecewise maps,
+> síntese editorial multi-range, 13 tabelas PostgreSQL com CHECK/EXCLUDE,
+> 12 capabilities `/v1` com rotas executáveis, worker durável com lease e
+> fencing, página operável `/capture-sessions` e quatro E2E.
+>
+> **Não entregue e fora do escopo desta wave:** F4.009 a F4.016, providers
+> pagos, deploy e aceite.
+>
+> **Verificado por medição:** suíte 1796/1796; `db:v2:validate` 227 tabelas,
+> 1099 índices, 850 FKs; E2E 5/5, 4/4 e 4/4.
+>
+> **Não verificado localmente:** a migração nunca foi aplicada contra um
+> PostgreSQL — não há instância nesta máquina — portanto `btree_gist`, as
+> constraints `EXCLUDE` e o E2E de browser só são medidos no CI.
+
 ### F4.009 — Capture Protocol [FR-147]
 
 - [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.

@@ -380,3 +380,62 @@ Director escolhe ângulo em outra etapa. Range com confidence baixa não pode se
 - Lip-sync validator.
 - Tratamento de drift no áudio final sem alterar pitch.
 
+
+---
+
+## 27. Estado de implementação — Wave 18 (F4.002–F4.008)
+
+Implementado localmente em 2026-09-03. Deploy e aceite pendentes.
+
+### 27.1 O que foi construído
+
+| Seção da spec | Módulo | Evidência |
+|---|---|---|
+| §5 Relógio de referência | `src/v2/domain/session-clock.ts` | T-FR-141, 11 casos |
+| §6 Timebase e normalização | `src/v2/domain/session-time.ts` | 13 casos |
+| §7 SyncAnchor e map | `src/v2/domain/sync-evidence.ts` | T-FR-142, 13 casos |
+| §8 Estratégia em cascata | `src/v2/domain/sync-evidence.ts` | T-FR-142 |
+| §10 Offset e drift | `src/v2/domain/clock-drift.ts` | T-FR-144, 12 casos |
+| §11 Piecewise maps | `src/v2/domain/piecewise-clock-map.ts` | T-FR-145, 14 casos |
+| §12 TrackCoverage | `src/v2/domain/track-coverage.ts` | T-FR-143, 14 casos |
+| §13 Recorder splits | `capture-session.ts` + piecewise | E2E heterogêneo |
+| §4 Modelo | `src/v2/domain/capture-session.ts` | T-FR-140, 8 casos |
+
+Persistência em treze tabelas com `CHECK` e `EXCLUDE` que carregam as
+invariantes; API `/v1` com doze capabilities e rotas executáveis; worker durável
+com lease, heartbeat e fencing; página operável em `/capture-sessions`.
+
+### 27.2 Decisões que a spec não previa
+
+**Sessão é cadeia imutável mais ponteiro.** A spec descrevia o modelo sem dizer
+como versioná-lo. Cada operação devolve versão+1 carregando o hash da anterior,
+e o ponteiro `capture_session_heads` diz qual é a corrente. Colapsar os dois
+numa linha atualizável significaria que adicionar uma faixa reescreve
+silenciosamente o que a versão anterior dizia — que é exatamente a pergunta que
+um editor faz quando um corte deixa de bater com o material.
+
+**Ticks atravessam a fronteira pública como string decimal.** Número JSON é
+`double` IEEE 754 em todo parser corrente, então um tick de 64 bits chegaria ao
+cliente já arredondado, sem erro e sem como perceber. Taxas atravessam como
+`"num/den"` pelo mesmo motivo invertido: 30000/1001 não tem forma decimal
+alguma.
+
+**A run de sincronização é fenced, não apenas leased.** Um lease é um timeout, e
+um processo pausado não pode ser avisado de que foi pausado. O token de fencing
+cresce estritamente por sessão e só o mais alto pode liquidar.
+
+### 27.3 O que continua aberto
+
+- §9 correlação de áudio: a cascata consome sinais por uma porta; nenhum
+  fingerprinter de produção foi escrito.
+- §14 a §16, §19 a §24: Capture Protocol, Apollo Marker, react PlaybackMap,
+  direção multicam e color match seguem fora de escopo (F4.009 a F4.016).
+- §26: a biblioteca de fingerprint, os thresholds por fps/duração e o tratamento
+  de drift no áudio final sem alterar pitch continuam sem calibração contra
+  material real.
+
+### 27.4 Não medido
+
+A migração nunca foi aplicada contra um PostgreSQL: não há instância nesta
+máquina. `btree_gist`, as constraints `EXCLUDE` e o E2E de browser são medidos
+apenas no CI.

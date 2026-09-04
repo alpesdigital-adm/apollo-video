@@ -210,6 +210,21 @@ jobs:
       - name: Run review-derived cleanup mask persistence tests
         run: npm run test:integration:review-cleanup-mask
 
+      - name: Run Wave 18 editorial synthesis journey
+        run: npm run test:e2e:editorial-synthesis
+
+      - name: Run Wave 18 heterogeneous capture session journey
+        run: npm run test:e2e:capture-heterogeneous
+
+      - name: Run Wave 18 insufficient sync evidence journey
+        run: npm run test:e2e:capture-insufficient-evidence
+
+      - name: Run Wave 18 capture sessions browser journey
+        run: npm run test:e2e:capture-sessions-browser
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-capture-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_CAPTURE_SESSIONS_E2E: "1"
+
       - name: Run transformation production journey
         run: npm run test:e2e:transformation-production
         env:

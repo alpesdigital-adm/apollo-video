@@ -259,6 +259,30 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Declares proof against one exact StoryPlan, selects only currently authorized cataloged EvidenceSegments and persists no provider, render or media materialization work.',
     },
+    'apollo.projects.capture-sessions.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Opens one metadata-only session from an already ingested file and its probe; it transcodes nothing, changes no media bytes and starts no provider or render work.',
+    },
+    'apollo.projects.capture-sessions.tracks.add': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Appends one immutable session version under optimistic concurrency on the expected version; it overwrites no earlier version and starts no provider or render work.',
+    },
+    'apollo.projects.capture-sessions.track-parts.add': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Appends one immutable session version carrying one more probed file of an existing track under optimistic concurrency; it rewrites no timestamps and starts no provider work.',
+    },
+    'apollo.projects.capture-sessions.reference-track.change': {
+      impact: 'bounded', confirmation: 'human-approval',
+      reason: 'Re-anchors every other track in the session and invalidates all existing maps, coverage and diagnostics, so a human confirms rather than an agent deciding which recording defines time.',
+    },
+    'apollo.projects.capture-sessions.sync.request': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Runs the local evidence cascade over already ingested media and persists maps and coverage against one exact session version; it invokes no paid provider and produces no media.',
+    },
+    'apollo.projects.editorial-syntheses.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable metadata-only cut from authorized cataloged ranges, refusing any assembly that strands a claim from its qualifier or repeats source milliseconds; it renders nothing.',
+    },
     'apollo.projects.contiguous-extractions.create': {
       impact: 'bounded', confirmation: 'none',
       reason: 'Selects one immutable virtual range from trusted persisted evaluations, preserves the source artifact, forbids synthesized ranges and automatic zoom, and starts no provider, render or media materialization work.',
