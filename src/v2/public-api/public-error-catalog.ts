@@ -87,14 +87,24 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     status: 403, category: 'policy', codes: ['PREFLIGHT_TOKEN_INVALID'],
   },
   {
+    // A tampered marker and a marker from another session are refusals of
+    // evidence, not malformed requests: the bytes arrived intact and say
+    // something the system will not act on.
+    status: 422, category: 'policy', codes: [
+      'SYNC_MARKER_CHECKSUM_INVALID', 'SYNC_MARKER_FOREIGN_SESSION',
+      'SYNC_ANCHOR_CONTRADICTORY',
+    ],
+  },
+  {
     // The request was well formed, and correct when the caller computed it.
     // What changed is the session, so 409 with the current version is the
     // answer an operator can act on.
-    status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE'],
+    status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE'],
   },
   {
     status: 404, category: 'validation', codes: [
       'CAPTURE_PROTOCOL_NOT_FOUND', 'CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND',
+      'SYNC_MARKER_NOT_FOUND', 'SYNC_DIAGNOSTIC_NOT_FOUND',
       'CAPTURE_SESSION_NOT_FOUND', 'CAPTURE_TRACK_NOT_FOUND',
       'CAPTURE_SYNC_RUN_NOT_FOUND', 'EDITORIAL_SYNTHESIS_NOT_FOUND',
       'MEDIA_UPLOAD_NOT_FOUND', 'MEDIA_DOWNLOAD_GRANT_NOT_FOUND',
