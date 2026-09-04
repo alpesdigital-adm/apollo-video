@@ -222,6 +222,7 @@ model V2Workspace {
   captureSyncEvidence                    V2CaptureSyncEvidence[]
   captureDriftFits                       V2CaptureDriftFit[]
   captureDriftAnchors                    V2CaptureDriftAnchor[]
+  captureSyncRuns                        V2CaptureSyncRun[]
   editorialSyntheses                     V2EditorialSynthesis[]
   editorialSynthesisRanges               V2EditorialSynthesisRange[]
   editorialSynthesisJoins                V2EditorialSynthesisJoin[]
@@ -724,6 +725,7 @@ model V2Project {
   transformationCriticReports            V2TransformationCriticReport[]
   captureSessionVersions                 V2CaptureSessionVersion[]
   captureSessionHeads                    V2CaptureSessionHead[]
+  captureSyncRuns                        V2CaptureSyncRun[]
   editorialSyntheses                     V2EditorialSynthesis[]
 
   @@unique([id, workspaceId])
@@ -8484,6 +8486,7 @@ model V2CaptureSessionHead {
   coverages     V2CaptureTrackCoverage[]
   syncEvidence  V2CaptureSyncEvidence[]
   driftFits     V2CaptureDriftFit[]
+  syncRuns      V2CaptureSyncRun[]
 
   @@unique([id, workspaceId])
   @@unique([sessionId, workspaceId])
@@ -8706,6 +8709,49 @@ model V2CaptureDriftAnchor {
   @@unique([id, workspaceId])
   @@unique([workspaceId, fitId, anchorId])
   @@map("capture_drift_anchors")
+}
+
+model V2CaptureSyncRun {
+  id                String    @id @db.VarChar(128)
+  workspaceId       String    @db.VarChar(128)
+  projectId         String    @db.VarChar(128)
+  sessionId         String    @db.VarChar(128)
+  baseVersionId     String    @db.VarChar(160)
+  baseSessionHash   String    @db.Char(64)
+  baseVersion       Int
+  status            String    @db.VarChar(24)
+  // Strictly increasing per session. Only the highest may settle, which is the
+  // guarantee a lease alone cannot give: a lease is a timeout, and a paused
+  // process cannot be told that it has been paused.
+  fencingToken      BigInt
+  attemptCount      Int       @default(0)
+  maxAttempts       Int       @default(3)
+  leaseOwner        String?   @db.VarChar(128)
+  leaseTokenHash    String?   @db.Char(64)
+  leaseExpiresAt    DateTime? @db.Timestamptz(3)
+  heartbeatAt       DateTime? @db.Timestamptz(3)
+  idempotencyKey    String    @db.VarChar(128)
+  createdByClientId String    @db.VarChar(80)
+  trackCount        Int
+  resolvedCount     Int?
+  reviewCount       Int?
+  insufficientCount Int?
+  failureReason     String?   @db.VarChar(512)
+  startedAt         DateTime? @db.Timestamptz(3)
+  settledAt         DateTime? @db.Timestamptz(3)
+  createdAt         DateTime  @db.Timestamptz(3)
+  updatedAt         DateTime  @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project            @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, fencingToken])
+  @@unique([workspaceId, createdByClientId, idempotencyKey], map: "capture_sync_runs_workspaceId_client_idempotencyKey_key")
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([workspaceId, sessionId, createdAt(sort: Desc)])
+  @@map("capture_sync_runs")
 }
 
 model V2EditorialSynthesis {

@@ -509,6 +509,116 @@ CREATE UNIQUE INDEX "capture_drift_anchors_id_workspaceId_key" ON "capture_drift
 CREATE UNIQUE INDEX "capture_drift_anchors_workspaceId_fitId_anchorId_key" ON "capture_drift_anchors" ("workspaceId", "fitId", "anchorId");
 
 -- ---------------------------------------------------------------------------
+-- F4.004/F4.006 — the durable synchronization run.
+--
+-- Synchronizing a session is long work over media, so it survives a restart of
+-- whatever was running it. Three columns carry the whole safety argument:
+--
+-- `leaseTokenHash` — a worker claims by writing the hash of a token only it
+-- holds. Settling requires presenting the token again, so a worker that paused
+-- long enough for its lease to expire, and whose work was reclaimed, cannot
+-- come back and write its stale result over the newer one.
+--
+-- `fencingToken` — strictly increasing per session. Even if two workers somehow
+-- both believe they hold the lease, only the higher token may settle. This is
+-- the guarantee a lease alone cannot give, because a lease is a timeout and a
+-- paused process cannot be told it has been paused.
+--
+-- `baseVersionId` / `baseSessionHash` — the exact session version the run was
+-- requested against. A result computed against version 4 must never be filed
+-- against version 5: the tracks it measured may no longer be the tracks in the
+-- session, and a map attributed to the wrong version is worse than no map.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE "capture_sync_runs" (
+  "id"                  VARCHAR(128) NOT NULL,
+  "workspaceId"         VARCHAR(128) NOT NULL,
+  "projectId"           VARCHAR(128) NOT NULL,
+  "sessionId"           VARCHAR(128) NOT NULL,
+  "baseVersionId"       VARCHAR(160) NOT NULL,
+  "baseSessionHash"     CHAR(64) NOT NULL,
+  "baseVersion"         INTEGER NOT NULL,
+  "status"              VARCHAR(24) NOT NULL,
+  "fencingToken"        BIGINT NOT NULL,
+  "attemptCount"        INTEGER NOT NULL DEFAULT 0,
+  "maxAttempts"         INTEGER NOT NULL DEFAULT 3,
+  "leaseOwner"          VARCHAR(128),
+  "leaseTokenHash"      CHAR(64),
+  "leaseExpiresAt"      TIMESTAMPTZ(3),
+  "heartbeatAt"         TIMESTAMPTZ(3),
+  "idempotencyKey"      VARCHAR(128) NOT NULL,
+  "createdByClientId"   VARCHAR(80) NOT NULL,
+  "trackCount"          INTEGER NOT NULL,
+  "resolvedCount"       INTEGER,
+  "reviewCount"         INTEGER,
+  "insufficientCount"   INTEGER,
+  "failureReason"       VARCHAR(512),
+  "startedAt"           TIMESTAMPTZ(3),
+  "settledAt"           TIMESTAMPTZ(3),
+  "createdAt"           TIMESTAMPTZ(3) NOT NULL,
+  "updatedAt"           TIMESTAMPTZ(3) NOT NULL,
+
+  CONSTRAINT "capture_sync_runs_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "capture_sync_runs_status_check"
+    CHECK ("status" IN ('queued', 'running', 'succeeded', 'failed', 'superseded')),
+  CONSTRAINT "capture_sync_runs_counters_check"
+    CHECK ("fencingToken" > 0 AND "attemptCount" >= 0 AND "maxAttempts" >= 1
+           AND "baseVersion" >= 1 AND "trackCount" >= 1),
+  -- A running claim is all-or-nothing. An owner without an expiry is a lease
+  -- nobody can reclaim; an expiry without a token hash is a lease anybody can
+  -- settle.
+  CONSTRAINT "capture_sync_runs_lease_check"
+    CHECK (
+      ("status" = 'running' AND "leaseOwner" IS NOT NULL AND "leaseTokenHash" IS NOT NULL
+        AND "leaseExpiresAt" IS NOT NULL AND "startedAt" IS NOT NULL) OR
+      ("status" <> 'running' AND "leaseOwner" IS NULL AND "leaseTokenHash" IS NULL
+        AND "leaseExpiresAt" IS NULL)
+    ),
+  -- A settled run says when it settled, and a failed one says why. "Failed"
+  -- with no reason is a result nobody can act on.
+  CONSTRAINT "capture_sync_runs_settled_check"
+    CHECK (
+      ("status" IN ('succeeded', 'failed', 'superseded') AND "settledAt" IS NOT NULL) OR
+      ("status" IN ('queued', 'running') AND "settledAt" IS NULL)
+    ),
+  CONSTRAINT "capture_sync_runs_failure_check"
+    CHECK ("status" <> 'failed' OR "failureReason" IS NOT NULL),
+  -- A run that succeeded reports how every track came out, and the three
+  -- counts must add up to the tracks it was asked about. A run that has not
+  -- succeeded reports none of them: partial counts read as a finished answer.
+  CONSTRAINT "capture_sync_runs_outcome_check"
+    CHECK (
+      ("status" = 'succeeded' AND "resolvedCount" IS NOT NULL AND "reviewCount" IS NOT NULL
+        AND "insufficientCount" IS NOT NULL
+        AND "resolvedCount" + "reviewCount" + "insufficientCount" = "trackCount") OR
+      ("status" <> 'succeeded' AND "resolvedCount" IS NULL AND "reviewCount" IS NULL
+        AND "insufficientCount" IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX "capture_sync_runs_id_workspaceId_key" ON "capture_sync_runs" ("id", "workspaceId");
+-- Fencing tokens are unique per session and strictly increasing, so "is this
+-- the newest claim" is a comparison rather than a judgement call.
+CREATE UNIQUE INDEX "capture_sync_runs_workspaceId_sessionId_fencingToken_key" ON "capture_sync_runs" ("workspaceId", "sessionId", "fencingToken");
+-- One run per idempotency key per client: a retried request rejoins the run it
+-- already started rather than starting a second one over the same media.
+CREATE UNIQUE INDEX "capture_sync_runs_workspaceId_client_idempotencyKey_key" ON "capture_sync_runs" ("workspaceId", "createdByClientId", "idempotencyKey");
+CREATE INDEX "capture_sync_runs_status_leaseExpiresAt_createdAt_idx" ON "capture_sync_runs" ("status", "leaseExpiresAt", "createdAt");
+CREATE INDEX "capture_sync_runs_workspaceId_sessionId_createdAt_idx" ON "capture_sync_runs" ("workspaceId", "sessionId", "createdAt" DESC);
+
+ALTER TABLE "capture_sync_runs"
+  ADD CONSTRAINT "capture_sync_runs_workspaceId_fkey"
+  FOREIGN KEY ("workspaceId") REFERENCES "workspaces"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+ALTER TABLE "capture_sync_runs"
+  ADD CONSTRAINT "capture_sync_runs_projectId_workspaceId_fkey"
+  FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "capture_sync_runs"
+  ADD CONSTRAINT "capture_sync_runs_sessionId_workspaceId_fkey"
+  FOREIGN KEY ("sessionId", "workspaceId") REFERENCES "capture_session_heads"("sessionId", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- ---------------------------------------------------------------------------
 -- F4.001 / FR-135 — multi-range editorial synthesis
 -- ---------------------------------------------------------------------------
 
