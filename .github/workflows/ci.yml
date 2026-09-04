@@ -219,6 +219,18 @@ jobs:
       - name: Run Wave 18 insufficient sync evidence journey
         run: npm run test:e2e:capture-insufficient-evidence
 
+      - name: Run Wave 19 capture protocol, marker and diagnostic journeys
+        run: npm run test:e2e:sync-diagnostic-journey
+
+      - name: Run Wave 19 marker robustness fixtures
+        run: npm run test:integration:marker-robustness
+
+      - name: Run Wave 19 sync diagnostic persistence against PostgreSQL
+        run: npm run test:e2e:sync-diagnostic-persistence
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-sync-diagnostic-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_SYNC_DIAGNOSTIC_E2E: "1"
+
       - name: Run Wave 18 capture sessions browser journey
         run: npm run test:e2e:capture-sessions-browser
         env:

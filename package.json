@@ -54,6 +54,7 @@
     "test:integration:transformation-registry": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/prisma-transformation-provider-registry.integration.mjs",
     "test:integration:transformation-critic-media": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/transformation-critic-media.integration.mjs",
     "test:integration:marker-detection": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/marker-detection.integration.mjs",
+    "test:e2e:sync-diagnostic-persistence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-persistence.e2e.mjs",
     "test:e2e:sync-diagnostic-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-diagnostic-journey.e2e.mjs",
     "test:integration:marker-robustness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/marker-robustness.integration.mjs",
     "test:integration:sync-marker-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/sync-marker-render.integration.mjs",
