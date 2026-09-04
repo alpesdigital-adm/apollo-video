@@ -177,6 +177,19 @@ function refitTrack(
  * status all moved — so it is refused rather than applied to a document the
  * operator never saw.
  */
+/**
+ * Who made this anchor what it is, plus whatever note the caller sent.
+ *
+ * The actor comes first and is never optional. A caller-supplied reference
+ * replacing it would erase the only trace of who overrode a measurement, and
+ * an override nobody can be traced to is indistinguishable from the system
+ * having decided on its own.
+ */
+function anchorEvidenceRef(actorId: string, note: string | undefined): string {
+  const trimmed = note?.trim()
+  return trimmed && trimmed.length > 0 ? `operator:${actorId} (${trimmed})` : `operator:${actorId}`
+}
+
 export function applyAnchorEdit(input: {
   diagnostic: Readonly<SyncDiagnostic>
   expectedVersion: number
@@ -226,7 +239,11 @@ export function applyAnchorEdit(input: {
       method: 'manual-anchor',
       confidence: 0.9,
       residualMs: null,
-      evidenceRef: edit.evidenceRef ?? `operator:${input.actorId}`,
+      // The actor is always recorded, never displaced by what the caller
+      // sent. A caller-supplied note replacing it would erase the only trace
+      // of who moved a measurement, which is the whole point of auditing a
+      // manual override.
+      evidenceRef: anchorEvidenceRef(input.actorId, edit.evidenceRef),
       createdAt: edit.editedAt,
     }))
   } else if (edit.action === 'move') {
@@ -241,6 +258,9 @@ export function applyAnchorEdit(input: {
       sourceMs: edit.sourceMs,
       sessionMs: edit.sessionMs,
       residualMs: null,
+      // Who moved it, which is not always who placed it. Keeping only the
+      // original author would attribute one operator's correction to another.
+      evidenceRef: anchorEvidenceRef(input.actorId, edit.evidenceRef),
       createdAt: edit.editedAt,
     })
   } else {

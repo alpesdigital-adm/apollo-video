@@ -477,6 +477,10 @@ test('E2E-FR-149 manual correction refits, preserves automatic anchors and fence
   assert.equal(v2.version, 2)
   assert.equal(v2.previousVersionHash, v1.diagnosticHash)
   assert.equal(v2.tracks[0].manualAnchors.length, 1)
+  // Who overrode the measurement, traceable even though the caller sent its
+  // own note. An override nobody can be traced to is indistinguishable from
+  // the system having decided on its own.
+  assert.match(v2.tracks[0].manualAnchors[0].evidenceRef, /operator:user-editor-1/)
   // The measured anchors are still there, with fresh residuals.
   assert.deepEqual(v2.tracks[0].automaticAnchors.map((entry) => entry.anchorId), automaticBefore)
   assert.ok(v2.tracks[0].automaticAnchors.every((entry) => entry.residualMs !== null))
@@ -804,4 +808,50 @@ test('E2E-FR-147/149 a session that lost every automatic path is refused, with r
     assert.equal(entry.offsetMs, null, `${entry.trackId} invented an offset from no evidence`)
     assert.equal(entry.status, 'needs-input')
   }
+})
+
+test('E2E-FR-149 a caller note never displaces who moved the anchor', async () => {
+  const session = teacherSession()
+  const services = wire(session, {
+    plan: { 'track-camera-main:start': { atMs: 1_000 }, 'track-screen:start': { atMs: 400 } },
+  })
+  await services.generateMarker({
+    actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start',
+  })
+  for (const trackId of ['track-camera-main', 'track-screen']) {
+    await services.detect({ actor: ACTOR, sessionId: session.sessionId, markerId: (
+      await services.repository.listMarkers({ workspaceId: 'workspace-1', sessionId: session.sessionId })
+    )[0].marker.markerId, trackId })
+  }
+  const v1 = (await services.generateDiagnostic({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })).diagnostic
+
+  // The caller sends its own note, as the UI does.
+  const v2 = (await services.editAnchor({
+    actor: ACTOR,
+    sessionId: session.sessionId,
+    ...diagBase(v1),
+    edit: {
+      trackId: 'track-screen', action: 'add', anchorId: 'manual-1',
+      sourceMs: 300_000, sessionMs: 300_600, evidenceRef: 'operator-frame-nudge',
+    },
+  })).diagnostic
+  const placed = v2.tracks[0].manualAnchors[0]
+  assert.match(placed.evidenceRef, /operator:user-editor-1/)
+  assert.match(placed.evidenceRef, /operator-frame-nudge/, 'the caller note was dropped instead of kept alongside')
+
+  // A second operator moves it. The record has to name the mover, not only the
+  // person who placed it.
+  const SECOND = { ...ACTOR, id: 'user-editor-2' }
+  const v3 = (await services.editAnchor({
+    actor: SECOND,
+    sessionId: session.sessionId,
+    ...diagBase(v2),
+    edit: {
+      trackId: 'track-screen', action: 'move', anchorId: 'manual-1',
+      sourceMs: 300_000, sessionMs: 300_640,
+    },
+  })).diagnostic
+  assert.match(v3.tracks[0].manualAnchors[0].evidenceRef, /operator:user-editor-2/)
 })
