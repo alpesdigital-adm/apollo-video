@@ -439,3 +439,79 @@ cresce estritamente por sessão e só o mais alto pode liquidar.
 A migração nunca foi aplicada contra um PostgreSQL: não há instância nesta
 máquina. `btree_gist`, as constraints `EXCLUDE` e o E2E de browser são medidos
 apenas no CI.
+
+## 28. Estado de implementação — Wave 19 (F4.009–F4.011)
+
+Implementado localmente em 2026-09-04. Deploy e aceite pendentes.
+
+### 28.1 O que foi construído
+
+| Seção da spec | Módulo | Evidência |
+|---|---|---|
+| §14 Professor + tela, §15 demais cenários | `src/v2/domain/capture-protocol-catalog.ts` | T-FR-147, 12 casos |
+| Protocolo versionado e endereçado por conteúdo | `src/v2/domain/capture-protocol.ts` | T-FR-147 |
+| Conformidade derivada da sessão | `src/v2/domain/capture-protocol-evaluation.ts` | T-FR-147 |
+| §16 Apollo Sync Marker | `src/v2/domain/sync-marker.ts` | T-FR-148, 14 casos |
+| Marcador como mídia verificável | `src/v2/infrastructure/media/ffmpeg-sync-marker-renderer.ts` | 3 casos com ffprobe |
+| Detectores independentes e fusão | `src/v2/domain/sync-marker-detection.ts` | T-FR-148 |
+| Detecção sobre mídia real | `src/v2/infrastructure/media/ffmpeg-marker-detectors.ts` | 9 fixtures geradas |
+| §18 SyncDiagnostic | `src/v2/domain/sync-diagnostic.ts` | T-FR-149, 13 casos |
+| §17 Contrato de UX de sync manual | `src/v2/domain/sync-diagnostic-anchors.ts` + `/sync-diagnostic` | E2E de jornada |
+
+Persistência em sete tabelas; API `/v1` com treze capabilities e nove rotas;
+duas páginas operáveis (`/capture-protocols` antes de gravar, `/sync-diagnostic`
+depois).
+
+### 28.2 Decisões que a spec não previa
+
+**Exigência obrigatória precisa nomear o que se perde.** A spec listava
+requisitos; o construtor recusa um item `required` que não nomeie nenhuma
+capacidade de sincronização perdida sem ele. Um requisito que não custa nada
+quando pulado não é obrigatório — é preferência com o rótulo errado, e um
+operador atrasado acerta ao pular.
+
+**Concordância entre canais não identifica o marcador.** Ver
+[ADR-151](../adr/ADR-151-marker-identity-requires-the-code.md). Todo marcador
+de uma sessão alterna igual e varre o mesmo chirp; só o código visual carrega
+identidade.
+
+**Cobertura não medida é `null`, nunca zero.** Zero afirma "nada desta faixa é
+aproveitável" sobre uma medição que ninguém fez, e o bloqueio de corte
+automático se apoia nesse número. `null` não sustenta a nota máxima e também não
+é `partial`: cai em `synced-medium`, que é exatamente "editável, convém
+conferir".
+
+**Avaliação e diagnóstico nomeiam a versão da sessão.** Ambos são derivações de
+uma CaptureSession, e a Wave 18 já decidiu que derivação nomeia versão+hash.
+Sem isso, uma faixa adicionada um segundo antes muda silenciosamente a resposta
+sobre a qual o operador está prestes a agir.
+
+**A chave de idempotência do marcador é ligada à credencial inteira.** Gerar
+marcador não tem chave natural: repetir renderiza um segundo clipe e queima uma
+segunda sequência, e depois "qual marcador a câmera viu" passa a ter duas
+respostas. O id do marcador é derivado de workspace, cliente, credencial, tipo
+de autenticação e usuário delegado — duas credenciais do mesmo cliente são dois
+chamadores.
+
+**O arquivo procurado vem da posição do marcador.** Um marcador emitido após
+reinício está no arquivo de reinício e em nenhum outro. Procurar no primeiro
+reportaria ausência do que foi gravado; procurar em todos deixaria um marcador
+de início ser creditado a um reinício.
+
+### 28.3 O que continua aberto
+
+- O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for
+  fixo, o teto de robustez do marcador é o teto de legibilidade do código.
+- O código só é lido em escala nativa (recorte central de `codeSizePx`). Filmado
+  maior ou menor, o flash aparece e o código some.
+- Não há fila durável para detecção: a rota executa a detecção na requisição.
+  Um lote grande de faixas ainda não tem retomada por trabalhador.
+- `spoken-code` existe como tipo e carrega um piso de erro de 120 ms; nenhum
+  reconhecedor de fala foi escrito, e a spec é explícita em não prometer
+  precisão de quadro para ele.
+
+### 28.4 Não medido
+
+O round trip contra PostgreSQL não foi executado nesta máquina: não há runtime
+de contêiner aqui. O teste existe, está ligado ao job de CI que tem um banco, e
+é medido lá — não aqui.
