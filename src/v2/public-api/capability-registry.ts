@@ -2592,6 +2592,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'version', description: 'Read this exact link of the immutable chain instead of the current one, so a cut can be inspected against the session it was actually made from.', required: false, schema: { type: 'integer', minimum: 1 } },
+    ],
   },
   {
     id: 'apollo.projects.capture-sessions.list',
@@ -2610,6 +2613,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'limit', description: 'Maximum capture sessions to return.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
+    ],
   },
   {
     id: 'apollo.projects.capture-sessions.versions.list',
@@ -2631,6 +2637,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'limit', description: 'Maximum versions of the chain to return, newest first.', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 25 } },
+    ],
   },
   {
     id: 'apollo.projects.capture-sessions.sync.read',
@@ -2711,6 +2720,9 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     confirmation: 'none',
     successStatuses: [200],
     idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'limit', description: 'Maximum multi-range cuts to return.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 25 } },
+    ],
   },
   {
     id: 'apollo.projects.contiguous-extractions.create',

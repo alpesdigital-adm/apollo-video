@@ -1,6 +1,9 @@
 import type { PrismaClient } from '../../../../generated/prisma-v2/index.js'
 
-import type { EditorialSynthesisRepository } from '../../application/ports/editorial-synthesis-repository.ts'
+import type {
+  EditorialSynthesisRepository,
+  StoredEditorialSynthesis,
+} from '../../application/ports/editorial-synthesis-repository.ts'
 import {
   assertEditorialSynthesisIntegrity,
   EDITORIAL_SYNTHESIS_SCHEMA_VERSION,
@@ -219,8 +222,8 @@ export class PrismaEditorialSynthesisRepository implements EditorialSynthesisRep
         workspaceId: input.synthesis.workspaceId,
         synthesisId: input.synthesis.id,
       })
-      if (existing && existing.synthesisHash === input.synthesis.synthesisHash) {
-        return Object.freeze({ synthesis: existing, replayed: true })
+      if (existing && existing.synthesis.synthesisHash === input.synthesis.synthesisHash) {
+        return Object.freeze({ synthesis: existing.synthesis, replayed: true })
       }
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
@@ -232,7 +235,7 @@ export class PrismaEditorialSynthesisRepository implements EditorialSynthesisRep
   async read(input: {
     workspaceId: string
     synthesisId: string
-  }): Promise<Readonly<EditorialSynthesis> | null> {
+  }): Promise<Readonly<StoredEditorialSynthesis> | null> {
     const row = await this.client.v2EditorialSynthesis.findFirst({
       where: { id: input.synthesisId, workspaceId: input.workspaceId },
       include: {
@@ -240,14 +243,16 @@ export class PrismaEditorialSynthesisRepository implements EditorialSynthesisRep
         joins: { orderBy: { ordinal: 'asc' } },
       },
     })
-    return row ? this.hydrate(row) : null
+    return row
+      ? Object.freeze({ synthesis: this.hydrate(row), createdAt: row.createdAt.toISOString() })
+      : null
   }
 
   async list(input: {
     workspaceId: string
     projectId: string
     limit?: number
-  }): Promise<readonly Readonly<EditorialSynthesis>[]> {
+  }): Promise<readonly Readonly<StoredEditorialSynthesis>[]> {
     const rows = await this.client.v2EditorialSynthesis.findMany({
       where: { workspaceId: input.workspaceId, projectId: input.projectId },
       orderBy: { updatedAt: 'desc' },
@@ -257,7 +262,10 @@ export class PrismaEditorialSynthesisRepository implements EditorialSynthesisRep
         joins: { orderBy: { ordinal: 'asc' } },
       },
     })
-    return Object.freeze(rows.map((row) => this.hydrate(row)))
+    return Object.freeze(rows.map((row) => Object.freeze({
+      synthesis: this.hydrate(row),
+      createdAt: row.createdAt.toISOString(),
+    })))
   }
 
   async listByMoment(input: {

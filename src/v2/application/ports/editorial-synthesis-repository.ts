@@ -10,22 +10,35 @@ import type { EditorialSynthesis } from '../../domain/editorial-synthesis.ts'
  * justifications are the audit trail for the cuts and overwriting them would
  * quietly re-license assertions somebody already reviewed.
  */
+export interface StoredEditorialSynthesis {
+  readonly synthesis: Readonly<EditorialSynthesis>
+  readonly createdAt: string
+}
+
 export interface EditorialSynthesisRepository {
   persist(input: {
     synthesis: Readonly<EditorialSynthesis>
     createdAt: string
   }): Promise<Readonly<{ synthesis: Readonly<EditorialSynthesis>; replayed: boolean }>>
 
+  /**
+   * The cut, and when it was stored.
+   *
+   * `createdAt` sits beside the aggregate rather than inside it because the
+   * synthesis hash covers what the cut asserts, and when it was written is not
+   * part of that. Folding it in would make the same cut hash differently on two
+   * days.
+   */
   read(input: {
     workspaceId: string
     synthesisId: string
-  }): Promise<Readonly<EditorialSynthesis> | null>
+  }): Promise<Readonly<StoredEditorialSynthesis> | null>
 
   list(input: {
     workspaceId: string
     projectId: string
     limit?: number
-  }): Promise<readonly Readonly<EditorialSynthesis>[]>
+  }): Promise<readonly Readonly<StoredEditorialSynthesis>[]>
 
   /**
    * Every synthesis that reused a given long-form moment.

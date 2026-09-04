@@ -87,8 +87,15 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     status: 403, category: 'policy', codes: ['PREFLIGHT_TOKEN_INVALID'],
   },
   {
+    // The request was well formed, and correct when the caller computed it.
+    // What changed is the session, so 409 with the current version is the
+    // answer an operator can act on.
+    status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE'],
+  },
+  {
     status: 404, category: 'validation', codes: [
-      'CAPTURE_TRACK_NOT_FOUND',
+      'CAPTURE_SESSION_NOT_FOUND', 'CAPTURE_TRACK_NOT_FOUND',
+      'CAPTURE_SYNC_RUN_NOT_FOUND', 'EDITORIAL_SYNTHESIS_NOT_FOUND',
       'MEDIA_UPLOAD_NOT_FOUND', 'MEDIA_DOWNLOAD_GRANT_NOT_FOUND',
       'MEDIA_ARTIFACT_NOT_FOUND', 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',
       'MEDIA_TRANSCRIPT_NOT_FOUND', 'MATERIALIZATION_AUTHORIZATION_NOT_FOUND',

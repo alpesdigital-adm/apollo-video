@@ -76,7 +76,11 @@ export const DOMAIN_ERROR_CODES = [
   // a generic INVALID_ARGUMENT: "this range is not covered" and "this range is
   // covered but unverified" call for different actions, and collapsing them
   // would leave the UI unable to say which.
+  'CAPTURE_SESSION_NOT_FOUND',
+  'CAPTURE_SESSION_VERSION_STALE',
   'CAPTURE_TRACK_NOT_FOUND',
+  'CAPTURE_SYNC_RUN_NOT_FOUND',
+  'EDITORIAL_SYNTHESIS_NOT_FOUND',
   'CAPTURE_COVERAGE_NOT_AVAILABLE',
   'CAPTURE_COVERAGE_UNVERIFIED',
   'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED',
