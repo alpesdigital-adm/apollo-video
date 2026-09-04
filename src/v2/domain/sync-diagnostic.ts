@@ -86,8 +86,13 @@ export interface TrackDiagnostic {
   readonly offsetMs: number | null
   readonly residualMs: number | null
   readonly driftPpm: number | null
-  /** Covered fraction in basis points, so it stays an integer. */
-  readonly coverageBps: number
+  /**
+   * Covered fraction in basis points, or null when coverage was never
+   * computed. Null is not zero: zero says none of this track is usable, and
+   * null says nobody looked. Collapsing the two would let an unmeasured track
+   * read as an empty one.
+   */
+  readonly coverageBps: number | null
   readonly gaps: readonly Readonly<TickInterval>[]
   readonly automaticAnchors: readonly Readonly<DiagnosticAnchor>[]
   readonly manualAnchors: readonly Readonly<DiagnosticAnchor>[]
@@ -157,7 +162,7 @@ function assertId(value: string, field: string): string {
 export function deriveTrackStatus(input: {
   offsetMs: number | null
   residualMs: number | null
-  coverageBps: number
+  coverageBps: number | null
   confidence: number
   hasContradictoryAnchors: boolean
 }): DiagnosticStatus {
@@ -165,9 +170,13 @@ export function deriveTrackStatus(input: {
   // No offset means nothing aligned this track. Coverage and confidence
   // describe a measurement that was never made.
   if (input.offsetMs === null || input.residualMs === null) return 'needs-input'
-  if (input.coverageBps < DIAGNOSTIC_POLICY.partialCoverageBps) return 'partial'
+  // Measured and low is 'partial'. Unmeasured is neither low nor high: it
+  // simply cannot support the top grade, which is what synced-medium means —
+  // editable, review recommended.
+  if (input.coverageBps !== null && input.coverageBps < DIAGNOSTIC_POLICY.partialCoverageBps) return 'partial'
   if (
-    input.residualMs <= DIAGNOSTIC_POLICY.highResidualMs
+    input.coverageBps !== null
+    && input.residualMs <= DIAGNOSTIC_POLICY.highResidualMs
     && input.coverageBps >= DIAGNOSTIC_POLICY.minimumCoverageBps
     && input.confidence >= DIAGNOSTIC_POLICY.highConfidence
   ) return 'synced-high'
@@ -261,9 +270,9 @@ export function createSyncDiagnostic(input: {
   for (const track of input.tracks) {
     assertId(track.trackId, 'trackId')
     assertDomain(
-      track.coverageBps >= 0 && track.coverageBps <= 10_000,
+      track.coverageBps === null || (track.coverageBps >= 0 && track.coverageBps <= 10_000),
       'INVALID_ARGUMENT',
-      `track ${track.trackId} coverage must be in basis points`,
+      `track ${track.trackId} coverage must be null or in basis points`,
     )
     assertDomain(
       track.confidence >= 0 && track.confidence <= 1,
