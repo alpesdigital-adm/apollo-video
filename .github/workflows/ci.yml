@@ -222,6 +222,12 @@ jobs:
       - name: Run Wave 19 capture protocol, marker and diagnostic journeys
         run: npm run test:e2e:sync-diagnostic-journey
 
+      - name: Run Wave 19 marker rendering against ffprobe
+        run: npm run test:integration:sync-marker-render
+
+      - name: Run Wave 19 clean marker detection fixtures
+        run: npm run test:integration:marker-detection
+
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 

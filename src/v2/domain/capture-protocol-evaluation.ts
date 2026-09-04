@@ -108,12 +108,27 @@ function decide(
       if (found.length === 0) {
         return { outcome: 'unmet', observation: `no ${check.role} track to carry sync audio` }
       }
-      // 'none' is the recorder saying it captured no usable audio at all;
-      // anything else can at least be correlated against.
-      const usable = found.filter((track) => track.syncAudioPolicy !== 'none')
-      return usable.length > 0
-        ? { outcome: 'met', observation: `${check.role} audio is usable for sync (${usable[0]!.syncAudioPolicy})` }
-        : { outcome: 'unmet', observation: `every ${check.role} track declares syncAudioPolicy 'none'` }
+      // 'none' is the recorder saying it captured no usable audio at all.
+      //
+      // Every track of the role has to carry it, not merely one. The
+      // requirement is worded "each camera keeps its own reference audio", and
+      // it means that: a camera that threw its audio away cannot be aligned by
+      // fingerprint, whatever the camera beside it did. Accepting one usable
+      // track would report the capability intact for a session where one
+      // recorder has already lost it.
+      const silent = found.filter((track) => track.syncAudioPolicy === 'none')
+      if (silent.length > 0) {
+        return {
+          outcome: 'unmet',
+          observation: silent.length === found.length
+            ? `every ${check.role} track declares syncAudioPolicy 'none'`
+            : `${silent.map((track) => track.trackId).join(', ')} declare syncAudioPolicy 'none'`,
+        }
+      }
+      return {
+        outcome: 'met',
+        observation: `all ${found.length} ${check.role} track(s) carry audio usable for sync`,
+      }
     }
     case 'track-excluded-from-mix': {
       const found = tracksWithRole(session, check.role)

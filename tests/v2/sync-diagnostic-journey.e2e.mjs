@@ -298,6 +298,43 @@ function wire(session, options = {}) {
 
 const ACTOR = { workspaceId: 'workspace-1', kind: 'human', id: 'user-editor-1' }
 
+/** A podcast: two cameras keeping scratch audio, plus the dedicated recorder. */
+function podcastSession(options = {}) {
+  const base = createCaptureSession({
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    sessionId: 'capture-session-1',
+    clock: { timebase: timebaseFromRate(90_000), rounding: 'nearest-half-even' },
+    referenceTrackId: 'track-master-audio',
+    tracks: [track({
+      trackId: 'track-master-audio',
+      role: 'master-audio',
+      device: { deviceId: 'device-rec', recorderId: 'rec-1', make: null, model: null, serial: null },
+      syncAudioPolicy: 'final-candidate',
+      includeInFinalMix: true,
+      partOverrides: { partId: 'part-master-1', sourceAssetId: 'asset-master' },
+    })],
+    lineage: LINEAGE,
+    createdAt: at(0),
+  })
+  let session = base
+  for (const [index, id] of ['track-camera-a', 'track-camera-b'].entries()) {
+    session = addCaptureSessionTrack(session, {
+      track: track({
+        trackId: id,
+        role: 'camera-main',
+        device: { deviceId: `device-${id}`, recorderId: `rec-${id}`, make: null, model: null, serial: null },
+        // The scratch track exists to be aligned against, not to be heard.
+        syncAudioPolicy: index === 1 && options.secondCameraMuted ? 'none' : 'sync-only',
+        includeInFinalMix: false,
+        partOverrides: { partId: `part-${id}`, sourceAssetId: `asset-${id}` },
+      }),
+      lineage: { ...LINEAGE, operation: 'add-track', commandId: `command-${id}` },
+    })
+  }
+  return session
+}
+
 /** The diagnostic base a caller that just read it would send. */
 function diagBase(diagnostic) {
   return {
@@ -659,4 +696,112 @@ test('E2E-FR-148 one unreadable file does not end the sweep', async () => {
   const retry = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
   assert.equal(retry.detected, 1)
   assert.equal(retry.complete, true)
+})
+
+test('E2E-FR-147/148/149 podcast: scratch audio on every camera earns the top ceiling', async () => {
+  const session = podcastSession()
+  const services = wire(session, {
+    coverages: ['track-camera-a', 'track-camera-b'].map(fullCoverage),
+    plan: {
+      'track-master-audio:start': { atMs: 500 },
+      'track-camera-a:start': { atMs: 1_100 },
+      'track-camera-b:start': { atMs: 300 },
+      'track-master-audio:end': { atMs: 590_500 },
+      'track-camera-a:end': { atMs: 591_100 },
+      'track-camera-b:end': { atMs: 590_300 },
+    },
+  })
+  await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'podcast-v1' })
+  for (const position of ['start', 'end']) {
+    await services.generateMarker({
+      actor: ACTOR, sessionId: session.sessionId, position, idempotencyKey: `key-${position}`,
+    })
+  }
+  const sweep = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
+  assert.equal(sweep.complete, true)
+  assert.equal(sweep.failed, 0)
+
+  const { evaluation } = await services.evaluate({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
+  // Every camera kept its scratch track, so nothing audio fingerprinting needs
+  // was thrown away, and the end marker means drift can still be measured.
+  assert.deepEqual([...evaluation.lostCapabilities], [])
+  assert.equal(evaluation.blocksAutoEdit, false)
+
+  const { diagnostic } = await services.generateDiagnostic({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
+  // The dedicated recorder is the reference; the cameras are what gets aligned.
+  assert.equal(diagnostic.referenceTrackId, 'track-master-audio')
+  assert.deepEqual(
+    diagnostic.tracks.map((entry) => entry.trackId).sort(),
+    ['track-camera-a', 'track-camera-b'],
+  )
+})
+
+test('E2E-FR-147/149 podcast: a camera recorded with no audio at all costs the fingerprint', async () => {
+  const session = podcastSession({ secondCameraMuted: true })
+  const services = wire(session, {
+    coverages: ['track-camera-a', 'track-camera-b'].map(fullCoverage),
+    plan: {
+      'track-master-audio:start': { atMs: 500 },
+      'track-camera-a:start': { atMs: 1_100 },
+    },
+  })
+  await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'podcast-v1' })
+  await services.generateMarker({
+    actor: ACTOR, sessionId: session.sessionId, position: 'start', idempotencyKey: 'key-start',
+  })
+
+  // A track that captured no usable audio is detected on either channel: it
+  // cannot be held to two, and refusing it for that would blame the recording
+  // for a choice the operator made.
+  const sweep = await services.sweep()({ actor: ACTOR, sessionId: session.sessionId })
+  const muted = sweep.outcomes.find((entry) => entry.trackId === 'track-camera-b')
+  assert.equal(muted.state, 'detected')
+
+  const { evaluation } = await services.evaluate({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
+  // The consequence the protocol named, arriving exactly as written.
+  assert.ok(evaluation.lostCapabilities.includes('audio-fingerprint'))
+  assert.ok(evaluation.lostCapabilities.includes('drift-measurement'), 'no end marker was filmed')
+  const missed = evaluation.findings.filter((finding) => finding.outcome === 'unmet')
+  assert.ok(missed.length > 0)
+  assert.ok(
+    missed.every((finding) => finding.consequence.length > 0),
+    'a requirement was reported unmet without saying what it costs',
+  )
+  assert.notEqual(evaluation.ceiling, 'automatic')
+})
+
+test('E2E-FR-147/149 a session that lost every automatic path is refused, with reasons', async () => {
+  // No markers filmed, no scratch audio on one camera. Every automatic route
+  // the protocol protects is gone, and no confident fitting recovers it.
+  const session = podcastSession({ secondCameraMuted: true })
+  const services = wire(session, { plan: {} })
+  await services.attach({ actor: ACTOR, sessionId: session.sessionId, protocolId: 'podcast-v1' })
+
+  const { evaluation } = await services.evaluate({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
+  assert.ok(
+    ['manual-anchors-required', 'not-synchronizable'].includes(evaluation.ceiling),
+    `a session with no evidence reported ceiling ${evaluation.ceiling}`,
+  )
+  assert.equal(evaluation.blocksAutoEdit, true)
+
+  const { diagnostic } = await services.generateDiagnostic({
+    actor: ACTOR, sessionId: session.sessionId, ...base(session),
+  })
+  const gate = canAutoEdit(diagnostic)
+  assert.equal(gate.allowed, false)
+  // Named, not merely refused: an operator told only "blocked" cannot act.
+  assert.ok(gate.blockedBy.length > 0)
+  // And every track reports the absence honestly rather than as zero.
+  for (const entry of diagnostic.tracks) {
+    assert.equal(entry.offsetMs, null, `${entry.trackId} invented an offset from no evidence`)
+    assert.equal(entry.status, 'needs-input')
+  }
 })
