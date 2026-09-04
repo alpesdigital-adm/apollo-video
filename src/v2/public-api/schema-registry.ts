@@ -1,4 +1,20 @@
-﻿import { DomainError, assertDomain } from '../domain/errors.ts'
+﻿import {
+  CAPTURE_SCENARIOS,
+  REQUIREMENT_LEVELS,
+  REQUIREMENT_VERIFICATIONS,
+  SYNC_CAPABILITIES,
+  SYNC_CEILINGS,
+} from '../domain/capture-protocol.ts'
+import { REQUIREMENT_OUTCOMES } from '../domain/capture-protocol-evaluation.ts'
+import { CAPTURE_TRACK_ROLES } from '../domain/capture-session.ts'
+import { ANCHOR_ORIGINS, DIAGNOSTIC_STATUSES, DIAGNOSTIC_WARNINGS, RECOMMENDED_ACTIONS } from '../domain/sync-diagnostic.ts'
+import {
+  FUSION_MODES,
+  FUSION_OUTCOMES,
+  FUSION_REJECTIONS,
+} from '../domain/sync-marker-detection.ts'
+import { MARKER_KINDS, MARKER_POSITIONS } from '../domain/sync-marker.ts'
+import { DomainError, assertDomain } from '../domain/errors.ts'
 import { PUBLIC_DATE_TIME_SCHEMA, PUBLIC_ID_SCHEMA } from './conventions.ts'
 import { PUBLIC_EVENT_CATALOG } from '../domain/public-event.ts'
 import { PUBLIC_ERROR_CODES } from './public-error-catalog.ts'
@@ -12635,6 +12651,323 @@ function defineSchema(
   })
 }
 
+/** F4.009 — a published capture protocol, as the catalogue lists it. */
+const captureProtocolSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'scenario', 'version', 'title', 'summary', 'bestCeiling', 'requirementCount', 'publishedAt', 'protocolHash'],
+  properties: {
+    protocolId: idSchema,
+    scenario: { type: 'string', enum: [...CAPTURE_SCENARIOS] },
+    version: { type: 'integer', minimum: 1 },
+    title: { type: 'string', minLength: 1, maxLength: 200 },
+    summary: { type: 'string', minLength: 1, maxLength: 1000 },
+    // The best this protocol can reach when everything is followed. It is a
+    // ceiling, not a promise: following the protocol does not guarantee the
+    // recording cooperated.
+    bestCeiling: { type: 'string', enum: [...SYNC_CEILINGS] },
+    requirementCount: { type: 'integer', minimum: 1 },
+    publishedAt: { type: 'string', format: 'date-time' },
+    protocolHash: sha256Schema,
+  },
+} as const
+
+const captureRequirementSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['requirementId', 'level', 'verification', 'checkKind', 'statement', 'losesCapabilities', 'consequence'],
+  properties: {
+    requirementId: idSchema,
+    level: { type: 'string', enum: [...REQUIREMENT_LEVELS] },
+    // Observed means the session is enough to decide it. Attested means only a
+    // person can, and the answer is their word — labelled, never mixed in with
+    // measurements.
+    verification: { type: 'string', enum: [...REQUIREMENT_VERIFICATIONS] },
+    checkKind: {
+      enum: [
+        'track-present', 'track-carries-sync-audio', 'track-excluded-from-mix',
+        'single-continuous-recording', 'marker-observed', 'distinct-devices',
+        'operator-attestation',
+      ],
+    },
+    statement: { type: 'string', minLength: 1, maxLength: 500 },
+    // A required item names what stops working without it. One that names
+    // nothing is a preference wearing the wrong label.
+    losesCapabilities: {
+      type: 'array',
+      items: { type: 'string', enum: [...SYNC_CAPABILITIES] },
+    },
+    consequence: { type: 'string', minLength: 1, maxLength: 500 },
+  },
+} as const
+
+const captureProtocolSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'scenario', 'version', 'title', 'summary', 'bestCeiling', 'requirementCount', 'publishedAt', 'protocolHash', 'schemaVersion', 'requirements', 'expectedTracks'],
+  properties: {
+    ...captureProtocolSummarySchema.properties,
+    schemaVersion: { const: 'capture-protocol/v1' },
+    requirements: { type: 'array', minItems: 1, items: captureRequirementSchema },
+    expectedTracks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['role', 'minimum', 'maximum', 'mustCarryAudio', 'note'],
+        properties: {
+          role: { type: 'string', enum: [...CAPTURE_TRACK_ROLES] },
+          minimum: { type: 'integer', minimum: 0 },
+          maximum: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+          mustCarryAudio: { type: 'boolean' },
+          note: { type: 'string', maxLength: 500 },
+        },
+      },
+    },
+  },
+} as const
+
+const captureProtocolAttachmentSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['protocolId', 'protocolVersion', 'protocolHash', 'attachedAt'],
+  properties: {
+    protocolId: idSchema,
+    // The exact version and hash attached, so a later reading of the protocol
+    // cannot silently rewrite what the shoot was held to.
+    protocolVersion: { type: 'integer', minimum: 1 },
+    protocolHash: sha256Schema,
+    attachedAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const captureProtocolEvaluationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'sessionId', 'sessionVersion', 'sessionHash', 'protocolId', 'protocolVersion', 'protocolHash', 'findings', 'lostCapabilities', 'ceiling', 'blocksAutoEdit', 'attestedRequirementIds', 'evaluatedAt', 'evaluationHash'],
+  properties: {
+    schemaVersion: { const: 'capture-protocol-evaluation/v1' },
+    sessionId: idSchema,
+    sessionVersion: { type: 'integer', minimum: 1 },
+    sessionHash: sha256Schema,
+    protocolId: idSchema,
+    protocolVersion: { type: 'integer', minimum: 1 },
+    protocolHash: sha256Schema,
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['requirementId', 'level', 'outcome', 'observation', 'losesCapabilities', 'consequence'],
+        properties: {
+          requirementId: idSchema,
+          level: { type: 'string', enum: [...REQUIREMENT_LEVELS] },
+          // 'unknown' is a real answer, not a failure. A requirement nothing
+          // in the session speaks to has not been met and has not been missed.
+          outcome: { type: 'string', enum: [...REQUIREMENT_OUTCOMES] },
+          observation: { type: 'string', minLength: 1, maxLength: 500 },
+          losesCapabilities: captureRequirementSchema.properties.losesCapabilities,
+          consequence: { type: 'string', minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    lostCapabilities: captureRequirementSchema.properties.losesCapabilities,
+    ceiling: captureProtocolSummarySchema.properties.bestCeiling,
+    blocksAutoEdit: { type: 'boolean' },
+    attestedRequirementIds: { type: 'array', items: idSchema },
+    evaluatedAt: { type: 'string', format: 'date-time' },
+    evaluationHash: sha256Schema,
+  },
+} as const
+
+/** F4.010 — a marker and, when it has been rendered, where its media lives. */
+const syncMarkerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['markerId', 'sessionId', 'kind', 'position', 'sequence', 'sessionCode', 'emittedAt', 'payload', 'checksum', 'markerHash', 'visual', 'audio', 'artifact'],
+  properties: {
+    markerId: idSchema,
+    sessionId: idSchema,
+    kind: { type: 'string', enum: [...MARKER_KINDS] },
+    position: { type: 'string', enum: [...MARKER_POSITIONS] },
+    sequence: { type: 'integer', minimum: 1 },
+    // Derived from the session id, so a marker filmed for another session is
+    // recognisable as foreign from the code alone.
+    sessionCode: { type: 'string', minLength: 6, maxLength: 6 },
+    emittedAt: { type: 'string', format: 'date-time' },
+    payload: { type: 'string', minLength: 1, maxLength: 200 },
+    // 16 hex characters of the payload digest, as markerChecksum produces.
+    checksum: { type: 'string', pattern: '^[a-f0-9]{16}$' },
+    markerHash: sha256Schema,
+    visual: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['patternFrames', 'frameRate', 'codeSizePx'],
+      properties: {
+        patternFrames: { type: 'array', minItems: 3, items: { type: 'string', enum: ['black', 'white'] } },
+        // Exact rational. 30000/1001 has no finite decimal form, and a client
+        // handed 29.97 could never recover the rate that was sent.
+        frameRate: { type: 'string', pattern: '^[1-9][0-9]*/[1-9][0-9]*$' },
+        codeSizePx: { type: 'integer', minimum: 1 },
+      },
+    },
+    audio: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['startHz', 'endHz', 'durationMs', 'sampleRate'],
+      properties: {
+        startHz: { type: 'number', exclusiveMinimum: 0 },
+        endHz: { type: 'number', exclusiveMinimum: 0 },
+        durationMs: { type: 'number', exclusiveMinimum: 0 },
+        sampleRate: { type: 'integer', minimum: 8000 },
+      },
+    },
+    // Bytes live in object storage. A marker is seconds of video, and a row
+    // carrying it would be paid for on every read of the marker list.
+    artifact: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['artifactId', 'sha256', 'byteSize'],
+          properties: { artifactId: idSchema, sha256: sha256Schema, byteSize: { type: 'integer', minimum: 1 } },
+        },
+        { type: 'null' },
+      ],
+    },
+  },
+} as const
+
+const markerDetectionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['markerId', 'sessionId', 'trackId', 'position', 'mode', 'outcome', 'rejection', 'atMs', 'errorMs', 'visualObservationId', 'audioObservationId', 'confidence', 'reasons', 'detectionHash'],
+  properties: {
+    markerId: idSchema,
+    sessionId: idSchema,
+    trackId: idSchema,
+    position: { type: 'string', enum: [...MARKER_POSITIONS] },
+    mode: { type: 'string', enum: [...FUSION_MODES] },
+    outcome: { type: 'string', enum: [...FUSION_OUTCOMES] },
+    rejection: {
+      oneOf: [
+        { type: 'string', enum: [...FUSION_REJECTIONS] },
+        { type: 'null' },
+      ],
+    },
+    // Null when nothing was found. Zero would say the marker was at the very
+    // first frame, which is a different claim entirely.
+    atMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    errorMs: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+    visualObservationId: { oneOf: [idSchema, { type: 'null' }] },
+    audioObservationId: { oneOf: [idSchema, { type: 'null' }] },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    reasons: { type: 'array', items: { type: 'string', maxLength: 300 } },
+    detectionHash: sha256Schema,
+  },
+} as const
+
+/** F4.011 — one anchor, and where it came from. */
+const diagnosticAnchorSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['anchorId', 'origin', 'sourceMs', 'sessionMs', 'method', 'confidence', 'residualMs', 'evidenceRef', 'createdAt'],
+  properties: {
+    anchorId: idSchema,
+    origin: { type: 'string', enum: [...ANCHOR_ORIGINS] },
+    sourceMs: { type: 'number' },
+    sessionMs: { type: 'number' },
+    method: { type: 'string', minLength: 1, maxLength: 120 },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    residualMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    evidenceRef: { type: 'string', minLength: 1, maxLength: 300 },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const syncDiagnosticSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['schemaVersion', 'sessionId', 'referenceTrackId', 'version', 'previousVersionHash', 'sessionVersion', 'referenceEpoch', 'status', 'globalConfidence', 'tracks', 'warnings', 'recommendedActions', 'manualRequired', 'protocolCeiling', 'generatedAt', 'diagnosticHash', 'autoEdit'],
+  properties: {
+    schemaVersion: { const: 'sync-diagnostic/v1' },
+    sessionId: idSchema,
+    referenceTrackId: idSchema,
+    version: { type: 'integer', minimum: 1 },
+    previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    sessionVersion: { type: 'integer', minimum: 1 },
+    referenceEpoch: { type: 'integer', minimum: 1 },
+    status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+    globalConfidence: { type: 'number', minimum: 0, maximum: 1 },
+    tracks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['trackId', 'methods', 'confidence', 'offsetMs', 'residualMs', 'driftPpm', 'coverageBps', 'gaps', 'automaticAnchors', 'manualAnchors', 'pieceIds', 'status', 'warnings', 'previewSampleMs'],
+        properties: {
+          trackId: idSchema,
+          methods: { type: 'array', items: { type: 'string', maxLength: 120 } },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          offsetMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          residualMs: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+          driftPpm: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          // Null means unmeasured. Zero would mean measured and unusable.
+          coverageBps: { oneOf: [{ type: 'integer', minimum: 0, maximum: 10000 }, { type: 'null' }] },
+          // Ticks, as decimal strings: a 64-bit count sent as a JSON number
+          // arrives rounded with nothing raised.
+          gaps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['start', 'end'],
+              properties: {
+                start: { type: 'string', pattern: '^-?[0-9]{1,19}$' },
+                end: { type: 'string', pattern: '^-?[0-9]{1,19}$' },
+              },
+            },
+          },
+          automaticAnchors: { type: 'array', items: diagnosticAnchorSchema },
+          manualAnchors: { type: 'array', items: diagnosticAnchorSchema },
+          pieceIds: { type: 'array', items: idSchema },
+          status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+          warnings: {
+            type: 'array',
+            items: { type: 'string', enum: [...DIAGNOSTIC_WARNINGS] },
+          },
+          previewSampleMs: { type: 'array', items: { type: 'number' } },
+        },
+      },
+    },
+    warnings: {
+      type: 'array',
+      items: { type: 'string', enum: [...DIAGNOSTIC_WARNINGS] },
+    },
+    recommendedActions: {
+      type: 'array',
+      items: { type: 'string', enum: [...RECOMMENDED_ACTIONS] },
+    },
+    manualRequired: { type: 'boolean' },
+    protocolCeiling: {
+      oneOf: [captureProtocolSummarySchema.properties.bestCeiling, { type: 'null' }],
+    },
+    generatedAt: { type: 'string', format: 'date-time' },
+    diagnosticHash: sha256Schema,
+    // The gate travels with the document. A client made to recompute "may I
+    // cut this?" from the fields above could compute a kinder answer.
+    autoEdit: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['allowed', 'blockedBy'],
+      properties: {
+        allowed: { type: 'boolean' },
+        blockedBy: { type: 'array', items: { type: 'string', maxLength: 300 } },
+      },
+    },
+  },
+} as const
+
 function defineSchemaRegistry(definitions: readonly PublicSchemaDefinition[]) {
   const refs = new Set<string>()
   for (const definition of definitions) {
@@ -24663,6 +24996,337 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['session'],
       properties: { session: captureSessionSchema },
+    }),
+  ),
+  // ---------------------------------------------------------------------------
+  // Wave 19 — F4.009-F4.011: capture protocols, sync markers, diagnostics.
+  //
+  // Two shapes recur and both are deliberate.
+  //
+  // Milliseconds cross as numbers, tick intervals as decimal strings. A tick
+  // is a 64-bit count and a JSON number is a double, so a tick sent as a
+  // number arrives rounded with nothing raised; a millisecond is a
+  // measurement with an error bar, far inside the range a double represents
+  // exactly, and a string would only make clients parse it back.
+  //
+  // Every measured field is nullable, and null is not zero. `atMs: null` says
+  // no marker was found; `atMs: 0` would say it was found at the first frame.
+  // `coverageBps: null` says nobody measured coverage; zero would say the
+  // track was measured and none of it is usable. Collapsing those would let a
+  // cut be blocked by a measurement that never happened.
+  // ---------------------------------------------------------------------------
+  defineSchema(
+    'capture-protocol-list',
+    1,
+    'The published capture protocols',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocols'],
+      properties: { protocols: { type: 'array', items: captureProtocolSummarySchema } },
+    }),
+  ),
+  defineSchema(
+    'capture-protocol-read',
+    1,
+    'One published capture protocol, with its requirements',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocol'],
+      properties: { protocol: captureProtocolSchema },
+    }),
+  ),
+  defineSchema(
+    'attach-capture-protocol-request',
+    1,
+    'Declare which protocol a capture session was shot under',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['protocolId'],
+      // Only an id. A caller that could post a protocol's content could post
+      // an empty one and be told the session complies with it.
+      properties: { protocolId: idSchema },
+    },
+  ),
+  defineSchema(
+    'capture-protocol-attached',
+    1,
+    'The protocol now attached to a capture session',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['attachment'],
+      properties: { attachment: captureProtocolAttachmentSchema },
+    }),
+  ),
+  defineSchema(
+    'evaluate-capture-protocol-request',
+    1,
+    'Judge a capture session against a protocol',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // The pair, not the number: a version number alone can be reused after a
+      // failed write, so a verdict naming only "version 3" could describe a
+      // different version 3 than the caller read.
+      required: ['baseVersionId', 'baseHash'],
+      properties: {
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        protocolId: idSchema,
+        scenario: { type: 'string', enum: [...CAPTURE_SCENARIOS] },
+        // The one thing a caller may assert, and it is kept separate from
+        // everything observed so a person's word is never read as a
+        // measurement. Naming both protocolId and scenario is refused: two
+        // ways to pick a protocol can disagree.
+        attestedRequirementIds: { type: 'array', maxItems: 64, items: idSchema },
+      },
+    },
+  ),
+  defineSchema(
+    'capture-protocol-evaluated',
+    1,
+    'What the session lost against its protocol, and the ceiling that leaves',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['evaluation', 'replayed'],
+      properties: { evaluation: captureProtocolEvaluationSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'capture-session-protocol-read',
+    1,
+    'The protocol attached to a capture session and the last evaluation of it',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sessionVersion', 'attachment', 'protocol', 'evaluation', 'evaluationIsForCurrentVersion'],
+      properties: {
+        sessionVersion: { type: 'integer', minimum: 1 },
+        attachment: { oneOf: [captureProtocolAttachmentSchema, { type: 'null' }] },
+        protocol: { oneOf: [captureProtocolSchema, { type: 'null' }] },
+        evaluation: { oneOf: [captureProtocolEvaluationSchema, { type: 'null' }] },
+        // Stale is not wrong, and the difference is worth stating rather than
+        // leaving a client to compare version numbers and guess.
+        evaluationIsForCurrentVersion: { type: 'boolean' },
+      },
+    }),
+  ),
+  defineSchema(
+    'generate-sync-marker-request',
+    1,
+    'Ask for an Apollo sync marker',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['position'],
+      properties: {
+        position: { type: 'string', enum: [...MARKER_POSITIONS] },
+        kind: { type: 'string', enum: [...MARKER_KINDS], default: 'audiovisual' },
+        // No sequence. The server assigns it from the markers this session
+        // already has, so two callers cannot both claim the same number and
+        // leave "which marker was seen" without an answer.
+      },
+    },
+  ),
+  defineSchema(
+    'sync-marker-generated',
+    1,
+    'The marker that was generated and the media it rendered to',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['marker', 'replayed'],
+      properties: { marker: syncMarkerSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'sync-marker-list',
+    1,
+    'The sync markers generated for a capture session',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['markers'],
+      properties: { markers: { type: 'array', items: syncMarkerSchema } },
+    }),
+  ),
+  defineSchema(
+    'detect-sync-marker-request',
+    1,
+    'Look for a marker in one track',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['trackId'],
+      properties: {
+        trackId: idSchema,
+        // Omitted lets the server choose from the track: one that captured no
+        // usable audio can only ever produce one channel, and holding it to
+        // both would refuse it for something that is not its fault.
+        mode: { type: 'string', enum: [...FUSION_MODES] },
+      },
+    },
+  ),
+  defineSchema(
+    'sync-marker-detected',
+    1,
+    'What the two detectors found, and what their fusion concluded',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['detection', 'replayed'],
+      properties: { detection: markerDetectionSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'sync-marker-detection-list',
+    1,
+    'Every detection recorded against one marker',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['detections'],
+      properties: { detections: { type: 'array', items: markerDetectionSchema } },
+    }),
+  ),
+  defineSchema(
+    'marker-detection-sweep',
+    1,
+    'What one bounded detection pass did, pair by pair',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['sweep'],
+      properties: {
+        sweep: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sessionId', 'sessionVersion', 'pairsConsidered', 'detected', 'skipped', 'failed', 'confirmed', 'outcomes', 'complete'],
+          properties: {
+            sessionId: idSchema,
+            sessionVersion: { type: 'integer', minimum: 1 },
+            pairsConsidered: { type: 'integer', minimum: 0 },
+            detected: { type: 'integer', minimum: 0 },
+            skipped: { type: 'integer', minimum: 0 },
+            failed: { type: 'integer', minimum: 0 },
+            confirmed: { type: 'integer', minimum: 0 },
+            outcomes: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['markerId', 'trackId', 'position', 'state', 'outcome', 'rejection', 'atMs', 'detail'],
+                properties: {
+                  markerId: idSchema,
+                  trackId: idSchema,
+                  position: { type: 'string', enum: [...MARKER_POSITIONS] },
+                  state: { type: 'string', enum: ['detected', 'skipped-existing', 'skipped-no-file', 'failed'] },
+                  outcome: { oneOf: [{ type: 'string', enum: [...FUSION_OUTCOMES] }, { type: 'null' }] },
+                  rejection: { oneOf: [{ type: 'string', enum: [...FUSION_REJECTIONS] }, { type: 'null' }] },
+                  atMs: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+                  detail: { type: 'string', maxLength: 1000 },
+                },
+              },
+            },
+            // False means another pass would find more work.
+            complete: { type: 'boolean' },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'sync-diagnostic-read',
+    1,
+    'One version of a capture session sync diagnostic',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['diagnostic'],
+      properties: { diagnostic: syncDiagnosticSchema },
+    }),
+  ),
+  defineSchema(
+    'sync-diagnostic-generated',
+    1,
+    'The diagnostic version a generate or anchor edit produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['diagnostic', 'replayed'],
+      properties: { diagnostic: syncDiagnosticSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'generate-sync-diagnostic-request',
+    1,
+    'Build a diagnostic for one exact version of a capture session',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // A diagnostic describes one exact version. Deriving it against whatever
+      // is current would silently produce a document about a session the
+      // operator never saw.
+      required: ['baseVersionId', 'baseHash'],
+      properties: { baseVersionId: idSchema, baseHash: sha256Schema },
+    },
+  ),
+  defineSchema(
+    'edit-sync-anchor-request',
+    1,
+    'Add, move or remove one manual sync anchor',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'trackId', 'action', 'anchorId'],
+      properties: {
+        // The pair, exactly as the capture chain does it. A version number
+        // alone can be reused after a failed write, so a nudge naming only
+        // "version 3" could be aimed at a different version 3 than the caller
+        // read; the hash cannot be reused.
+        baseVersionId: idSchema,
+        baseHash: sha256Schema,
+        trackId: idSchema,
+        action: { enum: ['add', 'move', 'remove'] },
+        anchorId: idSchema,
+        sourceMs: { type: 'number', minimum: -86400000, maximum: 86400000 },
+        sessionMs: { type: 'number', minimum: -86400000, maximum: 86400000 },
+        evidenceRef: idSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'sync-diagnostic-version-list',
+    1,
+    'The diagnostic chain of one capture session, newest first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['versions'],
+      properties: {
+        versions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['version', 'previousVersionHash', 'sessionVersion', 'status', 'globalConfidence', 'manualAnchorCount', 'generatedAt', 'diagnosticHash'],
+            properties: {
+              version: { type: 'integer', minimum: 1 },
+              previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+              sessionVersion: { type: 'integer', minimum: 1 },
+              status: { type: 'string', enum: [...DIAGNOSTIC_STATUSES] },
+              globalConfidence: { type: 'number', minimum: 0, maximum: 1 },
+              manualAnchorCount: { type: 'integer', minimum: 0 },
+              generatedAt: { type: 'string', format: 'date-time' },
+              diagnosticHash: sha256Schema,
+            },
+          },
+        },
+      },
     }),
   ),
   defineSchema(

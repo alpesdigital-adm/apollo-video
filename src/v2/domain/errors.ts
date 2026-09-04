@@ -76,9 +76,24 @@ export const DOMAIN_ERROR_CODES = [
   // a generic INVALID_ARGUMENT: "this range is not covered" and "this range is
   // covered but unverified" call for different actions, and collapsing them
   // would leave the UI unable to say which.
+  'CAPTURE_PROTOCOL_NOT_FOUND',
+  'SYNC_MARKER_NOT_FOUND',
+  'SYNC_MARKER_CHECKSUM_INVALID',
+  'SYNC_MARKER_FOREIGN_SESSION',
+  'SYNC_DIAGNOSTIC_NOT_FOUND',
+  'SYNC_DIAGNOSTIC_VERSION_STALE',
+  'SYNC_ANCHOR_CONTRADICTORY',
+  'CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND',
   'CAPTURE_SESSION_NOT_FOUND',
   'CAPTURE_SESSION_VERSION_STALE',
   'CAPTURE_TRACK_NOT_FOUND',
+  // A track exists but has no file the request could be about: a marker
+  // emitted after a restart, in a track whose recorder never restarted.
+  'CAPTURE_TRACK_PART_NOT_FOUND',
+  // The session was built from one file; the artifact registry now holds
+  // another. Detecting against the substituted bytes would produce a
+  // confident offset for a recording that never existed.
+  'MEDIA_ARTIFACT_IDENTITY_MISMATCH',
   'CAPTURE_SYNC_RUN_NOT_FOUND',
   'EDITORIAL_SYNTHESIS_NOT_FOUND',
   'CAPTURE_COVERAGE_NOT_AVAILABLE',

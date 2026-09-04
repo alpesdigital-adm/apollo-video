@@ -61,6 +61,8 @@ import type { LongFormIndexRepository } from '../application/ports/long-form-ind
 import type { ContiguousExtractionRepository } from '../application/ports/contiguous-extraction-repository.ts'
 import type { ColorPipelineCompilationRepository } from '../application/ports/color-pipeline-compilation-repository.ts'
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
+import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
+import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -211,6 +213,8 @@ import {
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
+import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
 import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
@@ -228,6 +232,8 @@ import { PrismaLongFormIndexRepository } from './prisma/long-form-index-reposito
 import { PrismaContiguousExtractionRepository } from './prisma/contiguous-extraction-repository.ts'
 import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipeline-compilation-repository.ts'
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
+import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
+import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2220,4 +2226,33 @@ export function createCaptureSyncRunRepository(): CaptureSyncRunRepository {
 
 export function createEditorialSynthesisRepository(): EditorialSynthesisRepository {
   return new PrismaEditorialSynthesisRepository(resolveV2Client())
+}
+
+export function createCaptureProtocolRepository(): CaptureProtocolRepository {
+  return new PrismaCaptureProtocolRepository(resolveV2Client())
+}
+
+export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
+  return new PrismaSyncDiagnosticRepository(resolveV2Client())
+}
+
+/**
+ * The media side of sync markers (F4.010).
+ *
+ * Assembled here rather than inside a route because it needs three things the
+ * route has no business knowing: where FFmpeg is, where scratch space lives,
+ * and which storage driver this deployment uses.
+ */
+export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.env) {
+  return createMarkerMediaAdapter(createVerifiedMediaStorage(environment), environment)
+}
+
+/**
+ * Turns a capture track's file into a path a detector can open.
+ *
+ * The materializer verifies the bytes against the artifact's recorded hash, so
+ * a detector never reads a file whose identity nobody checked.
+ */
+export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
+  return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
 }

@@ -354,6 +354,24 @@ export default function CaptureSessionsPage() {
 
       {message && state !== 'failed' && <p data-testid="message">{message}</p>}
 
+      {/* The pre-recording protocols live at their own route rather than in the
+          shell, which declares a fixed set of destinations. They are reached
+          from here because this is where an operator already is when the
+          question "what should the next shoot look like?" comes up. */}
+      <p data-testid="open-capture-protocols">
+        <a href="/capture-protocols">Ver as exigências antes de gravar</a>
+      </p>
+
+      {selected && (
+        <p data-testid="open-diagnostic">
+          <a
+            href={`/sync-diagnostic?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Abrir o diagnóstico desta sessão
+          </a>
+        </p>
+      )}
+
       {sync && (
         <section data-testid="sync-detail">
           <h2>

@@ -25,6 +25,34 @@ const coverage = Object.freeze({
     mode: 'base-version-bound-action',
     evidence: 'Wave18 binds the durable sync run to the exact session version and hash, so a result can never be attributed to a session that changed after the run was requested',
   },
+  'apollo.projects.capture-sessions.protocol.attach': {
+    mode: 'natural-idempotent-create',
+    evidence: 'Wave19 attaches one protocol per session by session key, so repeating the same attachment converges on the same row; the protocol version and hash are recorded at attach time so a later republish cannot rewrite what the shoot was held to',
+  },
+  'apollo.projects.capture-sessions.protocol.evaluate': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave19 binds every evaluation to the exact session version and hash it judged, so a verdict can never be attributed to a session that changed after it was computed, and a reader is told when the evaluation predates the current version',
+  },
+  'apollo.projects.capture-sessions.sync-markers.generate': {
+    mode: 'idempotent-create',
+    evidence: 'Wave19 derives the marker id from a key bound to workspace, client, credential, authentication kind and any delegated user, so one credential cannot replay another credential key and a retry returns the first marker without rendering a second clip or burning a second sequence number',
+  },
+  'apollo.projects.capture-sessions.sync-markers.detect': {
+    mode: 'natural-idempotent-create',
+    evidence: 'Wave19 keys the detection on the marker and track, so re-running detection after better evidence arrives replaces the earlier verdict rather than leaving two, and the file searched is chosen from the marker position and verified against the hash the session recorded',
+  },
+  'apollo.projects.capture-sessions.marker-detections.sweep': {
+    mode: 'natural-idempotent-create',
+    evidence: 'Wave19 skips any pair that already has a stored detection and replaces by marker and track otherwise, so repeating a pass is free and a partial pass reports complete:false rather than pretending it finished',
+  },
+  'apollo.projects.capture-sessions.sync-diagnostic.generate': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave19 derives the diagnostic from stored detections, coverage and maps against one exact session version, carrying manual anchors forward, so regenerating never invents a number and never discards a correction a person made',
+  },
+  'apollo.projects.capture-sessions.sync-diagnostic.anchors.edit': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave19 requires the exact diagnostic version id and its hash and enforces the fence inside the append, refusing an edit computed against a diagnostic that has since moved; automatic anchors can neither be removed nor shadowed by a manual one',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'idempotent-create',
     evidence: 'Wave18 persists one immutable content-addressed cut; a replayed key converges on the identical synthesis hash and a different body under the same id is refused',
@@ -702,12 +730,12 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 67,
-    'natural-idempotent-create': 7,
+    'idempotent-create': 68,
+    'natural-idempotent-create': 10,
     'state-machine-action': 16,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 20,
+    'base-version-bound-action': 23,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,

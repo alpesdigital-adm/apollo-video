@@ -223,6 +223,12 @@ model V2Workspace {
   captureDriftFits                       V2CaptureDriftFit[]
   captureDriftAnchors                    V2CaptureDriftAnchor[]
   captureSyncRuns                        V2CaptureSyncRun[]
+  captureProtocolEvaluations             V2CaptureProtocolEvaluation[]
+  captureSessionProtocols                V2CaptureSessionProtocol[]
+  syncMarkers                            V2SyncMarker[]
+  syncMarkerDetections                   V2SyncMarkerDetection[]
+  syncDiagnostics                        V2SyncDiagnostic[]
+  syncDiagnosticHeads                    V2SyncDiagnosticHead[]
   editorialSyntheses                     V2EditorialSynthesis[]
   editorialSynthesisRanges               V2EditorialSynthesisRange[]
   editorialSynthesisJoins                V2EditorialSynthesisJoin[]
@@ -8487,6 +8493,11 @@ model V2CaptureSessionHead {
   syncEvidence  V2CaptureSyncEvidence[]
   driftFits     V2CaptureDriftFit[]
   syncRuns      V2CaptureSyncRun[]
+  protocolEvaluations V2CaptureProtocolEvaluation[]
+  attachedProtocol    V2CaptureSessionProtocol?
+  syncMarkers         V2SyncMarker[]
+  syncDiagnostics     V2SyncDiagnostic[]
+  syncDiagnosticHead  V2SyncDiagnosticHead?
 
   @@unique([id, workspaceId])
   @@unique([sessionId, workspaceId])
@@ -8840,4 +8851,206 @@ model V2EditorialSynthesisJoin {
   @@unique([id, workspaceId])
   @@unique([workspaceId, synthesisId, ordinal])
   @@map("editorial_synthesis_joins")
+}
+
+// ---------------------------------------------------------------------------
+// F4.009 / FR-147 — capture protocols.
+//
+// V2CaptureProtocol is a published catalogue entry: append-only and versioned,
+// so a session judged last month stays readable against the protocol it was
+// actually judged by. V2CaptureProtocolEvaluation is a derivation bound to one
+// exact session version and carries the session hash it read.
+// ---------------------------------------------------------------------------
+
+model V2CaptureProtocol {
+  id                 String   @id @db.VarChar(128)
+  protocolId         String   @db.VarChar(64)
+  scenario           String   @db.VarChar(32)
+  version            Int
+  schemaVersion      String   @db.VarChar(64)
+  title              String   @db.VarChar(128)
+  summary            String   @db.VarChar(512)
+  requirementsJson   String   @db.Text
+  expectedTracksJson String   @db.Text
+  requiredCount      Int
+  bestCeiling        String   @db.VarChar(32)
+  protocolHash       String   @unique @db.Char(64)
+  publishedAt        DateTime @db.Timestamptz(3)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  @@unique([protocolId, version])
+  @@index([scenario, version(sort: Desc)])
+  @@map("capture_protocols")
+}
+
+model V2CaptureProtocolEvaluation {
+  id                       String   @id @db.VarChar(160)
+  workspaceId              String   @db.VarChar(128)
+  sessionId                String   @db.VarChar(128)
+  sessionVersion           Int
+  sessionHash              String   @db.Char(64)
+  protocolId               String   @db.VarChar(64)
+  protocolVersion          Int
+  protocolHash             String   @db.Char(64)
+  schemaVersion            String   @db.VarChar(64)
+  findingsJson             String   @db.Text
+  lostCapabilitiesJson     String   @default("[]") @db.Text
+  attestedRequirementsJson String   @default("[]") @db.Text
+  ceiling                  String   @db.VarChar(32)
+  blocksAutoEdit           Boolean
+  unmetRequiredCount       Int
+  evaluationHash           String   @db.Char(64)
+  evaluatedAt              DateTime @db.Timestamptz(3)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, sessionVersion, protocolId, protocolVersion], map: "capture_protocol_evaluations_session_protocol_key")
+  @@index([workspaceId, sessionId, evaluatedAt(sort: Desc)])
+  @@map("capture_protocol_evaluations")
+}
+
+model V2CaptureSessionProtocol {
+  id              String   @id @db.VarChar(128)
+  workspaceId     String   @db.VarChar(128)
+  sessionId       String   @db.VarChar(128)
+  protocolId      String   @db.VarChar(64)
+  protocolVersion Int
+  protocolHash    String   @db.Char(64)
+  attachedByKind  String   @db.VarChar(16)
+  attachedById    String   @db.VarChar(128)
+  attachedAt      DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([sessionId, workspaceId])
+  @@map("capture_session_protocols")
+}
+
+// ---------------------------------------------------------------------------
+// F4.010 / FR-148 and F4.011 / FR-149 — markers, detections and diagnostics.
+//
+// A rejected detection stores no instant: "we could not find it" and "we found
+// it at zero" are different answers, and a non-nullable column could not keep
+// them apart. Diagnostics are an immutable chain with a mutable head, the same
+// shape capture sessions use, so an anchor edit appends a version rather than
+// rewriting the one a cut was approved against.
+// ---------------------------------------------------------------------------
+
+model V2SyncMarker {
+  id             String   @id @db.VarChar(128)
+  workspaceId    String   @db.VarChar(128)
+  sessionId      String   @db.VarChar(128)
+  schemaVersion  String   @db.VarChar(64)
+  kind           String   @db.VarChar(24)
+  position       String   @db.VarChar(24)
+  sequence       Int
+  sessionCode    String   @db.Char(6)
+  emittedAt      DateTime @db.Timestamptz(3)
+  payload        String   @db.VarChar(256)
+  checksum       String   @db.VarChar(32)
+  visualJson     String   @db.Text
+  audioJson      String   @db.Text
+  artifactId     String?  @db.VarChar(128)
+  artifactSha256 String?  @db.Char(64)
+  artifactBytes  Int?
+  markerHash     String   @db.Char(64)
+  createdAt      DateTime @db.Timestamptz(3)
+
+  workspace  V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session    V2CaptureSessionHead   @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  detections V2SyncMarkerDetection[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, sequence])
+  @@index([workspaceId, sessionId, position])
+  @@map("sync_markers")
+}
+
+model V2SyncMarkerDetection {
+  id                  String   @id @db.VarChar(160)
+  workspaceId         String   @db.VarChar(128)
+  markerId            String   @db.VarChar(128)
+  sessionId           String   @db.VarChar(128)
+  trackId             String   @db.VarChar(128)
+  schemaVersion       String   @db.VarChar(64)
+  position            String   @db.VarChar(24)
+  mode                String   @db.VarChar(24)
+  outcome             String   @db.VarChar(32)
+  rejection           String?  @db.VarChar(48)
+  atMs                Float?
+  errorMs             Float?
+  visualObservationId String?  @db.VarChar(128)
+  audioObservationId  String?  @db.VarChar(128)
+  confidence          Float
+  reasonsJson         String   @default("[]") @db.Text
+  detectionHash       String   @db.Char(64)
+  detectedAt          DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  marker    V2SyncMarker @relation(fields: [markerId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, markerId, trackId])
+  @@index([workspaceId, sessionId, outcome])
+  @@map("sync_marker_detections")
+}
+
+model V2SyncDiagnostic {
+  id                     String   @id @db.VarChar(160)
+  workspaceId            String   @db.VarChar(128)
+  sessionId              String   @db.VarChar(128)
+  referenceTrackId       String   @db.VarChar(128)
+  version                Int
+  previousVersionHash    String?  @db.Char(64)
+  sessionVersion         Int
+  referenceEpoch         Int
+  schemaVersion          String   @db.VarChar(64)
+  status                 String   @db.VarChar(24)
+  globalConfidence       Float
+  tracksJson             String   @db.Text
+  trackCount             Int
+  warningsJson           String   @default("[]") @db.Text
+  recommendedActionsJson String   @default("[]") @db.Text
+  manualRequired         Boolean
+  protocolCeiling        String?  @db.VarChar(32)
+  manualAnchorCount      Int      @default(0)
+  automaticAnchorCount   Int      @default(0)
+  diagnosticHash         String   @db.Char(64)
+  generatedAt            DateTime @db.Timestamptz(3)
+  createdAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, version])
+  @@unique([workspaceId, diagnosticHash])
+  @@index([workspaceId, sessionId, generatedAt(sort: Desc)])
+  @@map("sync_diagnostics")
+}
+
+model V2SyncDiagnosticHead {
+  id             String   @id @db.VarChar(128)
+  workspaceId    String   @db.VarChar(128)
+  sessionId      String   @db.VarChar(128)
+  version        Int
+  diagnosticHash String   @db.Char(64)
+  status         String   @db.VarChar(24)
+  manualRequired Boolean
+  createdAt      DateTime @db.Timestamptz(3)
+  updatedAt      DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([sessionId, workspaceId])
+  @@index([workspaceId, status])
+  @@map("sync_diagnostic_heads")
 }

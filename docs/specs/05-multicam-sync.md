@@ -439,3 +439,142 @@ cresce estritamente por sessão e só o mais alto pode liquidar.
 A migração nunca foi aplicada contra um PostgreSQL: não há instância nesta
 máquina. `btree_gist`, as constraints `EXCLUDE` e o E2E de browser são medidos
 apenas no CI.
+
+## 28. Estado de implementação — Wave 19 (F4.009–F4.011)
+
+Implementado localmente em 2026-09-04. Deploy e aceite pendentes.
+
+### 28.1 O que foi construído
+
+| Seção da spec | Módulo | Evidência |
+|---|---|---|
+| §14 Professor + tela, §15 demais cenários | `src/v2/domain/capture-protocol-catalog.ts` | T-FR-147, 12 casos |
+| Protocolo versionado e endereçado por conteúdo | `src/v2/domain/capture-protocol.ts` | T-FR-147 |
+| Conformidade derivada da sessão | `src/v2/domain/capture-protocol-evaluation.ts` | T-FR-147 |
+| §16 Apollo Sync Marker | `src/v2/domain/sync-marker.ts` | T-FR-148, 14 casos |
+| Marcador como mídia verificável | `src/v2/infrastructure/media/ffmpeg-sync-marker-renderer.ts` | 3 casos com ffprobe |
+| Detectores independentes e fusão | `src/v2/domain/sync-marker-detection.ts` | T-FR-148 |
+| Detecção sobre mídia real | `src/v2/infrastructure/media/ffmpeg-marker-detectors.ts` | 9 fixtures geradas |
+| §18 SyncDiagnostic | `src/v2/domain/sync-diagnostic.ts` | T-FR-149, 13 casos |
+| §17 Contrato de UX de sync manual | `src/v2/domain/sync-diagnostic-anchors.ts` + `/sync-diagnostic` | E2E de jornada |
+
+Persistência em sete tabelas; API `/v1` com catorze capabilities e dez rotas;
+duas páginas operáveis (`/capture-protocols` antes de gravar, `/sync-diagnostic`
+depois).
+
+### 28.2 Decisões que a spec não previa
+
+**Exigência obrigatória precisa nomear o que se perde.** A spec listava
+requisitos; o construtor recusa um item `required` que não nomeie nenhuma
+capacidade de sincronização perdida sem ele. Um requisito que não custa nada
+quando pulado não é obrigatório — é preferência com o rótulo errado, e um
+operador atrasado acerta ao pular.
+
+**Concordância entre canais não identifica o marcador.** Ver
+[ADR-151](../adr/ADR-151-marker-identity-requires-the-code.md). Todo marcador
+de uma sessão alterna igual e varre o mesmo chirp; só o código visual carrega
+identidade.
+
+**Cobertura não medida é `null`, nunca zero.** Zero afirma "nada desta faixa é
+aproveitável" sobre uma medição que ninguém fez, e o bloqueio de corte
+automático se apoia nesse número. `null` não sustenta a nota máxima e também não
+é `partial`: cai em `synced-medium`, que é exatamente "editável, convém
+conferir".
+
+**Avaliação e diagnóstico nomeiam a versão da sessão.** Ambos são derivações de
+uma CaptureSession, e a Wave 18 já decidiu que derivação nomeia versão+hash.
+Sem isso, uma faixa adicionada um segundo antes muda silenciosamente a resposta
+sobre a qual o operador está prestes a agir.
+
+**A chave de idempotência do marcador é ligada à credencial inteira.** Gerar
+marcador não tem chave natural: repetir renderiza um segundo clipe e queima uma
+segunda sequência, e depois "qual marcador a câmera viu" passa a ter duas
+respostas. O id do marcador é derivado de workspace, cliente, credencial, tipo
+de autenticação e usuário delegado — duas credenciais do mesmo cliente são dois
+chamadores.
+
+**O arquivo procurado vem da posição do marcador — pelo ordinal, não pelo
+`splitReason`.** Um marcador emitido após reinício está no arquivo de reinício e
+em nenhum outro. Procurar no primeiro reportaria ausência do que foi gravado;
+procurar em todos deixaria um marcador de início ser creditado a um reinício.
+
+O sinal certo é o ordinal. A Wave 18 recarimba **a primeira** parte como
+`recorder-restart` no instante em que uma segunda chega — de propósito, porque
+uma primeira parte que continuasse dizendo `single-file` estaria mentindo. Ou
+seja: o `splitReason` diz que a faixa está partida, nunca qual arquivo veio
+depois da quebra. Ler o campo como se dissesse a segunda coisa fazia todo
+marcador de reinício ser procurado no arquivo anterior ao reinício, onde ele
+nunca poderia estar.
+
+**"Cada câmera" quer dizer cada uma.** A checagem
+`track-carries-sync-audio` aceitava uma faixa do papel com áudio utilizável e
+declarava o requisito cumprido. O requisito diz "cada câmera grava o próprio
+áudio de referência", e uma câmera que jogou o áudio fora não pode ser alinhada
+por impressão digital, independentemente do que a câmera ao lado fez. A leitura
+permissiva reportava `audio-fingerprint` intacta numa sessão que já a tinha
+perdido em um gravador — o teto mentindo na direção mais cara.
+
+**Mídia materializada é devolvida no `finally`.** O resolvedor chamava
+`materialize` e nunca `cleanup`. No driver S3 isso baixa a gravação inteira para
+um diretório por operação, então cada detecção deixava uma cópia completa em
+disco — uma varredura de seis faixas vaza seis gravações por passada. O driver
+local aponta para a raiz de artefatos e não copia nada, que é exatamente por que
+o esquecimento era invisível em desenvolvimento. `resolve` agora devolve
+`{ path, release }` e todo chamador libera no `finally`.
+
+**Ticks são serializados antes de entrar no hash — e antes de entrar no banco.** Buracos de cobertura são
+intervalos de tick, e tick é `bigint`; o hasher canônico recusa `bigint` de
+propósito, porque não existe uma renderização óbvia. O resultado é que um
+diagnóstico **com** buracos não podia sequer ser construído — exatamente a
+sessão que vale a pena diagnosticar. Todo teste anterior passava `gaps: []`, e
+por isso nada pegou. Serializados como a Wave 18 já serializa qualquer tick que
+entra em hash, e o teste de regressão confirma que dois buracos diferentes
+continuam produzindo digests diferentes.
+
+O mesmo defeito existia uma camada abaixo: o repositório escrevia
+`tracksJson` com `JSON.stringify`, que recusa `bigint` do mesmo jeito. Agora usa
+o codec com tag `{"$tick": "…"}` que a Wave 18 já tinha para exatamente isso, e
+o teste verifica o que importa — não que os bytes voltem, mas que o agregado
+reconstruído a partir deles ainda confira contra o hash guardado ao lado.
+
+### 28.3 O que continua aberto
+
+- O canal de áudio não carrega identidade. Enquanto `DEFAULT_MARKER_AUDIO` for
+  fixo, o teto de robustez do marcador é o teto de legibilidade do código.
+- O código só é lido em escala nativa (recorte central de `codeSizePx`). Filmado
+  maior ou menor, o flash aparece e o código some.
+- A varredura de detecção é retomável e observável, mas **não é fenced**. O
+  progresso é a própria tabela de detecções, então uma passada que morre
+  recomeça exatamente onde parou; dois trabalhadores na mesma sessão duplicam
+  decodificação e convergem em linhas idênticas, porque cada par é chaveado por
+  marcador e faixa. Isso custa CPU, não correção — diferente da run de
+  sincronização da Wave 18, onde liquidar um resultado obsoleto atribuiria um
+  mapa à versão errada e por isso exige token de fencing.
+- `spoken-code` existe como tipo e carrega um piso de erro de 120 ms; nenhum
+  reconhecedor de fala foi escrito, e a spec é explícita em não prometer
+  precisão de quadro para ele.
+
+### 28.4 Não medido
+
+O round trip contra PostgreSQL e a jornada de navegador não foram executados
+nesta máquina: não há runtime de contêiner aqui. Os testes existem, estão
+ligados ao job de CI que tem banco e build de produção, e são medidos lá — não
+aqui.
+
+Dois erros de método registrados porque a forma se repete.
+
+O primeiro: os módulos de mídia da Wave 19 resolviam `ffprobe` pelo nome nu.
+`ffmpeg-static` empacota só o ffmpeg; o ffprobe existe no meu PATH e não no
+runner. O repositório já depende de `ffprobe-static` e todo outro módulo de
+mídia resolve por ele — eu adotei a conveniência da minha máquina em vez do
+padrão que já existia, e o suite passava aqui e falhava em qualquer outro
+lugar. Os testes também passavam `ffprobePath` explícito, o que forçava o valor
+quebrado; agora deixam o módulo resolver, como a produção faz.
+
+O segundo: dois suites de mídia estavam
+registrados no `package.json` sob `tsx`, que transpila os módulos `.ts` para
+CJS e torna os exports nomeados invisíveis ao importador ESM. Toda invocação
+morria em `does not provide an export named FfmpegSyncMarkerRenderer`. Eu vinha
+rodando os arquivos direto com `node` e lendo isso como "o suite passa" —
+verificando o arquivo, não o comando. Ambos rodam com `node` agora e estão no
+CI.
