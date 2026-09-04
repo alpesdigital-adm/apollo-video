@@ -5,6 +5,30 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.projects.capture-sessions.create': {
+    mode: 'idempotent-create',
+    evidence: 'Wave18 opens the genesis version of a new chain; there is no earlier state to be stale against, and a replayed key converges on the identical session hash',
+  },
+  'apollo.projects.capture-sessions.tracks.add': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave18 requires the exact version id and its hash, and advances the head only where it still names that version; a version number alone could be reused after a failed write, the pair cannot',
+  },
+  'apollo.projects.capture-sessions.track-parts.add': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave18 requires the exact version id and its hash before appending a further probed file, so a part cannot be added to a session whose tracks have since changed',
+  },
+  'apollo.projects.capture-sessions.reference-track.change': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave18 re-anchors every other track and invalidates all derivations, so it requires the exact base version and hash it was decided against',
+  },
+  'apollo.projects.capture-sessions.sync.request': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave18 binds the durable sync run to the exact session version and hash, so a result can never be attributed to a session that changed after the run was requested',
+  },
+  'apollo.projects.editorial-syntheses.create': {
+    mode: 'idempotent-create',
+    evidence: 'Wave18 persists one immutable content-addressed cut; a replayed key converges on the identical synthesis hash and a different body under the same id is refused',
+  },
   'apollo.director-tools.execute': {
     mode: 'revision-bound-action',
     evidence: 'Wave7 requires baseRevision for the durable Director run budget and atomically reserves before any paid application handler',
@@ -678,12 +702,12 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 65,
+    'idempotent-create': 67,
     'natural-idempotent-create': 7,
     'state-machine-action': 16,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 16,
+    'base-version-bound-action': 20,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
