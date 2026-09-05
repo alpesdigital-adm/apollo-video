@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import type {
   CaptureSession,
@@ -124,6 +126,28 @@ export interface ReactPlaybackPlanResult {
 
 function versionRef(sessionId: string, reactionTrackId: string, version: number): string {
   return `${sessionId}:playback:${reactionTrackId}:v${version}`
+}
+
+/**
+ * A map id built from the ids above it, guaranteed to fit the domain's own
+ * identifier bound.
+ *
+ * `createPlaybackMap` refuses an id longer than 128 characters, and a session
+ * id may be 128 on its own. `<session>:<track>:playback-<n>` is then refused as
+ * "not a canonical identifier" — a build that works for every id anyone tested
+ * with and fails for a long one in production, with a message about syntax
+ * rather than about length. Truncating alone would be worse: two long sessions
+ * sharing a prefix would silently become one map, so an over-long id keeps its
+ * readable head and ends in a digest of the whole thing.
+ *
+ * Same shape as `childRowId` (infrastructure/prisma), deliberately not imported
+ * from it: that one exists to fit a column and may change with the column.
+ */
+function playbackMapId(sessionId: string, reactionTrackId: string, ordinal: number): string {
+  const id = `${sessionId}:${reactionTrackId}:playback-${ordinal}`
+  if (id.length <= 128) return id
+  const digest = createHash('sha256').update(id).digest('hex').slice(0, 16)
+  return `${id.slice(0, 128 - digest.length - 1)}-${digest}`
 }
 
 /**
@@ -357,7 +381,7 @@ export function buildReactPlaybackMapService(dependencies: {
       // The map keeps its identity across versions; a changed reference starts a
       // new one, because the ticks it maps onto are a different recording.
       mapId: referenceChanged || previous === null
-        ? `${input.sessionId}:${reaction.trackId}:playback-${(previous?.version ?? 0) + 1}`
+        ? playbackMapId(input.sessionId, reaction.trackId, (previous?.version ?? 0) + 1)
         : previous.mapId,
       session,
       reactionTrack: reaction,
