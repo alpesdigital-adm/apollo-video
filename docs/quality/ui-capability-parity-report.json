@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 128,
-    "capabilities": 116,
-    "endpoints": 116,
-    "registeredCapabilities": 340,
-    "operableCapabilities": 340,
-    "publicContractCapabilities": 340,
+    "uiActions": 135,
+    "capabilities": 123,
+    "endpoints": 123,
+    "registeredCapabilities": 347,
+    "operableCapabilities": 347,
+    "publicContractCapabilities": 347,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -672,6 +672,170 @@
       "endpoint": "POST /v1/session/oidc/callback",
       "applicationServices": [
         "signInWithOidcService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:157",
+      "capabilityId": "apollo.multicam-longform-gate.criteria.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/multicam-longform-gate/criteria",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGateCriteria",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:169",
+      "capabilityId": "apollo.projects.multicam-longform-gate.artifacts.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:178",
+      "capabilityId": "apollo.projects.multicam-longform-gate.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:187",
+      "capabilityId": "apollo.projects.multicam-longform-gate.outstanding.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/outstanding",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:204",
+      "capabilityId": "apollo.projects.multicam-longform-gate.latest.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:239",
+      "capabilityId": "apollo.projects.multicam-longform-gate.evaluate",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/multicam-longform-gate/evaluations",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:281",
+      "capabilityId": "apollo.projects.multicam-longform-gate.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "evaluateMulticamLongformGateService",
+        "explainMulticamLongformGateService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamLongformGatesService",
+        "readLatestMulticamLongformGateService",
+        "readMulticamLongformGateService",
+        "requireScope"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -6239,6 +6403,83 @@
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors",
       "inputSchemaRef": "apollo://schemas/add-react-playback-anchor-request/v1",
       "outputSchemaRef": "apollo://schemas/react-playback-map-anchored/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.evaluate",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/multicam-longform-gate/evaluations",
+      "inputSchemaRef": "apollo://schemas/evaluate-multicam-longform-gate-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-evaluated/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.latest.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.outstanding.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/outstanding",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-outstanding/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.multicam-longform-gate.artifacts.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-artifact-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.multicam-longform-gate.criteria.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/multicam-longform-gate/criteria",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-criteria/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"
