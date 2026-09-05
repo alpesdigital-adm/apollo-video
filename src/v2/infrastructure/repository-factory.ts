@@ -252,6 +252,18 @@ import {
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
+import { FfmpegPlaybackFingerprinter } from './media/ffmpeg-playback-fingerprint.ts'
+import {
+  buildReactPlaybackMapService,
+  compileReactPlaybackPlanService,
+  editReactPlaybackAnchorService,
+  listReactPlaybackMapVersionsService,
+  listReferenceDependentsService,
+  readReactPlaybackMapService,
+  type PlaybackMediaPort,
+  type PlaybackObservationSource,
+} from '../application/react-playback-map.ts'
+import { compileSynthesisRenderPlanService } from '../application/compile-synthesis-to-directed-plan.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2332,4 +2344,56 @@ export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.e
  */
 export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
   return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
+}
+
+/**
+ * The react playback map, assembled from the adapters that already exist
+ * (F4.015).
+ *
+ * Two of the three dependencies were built in earlier slices and had no caller:
+ * `CaptureMediaResolver` verifies a part's bytes against the artifact's
+ * recorded hash before handing over a path, and `FfmpegPlaybackFingerprinter`
+ * reports where each window of the reaction matched inside the reference. This
+ * is where they meet the services — and where the compiler proves the adapters
+ * satisfy the ports, which no test with a fake can.
+ *
+ * `workRoot` reads `APOLLO_V2_RENDER_WORK_ROOT`, the same variable the marker
+ * adapter reads (`marker-media-adapter.ts:130`), so one deployment setting
+ * governs the scratch directories FFmpeg writes into. Absent, the fingerprinter
+ * falls back to its own `mkdtemp` — which is correct on a developer machine and
+ * is why the variable is optional here rather than a refusal.
+ */
+export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = process.env) {
+  const repository = createPlaybackMapRepository()
+  const sessions = createCaptureSessionRepository()
+  const snapshots = createRenderablePlanSnapshotRepository()
+  const clock = () => new Date()
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
+  const observations: PlaybackObservationSource = new FfmpegPlaybackFingerprinter(
+    workRoot ? { workRoot } : {},
+  )
+  return Object.freeze({
+    build: buildReactPlaybackMapService({ repository, sessions, media, observations, clock }),
+    anchor: editReactPlaybackAnchorService({ repository, snapshots, clock }),
+    read: readReactPlaybackMapService({ repository }),
+    listVersions: listReactPlaybackMapVersionsService({ repository }),
+    listReferenceDependents: listReferenceDependentsService({ repository }),
+    compile: compileReactPlaybackPlanService({ repository, sessions, snapshots, clock }),
+  })
+}
+
+/**
+ * The synthesis-to-render bridge, assembled (F4.016 condition 6).
+ *
+ * The synthesis is read from its own repository and the plan is kept beside it;
+ * the caller brings ids and the measured identity of the sources, and nothing
+ * else.
+ */
+export function createSynthesisRenderPlanService() {
+  return compileSynthesisRenderPlanService({
+    syntheses: createEditorialSynthesisRepository(),
+    snapshots: createRenderablePlanSnapshotRepository(),
+    clock: () => new Date(),
+  })
 }
