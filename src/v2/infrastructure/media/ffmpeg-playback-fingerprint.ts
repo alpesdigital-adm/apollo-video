@@ -143,7 +143,14 @@ function windowEnergy(samples: Float64Array, offset: number, length: number): nu
   return Math.sqrt(energy)
 }
 
-function scoreAt(
+/**
+ * Normalised correlation of one needle against one offset of the haystack.
+ *
+ * Kept as the definition the transform below has to agree with: it is what the
+ * unit suite compares `createCorrelationPlan` against, and a direct loop is the
+ * only version of this whose correctness is obvious by reading it.
+ */
+export function scoreAt(
   haystack: Float64Array,
   needle: Float64Array,
   offset: number,
@@ -158,6 +165,161 @@ function scoreAt(
   }
   const denominator = Math.sqrt(energy) * needleEnergy
   return denominator === 0 ? 0 : dot / denominator
+}
+
+function nextPowerOfTwo(value: number): number {
+  let size = 1
+  while (size < value) size *= 2
+  return size
+}
+
+/**
+ * A radix-2 transform whose twiddle factors are computed by direct
+ * trigonometry rather than by the usual recurrence.
+ *
+ * The recurrence drifts across a transform of a million points, and being exact
+ * at every lag is the entire reason this exists. The table costs one pass of
+ * `cos`/`sin` per plan and is reused by all three transforms of every window.
+ */
+interface FourierPlan {
+  readonly size: number
+  readonly cos: Float64Array
+  readonly sin: Float64Array
+}
+
+function createFourierPlan(size: number): FourierPlan {
+  const cos = new Float64Array(size / 2)
+  const sin = new Float64Array(size / 2)
+  for (let index = 0; index < size / 2; index += 1) {
+    const angle = (-2 * Math.PI * index) / size
+    cos[index] = Math.cos(angle)
+    sin[index] = Math.sin(angle)
+  }
+  return { size, cos, sin }
+}
+
+function transform(plan: FourierPlan, re: Float64Array, im: Float64Array, inverse: boolean): void {
+  const n = plan.size
+  for (let index = 1, target = 0; index < n; index += 1) {
+    let bit = n >> 1
+    for (; target & bit; bit >>= 1) target ^= bit
+    target ^= bit
+    if (index < target) {
+      const swapRe = re[index]!
+      re[index] = re[target]!
+      re[target] = swapRe
+      const swapIm = im[index]!
+      im[index] = im[target]!
+      im[target] = swapIm
+    }
+  }
+  for (let length = 2; length <= n; length <<= 1) {
+    const half = length >> 1
+    const step = n / length
+    for (let start = 0; start < n; start += length) {
+      for (let k = 0; k < half; k += 1) {
+        const twiddle = k * step
+        const wRe = plan.cos[twiddle]!
+        const wIm = inverse ? -plan.sin[twiddle]! : plan.sin[twiddle]!
+        const evenRe = re[start + k]!
+        const evenIm = im[start + k]!
+        const oddRe = re[start + k + half]!
+        const oddIm = im[start + k + half]!
+        const productRe = oddRe * wRe - oddIm * wIm
+        const productIm = oddRe * wIm + oddIm * wRe
+        re[start + k] = evenRe + productRe
+        im[start + k] = evenIm + productIm
+        re[start + k + half] = evenRe - productRe
+        im[start + k + half] = evenIm - productIm
+      }
+    }
+  }
+  if (inverse) {
+    for (let index = 0; index < n; index += 1) {
+      re[index] = re[index]! / n
+      im[index] = im[index]! / n
+    }
+  }
+}
+
+/**
+ * Every offset scored, not a grid of them.
+ *
+ * What this replaces sampled the offsets on a coarse stride of an eighth of the
+ * needle and refined only around the winner. That is sound when the correlation
+ * peak is wider than the stride, and the normalised correlation of audio
+ * against itself has a main lobe about *one sample* wide — so the coarse pass
+ * could only find the peak when the true lag happened to be a multiple of the
+ * stride. Both F4.015 fixtures were built from integer-second offsets, which are
+ * exactly such multiples, so the search looked correct while it would have
+ * missed almost every real lag: measured here, an off-grid lag of 1.52 s over a
+ * 40 s reference came back as 7.785 s with a peak ratio of 14 behind it.
+ *
+ * The transform scores every offset exactly and costs less than the grid did:
+ * the reference is transformed once per call, and each window is two transforms
+ * instead of one multiply-accumulate per needle sample per grid point.
+ */
+export interface CorrelationPlan {
+  /** The highest offset the needle still fits at. */
+  readonly available: number
+  /**
+   * Scores for every offset in `[0, available]`. The array is reused between
+   * calls: read it, or copy it, before correlating the next window.
+   */
+  correlate(needle: Float64Array, needleEnergy: number): Float64Array
+}
+
+export function createCorrelationPlan(
+  haystack: Float64Array,
+  needleLength: number,
+): CorrelationPlan {
+  const available = haystack.length - needleLength
+  const size = nextPowerOfTwo(haystack.length + needleLength)
+  const plan = createFourierPlan(size)
+  const haystackRe = new Float64Array(size)
+  const haystackIm = new Float64Array(size)
+  haystackRe.set(haystack)
+  transform(plan, haystackRe, haystackIm, false)
+
+  // Sliding energy of the haystack, so the normalisation is exactly the one
+  // `scoreAt` computes rather than an approximation of it.
+  const energyPrefix = new Float64Array(haystack.length + 1)
+  for (let index = 0; index < haystack.length; index += 1) {
+    energyPrefix[index + 1] = energyPrefix[index]! + haystack[index]! * haystack[index]!
+  }
+
+  const workRe = new Float64Array(size)
+  const workIm = new Float64Array(size)
+  const scores = new Float64Array(Math.max(0, available + 1))
+
+  return {
+    available,
+    correlate(needle: Float64Array, needleEnergy: number): Float64Array {
+      workRe.fill(0)
+      workIm.fill(0)
+      // Reversed, because the convolution a transform gives is the
+      // cross-correlation once one of the two sequences is reversed.
+      for (let index = 0; index < needle.length; index += 1) {
+        workRe[needle.length - 1 - index] = needle[index]!
+      }
+      transform(plan, workRe, workIm, false)
+      for (let index = 0; index < size; index += 1) {
+        const re = haystackRe[index]! * workRe[index]! - haystackIm[index]! * workIm[index]!
+        const im = haystackRe[index]! * workIm[index]! + haystackIm[index]! * workRe[index]!
+        workRe[index] = re
+        workIm[index] = im
+      }
+      transform(plan, workRe, workIm, true)
+      for (let offset = 0; offset <= available; offset += 1) {
+        const energy = energyPrefix[offset + needle.length]! - energyPrefix[offset]!
+        const denominator = Math.sqrt(energy > 0 ? energy : 0) * needleEnergy
+        scores[offset] = denominator === 0
+          ? 0
+          : workRe[offset + needle.length - 1]! / denominator
+      }
+      return scores
+    },
+  }
 }
 
 /**
@@ -214,6 +376,18 @@ export function absenceConfidence(peak: number, minimumPeak: number): number {
   return Math.min(MAXIMUM_ABSENCE_CONFIDENCE, 1 - peak / minimumPeak)
 }
 
+/**
+ * How the lag is looked for.
+ *
+ * `grid` is the original search: the offsets are sampled on a stride of an
+ * eighth of the needle and only the winner is refined. `exhaustive` scores every
+ * offset with a transform. They are not two speeds of the same answer — see
+ * `SEARCH_MODES` below — and the default is `grid` only because F4.015's
+ * published measurements were taken with it.
+ */
+export const SEARCH_MODES = Object.freeze(['grid', 'exhaustive'] as const)
+export type SearchMode = (typeof SEARCH_MODES)[number]
+
 export interface CorrelateAudioWindowsInput {
   readonly reference: Samples
   readonly candidate: Samples
@@ -222,6 +396,33 @@ export interface CorrelateAudioWindowsInput {
   readonly hopMs?: number
   readonly energyFloor?: number
   readonly correlationRate?: number
+  /**
+   * Defaults to `grid`, which is what F4.015 measured and published.
+   *
+   * **The grid search can only find a lag that is a multiple of its stride.**
+   * The stride is an eighth of the needle, and the normalised correlation of
+   * audio against itself has a main lobe about one sample wide, so an off-grid
+   * peak is not merely located imprecisely — it is not seen at all, and the
+   * winner is then whichever unrelated offset happened to sit on the grid.
+   * Measured on the F4.012 fixture: a true lag of 1.52 s over a 40 s reference
+   * came back as 7.785 s, with a peak ratio of 14 standing behind it.
+   *
+   * Both F4.015 fixtures are built from integer-second offsets, which are
+   * exactly such multiples, which is why the grid search looks correct there and
+   * has never been exercised off-grid. Anything measuring a lag that was not
+   * chosen in advance — which is every real recording — must ask for
+   * `exhaustive`.
+   *
+   * Flipping the default is not this slice's call to make: an exhaustive search
+   * finds stronger runner-ups, which correctly pushes windows that straddle a
+   * boundary below the admission ratio, which shortens each locked run by half a
+   * window, which makes `playback-map.ts` read one replay in the F4.015 fixture
+   * as a rewind (its "already played" test asks whether one earlier interval
+   * contains the range, and the range now spans two of them across a
+   * half-window hole). That chain is worth following, and it belongs to whoever
+   * owns F4.015 rather than to a caller passing an option.
+   */
+  readonly search?: SearchMode
 }
 
 /**
@@ -260,6 +461,13 @@ export function correlateAudioWindows(
   const hopSamples = Math.max(1, Math.round((hopMs / 1_000) * sampleRate))
   const smallWindow = Math.max(1, Math.floor(windowSamples / factor))
   const stride = Math.max(1, Math.floor(smallWindow / 8))
+  const search = input.search ?? 'grid'
+  // One plan for the whole call: the reference is transformed once and every
+  // window reuses it, which is what makes scoring every offset cheaper than
+  // scoring a grid of them.
+  const plan = search === 'exhaustive' && smallReference.length >= smallWindow
+    ? createCorrelationPlan(smallReference, smallWindow)
+    : null
 
   const results: Readonly<AudioWindowCorrelation>[] = []
   // Whole windows only. A partial window at the tail would be measured against a
@@ -306,33 +514,58 @@ export function correlateAudioWindows(
       continue
     }
 
-    // Coarse pass, then a fine pass around the winner. Identical in shape to
-    // `correlate` (ffmpeg-marker-detectors.ts:353-379).
-    const coarse: { offset: number; score: number }[] = []
-    for (let offset = 0; offset <= available; offset += stride) {
-      coarse.push({ offset, score: scoreAt(smallReference, needle, offset, needleEnergy) })
-    }
-    coarse.sort((left, right) => right.score - left.score)
-    let best = coarse[0]!
-    const from = Math.max(0, best.offset - stride)
-    const to = Math.min(available, best.offset + stride)
-    for (let offset = from; offset <= to; offset += 1) {
-      const value = scoreAt(smallReference, needle, offset, needleEnergy)
-      if (value > best.score) best = { offset, score: value }
-    }
     // Outside a guard band of one window: nearer offsets are the same match seen
     // from one sample over, and counting them as rivals would make every clean
     // lock look like a coin toss.
     const guard = smallWindow
-    const rival = coarse.find((entry) => Math.abs(entry.offset - best.offset) > guard)
-    const peak = Math.max(0, best.score)
-    const secondPeak = Math.max(0, rival?.score ?? 0)
+    let bestOffset = 0
+    let bestScore = Number.NEGATIVE_INFINITY
+    let secondPeak = 0
+    if (plan) {
+      const scores = plan.correlate(needle, needleEnergy)
+      for (let offset = 0; offset <= available; offset += 1) {
+        if (scores[offset]! > bestScore) {
+          bestScore = scores[offset]!
+          bestOffset = offset
+        }
+      }
+      // The runner-up here is the best of *every* remaining offset rather than
+      // the best of a grid, which can only lower a reported ratio: a rival
+      // sitting between two grid points is invisible to the grid, and an
+      // invisible rival makes an ambiguous window look decisive.
+      for (let offset = 0; offset <= available; offset += 1) {
+        if (Math.abs(offset - bestOffset) > guard && scores[offset]! > secondPeak) {
+          secondPeak = scores[offset]!
+        }
+      }
+    } else {
+      // Coarse pass, then a fine pass around the winner. Identical in shape to
+      // `correlate` (ffmpeg-marker-detectors.ts:353-379), and subject to the
+      // stride limitation documented on `CorrelateAudioWindowsInput.search`.
+      const coarse: { offset: number; score: number }[] = []
+      for (let offset = 0; offset <= available; offset += stride) {
+        coarse.push({ offset, score: scoreAt(smallReference, needle, offset, needleEnergy) })
+      }
+      coarse.sort((left, right) => right.score - left.score)
+      let best = coarse[0]!
+      const from = Math.max(0, best.offset - stride)
+      const to = Math.min(available, best.offset + stride)
+      for (let offset = from; offset <= to; offset += 1) {
+        const value = scoreAt(smallReference, needle, offset, needleEnergy)
+        if (value > best.score) best = { offset, score: value }
+      }
+      const rival = coarse.find((entry) => Math.abs(entry.offset - best.offset) > guard)
+      bestOffset = best.offset
+      bestScore = best.score
+      secondPeak = Math.max(0, rival?.score ?? 0)
+    }
+    const peak = Math.max(0, bestScore)
     const peakRatio = secondPeak > 0
       ? Math.min(MAXIMUM_REPORTABLE_PEAK_RATIO, peak / secondPeak)
       : peak > 0 ? MAXIMUM_REPORTABLE_PEAK_RATIO : 0
     results.push(Object.freeze({
       startSample: start,
-      lagSamples: best.offset * factor,
+      lagSamples: bestOffset * factor,
       peak,
       secondPeak,
       peakRatio,

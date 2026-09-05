@@ -333,6 +333,10 @@ export class FfmpegAudioSyncSignalSource {
       windowMs: this.windowMs,
       hopMs,
       correlationRate: this.sampleRate,
+      // Every offset, not a grid of them. Two cameras start when two people
+      // press record; the lag between them is not a multiple of anything, and a
+      // grid search cannot see a peak that falls between its samples.
+      search: 'exhaustive',
     })
 
     // The same admission rule the react detector applies, stated once: a window
@@ -372,32 +376,58 @@ export class FfmpegAudioSyncSignalSource {
     }
     if (agreeing.length < AUDIO_SYNC_SIGNAL_DEFAULTS.minimumAgreeingWindows) return null
 
-    const residualTicks = agreeing.reduce((worst, entry) => {
-      const deviation = entry.offset - chosen
+    /**
+     * Everything the observation publishes is counted in session ticks, and the
+     * measurement above is not.
+     *
+     * The cascade documents an observation's offset and anchors as being in the
+     * signal's own `timebase` (`sync-evidence.ts:218-242`) but measures
+     * `anchor.sessionTick` against `sessionBounds` without converting either
+     * (`anchorDistribution`), while `coverage` is documented as session ticks
+     * and compared the same way. Reported in samples, this signal's anchors all
+     * landed past the end of the session, `anchorThirdsOccupied` came back 0,
+     * and every measurement — however clean — was blocked from auto-apply by a
+     * distribution gate it had actually satisfied. Measured: three lags, all
+     * exact to the frame, all held at `review` by "anchors occupy 0 thirds".
+     *
+     * The cascade is Wave 18 authority and not this slice's to change, so the
+     * adapter speaks the unit the cascade actually compares in. Nothing is lost
+     * that survives the pipeline anyway: the piecewise map's offset is stored in
+     * session ticks whatever the signal reports.
+     */
+    const toSession = (tick: bigint, rounding: 'floor' | 'ceil' | 'nearest-half-even' = 'nearest-half-even') =>
+      convertTick({ tick, from: input.sampleTimebase, to: input.sessionTimebase, rounding })
+
+    const placed = agreeing.map((entry) => ({
+      correlation: entry.correlation,
+      sourceTick: toSession(candidateOrigin + BigInt(entry.correlation.startSample)),
+      sessionTick: toSession(referenceOrigin + BigInt(entry.correlation.lagSamples!)),
+    }))
+    const sessionOffsets = placed.map((entry) => entry.sessionTick - entry.sourceTick)
+    const offsetTicks = medianBigInt(sessionOffsets)
+    // Recomputed against the published anchors rather than carried over from
+    // the sample domain: a residual has to describe the numbers a reader can
+    // check, and rounding into session ticks is part of what they will see.
+    const residualTicks = sessionOffsets.reduce((worst, offset) => {
+      const deviation = offset - offsetTicks
       const magnitude = deviation < BigInt(0) ? -deviation : deviation
       return magnitude > worst ? magnitude : worst
     }, BigInt(0))
 
-    const published = spread(agreeing, AUDIO_SYNC_SIGNAL_DEFAULTS.maximumPublishedAnchors)
+    const published = spread(placed, AUDIO_SYNC_SIGNAL_DEFAULTS.maximumPublishedAnchors)
     const signalId = `audio-p${input.candidatePart.ordinal}-r${input.referencePart.ordinal}`
     const anchors: Readonly<SyncAnchorObservation>[] = published.map((entry, index) => Object.freeze({
       anchorId: `${signalId}-w${index}`,
-      sourceTick: candidateOrigin + BigInt(entry.correlation.startSample),
-      sessionTick: referenceOrigin + BigInt(entry.correlation.lagSamples!),
+      sourceTick: entry.sourceTick,
+      sessionTick: entry.sessionTick,
       evidenceRef: `${input.candidatePart.evidence.probeHash.slice(0, 16)}:${entry.correlation.startSample}`,
     }))
 
-    // Reported in session ticks while the offset and anchors above are in the
-    // signal's own timebase. That asymmetry is the cascade's
-    // (`sync-evidence.ts:218-242`; `coverageOf` converts nothing), and getting
-    // it wrong looks like a coverage shortfall rather than a unit error.
-    const sessionTicks = anchors.map((anchor) => anchor.sessionTick)
+    const sessionTicks = placed.map((entry) => entry.sessionTick)
     const supportStart = sessionTicks.reduce((least, value) => (value < least ? value : least))
-    const supportEnd = sessionTicks.reduce((most, value) => (value > most ? value : most)) + BigInt(windowSamples)
-    const coverage = createTickInterval(
-      convertTick({ tick: supportStart, from: input.sampleTimebase, to: input.sessionTimebase, rounding: 'floor' }),
-      convertTick({ tick: supportEnd, from: input.sampleTimebase, to: input.sessionTimebase, rounding: 'ceil' }),
-    )
+    const supportEnd = sessionTicks.reduce((most, value) => (value > most ? value : most)) +
+      toSession(BigInt(windowSamples), 'ceil')
+    const coverage = createTickInterval(supportStart, supportEnd)
 
     const bestPeak = median(agreeing.map((entry) => entry.correlation.peak))
     const secondBestPeak = median(agreeing.map((entry) => entry.correlation.secondPeak))
@@ -406,8 +436,8 @@ export class FfmpegAudioSyncSignalSource {
     return Object.freeze({
       signalId,
       method: 'audio-fingerprint' as const,
-      timebase: input.sampleTimebase,
-      offsetTicks: chosen,
+      timebase: input.sessionTimebase,
+      offsetTicks,
       // No `rate`: this measures where, not how fast. Reporting 1.0 would claim
       // the two clocks were measured and found identical.
       anchors: Object.freeze(anchors),
