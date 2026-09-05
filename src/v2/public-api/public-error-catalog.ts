@@ -111,6 +111,23 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     status: 422, category: 'policy', codes: ['PLAYBACK_MAP_UNRESOLVED'],
   },
   {
+    // Refusals of evidence and of shape, not of the request. The session is not
+    // a react session, or its track was recorded in more than one file, or the
+    // detector never found the reference inside the reaction — a hidden player,
+    // which ADR-135 answers with a person rather than a guess. Each is 422
+    // because retrying the same request cannot change any of them.
+    status: 422, category: 'policy', codes: [
+      'PLAYBACK_SESSION_NOT_REACT',
+      'PLAYBACK_TRACK_NOT_SINGLE_PART',
+      'PLAYBACK_EVIDENCE_INSUFFICIENT',
+    ],
+  },
+  {
+    // This one IS the caller's to fix: the session has more than one reactor and
+    // the request did not say which to map.
+    status: 422, category: 'validation', codes: ['PLAYBACK_REACTION_TRACK_AMBIGUOUS'],
+  },
+  {
     // Not a 404: the artifact exists. Not a stale version: the request is
     // current. The bytes behind it are no longer the bytes the session was
     // built from, and no retry of the same request can fix that.
@@ -123,6 +140,7 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'CAPTURE_SESSION_NOT_FOUND', 'CAPTURE_TRACK_NOT_FOUND',
       'CAPTURE_TRACK_PART_NOT_FOUND',
       'CAPTURE_SYNC_RUN_NOT_FOUND', 'EDITORIAL_SYNTHESIS_NOT_FOUND',
+      'PLAYBACK_MAP_NOT_FOUND',
       'MEDIA_UPLOAD_NOT_FOUND', 'MEDIA_DOWNLOAD_GRANT_NOT_FOUND',
       'MEDIA_ARTIFACT_NOT_FOUND', 'MEDIA_ARTIFACT_MANIFEST_NOT_FOUND',
       'MEDIA_TRANSCRIPT_NOT_FOUND', 'MATERIALIZATION_AUTHORIZATION_NOT_FOUND',
