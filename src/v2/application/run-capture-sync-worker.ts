@@ -3,11 +3,14 @@ import {
   createSourceClock,
   createSourceToSessionMapping,
   type ClockConfidence,
+  type SessionClock,
 } from '../domain/session-clock.ts'
 import {
+  convertTick,
   createTickInterval,
   rational,
   type Rational,
+  type Timebase,
   type TickInterval,
 } from '../domain/session-time.ts'
 import {
@@ -20,6 +23,8 @@ import {
   type SyncSignalObservation,
 } from '../domain/sync-evidence.ts'
 import type { CaptureSession, CaptureTrack } from '../domain/capture-session.ts'
+import { DomainError } from '../domain/errors.ts'
+import { deriveTrackCoverage } from './derive-track-coverage.ts'
 import type { CaptureSessionRepository } from './ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from './ports/capture-sync-run-repository.ts'
 
@@ -39,12 +44,25 @@ import type { CaptureSyncRunRepository } from './ports/capture-sync-run-reposito
  * whole cascade be tested against known inputs without touching a codec.
  */
 
-/** Where a track's candidate sync signals come from. Never a paid provider. */
+/**
+ * Where a track's candidate sync signals come from. Never a paid provider.
+ *
+ * The session clock the worker resolved is handed in rather than re-derived by
+ * the adapter. A signal's `coverage` is counted in session ticks while its
+ * offset and anchors are counted in the signal's own timebase
+ * (`sync-evidence.ts:218-242`), so an adapter that guessed the session clock
+ * would emit coverage against a different clock than the cascade measures it
+ * with — and the failure would look like a coverage shortfall, not a
+ * disagreement about units.
+ */
 export interface SyncSignalSource {
   observe(input: {
     session: Readonly<CaptureSession>
     track: Readonly<CaptureTrack>
     referenceTrack: Readonly<CaptureTrack>
+    sessionTimebase: Readonly<Timebase>
+    sessionFrameRate: Rational
+    sessionBounds: Readonly<TickInterval>
   }): Promise<readonly Readonly<SyncSignalObservation>[]>
 }
 
@@ -55,10 +73,87 @@ export interface CaptureSyncWorkerResult {
   readonly resolved: number
   readonly review: number
   readonly insufficient: number
+  /** Tracks whose coverage was derived and persisted this pass. */
+  readonly coverageDerived: number
+  /**
+   * Tracks whose coverage the domain refused — overlapping parts with no
+   * operator decision, in practice. Counted rather than thrown: one track
+   * awaiting a human must not stop the other five from being synchronized.
+   */
+  readonly coverageRefused: number
   readonly abandonedBecause?: 'lease-lost' | 'superseded' | 'session-moved'
 }
 
 const DEFAULT_LEASE_MS = 60_000
+
+/** Where the session's frame rate came from. Ordered strongest first. */
+export const SESSION_FRAME_RATE_SOURCES = Object.freeze([
+  'persisted-session-clock',
+  'reference-track-timebase',
+  'reference-part-timebase',
+] as const)
+export type SessionFrameRateSource = (typeof SESSION_FRAME_RATE_SOURCES)[number]
+
+/**
+ * The window in which the inverse of a timebase is a shutter rather than a
+ * clock.
+ *
+ * A recorder writes video in one of two kinds of timebase: the frame duration
+ * itself (1/25, 1001/30000) or a media clock the frames are counted against
+ * (600, 1000, 48000, 90000 ticks per second). Inverting the second kind
+ * produces "90000 fps", which is not a slow answer — it is a wrong one, and it
+ * would be carried into every residual threshold in the cascade. Three hundred
+ * is above the fastest camera anyone points at a talking head and below every
+ * media clock in use.
+ */
+export const MINIMUM_PLAUSIBLE_FRAME_RATE = 1
+export const MAXIMUM_PLAUSIBLE_FRAME_RATE = 300
+
+function frameRateFromTimebase(timebase: Readonly<Timebase>): Rational | null {
+  const candidate = rational(timebase.secondsPerTick.den, timebase.secondsPerTick.num)
+  const asNumber = Number(candidate.num) / Number(candidate.den)
+  if (!Number.isFinite(asNumber)) return null
+  if (asNumber < MINIMUM_PLAUSIBLE_FRAME_RATE || asNumber > MAXIMUM_PLAUSIBLE_FRAME_RATE) return null
+  return candidate
+}
+
+/**
+ * The session's frame rate, or nothing.
+ *
+ * Every threshold the cascade compares against is stated in frames — residual
+ * limits, contradiction bands, the two-frame ceiling on a high-confidence map —
+ * so the frame rate is not a display detail. Until this slice the worker
+ * defaulted to 30000/1001 when the session clock had never been persisted,
+ * which is always: nothing writes `capture_session_clocks` in production
+ * (map §19.3). Every 25 fps session was therefore measured against 29.97, and a
+ * residual of one 25 fps frame read as 1.2 frames — quietly stricter, and
+ * quietly wrong.
+ *
+ * Returning `null` is the honest third answer. A caller that cannot name the
+ * frame rate has no business naming a residual in frames.
+ */
+export function resolveSessionFrameRate(input: {
+  clock: Readonly<SessionClock> | null
+  referenceTrack: Readonly<CaptureTrack>
+}): Readonly<{ frameRate: Rational; source: SessionFrameRateSource }> | null {
+  if (input.clock) {
+    return Object.freeze({ frameRate: input.clock.frameRate, source: 'persisted-session-clock' as const })
+  }
+  const fromTrack = frameRateFromTimebase(input.referenceTrack.timebase)
+  if (fromTrack) {
+    return Object.freeze({ frameRate: fromTrack, source: 'reference-track-timebase' as const })
+  }
+  // A recorder that restarted in a different timebase leaves the track carrying
+  // the first part's; the parts are asked in the recorder's own order so the
+  // answer is the earliest one that names a rate, not whichever sorted first.
+  for (const part of [...input.referenceTrack.parts].sort((left, right) => left.ordinal - right.ordinal)) {
+    const fromPart = frameRateFromTimebase(part.timebase)
+    if (fromPart) {
+      return Object.freeze({ frameRate: fromPart, source: 'reference-part-timebase' as const })
+    }
+  }
+  return null
+}
 
 /**
  * The hull of a track, in its own ticks.
@@ -162,6 +257,7 @@ export function runCaptureSyncWorker(dependencies: {
     if (!claim) {
       return Object.freeze({
         claimed: false, runId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
+        coverageDerived: 0, coverageRefused: 0,
       })
     }
 
@@ -176,6 +272,7 @@ export function runCaptureSyncWorker(dependencies: {
       })
       return Object.freeze({
         claimed: true, runId: run.id, settled: true, resolved: 0, review: 0, insufficient: 0,
+        coverageDerived: 0, coverageRefused: 0,
       })
     }
 
@@ -201,6 +298,7 @@ export function runCaptureSyncWorker(dependencies: {
       })
       return Object.freeze({
         claimed: true, runId: run.id, settled: true, resolved: 0, review: 0, insufficient: 0,
+        coverageDerived: 0, coverageRefused: 0,
         abandonedBecause: 'session-moved' as const,
       })
     }
@@ -213,13 +311,63 @@ export function runCaptureSyncWorker(dependencies: {
       sessionId: run.sessionId,
     })
     const sessionTimebase = clockRecord?.timebase ?? session.clock.timebase
-    const sessionFrameRate: Rational = clockRecord?.frameRate ?? rational(BigInt(30_000), BigInt(1_001))
-    const sessionBounds = trackBounds(referenceTrack)
+    const resolvedRate = resolveSessionFrameRate({ clock: clockRecord, referenceTrack })
+    if (!resolvedRate) {
+      return failWith(
+        'insufficient evidence to name the session frame rate: no session clock is persisted and neither the ' +
+        `reference track ${referenceTrack.trackId} nor any of its parts carries a timebase that is a frame duration`,
+      )
+    }
+    const sessionFrameRate: Rational = resolvedRate.frameRate
+    // The reference track's hull is measured in the reference track's own
+    // ticks, and the session may count in another timebase entirely — a 90 kHz
+    // session clock over a 1/25 camera is the ordinary case. Comparing the two
+    // without converting made every coverage ratio in the cascade wrong by the
+    // ratio of the clocks; it survived because every fixture so far gave the
+    // reference track and the session the same timebase.
+    const referenceBounds = trackBounds(referenceTrack)
+    const sessionBounds = createTickInterval(
+      convertTick({
+        tick: referenceBounds.start, from: referenceTrack.timebase, to: sessionTimebase, rounding: 'floor',
+      }),
+      convertTick({
+        tick: referenceBounds.end, from: referenceTrack.timebase, to: sessionTimebase, rounding: 'ceil',
+      }),
+    )
     const now = () => dependencies.clock().toISOString()
 
     let resolved = 0
     let review = 0
     let insufficient = 0
+    let coverageDerived = 0
+    let coverageRefused = 0
+
+    // Coverage first, and for every track including the reference: the
+    // diagnostic reads it per track (`application/sync-diagnostic.ts:358-361`)
+    // and a reference track with a hole in it is exactly the case an operator
+    // needs to see. No heartbeat in this loop on purpose — it is one derivation
+    // and one small write per track, while the cascade below is FFmpeg time,
+    // which is where a lease actually expires.
+    for (const track of session.tracks) {
+      try {
+        const coverage = deriveTrackCoverage({ session, track })
+        await dependencies.sessions.persistCoverage({
+          coverage,
+          sessionId: session.sessionId,
+          createdAt: now(),
+        })
+        coverageDerived += 1
+      } catch (error) {
+        // Two parts claiming the same ticks is a fact about the recording that
+        // only a human can resolve (`track-coverage.ts:466-470`). Refusing the
+        // whole run over it would make one ambiguous card change block the
+        // synchronization of every other camera, so the refusal is counted and
+        // the track simply has no coverage row — which reads downstream as
+        // "nobody measured this", never as "this track is empty".
+        if (!(error instanceof DomainError)) throw error
+        coverageRefused += 1
+      }
+    }
 
     for (const track of session.tracks) {
       if (track.trackId === session.referenceTrackId) continue
@@ -237,11 +385,19 @@ export function runCaptureSyncWorker(dependencies: {
       if (!alive) {
         return Object.freeze({
           claimed: true, runId: run.id, settled: false, resolved, review, insufficient,
+          coverageDerived, coverageRefused,
           abandonedBecause: 'lease-lost' as const,
         })
       }
 
-      const signals = await dependencies.signals.observe({ session, track, referenceTrack })
+      const signals = await dependencies.signals.observe({
+        session,
+        track,
+        referenceTrack,
+        sessionTimebase,
+        sessionFrameRate,
+        sessionBounds,
+      })
       const record = evaluateSyncEvidence({
         sessionId: session.sessionId,
         trackId: track.trackId,
@@ -318,6 +474,8 @@ export function runCaptureSyncWorker(dependencies: {
       resolved,
       review,
       insufficient,
+      coverageDerived,
+      coverageRefused,
       ...(settlement.settled ? {} : { abandonedBecause: settlement.reason === 'superseded' ? 'superseded' as const : 'lease-lost' as const }),
     })
   }

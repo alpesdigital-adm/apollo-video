@@ -5,9 +5,14 @@ import {
   addCaptureSessionTrack,
   createCaptureSession,
 } from '../../src/v2/domain/capture-session.ts'
-import { runCaptureSyncWorker } from '../../src/v2/application/run-capture-sync-worker.ts'
+import {
+  resolveSessionFrameRate,
+  runCaptureSyncWorker,
+} from '../../src/v2/application/run-capture-sync-worker.ts'
+import { createSessionClock } from '../../src/v2/domain/session-clock.ts'
 import {
   createTickInterval,
+  createTimebase,
   rational,
   timebaseFromRate,
 } from '../../src/v2/domain/session-time.ts'
@@ -88,25 +93,49 @@ function sessionWithTwoTracks() {
   })
 }
 
+/**
+ * The clock a 90 kHz session would have had persisted.
+ *
+ * Passed explicitly because the worker no longer invents 30000/1001 when
+ * nothing names a frame rate: a 90 kHz timebase is a media clock, and inverting
+ * it would claim the camera ran at ninety thousand frames a second.
+ */
+function sessionClock(session) {
+  return createSessionClock({
+    sessionId: session.sessionId,
+    timebase: timebaseFromRate(90_000),
+    frameRate: rational(t(30_000), t(1_001)),
+    authority: {
+      origin: 'primary-camera',
+      sourceId: session.referenceTrackId,
+      provenance: 'original-capture',
+      evidenceRef: 'probe-reference-camera',
+    },
+    establishedAt: at(0),
+  })
+}
+
 /** A repository that remembers, so the worker's writes can be inspected. */
-function fakeSessions(session) {
+function fakeSessions(session, options = {}) {
   const evidence = []
   const maps = []
+  const coverage = []
   return {
     evidence,
     maps,
+    coverage,
     async readHead() { return session },
     async readVersion() { return session },
     async listVersions() { return [session] },
     async listHeads() { return [] },
     async persistClock() { throw new Error('unused') },
-    async readClock() { return null },
+    async readClock() { return options.clock === undefined ? sessionClock(session) : options.clock },
     async persistClockMap(input) { maps.push(input.map); return { map: input.map, replayed: false } },
     async readClockMap() { return null },
     async listClockMaps() { return maps },
-    async persistCoverage(input) { return { coverage: input.coverage, replayed: false } },
+    async persistCoverage(input) { coverage.push(input.coverage); return { coverage: input.coverage, replayed: false } },
     async readCoverage() { return null },
-    async listCoverage() { return [] },
+    async listCoverage() { return coverage },
     async persistSyncEvidence(input) { evidence.push(input.record); return { record: input.record, replayed: false } },
     async readSyncEvidence() { return null },
     async listSyncEvidence() { return evidence },
@@ -310,7 +339,73 @@ test('T-FR-142 an empty queue is not an error', async () => {
   })()
   assert.deepEqual({ ...result }, {
     claimed: false, runId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
+    coverageDerived: 0, coverageRefused: 0,
   })
+})
+
+test('T-F4.012 the worker refuses to invent a frame rate it cannot read anywhere', async () => {
+  // The defect this replaces: with no persisted session clock — which is every
+  // session in production — the worker fell back to 30000/1001, so a 25 fps
+  // session had every residual threshold in the cascade measured against a
+  // frame it never had.
+  const session = sessionWithTwoTracks()
+  const sessions = fakeSessions(session, { clock: null })
+  const runs = fakeRuns({ baseSessionHash: session.sessionHash })
+  const result = await runCaptureSyncWorker({
+    sessions,
+    runs,
+    signals: cleanSignals(),
+    owner: 'worker-1',
+    clock: () => new Date(at(10)),
+  })()
+
+  assert.equal(result.settled, true)
+  assert.equal(runs.state.settled.status, 'failed')
+  assert.match(runs.state.settled.failureReason, /frame rate/)
+  assert.equal(sessions.evidence.length, 0, 'nothing may be measured in frames nobody could name')
+})
+
+test('T-F4.012 a camera timebase that is a frame duration names the rate by itself', () => {
+  // The ordinary case once the fallback is gone: a 1/25 video track carries its
+  // own frame rate, and a 90 kHz media clock carries none.
+  const camera = track({ timebase: createTimebase(rational(t(1), t(25))) })
+  assert.equal(
+    resolveSessionFrameRate({ clock: null, referenceTrack: camera })?.source,
+    'reference-track-timebase',
+  )
+  assert.deepEqual(
+    { ...resolveSessionFrameRate({ clock: null, referenceTrack: camera }).frameRate },
+    { num: t(25), den: t(1) },
+  )
+  assert.equal(resolveSessionFrameRate({ clock: null, referenceTrack: track() }), null)
+})
+
+test('T-F4.012 the worker derives and persists coverage for every track', () => {
+  // Guards map §19.2: createTrackCoverage had no runtime caller, so coverageBps
+  // was null on every diagnostic and coverage-below-floor could never fire.
+  return (async () => {
+    const session = sessionWithTwoTracks()
+    const sessions = fakeSessions(session)
+    const runs = fakeRuns({ baseSessionHash: session.sessionHash })
+    const result = await runCaptureSyncWorker({
+      sessions,
+      runs,
+      signals: cleanSignals(),
+      owner: 'worker-1',
+      clock: () => new Date(at(10)),
+    })()
+
+    assert.equal(result.coverageDerived, 2, 'the reference track is measured too')
+    assert.equal(result.coverageRefused, 0)
+    assert.deepEqual(
+      sessions.coverage.map((entry) => entry.trackId).sort(),
+      ['track-camera-main', 'track-phone'],
+    )
+    // Derivation is bound to the exact session version it was read from, so a
+    // later reference change makes it refusably stale rather than silently old.
+    assert.equal(sessions.coverage[0].derivedFrom.sessionVersion, session.version)
+    assert.equal(sessions.coverage[0].derivedFrom.referenceEpoch, session.referenceEpoch)
+  })()
 })
 
 test('T-FR-145 a settlement refused as superseded is reported, not swallowed', async () => {
