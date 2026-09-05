@@ -1214,6 +1214,81 @@ test(
       })
     }
 
+    // A diagnostic that says the session CAN be edited unattended, over a
+    // protocol evaluation whose ceiling still blocks it. The two disagree, and
+    // `canAutoEdit` — the domain authority, which blocks on six grounds — is
+    // the one that decides. A copy that only re-derives the ceiling clause
+    // reports this as blocked, which is the state ADR-135 asks the gate to
+    // catch: an automatic edit nobody is stopping.
+    const { createSyncDiagnostic, deriveTrackStatus } = await import(
+      '../../src/v2/domain/sync-diagnostic.ts'
+    )
+    const { PrismaSyncDiagnosticRepository } = await import(
+      '../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts'
+    )
+    const diagnosticRepository = new PrismaSyncDiagnosticRepository(client)
+    const headBefore = await client.v2SyncDiagnosticHead.findFirstOrThrow({
+      where: { workspaceId: W, sessionId: world.ids.insufficientSession },
+    })
+    const editableTrack = {
+      ...world.unusableTrack,
+      methods: ['apollo-marker'],
+      confidence: 0.9,
+      offsetMs: 0,
+      residualMs: 6,
+      coverageBps: 9_800,
+      warnings: [],
+    }
+    const editableDiagnostic = createSyncDiagnostic({
+      workspaceId: W,
+      sessionId: world.ids.insufficientSession,
+      referenceTrackId: world.insufficientDiagnostic.referenceTrackId,
+      version: world.insufficientDiagnostic.version + 1,
+      previousVersionHash: world.insufficientDiagnostic.diagnosticHash,
+      sessionVersion: world.insufficientDiagnostic.sessionVersion,
+      referenceEpoch: world.insufficientDiagnostic.referenceEpoch,
+      tracks: [{
+        ...editableTrack,
+        status: deriveTrackStatus({ ...editableTrack, hasContradictoryAnchors: false }),
+      }],
+      protocolCeiling: 'automatic',
+      generatedAt: at(500).toISOString(),
+    })
+    assert.equal(editableDiagnostic.manualRequired, false, 'the fixture no longer allows the edit')
+    await diagnosticRepository.appendVersion({
+      diagnostic: editableDiagnostic,
+      occurredAt: at(500).toISOString(),
+    })
+    const editableRun = await run('f4016-world-key-auto-editable')
+    const ceilingChecks = Object.fromEntries(
+      criterionOf(editableRun.gate, 'insufficient-evidence-requires-manual')
+        .checks.map((item) => [item.code, item]),
+    )
+    assert.equal(ceilingChecks['sync-evidence-insufficient'].passed, true)
+    assert.equal(
+      ceilingChecks['protocol-ceiling-blocks-auto-edit'].passed,
+      false,
+      'the ceiling was reported as blocking an edit canAutoEdit would allow',
+    )
+    assert.match(ceilingChecks['protocol-ceiling-blocks-auto-edit'].detail, /canAutoEdit allowed=true/)
+    await client.v2SyncDiagnostic.deleteMany({
+      where: {
+        workspaceId: W,
+        sessionId: world.ids.insufficientSession,
+        version: editableDiagnostic.version,
+      },
+    })
+    await client.v2SyncDiagnosticHead.update({
+      where: { id: headBefore.id },
+      data: {
+        version: headBefore.version,
+        diagnosticHash: headBefore.diagnosticHash,
+        status: headBefore.status,
+        manualRequired: headBefore.manualRequired,
+        updatedAt: headBefore.updatedAt,
+      },
+    })
+
     const healthy = await run('f4016-world-key-healthy-again')
     assert.equal(healthy.gate.report.satisfied, 10, 'the world did not come back')
 

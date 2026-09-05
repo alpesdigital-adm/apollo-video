@@ -975,6 +975,8 @@ export async function buildGateWorld({
     ids,
     exportIds,
     artifacts,
+    insufficientDiagnostic,
+    unusableTrack,
     podcast,
     teacher,
     react,
