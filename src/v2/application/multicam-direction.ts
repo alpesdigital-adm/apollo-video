@@ -210,7 +210,7 @@ const NTSC_RATES: readonly Rational[] = Object.freeze([
 export function planFrameRate(fps: number): Rational {
   assertDomain(Number.isFinite(fps) && fps > 0, 'INVALID_RENDER_INPUT', 'the project plan does not declare a positive frame rate')
   for (const rate of NTSC_RATES) {
-    if (Math.abs(fps - Number(rate.num) / Number(rate.den)) < 1e-6) return rate
+    if (Math.abs(fps - Number(rate.num) / Number(rate.den)) < 5e-3) return rate
   }
   const thousandths = Math.round(fps * 1_000)
   assertDomain(
@@ -578,6 +578,18 @@ export interface DirectMulticamSessionRequest {
   readonly baseVersionId: string
   readonly baseHash: string
   readonly format: Readonly<{ aspectRatio: OutputAspectRatio }>
+  /**
+   * The stretch of session time to direct, as decimal tick strings.
+   *
+   * A position, which a request may carry, not a measurement, which it may not.
+   * Omitting it directs the reference track's own hull — and when the recorder
+   * outran the cameras that hull includes instants no camera covered, which the
+   * direction reports as `uncovered` and the compile step then refuses. Naming
+   * the range is how an operator says "cut the part we actually filmed"; the
+   * refusal is how the system says "you did not tell me what to do with the
+   * rest".
+   */
+  readonly range?: Readonly<{ sessionStartTicks: string; sessionEndTicks: string }>
   readonly policy?: DirectionPolicyOverrides
   readonly protectedSelections?: readonly Readonly<DirectMulticamProtectedSelectionInput>[]
   readonly reason?: string
@@ -837,17 +849,12 @@ async function persistDirection(
 
 export function directMulticamSessionService(dependencies: DirectMulticamSessionDependencies) {
   return async function execute(request: Readonly<DirectMulticamSessionRequest>): Promise<Readonly<DirectMulticamSessionServiceResult>> {
-    // Only the caller-controlled half is scanned: the authenticated actor is
-    // built by `authenticate-api-client`, not sent, and scanning it would refuse
-    // a legitimate credential field that happens to share a name.
-    assertNoCallerDerivations({
-      sessionId: request.sessionId,
-      baseVersionId: request.baseVersionId,
-      format: request.format,
-      policy: request.policy,
-      protectedSelections: request.protectedSelections,
-      reason: request.reason,
-    }, '')
+    // The whole request is scanned except the authenticated actor, which is
+    // built by `authenticate-api-client` rather than sent — scanning it would
+    // refuse a legitimate credential field that happens to share a name with a
+    // derivation.
+    const { actor: _actor, ...scannable } = request
+    assertNoCallerDerivations(scannable as Record<string, unknown>, '')
     const workspaceId = request.workspaceId.trim()
     const projectId = request.projectId.trim()
     const sessionId = request.sessionId.trim()
@@ -898,6 +905,7 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       baseVersionId,
       baseHash: request.baseHash,
       aspectRatio: request.format.aspectRatio,
+      range: request.range ? [request.range.sessionStartTicks, request.range.sessionEndTicks] : null,
       policy: request.policy ?? null,
       protectedSelections: protectedSelections.map((selection) => ({
         selectionId: selection.selectionId,
@@ -992,6 +1000,14 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       policy,
       format: { aspectRatio: request.format.aspectRatio },
       protectedSelections,
+      ...(request.range
+        ? {
+          range: createTickInterval(
+            parseTick(request.range.sessionStartTicks, 'range.sessionStartTicks'),
+            parseTick(request.range.sessionEndTicks, 'range.sessionEndTicks'),
+          ),
+        }
+        : {}),
       generatedAt: createdAt,
     })
 
