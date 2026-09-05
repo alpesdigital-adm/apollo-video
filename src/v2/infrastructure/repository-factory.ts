@@ -2265,6 +2265,18 @@ export function createMulticamDirectionCommandRepository(): MulticamDirectionCom
   return new PrismaMulticamDirectionCommandRepository(resolveV2Client())
 }
 
+/**
+ * The persisted diarization the direction reads as speech evidence.
+ *
+ * This factory, `createMulticamDirectionCommandRepository` above and
+ * `createMulticamVisualEvidenceProvider` below have no call site: there is no
+ * HTTP route and no worker for `direct-multicam-session` yet, so the wiring
+ * exists and nothing pulls it. The adapters themselves are executed — the
+ * diarization source against real rows in `multicam-direction.e2e.mjs`, the
+ * visual provider against real pixels in
+ * `multicam-visual-evidence.integration.mjs` — but the composition root is a
+ * named integration need rather than something the tests can claim.
+ */
 export function createMulticamDiarizationSource(): MulticamDiarizationSource {
   return new PrismaMulticamDiarizationSource(resolveV2Client())
 }

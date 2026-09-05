@@ -60,6 +60,17 @@ const COLOR_METADATA = Object.freeze({
  * (`ffmpeg-editorial-proxy-renderer.ts:470-474`). A multicam plan therefore
  * needs ONE compilation per camera, which is the integration need this suite
  * discovered by being refused.
+ *
+ * That refusal is a NAMED integration need and not a thing this suite quietly
+ * worked around: `run-project-proxy-render-worker.ts:149-152` throws unless
+ * `colorPipelineBindings` names every video artifactId with the matching
+ * sourceManifestId, and `direct-multicam-session` does not produce bindings for
+ * the cameras it newly puts on the timeline. So this suite fabricates the
+ * compilations to reach the renderer at all, and the hand-off carries the
+ * missing work. What the runtime path DOES accept is measured elsewhere and not
+ * guessed here: `multicam-direction.e2e.mjs` calls
+ * `PrismaProjectProxyRenderRepository.readCurrentSource` against the stored
+ * multicam version and asserts the three render sources it derives.
  */
 function colorCompilation(artifactId) {
   const manifestId = `manifest-${artifactId}`

@@ -83,6 +83,24 @@ import { calculateVersionHash, stableSerialize } from './version-hash.ts'
  * only half the caller's: the note is theirs, the identity is the authenticated
  * actor's, and the two are concatenated rather than one replacing the other
  * (CONTRACT §2, "evidenceRef = actor + nota do chamador").
+ *
+ * **What is not wired yet, stated rather than implied.** Two things this module
+ * consumes have no production caller in the repository:
+ *
+ * - `MulticamPerceptionSource` has no adapter. `repository-factory.ts` builds a
+ *   diarization source and a visual provider and nothing for perception, so the
+ *   `reaction` observations below and the `reactionIntensityFloorBps` that
+ *   filters them are exercised by tests and by nothing else. That is the honest
+ *   state — a session nobody ran perception over produces no reaction evidence
+ *   at all, which the direction handles by holding the current angle — and it
+ *   is a phase-4 integration need, not a gap somebody should paper over with a
+ *   stub returning intensity zero.
+ * - nothing calls `directMulticamSessionService`. There is no HTTP route and no
+ *   worker for `direct-multicam-session`; the factories that build its
+ *   repository, its diarization source and its visual provider exist and have
+ *   no call site. The slice is proven end to end by the PostgreSQL E2E and the
+ *   FFmpeg integration suites, which is not the same as being reachable in
+ *   production, and the hand-off says so.
  */
 
 export const MULTICAM_DIRECTION_PLANNER_VERSION = 'multicam-direction-planner/2026-09-v1'

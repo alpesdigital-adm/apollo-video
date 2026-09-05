@@ -613,10 +613,18 @@ test('T-F4.012 the plan drops what described the timeline it replaced, and says 
   // carrying them would be a description of a timeline that no longer exists.
   assert.deepEqual([...result.editPlan.editorial.retainedSourceRanges], [])
   assert.deepEqual([...result.editPlan.editorial.exclusions], [])
-  assert.deepEqual([...result.editPlan.subtitleTracks], [])
+  // The whole plan goes in the message rather than just the field: this
+  // assertion failed once, unreproduced in twelve subsequent runs, and if it
+  // ever fails again the next reader needs to see WHICH object came back.
+  assert.deepEqual(
+    [...result.editPlan.subtitleTracks],
+    [],
+    `subtitleTracks survived the re-cut; plan was ${JSON.stringify(result.editPlan, (_key, value) => (typeof value === 'bigint' ? value.toString() : value))}`,
+  )
   assert.deepEqual([...result.editPlan.retimedTranscript.words], [])
+  assert.deepEqual([...result.editPlan.markers], [], 'the editorial-cut markers named source seconds of a recording this cut no longer follows')
   assert.equal(result.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-base', 'the transcript it came from is still named')
-  for (const fragment of ['Subtitle cues', 'retimed transcript', 'editorial exclusions']) {
+  for (const fragment of ['Subtitle cues', 'retimed transcript', 'editorial exclusions', 'editorial-cut markers']) {
     assert.ok(
       result.editPlan.director.assumptions.some((assumption) => assumption.includes(fragment)),
       `the plan states out loud that it dropped ${fragment}`,
