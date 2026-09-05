@@ -20,6 +20,7 @@ import type { DiagnosticAnchor, SyncDiagnostic } from '../../domain/sync-diagnos
 import type { MarkerDetection } from '../../domain/sync-marker-detection.ts'
 import {
   DEFAULT_SYNC_EVIDENCE_THRESHOLDS,
+  MAXIMUM_REPORTABLE_PEAK_RATIO,
   type SyncAnchorObservation,
   type SyncSignalObservation,
 } from '../../domain/sync-evidence.ts'
@@ -79,9 +80,18 @@ export const AUDIO_SYNC_SIGNAL_DEFAULTS = Object.freeze({
   /**
    * The correlation is O(windows x reference length). Fixing the window count
    * rather than the hop keeps a three-hour session from costing three hundred
-   * times a ten-minute one; thirty-two windows spread across the span is far
-   * more than the cascade's anchor-distribution gate asks for, and the whole
-   * search stays inside a few seconds of one core.
+   * times a ten-minute one, and thirty-two windows spread across the span is
+   * far more than the cascade's anchor-distribution gate asks for.
+   *
+   * It does not make the search cheap. Measured on this machine calling
+   * `correlateAudioWindows` with the arguments `correlatePair` uses (2 kHz,
+   * 2 s windows, exhaustive), one candidate part against one reference part
+   * costs 160 ms (N=3, sd 12 ms) over 40 s of material, 9.1 s (N=3, sd 1.6 s)
+   * over 300 s, and 71 s (N=1, 345 MB RSS) at `maximumAnalysisSeconds`. The
+   * call is synchronous, so that last number is a stretch of wall clock in
+   * which nothing else in the process runs — which is why the worker's lease
+   * is five minutes and why `heartbeat` is awaited between pairs rather than
+   * left to a timer that could never fire.
    */
   maximumCorrelationWindows: 32,
   /**
@@ -231,6 +241,7 @@ export class FfmpegAudioSyncSignalSource {
     sessionTimebase: Readonly<Timebase>
     sessionFrameRate: Rational
     sessionBounds: Readonly<TickInterval>
+    heartbeat?: () => Promise<void>
   }): Promise<readonly Readonly<SyncSignalObservation>[]> {
     const observations: Readonly<SyncSignalObservation>[] = []
     observations.push(...await this.observeAudio(input))
@@ -272,14 +283,21 @@ export class FfmpegAudioSyncSignalSource {
     track: Readonly<CaptureTrack>
     referenceTrack: Readonly<CaptureTrack>
     sessionTimebase: Readonly<Timebase>
+    heartbeat?: () => Promise<void>
   }): Promise<readonly Readonly<SyncSignalObservation>[]> {
     const sampleTimebase = timebaseFromRate(this.sampleRate)
     const candidateParts = byOrdinal(input.track.parts)
     const referenceParts = byOrdinal(input.referenceTrack.parts)
     const observations: Readonly<SyncSignalObservation>[] = []
+    // Awaited at every point the loop can be interrupted at, which is every
+    // point except inside one correlation. The caller's lease is refreshed and,
+    // just as importantly, the event loop gets a turn between two synchronous
+    // searches that can each run for a minute.
+    const beat = input.heartbeat ?? (async () => {})
 
     const referenceAudio = new Map<string, DecodedAudio>()
     for (const referencePart of referenceParts) {
+      await beat()
       referenceAudio.set(
         referencePart.partId,
         await this.decode({ workspaceId: input.session.workspaceId, part: referencePart }),
@@ -287,12 +305,14 @@ export class FfmpegAudioSyncSignalSource {
     }
 
     for (const candidatePart of candidateParts) {
+      await beat()
       const candidate = await this.decode({ workspaceId: input.session.workspaceId, part: candidatePart })
       if (!candidate.hasAudio || candidate.samples.length === 0) continue
 
       for (const referencePart of referenceParts) {
         const reference = referenceAudio.get(referencePart.partId)!
         if (!reference.hasAudio || reference.samples.length === 0) continue
+        await beat()
 
         const observation = this.correlatePair({
           candidate,
@@ -431,7 +451,18 @@ export class FfmpegAudioSyncSignalSource {
 
     const bestPeak = median(agreeing.map((entry) => entry.correlation.peak))
     const secondBestPeak = median(agreeing.map((entry) => entry.correlation.secondPeak))
-    const peakRatio = secondBestPeak > 0 ? bestPeak / secondBestPeak : bestPeak > 0 ? Infinity : 0
+    // Clamped the way the correlator itself clamps it
+    // (`ffmpeg-playback-fingerprint.ts:563-565`), and for the reason
+    // `MAXIMUM_REPORTABLE_PEAK_RATIO` exists: a runner-up of zero is perfect
+    // separation, not an infinite one. Reported as `Infinity` it went through
+    // `confidenceFromPeakRatio`, whose guard rejects every non-finite ratio,
+    // and came back 0 — below the cascade's admission floor. The single
+    // strongest measurement this adapter can make was discarded as
+    // `confidence-below-floor`, while a runner-up at 1/64 of the peak scored
+    // 0.9855.
+    const peakRatio = secondBestPeak > 0
+      ? Math.min(MAXIMUM_REPORTABLE_PEAK_RATIO, bestPeak / secondBestPeak)
+      : bestPeak > 0 ? MAXIMUM_REPORTABLE_PEAK_RATIO : 0
 
     return Object.freeze({
       signalId,
@@ -595,7 +626,40 @@ export class FfmpegAudioSyncSignalSource {
       Number.isFinite(anchor.sourceMs) && Number.isFinite(anchor.sessionMs))
     if (usable.length === 0) return null
 
-    const offsets = usable.map((anchor) => BigInt(Math.round(anchor.sessionMs) - Math.round(anchor.sourceMs)))
+    /**
+     * Milliseconds in, session ticks out — the same workaround `correlatePair`
+     * documents at :390-403, applied here too.
+     *
+     * The cascade converts `offsetTicks` and `residualTicks` out of the
+     * observation's declared timebase (`sync-evidence.ts:613-624`) but reads
+     * `anchor.sessionTick` raw against `sessionBounds`
+     * (`anchorDistribution`, called at `sync-evidence.ts:628`). Published in
+     * milliseconds against a 90 kHz session, three operator anchors spread over
+     * ten minutes landed inside the first 0.6 s of the bounds: measured,
+     * `anchorThirdsOccupied` came back 1 where 2 are required and the elected
+     * manual anchor was held at `review` by a distribution gate it had actually
+     * satisfied — with that false reason persisted in the evidence record.
+     * Manual anchors are not secondary-only (`sync-evidence.ts:161`), so this
+     * cost an auto-apply an operator had already earned by hand.
+     *
+     * Publishing in session ticks means the offset and the residual are
+     * computed from the CONVERTED anchors, not converted after the fact: the
+     * residual has to describe the numbers a reader can check.
+     */
+    const toSession = (ms: number, rounding: 'floor' | 'ceil' | 'nearest-half-even' = 'nearest-half-even') =>
+      convertTick({
+        tick: BigInt(Math.round(ms)),
+        from: MILLISECOND_TIMEBASE,
+        to: input.sessionTimebase,
+        rounding,
+      })
+
+    const placed = usable.map((anchor) => ({
+      anchor,
+      sourceTick: toSession(anchor.sourceMs),
+      sessionTick: toSession(anchor.sessionMs),
+    }))
+    const offsets = placed.map((entry) => entry.sessionTick - entry.sourceTick)
     const chosen = medianBigInt(offsets)
     const residualTicks = offsets.reduce((worst, offset) => {
       const deviation = offset - chosen
@@ -606,30 +670,20 @@ export class FfmpegAudioSyncSignalSource {
     const sessionMs = usable.map((anchor) => Math.round(anchor.sessionMs))
     const support = AUDIO_SYNC_SIGNAL_DEFAULTS.anchorSupportMs
     const coverage = createTickInterval(
-      convertTick({
-        tick: BigInt(Math.min(...sessionMs) - support),
-        from: MILLISECOND_TIMEBASE,
-        to: input.sessionTimebase,
-        rounding: 'floor',
-      }),
-      convertTick({
-        tick: BigInt(Math.max(...sessionMs) + support),
-        from: MILLISECOND_TIMEBASE,
-        to: input.sessionTimebase,
-        rounding: 'ceil',
-      }),
+      toSession(Math.min(...sessionMs) - support, 'floor'),
+      toSession(Math.max(...sessionMs) + support, 'ceil'),
     )
 
     return Object.freeze({
       signalId: input.signalId,
       method: input.method,
-      timebase: MILLISECOND_TIMEBASE,
+      timebase: input.sessionTimebase,
       offsetTicks: chosen,
-      anchors: Object.freeze(usable.map((anchor) => Object.freeze({
-        anchorId: anchor.anchorId,
-        sourceTick: BigInt(Math.round(anchor.sourceMs)),
-        sessionTick: BigInt(Math.round(anchor.sessionMs)),
-        evidenceRef: anchor.evidenceRef,
+      anchors: Object.freeze(placed.map((entry) => Object.freeze({
+        anchorId: entry.anchor.anchorId,
+        sourceTick: entry.sourceTick,
+        sessionTick: entry.sessionTick,
+        evidenceRef: entry.anchor.evidenceRef,
       }))),
       preconditions: Object.freeze(input.preconditions.map((entry) => Object.freeze({ ...entry }))),
       coverage: Object.freeze([coverage]),

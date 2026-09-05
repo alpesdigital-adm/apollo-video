@@ -2255,12 +2255,21 @@ export function createCaptureSyncWorker(environment: NodeJS.ProcessEnv = process
     media: createCaptureMediaResolver(environment),
     diagnostics: createSyncDiagnosticRepository(),
   })
+  // Read the way every sibling worker factory reads it. Without this the lease
+  // was whatever the module declared and no deployment could raise it, while
+  // one audio correlation at the adapter's analysis cap measures over a minute
+  // of uninterruptible CPU — long enough for a second worker to reclaim the run
+  // mid-flight and fail it permanently three attempts later.
+  const configuredLease = Number(
+    environment.APOLLO_V2_CAPTURE_SYNC_LEASE_MS ?? environment.APOLLO_V2_WORKER_LEASE_MS,
+  )
   return async (owner: string) => runCaptureSyncWorker({
     sessions,
     runs,
     signals,
     owner,
     clock: () => new Date(),
+    ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseMs: configuredLease } : {}),
   })()
 }
 

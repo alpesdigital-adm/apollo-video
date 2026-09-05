@@ -339,7 +339,7 @@ test('T-FR-142 an empty queue is not an error', async () => {
   })()
   assert.deepEqual({ ...result }, {
     claimed: false, runId: null, workspaceId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
-    coverageDerived: 0, coverageRefused: 0,
+    coverageDerived: 0, coverageRefused: 0, mapRefused: 0, mediaUnavailable: 0,
   })
 })
 

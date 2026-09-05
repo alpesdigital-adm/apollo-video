@@ -34,25 +34,41 @@ const workerId = `capture-sync:${hostname().slice(0, 32)}:${process.pid}:${rando
 const runNext = createCaptureSyncWorker()
 
 if (once) {
-  const outcome = await runNext(workerId)
-  // The worker's own result cannot distinguish a run that was settled with a
-  // verdict from one settled as failed — both are `settled: true`. The row can,
-  // so the row is read rather than the failure being inferred.
-  const run = outcome.runId
-    ? await createCaptureSyncRunRepository().read({
-      workspaceId: outcome.workspaceId,
-      runId: outcome.runId,
-    })
-    : null
-  process.stdout.write(`APOLLO_CAPTURE_SYNC_OUTCOME=${JSON.stringify({
-    ...outcome,
-    status: run?.status ?? null,
-    failureReason: run?.failureReason ?? null,
-  })}\n`)
-  // Nothing to claim is success: the queue being empty is the steady state, and
-  // a replay of this command must not invent work or a failure.
-  const healthy = !outcome.claimed || (outcome.settled && run?.status !== 'failed')
-  process.exit(healthy ? 0 : 1)
+  // Wrapped because the alternative is an unhandled rejection: this is
+  // top-level `await` in a module, so anything the worker lets escape kills the
+  // process with a stack trace and no outcome line, and CI reads the outcome
+  // line. The run it was holding is already back in the queue once its lease
+  // expires, which is the recovery this exit code reports rather than performs.
+  try {
+    const outcome = await runNext(workerId)
+    // The worker's own result cannot distinguish a run that was settled with a
+    // verdict from one settled as failed — both are `settled: true`. The row can,
+    // so the row is read rather than the failure being inferred.
+    const run = outcome.runId
+      ? await createCaptureSyncRunRepository().read({
+        workspaceId: outcome.workspaceId,
+        runId: outcome.runId,
+      })
+      : null
+    process.stdout.write(`APOLLO_CAPTURE_SYNC_OUTCOME=${JSON.stringify({
+      ...outcome,
+      status: run?.status ?? null,
+      failureReason: run?.failureReason ?? null,
+    })}\n`)
+    // Nothing to claim is success: the queue being empty is the steady state, and
+    // a replay of this command must not invent work or a failure.
+    const healthy = !outcome.claimed || (outcome.settled && run?.status !== 'failed')
+    process.exit(healthy ? 0 : 1)
+  } catch (error) {
+    process.stdout.write(`APOLLO_CAPTURE_SYNC_OUTCOME=${JSON.stringify({
+      claimed: null,
+      settled: false,
+      status: null,
+      failureReason: error instanceof Error ? error.message : String(error),
+    })}\n`)
+    console.error(error)
+    process.exit(1)
+  }
 }
 
 let stopping = false
@@ -71,6 +87,8 @@ while (!stopping) {
         insufficient: outcome.insufficient,
         coverageDerived: outcome.coverageDerived,
         coverageRefused: outcome.coverageRefused,
+        mapRefused: outcome.mapRefused,
+        mediaUnavailable: outcome.mediaUnavailable,
         ...(outcome.abandonedBecause ? { abandonedBecause: outcome.abandonedBecause } : {}),
       }))
     } else {
