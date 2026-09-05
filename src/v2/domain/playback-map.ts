@@ -1134,9 +1134,8 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
         previousOutcome = 'commentary-only'
         continue
       }
-      const leave = referenceEndOf(before.run, input.policy)
-      const resume = firstReferenceOf(after.run)
-      if (resume > leave + input.policy.continuityToleranceTicks) {
+      const junction = classifyJunction(before.run, after.run, input.policy)
+      if (junction !== 'stalled' && junction !== 'backward') {
         // The reference moved while nobody could observe it. Played through,
         // paused then seeked, or scrubbed — all three fit, so the domain names
         // none of them (ADR-135).
@@ -1171,25 +1170,20 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
     let direction: PlaybackDirection = 'forward'
     let reason: PlaybackDiscontinuityReason | null = null
     if (previousLockedIndex >= 0) {
-      const previousEnd = referenceEndOf(runs[previousLockedIndex]!, input.policy)
-      if (referenceStart < previousEnd - input.policy.continuityToleranceTicks) {
-        // Backwards is unambiguous: no amount of forward playback produces it.
+      // Reaction time can pass between two locked runs, and the reference may
+      // legitimately have advanced through it. What counts as a jump is measured
+      // against that passage, not against the previous end alone.
+      const junction = classifyJunction(runs[previousLockedIndex]!, run, input.policy)
+      if (junction === 'backward') {
         direction = 'backward'
         reason = 'rewind'
         const { merged } = canonicalizeIntervals(playedReference)
         mode = merged.some((played) => intervalContainsInterval(played, referenceRange))
           ? 'replay'
           : 'rewind'
-      } else if (referenceStart > previousEnd + input.policy.seekThresholdTicks) {
-        // Reaction time can pass between two locked runs, and the reference may
-        // legitimately have advanced through it. What counts as a jump is
-        // measured against that passage, not against the previous end alone.
-        const gapTicks = range.start - bounds[previousLockedIndex]!.end
-        const expected = previousEnd + gapTicks
-        if (absTicks(referenceStart - expected) > input.policy.seekThresholdTicks) {
-          mode = 'seek'
-          reason = 'seek'
-        }
+      } else if (junction === 'jumped') {
+        mode = 'seek'
+        reason = 'seek'
       }
     }
     if (reason === null && index > 0) {
@@ -1235,14 +1229,52 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
   })
 }
 
-function referenceEndOf(run: Run, policy: Readonly<PlaybackPolicy>): bigint {
-  const windows = run.windows as readonly Extract<WindowVerdict, { kind: 'locked' }>[]
-  return windows[windows.length - 1]!.referenceTick + policy.windowTicks
+type LockedWindow = Extract<WindowVerdict, { kind: 'locked' }>
+
+function lastLocked(run: Run): LockedWindow {
+  const windows = run.windows as readonly LockedWindow[]
+  return windows[windows.length - 1]!
 }
 
-function firstReferenceOf(run: Run): bigint {
-  const windows = run.windows as readonly Extract<WindowVerdict, { kind: 'locked' }>[]
-  return windows[0]!.referenceTick
+function firstLocked(run: Run): LockedWindow {
+  return (run.windows as readonly LockedWindow[])[0]!
+}
+
+/**
+ * What happened to the reference between two locked runs.
+ *
+ * The uncertainty that shapes every threshold here: the last window of a run
+ * *starts* where its reference tick says, and covers one window after that. So
+ * the instant playback actually stopped is known only to within one window, and
+ * every comparison has to carry that window in its tolerance. Pretending to a
+ * finer boundary than the detector's own window would be reporting precision
+ * nobody measured.
+ *
+ * - `backward` — the reference went back. No amount of forward playback does
+ *   that, so it is the one unambiguous verdict.
+ * - `stalled` — the reference did not advance beyond the window's uncertainty:
+ *   the player was stopped.
+ * - `continuous` — the reference advanced by exactly the reaction time that
+ *   passed: it kept playing, and if that happened across a gap then it did so
+ *   unobserved.
+ * - `jumped` — it advanced by something else entirely.
+ */
+function classifyJunction(
+  before: Run,
+  after: Run,
+  policy: Readonly<PlaybackPolicy>,
+): 'backward' | 'stalled' | 'continuous' | 'jumped' {
+  const last = lastLocked(before)
+  const next = firstLocked(after)
+  if (next.referenceTick < last.referenceTick - policy.continuityToleranceTicks) return 'backward'
+  if (next.referenceTick <= last.referenceTick + policy.windowTicks + policy.continuityToleranceTicks) {
+    return 'stalled'
+  }
+  const projected = last.referenceTick + (next.tick - last.tick)
+  if (absTicks(next.referenceTick - projected) <= policy.windowTicks + policy.continuityToleranceTicks) {
+    return 'continuous'
+  }
+  return 'jumped'
 }
 
 function gapPiece(
