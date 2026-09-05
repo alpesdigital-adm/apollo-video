@@ -56,6 +56,12 @@ import { createTrackCoverage } from '../../src/v2/domain/track-coverage.ts'
  * The direction never receives a number it could not have derived itself.
  */
 
+/** A candidate without its hash, ready to be resealed after a change. */
+function withoutHash(candidate) {
+  const { candidateHash: _candidateHash, ...body } = candidate
+  return body
+}
+
 const t = (n) => BigInt(n)
 const HZ = 90_000
 // Seconds may be fractional: 90 000 ticks per second is 90 per millisecond, so a
@@ -1083,7 +1089,16 @@ test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap p
   }
   const forgedCandidate = { ...forgedBody, candidateHash: calculateAngleCandidateHash(forgedBody) }
   const { decisionHash: _decisionHash, ...shotBody } = fallback
-  const forgedShotBody = { ...shotBody, chosen: forgedCandidate, rule: 'speech-prefers-active-speaker' }
+  // The forger has to replace camera B in the evaluated window too, not only in
+  // `chosen`: since the decided window is retained (ADR-118) a shot whose chosen
+  // angle is absent from its own candidates is refused for that alone, and the
+  // point here is a forgery the hashes cannot tell from an honest cut.
+  const forgedShotBody = {
+    ...shotBody,
+    chosen: forgedCandidate,
+    evaluated: shotBody.evaluated.map((candidate) => (candidate.trackId === 'track-camera-b' ? forgedCandidate : candidate)),
+    rule: 'speech-prefers-active-speaker',
+  }
   const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
   const { directionHash: _directionHash, ...directionBody } = honest
   const forgedDirectionBody = { ...directionBody, shots: honest.shots.map((shot) => (shot.shotId === fallback.shotId ? forgedShot : shot)) }
@@ -1151,7 +1166,14 @@ test('T-FR-150 falsification: the direction hash binds which angle each shot cho
   assert.equal(alternative.eligible, true, 'camera A really could have been cut there — the forgery is plausible')
   const reseal = (changes) => {
     const { decisionHash: _decisionHash, ...shotBody } = shot
-    const forgedShotBody = { ...shotBody, ...changes }
+    // Swapping the angle means swapping it in the retained window as well —
+    // `assertMulticamDirectionIntegrity` refuses a shot cut to a candidate it
+    // never evaluated — so the forgery stays internally consistent and only the
+    // hash is left to tell it apart.
+    const swapped = changes.chosen
+      ? { evaluated: shotBody.evaluated.map((candidate) => (candidate.trackId === changes.chosen.trackId ? changes.chosen : candidate)) }
+      : {}
+    const forgedShotBody = { ...shotBody, ...swapped, ...changes }
     const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
     const { directionHash: _directionHash, ...body } = honest
     const forgedBody = { ...body, shots: honest.shots.map((entry) => (entry.shotId === shot.shotId ? forgedShot : entry)) }
@@ -1340,4 +1362,97 @@ test('T-FR-150 every direction refusal is a domain error code the public envelop
     assert.equal(PUBLIC_ERROR_CATALOG[code].category, 'policy')
     assert.equal(PUBLIC_ERROR_CATALOG[code].retryable, false)
   }
+})
+
+test('T-FR-150 falsification: the evaluated window is checked in its own right, not only by the shot hash', () => {
+  // Every guard `assertMulticamDirectionIntegrity` puts on `shot.evaluated` sits
+  // BEHIND the shot hash, so a reviewer who only tampers with storage never
+  // reaches them — the hash refuses first. The forger here has code access: each
+  // forgery is resealed all the way up (candidate → shot → direction) so it is
+  // internally consistent, which is exactly the artifact a bug in this module or
+  // a repair script would write. Without the guards, five of the six below are
+  // accepted as an honest cut.
+  const world = podcastWorld()
+  const honest = world.direct()
+  const shot = honest.shots[0]
+  assert.ok(shot.evaluated.length >= 3, 'the shot really did weigh several angles')
+
+  const reseal = (evaluated, chosen = shot.chosen) => {
+    const { decisionHash: _decisionHash, ...shotBody } = shot
+    const forgedShotBody = { ...shotBody, chosen, evaluated }
+    const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
+    const { directionHash: _directionHash, ...body } = honest
+    const forgedBody = { ...body, shots: honest.shots.map((entry) => (entry.shotId === shot.shotId ? forgedShot : entry)) }
+    return { ...forgedBody, directionHash: calculateMulticamDirectionHash(forgedBody) }
+  }
+  const refuses = (forged, fragment, why) => {
+    assert.throws(
+      () => assertMulticamDirectionIntegrity(forged),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && new RegExp(fragment).test(error.message),
+      why,
+    )
+  }
+  // The shot hash is genuinely satisfied by each of these, so the guards are
+  // what refuses them and not the arithmetic above.
+  const selfConsistent = (forged) => {
+    const { decisionHash, ...body } = forged.shots.find((entry) => entry.shotId === shot.shotId)
+    assert.equal(calculateShotDecisionHash(body), decisionHash, 'the forgery reseals its own shot hash')
+    const { directionHash, ...directionBody } = forged
+    assert.equal(calculateMulticamDirectionHash(directionBody), directionHash, 'and the direction hash above it')
+  }
+
+  // 1. One angle counted twice — a duplicated candidateId lets a rejected angle
+  //    also appear as an eligible one, and a reviewer reading the table sees two
+  //    rows that disagree about the same camera.
+  const duplicated = reseal([...shot.evaluated, shot.evaluated[0]])
+  selfConsistent(duplicated)
+  refuses(duplicated, 'evaluated candidate .* twice', 'a candidate counted twice is refused')
+
+  // 2. The list out of the order the hash covers. `ordinal` is what the database
+  //    stores, so a permuted list is what a repair script writes.
+  const permuted = reseal([shot.evaluated[1], shot.evaluated[0], ...shot.evaluated.slice(2)])
+  selfConsistent(permuted)
+  refuses(permuted, 'not in track order', 'the retained order is checked, not assumed')
+
+  // 3. A candidate whose eligibility contradicts its own reasons: the one field
+  //    a reviewer reads to decide whether a camera can be trusted again.
+  const rejected = shot.evaluated.find((candidate) => !candidate.eligible)
+  assert.ok(rejected, 'this shot rejected something')
+  const liarBody = { ...withoutHash(rejected), eligible: true }
+  const liar = { ...liarBody, candidateHash: calculateAngleCandidateHash(liarBody) }
+  const lying = reseal(shot.evaluated.map((candidate) => (candidate.candidateId === liar.candidateId ? liar : candidate)))
+  selfConsistent(lying)
+  refuses(lying, 'claims eligibility its rejection reasons contradict', 'eligible with reasons is a contradiction, not a row')
+
+  // 4. A candidate describing another range: evidence smuggled in from a
+  //    different instant of the session, with every hash in order.
+  const elsewhere = deriveAngleCandidates({
+    ...world.inputs,
+    window: createTickInterval(shot.sessionRange.end, shot.sessionRange.end + (shot.sessionRange.end - shot.sessionRange.start)),
+    previousShot: null,
+  }).find((candidate) => candidate.trackId === rejected.trackId)
+  assert.ok(elsewhere && elsewhere.sessionRange.start !== shot.sessionRange.start)
+  const foreign = reseal(shot.evaluated.map((candidate) => (candidate.trackId === elsewhere.trackId ? elsewhere : candidate)))
+  selfConsistent(foreign)
+  refuses(foreign, 'describes another range', 'a candidate weighed over a different window is refused')
+
+  // 5. A candidate whose body no longer produces its own hash — the shape a
+  //    hand-edited row takes once somebody remembers to reseal the shot but not
+  //    the candidate.
+  const detached = { ...rejected, rejectionReasons: Object.freeze(['sync-missing']) }
+  const unsealed = reseal(shot.evaluated.map((candidate) => (candidate.candidateId === detached.candidateId ? detached : candidate)))
+  selfConsistent(unsealed)
+  refuses(unsealed, 'hash does not match its body', 'each evaluated candidate is verified in its own right')
+
+  // 6. A shot cut to an angle that is not in the window it says it evaluated:
+  //    the record would claim a decision nobody can audit.
+  const withoutChosen = shot.evaluated.filter((candidate) => candidate.candidateId !== shot.chosen.candidateId)
+  assert.equal(withoutChosen.length, shot.evaluated.length - 1)
+  const orphaned = reseal(withoutChosen)
+  selfConsistent(orphaned)
+  refuses(orphaned, 'which is not among the candidates it evaluated', 'the chosen angle has to be one it weighed')
+
+  // And the honest one still passes, so none of the above is refused by accident.
+  assert.equal(assertMulticamDirectionIntegrity(honest), honest)
+  console.log(`evaluated guards shot=${shot.shotId} candidates=${shot.evaluated.length} rejected=${shot.evaluated.filter((candidate) => !candidate.eligible).length}`)
 })

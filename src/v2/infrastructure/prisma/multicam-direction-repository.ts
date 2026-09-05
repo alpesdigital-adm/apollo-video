@@ -201,6 +201,9 @@ function hydrateScoreComponents(
 function hydrateCandidate(row: {
   shotId: string
   candidateId: string
+  ordinal: number
+  eligible: boolean
+  rejectionReasonsJson: string
   schemaVersion: string
   trackId: string
   sourceAssetId: string
@@ -266,17 +269,17 @@ function hydrateCandidate(row: {
     protected: row.protectedSelectionId === null || row.protectedReason === null
       ? null
       : Object.freeze({ selectionId: row.protectedSelectionId, reason: row.protectedReason }),
-    // This table holds the angle each shot CHOSE, and `directMulticam` refuses
-    // to choose an ineligible one (multicam-direction.ts:1546-1550), so both
-    // facts are known without a column: eligible, with nothing against it.
-    //
-    // They are not assumed on the way out either. The candidate hash covers
-    // both, and `assertMulticamDirectionIntegrity` below recomputes it — a
-    // stored candidate that was in fact rejected would come back with a
-    // different hash and be refused. Storing them as columns added a CHECK no
-    // writable row could violate; the hash is the check that can.
-    eligible: true,
-    rejectionReasons: Object.freeze([] as AngleRejection[]),
+    // Read, never assumed. This table holds every candidate the shot evaluated
+    // (ADR-118), so most rows in it are rejected ones and the two facts below
+    // are the reason a reviewer opens the row at all. `multicam_angle_candidates
+    // _eligibility_check` keeps the flag, the list and the count agreeing in the
+    // database; the candidate hash, recomputed by
+    // `assertMulticamDirectionIntegrity` further down, is what refuses a
+    // rejection reason edited underneath the aggregate.
+    eligible: row.eligible,
+    rejectionReasons: Object.freeze(
+      parse<AngleRejection[]>(row.rejectionReasonsJson, `candidate ${row.candidateId} rejection reasons`),
+    ),
     scoreComponents: hydrateScoreComponents(row.shotId, row.candidateId, row.scoreTotal, row.components),
     candidateHash: row.candidateHash,
   })
@@ -309,13 +312,19 @@ function hydrateShot(row: {
   if (row.schemaVersion !== SHOT_DECISION_SCHEMA_VERSION) {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored shot ${row.shotId} carries an unknown schema version`)
   }
-  const chosen = row.candidates.find((candidate) => candidate.candidateId === row.candidateId)
+  // The evaluated window in the order the shot hash covers — `ordinal`, which
+  // is the domain's track-id ascending. Reading them in whatever order the
+  // database returned would permute the list inside the hash and every stored
+  // direction would fail integrity on the way out.
+  const evaluatedRows = [...row.candidates].sort((left, right) => left.ordinal - right.ordinal)
+  const chosen = evaluatedRows.find((candidate) => candidate.candidateId === row.candidateId)
   if (!chosen) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       `Stored shot ${row.shotId} names candidate ${row.candidateId}, which is not stored beside it`,
     )
   }
+  const evaluated = Object.freeze(evaluatedRows.map(hydrateCandidate))
   const alternatives: readonly Readonly<ShotAlternative>[] = Object.freeze(
     [...row.alternatives]
       .sort((left, right) => left.ordinal - right.ordinal)
@@ -332,6 +341,7 @@ function hydrateShot(row: {
     ordinal: row.ordinal,
     sessionRange: createTickInterval(row.sessionStartTicks, row.sessionEndTicks),
     chosen: hydrateCandidate(chosen),
+    evaluated,
     audioTrackId: row.audioTrackId,
     alternatives,
     rule: row.rule as DirectionRule,
@@ -608,55 +618,67 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
             },
           })
 
-          const candidateRowId = childRowId([shotId, 'c0'], 160)
-          await transaction.v2MulticamAngleCandidate.create({
-            data: {
-              id: candidateRowId,
-              workspaceId: direction.workspaceId,
-              shotId,
-              directionId: id,
-              candidateId: shot.chosen.candidateId,
-              schemaVersion: shot.chosen.schemaVersion,
-              trackId: shot.chosen.trackId,
-              sourceAssetId: shot.chosen.sourceAssetId,
-              role: shot.chosen.role,
-              context: shot.chosen.context,
-              sessionStartTicks: shot.chosen.sessionRange.start,
-              sessionEndTicks: shot.chosen.sessionRange.end,
-              sourceStartTicks: shot.chosen.sourceRange?.start ?? null,
-              sourceEndTicks: shot.chosen.sourceRange?.end ?? null,
-              sourcePieceId: shot.chosen.sourcePieceId,
-              sourcePartId: shot.chosen.sourcePartId,
-              sourcePartAssetId: shot.chosen.sourcePartAssetId,
-              coverageAvailability: shot.chosen.coverage.availability,
-              coverageConfidenceBps: shot.chosen.coverage.confidenceBps,
-              syncStatus: shot.chosen.syncStatus,
-              syncConfidence: shot.chosen.syncConfidence,
-              previousTrackId: shot.chosen.continuity.previousTrackId,
-              sameAngleTicks: shot.chosen.continuity.sameAngleTicks,
-              spatialRelation: shot.chosen.continuity.spatialRelation,
-              protectedSelectionId: shot.chosen.protected?.selectionId ?? null,
-              protectedReason: shot.chosen.protected?.reason ?? null,
-              evidenceJson: JSON.stringify(candidateEvidenceOf(shot.chosen)),
-              scoreTotal: shot.chosen.scoreComponents.total,
-              candidateHash: shot.chosen.candidateHash,
-            },
-          })
-
-          await transaction.v2MulticamAngleScoreComponent.createMany({
-            data: ANGLE_SCORE_COMPONENT_NAMES.map((name) => {
-              const component = shot.chosen.scoreComponents[name]
-              return {
-                id: childRowId([candidateRowId, name], 160),
+          // Every candidate the shot evaluated, not only the winner (ADR-118).
+          // The rejected ones are the rows a reviewer reads: which camera could
+          // not be cut to over these exact ticks, and whether it was coverage,
+          // the clock map, the protocol ceiling or the quality floor that
+          // refused it. `ordinal` is the position inside the shot hash, so the
+          // list can be read back in the order it was hashed in.
+          for (const [ordinal, candidate] of shot.evaluated.entries()) {
+            const candidateRowId = childRowId([shotId, `c${ordinal}`], 160)
+            await transaction.v2MulticamAngleCandidate.create({
+              data: {
+                id: candidateRowId,
                 workspaceId: direction.workspaceId,
-                candidateId: candidateRowId,
-                name,
-                value: component.value,
-                evidenceRefsJson: JSON.stringify(component.evidenceRefs),
-                evidenceRefCount: component.evidenceRefs.length,
-              }
-            }),
-          })
+                shotId,
+                directionId: id,
+                candidateId: candidate.candidateId,
+                ordinal,
+                schemaVersion: candidate.schemaVersion,
+                trackId: candidate.trackId,
+                sourceAssetId: candidate.sourceAssetId,
+                role: candidate.role,
+                context: candidate.context,
+                sessionStartTicks: candidate.sessionRange.start,
+                sessionEndTicks: candidate.sessionRange.end,
+                sourceStartTicks: candidate.sourceRange?.start ?? null,
+                sourceEndTicks: candidate.sourceRange?.end ?? null,
+                sourcePieceId: candidate.sourcePieceId,
+                sourcePartId: candidate.sourcePartId,
+                sourcePartAssetId: candidate.sourcePartAssetId,
+                coverageAvailability: candidate.coverage.availability,
+                coverageConfidenceBps: candidate.coverage.confidenceBps,
+                syncStatus: candidate.syncStatus,
+                syncConfidence: candidate.syncConfidence,
+                previousTrackId: candidate.continuity.previousTrackId,
+                sameAngleTicks: candidate.continuity.sameAngleTicks,
+                spatialRelation: candidate.continuity.spatialRelation,
+                protectedSelectionId: candidate.protected?.selectionId ?? null,
+                protectedReason: candidate.protected?.reason ?? null,
+                evidenceJson: JSON.stringify(candidateEvidenceOf(candidate)),
+                scoreTotal: candidate.scoreComponents.total,
+                eligible: candidate.eligible,
+                rejectionReasonsJson: JSON.stringify(candidate.rejectionReasons),
+                rejectionCount: candidate.rejectionReasons.length,
+                candidateHash: candidate.candidateHash,
+              },
+            })
+
+            await transaction.v2MulticamAngleScoreComponent.createMany({
+              data: ANGLE_SCORE_COMPONENT_NAMES.map((name) => {
+                const component = candidate.scoreComponents[name]
+                return {
+                  id: childRowId([candidateRowId, name], 160),
+                  workspaceId: direction.workspaceId,
+                  candidateId: candidateRowId,
+                  name,
+                  value: component.value,
+                  evidenceRefsJson: JSON.stringify(component.evidenceRefs),
+                  evidenceRefCount: component.evidenceRefs.length,
+                }
+              }),
+            })
+          }
 
           if (shot.alternatives.length > 0) {
             await transaction.v2MulticamShotAlternative.createMany({
@@ -747,9 +769,27 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
       }
       // Two different cuts claiming one link of the chain. Picking either would
       // discard a decision somebody made.
+      //
+      // This is the path a concurrent second writer actually takes, and it used
+      // to say so without saying what to do about it. The direction row id is
+      // derived from (workspace, session, version), so two writers that both
+      // computed against version 1 collide on the PRIMARY KEY before either
+      // reaches the head's UPDATE predicate: the fence holds, but the branch
+      // that carries `currentVersion`/`currentHash` for the UI to offer a reload
+      // is the one that never runs. The head is read here so the loser is told
+      // the same thing in both paths (CONTRACT §2: a stale-version error carries
+      // the current version and hash).
+      const current = await this.client.v2MulticamDirectionHead.findFirst({
+        where: { workspaceId: direction.workspaceId, sessionId: direction.sessionId },
+        select: { version: true, directionHash: true },
+      })
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         `The direction for ${direction.sessionId} already has a different version ${version}`,
+        {
+          currentVersion: current?.version ?? null,
+          currentHash: current?.directionHash ?? null,
+        },
       )
     }
   }

@@ -9282,12 +9282,16 @@ model V2MulticamShotAlternative {
   @@map("multicam_shot_alternatives")
 }
 
+/// One row per candidate the shot EVALUATED — chosen and rejected alike
+/// (ADR-118). `ordinal` is the position in `ShotDecision.evaluated`, which is
+/// inside the shot hash, so hydration must read them back in it.
 model V2MulticamAngleCandidate {
   id                    String  @id @db.VarChar(160)
   workspaceId           String  @db.VarChar(128)
   shotId                String  @db.VarChar(160)
   directionId           String  @db.VarChar(160)
   candidateId           String  @db.VarChar(128)
+  ordinal               Int
   schemaVersion         String  @db.VarChar(64)
   trackId               String  @db.VarChar(128)
   sourceAssetId         String  @db.VarChar(128)
@@ -9311,6 +9315,9 @@ model V2MulticamAngleCandidate {
   protectedReason       String? @db.VarChar(512)
   evidenceJson          String  @db.Text
   scoreTotal            Float
+  eligible              Boolean
+  rejectionReasonsJson  String  @default("[]") @db.Text
+  rejectionCount        Int     @default(0)
   candidateHash         String  @db.Char(64)
 
   workspace  V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -9319,8 +9326,10 @@ model V2MulticamAngleCandidate {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, shotId, candidateId])
+  @@unique([workspaceId, shotId, ordinal])
   @@index([workspaceId, directionId])
   @@index([workspaceId, trackId])
+  @@index([workspaceId, directionId, eligible])
   @@map("multicam_angle_candidates")
 }
 

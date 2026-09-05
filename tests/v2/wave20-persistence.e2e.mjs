@@ -225,7 +225,7 @@ test(
       rangeStartTicks: rangeStart,
       rangeEndTicks: rangeEnd,
       aspectRatio: '9:16',
-      policyCalibrationVersion: 'multicam-direction-2026-09-v1',
+      policyCalibrationVersion: 'multicam-direction-2026-09-v2',
       policyJson: JSON.stringify({ schemaVersion: 'direction-policy/v1' }),
       audioTrackId: 'track-master-audio',
       shotCount: 2,
@@ -322,6 +322,8 @@ test(
       shotId: `${directionId}:0`,
       directionId,
       candidateId: 'candidate-0',
+      ordinal: 0,
+      eligible: true,
       schemaVersion: 'angle-candidate/v1',
       trackId: 'track-camera-main',
       sourceAssetId: 'asset-camera-main',
@@ -350,10 +352,43 @@ test(
       candidateHash: hash('a'),
     }
     await client.v2MulticamAngleCandidate.create({ data: candidate })
-    // ADR-118's rejected angles live in multicam_shot_alternatives, not here:
-    // this table holds the angle each shot chose, and the columns that used to
-    // say "eligible, nothing against it" could hold nothing else. The alternative
-    // written above carries the track that lost and the sentence saying why.
+    // ADR-118: a REJECTED angle is a row here, and this is the row the phase-2
+    // schema could not hold. It carries the reasons the domain gave, and the
+    // count is the length of that list.
+    const rejectedCandidate = {
+      ...candidate,
+      id: `${directionId}:0:candidate-1`,
+      candidateId: 'candidate-1',
+      ordinal: 1,
+      trackId: 'track-camera-alt',
+      sourceAssetId: 'asset-camera-alt',
+      role: 'camera-alt',
+      coverageAvailability: 'gap',
+      coverageConfidenceBps: null,
+      syncStatus: 'partial',
+      syncConfidence: 0.4,
+      eligible: false,
+      rejectionReasonsJson: JSON.stringify(['coverage-gap', 'sync-below-threshold']),
+      rejectionCount: 2,
+      candidateHash: hash('b'),
+    }
+    await client.v2MulticamAngleCandidate.create({ data: rejectedCandidate })
+    // Eligibility IS the emptiness of the list, and the count IS its length.
+    // Neither half can be nudged on its own.
+    await refused('multicam_angle_candidates_eligibility_check', () =>
+      client.v2MulticamAngleCandidate.create({
+        data: { ...rejectedCandidate, id: `${directionId}:0:candidate-2`, candidateId: 'candidate-2', ordinal: 2, eligible: true },
+      }))
+    await refused('multicam_angle_candidates_eligibility_check', () =>
+      client.v2MulticamAngleCandidate.create({
+        data: { ...rejectedCandidate, id: `${directionId}:0:candidate-3`, candidateId: 'candidate-3', ordinal: 3, rejectionCount: 1 },
+      }))
+    // Two candidates of one shot cannot claim one position in the list the shot
+    // hash covers.
+    await refused('multicam_angle_candidates_workspaceId_shotId_ordinal_key', () =>
+      client.v2MulticamAngleCandidate.create({
+        data: { ...rejectedCandidate, id: `${directionId}:0:candidate-4`, candidateId: 'candidate-4', candidateHash: hash('c') },
+      }))
     await client.v2MulticamAngleScoreComponent.create({
       data: {
         id: `${candidate.id}:speaker`,

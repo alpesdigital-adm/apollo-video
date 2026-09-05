@@ -182,6 +182,10 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED', 'CAPTURE_SESSION_DERIVATION_STALE',
       'DIRECTION_RANGE_UNRESOLVABLE', 'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
       'CAMERA_IDENTITY_COLLISION',
+      // The request is well formed and the caller had no business sending it:
+      // a score, an eligibility, a measurement or an approval the server is the
+      // only thing entitled to derive. 422 with the offending field, not 400.
+      'DIRECTION_CALLER_SUPPLIED_DERIVATION',
       // Colour match and critic refusals: the measurements arrived intact and
       // say something the system will not build a correction on.
       'COLOR_SOURCES_INCOMPARABLE', 'COLOR_HDR_SDR_UNSUPPORTED',

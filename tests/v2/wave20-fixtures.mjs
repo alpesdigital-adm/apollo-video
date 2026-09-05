@@ -7,6 +7,7 @@
 // way, and both loaders — plain `node` and `tsx` — link this shape.
 const {
   addCaptureSessionTrack,
+  addCaptureSessionTrackPart,
   captureSessionDerivationRef,
   createCaptureSession,
 } = await import('../../src/v2/domain/capture-session.ts')
@@ -135,6 +136,17 @@ function mapFor(workspaceId, sessionId, session, clock, trackId, offsetTicks) {
     derivedFrom: { sessionVersion: session.version, referenceEpoch: session.referenceEpoch },
     pieces: entry.parts.map((piece) => ({
       pieceId: `${trackId}-piece-${piece.ordinal}`,
+      // A piece that follows another has to say what opened it, and a cause
+      // that means "the source stopped producing time" has to show the gap
+      // (`piecewise-clock-map.ts:224-250`). The parts of a restarted track are
+      // laid out with a hole between them, so `recorder-restart` is both the
+      // true cause and the one the map will accept.
+      ...(piece.ordinal === 0
+        ? {}
+        : {
+          openedBy: 'recorder-restart',
+          openedByDetail: `the recorder stopped after ${piece.ordinal === 1 ? 'the first' : `part ${piece.ordinal}`} file and came back as a new one`,
+        }),
       mapping: createSourceToSessionMapping({
         clock,
         source,
@@ -620,6 +632,166 @@ export function anchorPlaybackMap(map, { anchorId, actorId, note, createdAt, str
   })
 }
 
+/**
+ * A session that can actually be CUT, for the F4.012 integration lane.
+ *
+ * `buildDirectionWorld` above is deliberately the unhealthy case: its cameras
+ * stop at 300 s while the recorder runs to 600 s, so the direction carries an
+ * uncovered stretch and `compileShotsToSourceRanges` refuses it by design. That
+ * is the right fixture for persistence and the wrong one for an integration
+ * that has to reach a `RenderInput`, so this is its healthy twin — every track
+ * covers the same 300 s, every non-reference track has a clock map, and the
+ * screen carries measurable activity.
+ *
+ * It is still not the happy path everywhere: the screen is a third angle with
+ * its own context, and the microphones are audio-only tracks bound to cameras by
+ * device, which is what makes the active-speaker mapping non-trivial
+ * (`speakerCamerasFor`).
+ *
+ * Two options exist because the default world has no discontinuity anywhere,
+ * and a world with no discontinuity cannot tell a clock map from a linear
+ * conversion — the whole `resolveSourceTick` limb could be deleted and every
+ * suite stayed green. The comment here used to *claim* the first of them
+ * ("camera B runs 12 s behind") over five identity maps with `offsetTicks:
+ * tick(0)`; now it is a parameter, and the suites that need it ask for it.
+ *
+ * - `cameraBOffsetSeconds` starts camera B late: its file's t=0 lands at that
+ *   session instant, so the map is genuinely anchored (`offsetTicks !== 0`
+ *   flips `anchored`), and the opening of the session has no camera-B picture
+ *   at all — a real `coverage-*` rejection instead of the audio-only one.
+ * - `cameraEndSecond` stops the three pictures before the recorder does, so the
+ *   reference track's own hull — what a request that omits `range` directs —
+ *   contains instants no camera covered. That is the case the request type
+ *   documents at length and the one the compile step then refuses.
+ * - `restart` splits one track into two files with a recorder gap between them,
+ *   exactly as `addCaptureSessionTrackPart` models it. The clock map then has
+ *   two pieces with a hole, so an analysis that straddles the hole resolves to
+ *   nothing and must be reported rather than stretched across it, and the
+ *   second file only reaches the evidence producer if the producer looks at
+ *   parts rather than at `track.sourceAssetId`.
+ */
+export function buildDirectableMulticamWorld({
+  workspaceId,
+  sessionId,
+  projectId,
+  endSecond = 300,
+  cameraEndSecond = endSecond,
+  cameraBOffsetSeconds = 0,
+  restart = null,
+}) {
+  const span = createTickInterval(tick(0), sec(endSecond))
+  const pictureSpan = createTickInterval(tick(0), sec(cameraEndSecond))
+  const master = track({
+    trackId: 'track-master-audio',
+    role: 'master-audio',
+    deviceId: 'dev-rec',
+    assetId: 'asset-master',
+    coverage: span,
+    syncAudioPolicy: 'final-candidate',
+    includeInFinalMix: true,
+  })
+  // The restarted track's FIRST file stops early; the second is appended below
+  // through the aggregate, so the split reason and the version chain are the
+  // ones a real recorder restart produces rather than a hand-written pair.
+  const firstSpan = (trackId, whole) => (restart && restart.trackId === trackId
+    ? createTickInterval(tick(0), sec(restart.stopSecond))
+    : whole)
+  const cameraA = track({ trackId: 'track-camera-a', role: 'camera-main', deviceId: 'dev-a', assetId: 'asset-cam-a', coverage: firstSpan('track-camera-a', pictureSpan) })
+  const cameraB = track({ trackId: 'track-camera-b', role: 'camera-main', deviceId: 'dev-b', assetId: 'asset-cam-b', coverage: firstSpan('track-camera-b', pictureSpan) })
+  const screen = track({ trackId: 'track-screen', role: 'screen', deviceId: 'dev-screen', assetId: 'asset-screen', coverage: firstSpan('track-screen', pictureSpan) })
+  const micA = track({ trackId: 'track-mic-a', role: 'microphone', deviceId: 'dev-a', assetId: 'asset-mic-a', coverage: firstSpan('track-mic-a', span) })
+  const micB = track({ trackId: 'track-mic-b', role: 'microphone', deviceId: 'dev-b', assetId: 'asset-mic-b', coverage: firstSpan('track-mic-b', span) })
+
+  let session = createCaptureSession({
+    workspaceId,
+    projectId,
+    sessionId,
+    clock: { timebase: TB, rounding: 'nearest-half-even' },
+    referenceTrackId: master.trackId,
+    tracks: [master],
+    lineage: lineage('create-session', 'command-create'),
+    createdAt: at(0),
+  })
+  // Every link of the chain is kept, not only the head: a repository that
+  // appends versions refuses to start at version 6, so a suite that stores this
+  // session has to walk it the way the operator built it.
+  const versions = [session]
+  for (const [index, entry] of [cameraA, cameraB, screen, micA, micB].entries()) {
+    session = addCaptureSessionTrack(session, { track: entry, lineage: lineage('add-track', `command-add-${index}`) })
+    versions.push(session)
+  }
+  if (restart) {
+    session = addCaptureSessionTrackPart(session, {
+      trackId: restart.trackId,
+      part: part({
+        partId: `${restart.trackId}-part-2`,
+        ordinal: 1,
+        sourceAssetId: restart.assetId,
+        coverage: createTickInterval(sec(restart.resumeSecond), sec(endSecond)),
+        splitReason: 'recorder-restart',
+      }),
+      lineage: lineage('add-track-part', 'command-restart'),
+    })
+    versions.push(session)
+  }
+
+  const clock = createSessionClock({
+    sessionId,
+    timebase: TB,
+    frameRate: rational(30, 1),
+    authority: { origin: 'master-audio', sourceId: 'asset-master', provenance: 'original-capture', evidenceRef: 'probe-master' },
+    establishedAt: at(0),
+  })
+
+  // Every non-reference track has a map: without one the track resolves to
+  // nothing, and a millisecond measured on its file has nowhere to land on the
+  // session clock.
+  const clockMaps = ['track-camera-a', 'track-camera-b', 'track-screen', 'track-mic-a', 'track-mic-b']
+    .map((trackId) => mapFor(
+      workspaceId,
+      sessionId,
+      session,
+      clock,
+      trackId,
+      trackId === 'track-camera-b' ? sec(cameraBOffsetSeconds) : tick(0),
+    ))
+  const coverages = session.tracks.map((entry) => coverageFor(workspaceId, session, entry.trackId))
+
+  const diagnostic = createSyncDiagnostic({
+    workspaceId,
+    sessionId,
+    referenceTrackId: session.referenceTrackId,
+    version: 1,
+    previousVersionHash: null,
+    sessionVersion: session.version,
+    referenceEpoch: session.referenceEpoch,
+    tracks: ['track-camera-a', 'track-camera-b', 'track-screen', 'track-mic-a', 'track-mic-b'].map((trackId) => {
+      const base = {
+        trackId,
+        methods: ['apollo-marker'],
+        confidence: 0.9,
+        offsetMs: 0,
+        residualMs: 6,
+        driftPpm: null,
+        coverageBps: 9_800,
+        gaps: [],
+        automaticAnchors: [],
+        manualAnchors: [],
+        pieceIds: [],
+        warnings: [],
+        previewSampleMs: [],
+      }
+      return { ...base, status: deriveTrackStatus({ ...base, hasContradictoryAnchors: false }) }
+    }),
+    protocolCeiling: 'automatic',
+    generatedAt: at(120),
+  })
+
+  return { session, versions, clock, coverages, clockMaps, diagnostic }
+}
+
 export const fixtureInstant = at
 export const fixtureSeconds = sec
 export const fixtureSha = sha
+export const fixtureTicks = tick
+export const fixtureTimebase = TB
