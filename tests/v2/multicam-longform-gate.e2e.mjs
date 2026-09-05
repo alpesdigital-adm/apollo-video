@@ -117,6 +117,12 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       } finally {
+        // The factory-built runtime below opens the process-wide client, which
+        // is not this test's own: both have to be given back.
+        const { disconnectV2PostgresClient } = await import(
+          '../../src/v2/infrastructure/prisma-postgres/client.ts'
+        )
+        await disconnectV2PostgresClient()
         await client.$disconnect()
       }
     })
@@ -546,6 +552,40 @@ test(
     )
 
     // -----------------------------------------------------------------------
+    // The assembled runtime exposes the scanner its evaluation uses.
+    // -----------------------------------------------------------------------
+    // Two instances were built, and the one on `legacyAudit` was not the one
+    // `evaluate` read — so a caller that configured it changed nothing, and
+    // every evaluation walked the 113-module graph from disk twice. Identity
+    // is the assertion: the exposed object is patched, and the evaluation has
+    // to see the patch.
+    const { createMulticamLongformGateRuntime } = await import(
+      '../../src/v2/infrastructure/repository-factory.ts'
+    )
+    const runtime = createMulticamLongformGateRuntime(() => at(150))
+    let scans = 0
+    const realAudit = runtime.legacyAudit.audit.bind(runtime.legacyAudit)
+    runtime.legacyAudit.audit = async () => {
+      scans += 1
+      const audit = await realAudit()
+      // A scan that reached nothing: `module-graph-scanned` has to say so.
+      return Object.freeze({ ...audit, entryModules: [...audit.entryModules, 'nowhere.ts'] })
+    }
+    const scanned = await runtime.evaluate({
+      workspaceId: A,
+      projectId: PROJECT_A,
+      actor: actorA,
+      idempotencyKey: 'f4016-key-runtime',
+    })
+    assert.equal(scans, 1, 'the runtime evaluated with a scanner it did not expose')
+    assert.equal(
+      criterionOf(scanned.gate, 'no-legacy-runtime-dependency').checks
+        .every((check) => check.failureReason === 'evidence-unverified'),
+      true,
+      'the patched scan was not the one the evaluation read',
+    )
+
+    // -----------------------------------------------------------------------
     // The CHECK constraints, offered rows they must refuse.
     // -----------------------------------------------------------------------
     let refusals = 0
@@ -808,6 +848,21 @@ test(
     assert.match(
       criterionOf(approved.gate, 'podcast-multicam-synchronised').checks[0].detail,
       /\(podcast\)/,
+    )
+
+    // `protocol-ceiling-blocks-auto-edit` asks the domain authority rather than
+    // re-deriving one of its six grounds from the evaluation row: a diagnostic
+    // canAutoEdit refuses for confidence or contradictory anchors was reported
+    // as "not blocked" by the copy that only looked at the ceiling.
+    const ceilingDetail = criterionOf(
+      approved.gate,
+      'insufficient-evidence-requires-manual',
+    ).checks.find((item) => item.code === 'protocol-ceiling-blocks-auto-edit').detail
+    assert.match(ceilingDetail, /canAutoEdit allowed=false/)
+    assert.match(
+      ceilingDetail,
+      /manual input is required/,
+      'the check reports the ceiling but not the other grounds canAutoEdit found',
     )
 
     // A pass may cite a row that stores no hash — a media artifact nobody
@@ -1121,6 +1176,42 @@ test(
         row.sourceHash,
         row.id,
       )
+    }
+
+    // One coverage row left where two are needed. "We derived one" and "we
+    // derived two and neither carries a measured coverageBps" are different
+    // jobs for the operator, and `coverage-derived` used to announce both as
+    // `evidence-not-measured` — the reason came from a different predicate
+    // than the one that decided the failure.
+    const { PrismaCaptureSessionRepository } = await import(
+      '../../src/v2/infrastructure/prisma/capture-session-repository.ts'
+    )
+    const sessionRepository = new PrismaCaptureSessionRepository(client)
+    const keptCoverage = world.podcast.coverages[0]
+    await client.v2CaptureTrackCoverage.deleteMany({
+      where: {
+        workspaceId: W,
+        sessionId: world.ids.podcastSession,
+        trackId: { not: keptCoverage.trackId },
+      },
+    })
+    const thinRun = await run('f4016-world-key-thin-coverage')
+    const coverageCheck = criterionOf(thinRun.gate, 'podcast-multicam-synchronised')
+      .checks.find((item) => item.code === 'coverage-derived')
+    assert.equal(coverageCheck.passed, false)
+    assert.equal(
+      coverageCheck.failureReason,
+      'evidence-missing',
+      'one derived coverage was announced as a measurement nobody took',
+    )
+    assert.match(coverageCheck.detail, /derived 1 track coverages/)
+    assert.deepEqual(failing(thinRun.gate), ['podcast-multicam-synchronised'])
+    for (const coverage of world.podcast.coverages) {
+      await sessionRepository.persistCoverage({
+        coverage,
+        sessionId: world.ids.podcastSession,
+        createdAt: new Date(at(400)).toISOString(),
+      })
     }
 
     const healthy = await run('f4016-world-key-healthy-again')
