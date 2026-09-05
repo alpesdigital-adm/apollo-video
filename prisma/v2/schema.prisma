@@ -952,6 +952,7 @@ model V2ProjectVersion {
   assetSelections                  V2AssetSelection[]
   qualityIterations                V2QualityIteration[]
   perceptionTimelines              V2PerceptionTimeline[]
+  renderablePlanSnapshots          V2RenderablePlanSnapshot[]          @relation("RenderablePlanSnapshotVersion")
   mvpCoreGatesAsPrimary            V2MvpCoreGate[]                     @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion          V2MvpCoreGate[]                     @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase              V2ProjectLutSelection[]             @relation("ProjectLutSelectionBase")
@@ -9988,8 +9989,9 @@ model V2RenderablePlanSnapshot {
   planHash         String   @db.Char(64)
   createdAt        DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project   V2Project   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion @relation("RenderablePlanSnapshotVersion", fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, planHash])

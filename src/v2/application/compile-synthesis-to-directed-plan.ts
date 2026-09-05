@@ -8,6 +8,7 @@ import type { DesiredActionInput } from '../domain/desired-action.ts'
 import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 import type { EditorialSynthesisRepository } from './ports/editorial-synthesis-repository.ts'
+import type { RenderSourceRepository } from './ports/render-source-repository.ts'
 import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
@@ -34,6 +35,16 @@ import {
  * demands and refuses anything that would change what the synthesis asserts.
  */
 
+/**
+ * One master the ranges were cut from, as the server measured it.
+ *
+ * Never assembled by a caller in the service path: `compileSynthesisRenderPlanService`
+ * resolves every `range.lineage.sourceArtifactId` through `RenderSourceRepository`
+ * and builds these itself. The type stays exported because the pure compiler
+ * below is also driven directly by the FFmpeg golden, which measures the file it
+ * just wrote with ffprobe — that is a server measurement too, taken by the only
+ * process that can take it there.
+ */
 export interface SynthesisRenderSource {
   readonly artifactId: string
   /** The bytes the ranges were selected from. Checked, not trusted. */
@@ -82,8 +93,12 @@ export function compileSynthesisToDirectedPlan(
     `synthesis ${synthesis.id} selected ${synthesis.ranges.length} ranges and compiled ${clips.length} clips`,
   )
 
+  const fps = Number(synthesis.editPlan.frameRate.num) / Number(synthesis.editPlan.frameRate.den)
+  const frameMs = 1_000 / fps
+
   const byArtifact = new Map(options.sources.map((source) => [source.artifactId, source]))
   const shaByArtifact = new Map<string, string>()
+  const lastReadMsByArtifact = new Map<string, number>()
   for (const range of synthesis.ranges) {
     const previous = shaByArtifact.get(range.lineage.sourceArtifactId)
     // Two ranges of the same artifact naming two digests is a corrupted
@@ -94,6 +109,10 @@ export function compileSynthesisToDirectedPlan(
       `synthesis ${synthesis.id} names two different digests for artifact ${range.lineage.sourceArtifactId}`,
     )
     shaByArtifact.set(range.lineage.sourceArtifactId, range.lineage.sourceArtifactSha256)
+    lastReadMsByArtifact.set(
+      range.lineage.sourceArtifactId,
+      Math.max(lastReadMsByArtifact.get(range.lineage.sourceArtifactId) ?? 0, range.endMs),
+    )
   }
 
   const sources: RenderablePlanSource[] = []
@@ -118,6 +137,29 @@ export function compileSynthesisToDirectedPlan(
       'INVALID_RENDER_INPUT',
       `artifact ${artifactId} has no measured duration`,
     )
+    // A measurement that is only checked for being a positive number is not
+    // checked. Two things make it falsifiable: the file has to be long enough
+    // for the ranges the synthesis cut out of it, and — where the whole cut
+    // comes from one master — it has to be the master the aggregate declared it
+    // measured. Without these, a plan could declare a five-second source while
+    // its clips read to the two-hour mark of it, and every later reader would
+    // take the five seconds as the provenance of the cut.
+    const measuredMs = resolved.durationSeconds * 1_000
+    const lastReadMs = lastReadMsByArtifact.get(artifactId) ?? 0
+    assertDomain(
+      measuredMs + frameMs >= lastReadMs,
+      'INVALID_RENDER_INPUT',
+      `artifact ${artifactId} measures ${measuredMs.toFixed(0)} ms and synthesis ${synthesis.id} reads to ${lastReadMs} ms of it`,
+      { artifactId, measuredMs, lastReadMs },
+    )
+    if (shaByArtifact.size === 1) {
+      assertDomain(
+        Math.abs(measuredMs - synthesis.sourceDurationMs) <= frameMs,
+        'INVALID_RENDER_INPUT',
+        `artifact ${artifactId} measures ${measuredMs.toFixed(0)} ms and synthesis ${synthesis.id} was selected from a master of ${synthesis.sourceDurationMs} ms`,
+        { artifactId, measuredMs, declaredMs: synthesis.sourceDurationMs },
+      )
+    }
     sources.push({
       id: `source-${artifactId}`,
       artifactId,
@@ -157,10 +199,23 @@ export function compileSynthesisToDirectedPlan(
     .map((join) => {
       const before = synthesis.ranges.find((range) => range.rangeId === join.beforeRangeId)!
       const after = synthesis.ranges.find((range) => range.rangeId === join.afterRangeId)!
+      // Refused, not defaulted to zero. Frame 0 is a legitimate position — it is
+      // the first clip's `timelineInFrame` — so a lookup that missed would be
+      // indistinguishable from a marker on the opening frame, and this document
+      // is an audit artifact: a reviewer would be sent to the wrong instant with
+      // nothing saying so. It is unreachable today only because
+      // `editorial-synthesis.ts` happens to mint clip ids as `clip-<rangeId>`.
       const atClip = cutClips.find((clip) => clip.id === `clip-${join.afterRangeId}`)
+      if (!atClip) {
+        throw new DomainError(
+          'INVALID_RENDER_INPUT',
+          `synthesis ${synthesis.id} splices before range ${join.afterRangeId}, which compiled to no clip`,
+          { joinAfterRangeId: join.afterRangeId, clipIds: cutClips.map((clip) => clip.id) },
+        )
+      }
       return {
         kind: 'editorial-cut' as const,
-        atFrame: atClip?.timelineInFrame ?? 0,
+        atFrame: atClip.timelineInFrame,
         // The span that was dropped, in the source's own seconds: what an
         // editor has to listen to before defending the join.
         sourceStartSeconds: before.endMs / 1_000,
@@ -171,8 +226,6 @@ export function compileSynthesisToDirectedPlan(
         ]),
       }
     })
-
-  const fps = Number(synthesis.editPlan.frameRate.num) / Number(synthesis.editPlan.frameRate.den)
 
   return assembleDirectedEditPlan({
     planId: `${synthesis.editPlan.id}:directed`,
@@ -231,9 +284,18 @@ function seamReason(join: Readonly<SynthesisJoin>): string {
  *
  * Recompiling the same synthesis is a replay: the same bytes under the same
  * key, returned without a second write.
+ *
+ * The caller brings ids and nothing else. It used to hand over the sources —
+ * their artifact ids, their digests and their durations — which made the
+ * identity check above ceremonial: "the bytes are the bytes the selection was
+ * made from" compared the caller's digest against the aggregate's, so anyone who
+ * could read the lineage could satisfy it by quoting it back. The sources are
+ * now resolved from the project's own media-asset links, which is both where the
+ * measurements live and the lookup the renderer performs.
  */
 export function compileSynthesisRenderPlanService(dependencies: {
   syntheses: EditorialSynthesisRepository
+  sources: RenderSourceRepository
   snapshots: RenderablePlanSnapshotRepository
   clock: () => Date
 }) {
@@ -244,7 +306,6 @@ export function compileSynthesisRenderPlanService(dependencies: {
     projectVersionId: string
     objective: StrategicObjectiveId
     desiredAction?: Readonly<DesiredActionInput>
-    sources: readonly Readonly<SynthesisRenderSource>[]
   }): Promise<Readonly<{
     plan: Readonly<DirectedEditPlan>
     planHash: string
@@ -265,9 +326,40 @@ export function compileSynthesisRenderPlanService(dependencies: {
       'INVALID_ARGUMENT',
       `Editorial synthesis ${input.synthesisId} belongs to project ${stored.synthesis.projectId}`,
     )
+    const artifactIds = [...new Set(
+      stored.synthesis.ranges.map((range) => range.lineage.sourceArtifactId),
+    )]
+    const resolved = await dependencies.sources.resolveForProject({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      artifactIds,
+    })
+    const byArtifactId = new Map(resolved.map((source) => [source.artifactId, source] as const))
+    const sources: SynthesisRenderSource[] = artifactIds.map((artifactId) => {
+      const source = byArtifactId.get(artifactId)
+      if (!source) {
+        throw new DomainError(
+          'MEDIA_ARTIFACT_NOT_FOUND',
+          `synthesis ${input.synthesisId} reads from artifact ${artifactId}, which project ${input.projectId} cannot render from`,
+          { artifactId, projectId: input.projectId },
+        )
+      }
+      assertDomain(
+        source.durationSeconds !== null,
+        'INVALID_RENDER_INPUT',
+        `artifact ${artifactId} carries no measured duration; a plan cannot declare a source nobody probed`,
+        { artifactId },
+      )
+      return {
+        artifactId: source.artifactId,
+        sha256: source.sha256,
+        durationSeconds: source.durationSeconds,
+      }
+    })
+
     const createdAt = dependencies.clock().toISOString()
     const plan = compileSynthesisToDirectedPlan(stored.synthesis, {
-      sources: input.sources,
+      sources,
       projectVersionId: input.projectVersionId,
       objective: input.objective,
       ...(input.desiredAction ? { desiredAction: input.desiredAction } : {}),

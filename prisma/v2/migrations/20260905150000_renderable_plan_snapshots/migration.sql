@@ -91,3 +91,12 @@ ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshot
 
 -- AddForeignKey
 ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshots_projectId_workspaceId_fkey" FOREIGN KEY ("projectId", "workspaceId") REFERENCES "projects"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- `projectVersionId` is the last column of the idempotency key above and is
+-- cross-checked against the stored JSON, so it decides both which rows replay
+-- and which cut a row belongs to — and it named nothing. The composite is the
+-- one the rest of this schema uses for a project version (asset_selections,
+-- director_runs, edit_commands and a hundred others), and it buys the second
+-- check for free: the version has to belong to the project the row names.
+-- AddForeignKey
+ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshots_projectVersionId_fkey" FOREIGN KEY ("projectVersionId", "projectId", "workspaceId") REFERENCES "project_versions"("id", "projectId", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;

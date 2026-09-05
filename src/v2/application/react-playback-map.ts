@@ -35,6 +35,10 @@ import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 import type { CaptureSessionRepository } from './ports/capture-session-repository.ts'
 import type { PlaybackMapRepository } from './ports/playback-map-repository.ts'
+import type {
+  RenderSourceRepository,
+  ResolvedRenderSource,
+} from './ports/render-source-repository.ts'
 import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
@@ -99,6 +103,20 @@ export interface PlaybackObservationSource {
   }): Promise<readonly Readonly<PlaybackObservation>[]>
 }
 
+/**
+ * A compiled plan that no longer describes the head of the map it came from.
+ *
+ * Reported rather than deleted: the plan that was rendered stays readable, and
+ * what changed is that it stopped describing the current cut. `compiledFromHash`
+ * is the map hash it was compiled at, so a reader can see *which* version it
+ * still describes instead of only that it is stale.
+ */
+export interface StrandedRenderablePlan {
+  readonly planId: string
+  readonly planHash: string
+  readonly compiledFromHash: string
+}
+
 export interface BuildReactPlaybackMapResult {
   readonly map: Readonly<PlaybackMap>
   readonly replayed: boolean
@@ -114,6 +132,28 @@ export interface BuildReactPlaybackMapResult {
    * else now.
    */
   readonly droppedAnchors: number
+  /**
+   * The compiled plan this rebuild stranded, if one had been compiled.
+   *
+   * This is where "a rebuild invalidates its dependents" is actually observable.
+   * A rebuild is the only operation that can strand a plan: the map has to be
+   * resolved before it compiles, and an anchor only ever resolves an uncovered
+   * stretch, so nothing else moves a head out from under a stored plan.
+   */
+  readonly invalidated: Readonly<StrandedRenderablePlan> | null
+}
+
+/**
+ * One recording the plan will declare, after the server measured it.
+ *
+ * The narrowed counterpart of `ResolvedRenderSource`: the port allows a null
+ * duration because an artifact may carry no probe, and this compiler refuses
+ * that case by name, so everything past the refusal holds a real number.
+ */
+interface MeasuredRenderSource {
+  readonly artifactId: string
+  readonly sha256: string
+  readonly durationSeconds: number
 }
 
 export interface ReactPlaybackPlanResult {
@@ -285,6 +325,8 @@ export function buildReactPlaybackMapService(dependencies: {
   sessions: CaptureSessionRepository
   media: PlaybackMediaPort
   observations: PlaybackObservationSource
+  /** Read-only here: a rebuild reports the plan it stranded, it deletes none. */
+  snapshots: RenderablePlanSnapshotRepository
   clock: () => Date
 }) {
   return async (input: {
@@ -412,6 +454,17 @@ export function buildReactPlaybackMapService(dependencies: {
       )
     }
 
+    // Read before the write, and against the map this build advances or
+    // supersedes: a changed reference starts a new map id, so asking about the
+    // new head would ask about a derivation nothing has ever compiled.
+    const compiled = previous === null
+      ? null
+      : await dependencies.snapshots.readLatestForSource({
+        workspaceId: input.actor.workspaceId,
+        origin: 'react-playback',
+        sourceId: previous.mapId,
+      })
+
     const result = (map: Readonly<PlaybackMap>, replayed: boolean): Readonly<BuildReactPlaybackMapResult> =>
       Object.freeze({
         map,
@@ -420,12 +473,19 @@ export function buildReactPlaybackMapService(dependencies: {
         supersededMapId: map.supersedesMapId,
         carriedAnchors: carried.length,
         droppedAnchors: referenceChanged ? manualAnchors.length : 0,
+        invalidated: compiled && compiled.sourceHash !== map.mapHash
+          ? Object.freeze({
+            planId: compiled.planId,
+            planHash: compiled.planHash,
+            compiledFromHash: compiled.sourceHash,
+          })
+          : null,
       })
 
     if (previous && derivationFingerprint(previous) === derivationFingerprint(candidate)) {
       // Same session version, same bytes, same pieces: re-running the detector
       // changed nothing, so the chain does not grow a version that repeats the
-      // one before it.
+      // one before it — and a plan compiled from that head is still current.
       return result(previous, true)
     }
 
@@ -511,8 +571,8 @@ export function editReactPlaybackAnchorService(dependencies: {
     map: Readonly<PlaybackMap>
     replayed: boolean
     manualReviewRequired: boolean
-    /** The compiled plan this edit made stale, if one had been compiled. */
-    invalidated: Readonly<{ planId: string; planHash: string }> | null
+    /** The compiled plan this edit left describing an older head, if any. */
+    invalidated: Readonly<StrandedRenderablePlan> | null
   }>> => {
     const current = await dependencies.repository.readHead({
       workspaceId: input.actor.workspaceId,
@@ -568,10 +628,21 @@ export function editReactPlaybackAnchorService(dependencies: {
       map: stored.map,
       replayed: stored.replayed,
       manualReviewRequired: stored.map.uncovered.length > 0,
-      // Reported rather than deleted: the plan that was rendered stays readable,
-      // and what changed is that it no longer describes the head.
-      invalidated: stale && stale.sourceHash === current.mapHash
-        ? Object.freeze({ planId: stale.planId, planHash: stale.planHash })
+      // Compared against the head this anchor just produced, never against the
+      // one it was computed from. The earlier form asked whether a plan had been
+      // compiled from *this exact version* — which no sequence of operations can
+      // produce, because compiling refuses a map with an uncovered stretch and
+      // anchoring refuses an instant that is not inside one. It was therefore
+      // always null, and the invalidation this service is supposed to report was
+      // declared and not implemented. The reachable case is a plan compiled from
+      // an earlier version of the same map, which a rebuild left answerable
+      // again: that plan still describes a cut, and it is no longer this one.
+      invalidated: stale && stale.sourceHash !== stored.map.mapHash
+        ? Object.freeze({
+          planId: stale.planId,
+          planHash: stale.planHash,
+          compiledFromHash: stale.sourceHash,
+        })
         : null,
     })
   }
@@ -695,6 +766,11 @@ function shotMarker(
 export function compileReactPlaybackPlanService(dependencies: {
   repository: PlaybackMapRepository
   sessions: CaptureSessionRepository
+  /**
+   * Where the two recordings become things a renderer can open. The caller
+   * names no artifact, no digest and no duration: all three are read here.
+   */
+  sources: RenderSourceRepository
   snapshots: RenderablePlanSnapshotRepository
   clock: () => Date
 }) {
@@ -731,16 +807,105 @@ export function compileReactPlaybackPlanService(dependencies: {
     // The map names the session version it was derived under. Compiling it
     // against a later one would render a cut derived from tracks that have
     // since changed, and nothing downstream would say so.
+    //
+    // The code is the *session*'s, not the map's: it is the session that moved,
+    // and a UI following `PLAYBACK_MAP_VERSION_STALE` would reload the map —
+    // which is exactly where it already is. `CAPTURE_SESSION_VERSION_STALE`
+    // carries the same details shape as the sibling fence in
+    // `assertSessionUnmoved`, plus what the map was derived under.
     if (session.version !== map.sessionVersion || session.referenceEpoch !== map.referenceEpoch) {
       throw new DomainError(
-        'PLAYBACK_MAP_VERSION_STALE',
-        `The playback map for ${input.sessionId} was derived from session version ${map.sessionVersion}; the session is at ${session.version}`,
+        'CAPTURE_SESSION_VERSION_STALE',
+        `The playback map for ${input.sessionId} was derived from session version ${map.sessionVersion} at reference epoch ${map.referenceEpoch}; the session is at version ${session.version} and epoch ${session.referenceEpoch}`,
         {
+          currentVersionId: `${session.sessionId}:v${session.version}`,
           currentVersion: session.version,
           currentHash: session.sessionHash,
+          currentReferenceEpoch: session.referenceEpoch,
           mapSessionVersion: map.sessionVersion,
+          mapReferenceEpoch: map.referenceEpoch,
         },
       )
+    }
+
+    // The two recordings, resolved the way the renderer will resolve them.
+    //
+    // The map names its recordings by the *capture asset* the recorder wrote
+    // (`CaptureTrackPart.sourceAssetId`), which is not what a plan's sources are
+    // keyed by: `PrismaProjectProxyRenderRepository` looks every
+    // `clip.sourceArtifactId` up in the project's media-asset links, whose ids
+    // are `v2MediaArtifact` rows — the same ids `CaptureMediaResolver` uses to
+    // fetch the bytes (`part.evidence.ingestArtifactId`). Writing the asset id
+    // into the plan produced a document that persisted cleanly and could not be
+    // rendered: the resolver would refuse every source it declared. So the
+    // translation happens here, once, against the session the map was derived
+    // from, and every id the plan declares is proved to resolve before the plan
+    // is assembled.
+    const { reaction, reference } = resolveReactTracks(session, input.reactionTrackId)
+    const recordings = [
+      Object.freeze({ role: 'reaction' as const, part: soleMeasuredPart(reaction), identity: map.reactionMedia }),
+      Object.freeze({ role: 'reference' as const, part: soleMeasuredPart(reference), identity: map.referenceMedia }),
+    ]
+    for (const recording of recordings) {
+      // The map was built from these parts; if the session now names other
+      // bytes under the same version, one of the two is lying about what it
+      // measured, and cutting from either would be a guess.
+      if (
+        recording.part.sourceAssetId !== recording.identity.assetId ||
+        recording.part.evidence.ingestSha256 !== recording.identity.sha256
+      ) {
+        throw new DomainError(
+          'MEDIA_ARTIFACT_IDENTITY_MISMATCH',
+          `The ${recording.role} track of ${input.sessionId} no longer holds the recording the playback map measured`,
+          {
+            role: recording.role,
+            mapAssetId: recording.identity.assetId,
+            trackAssetId: recording.part.sourceAssetId,
+          },
+        )
+      }
+    }
+    const artifactByAssetId = new Map(
+      recordings.map((recording) =>
+        [recording.identity.assetId, recording.part.evidence.ingestArtifactId] as const),
+    )
+    const resolvedSources = await dependencies.sources.resolveForProject({
+      workspaceId: input.actor.workspaceId,
+      projectId: session.projectId,
+      artifactIds: [...artifactByAssetId.values()],
+    })
+    const byArtifactId = new Map(resolvedSources.map((source) => [source.artifactId, source] as const))
+    const measured = new Map<string, Readonly<MeasuredRenderSource>>()
+    for (const recording of recordings) {
+      const artifactId = recording.part.evidence.ingestArtifactId
+      const resolved = byArtifactId.get(artifactId)
+      if (!resolved) {
+        throw new DomainError(
+          'MEDIA_ARTIFACT_NOT_FOUND',
+          `The ${recording.role} recording of ${input.sessionId} is artifact ${artifactId}, which project ${session.projectId} cannot render from`,
+          { role: recording.role, artifactId, projectId: session.projectId },
+        )
+      }
+      if (resolved.sha256 !== recording.identity.sha256) {
+        throw new DomainError(
+          'MEDIA_ARTIFACT_IDENTITY_MISMATCH',
+          `Artifact ${artifactId} no longer holds the bytes the playback map was measured against`,
+          { role: recording.role, artifactId, mapSha256: recording.identity.sha256 },
+        )
+      }
+      // Measured on the file by whoever ingested it, never derived from the
+      // timeline that is about to use it.
+      assertDomain(
+        resolved.durationSeconds !== null,
+        'INVALID_RENDER_INPUT',
+        `artifact ${artifactId} carries no measured duration; a plan cannot declare a source nobody probed`,
+        { role: recording.role, artifactId },
+      )
+      measured.set(recording.identity.assetId, Object.freeze({
+        artifactId: resolved.artifactId,
+        sha256: resolved.sha256,
+        durationSeconds: resolved.durationSeconds as number,
+      }))
     }
 
     const { shots } = compilePlaybackToShots(map, {
@@ -750,10 +915,21 @@ export function compileReactPlaybackPlanService(dependencies: {
     })
     const byPieceId = new Map(map.pieces.map((piece) => [piece.pieceId, piece]))
 
+    const artifactFor = (assetId: string): string => {
+      const artifactId = artifactByAssetId.get(assetId)
+      assertDomain(
+        artifactId !== undefined,
+        'INVALID_RENDER_INPUT',
+        `the compiled shots cut from ${assetId}, which is neither the reaction nor the reference of ${map.sessionId}`,
+        { assetId },
+      )
+      return artifactId as string
+    }
+
     const clips: EditorialCutClip[] = shots.map((shot) => ({
       id: `clip-${shot.pieceId}`,
-      sourceArtifactId: shot.sourceAssetId,
-      audioSourceArtifactId: shot.audioSourceAssetId,
+      sourceArtifactId: artifactFor(shot.sourceAssetId),
+      audioSourceArtifactId: artifactFor(shot.audioSourceAssetId),
       audioSourceInFrame: shot.audioSourceInFrame,
       audioSourceOutFrame: shot.audioSourceOutFrame,
       sourceInFrame: shot.sourceInFrame,
@@ -774,10 +950,46 @@ export function compileReactPlaybackPlanService(dependencies: {
       ))
 
     const fps = Number(input.planFps.num) / Number(input.planFps.den)
-    const referenceSeconds = Number(map.referenceMedia.durationTicks) *
-      SECONDS_PER_TICK(map.referenceMedia.timebase)
+    // Two different measurements of two different things, and they are not
+    // interchangeable. The reaction's tick count is the *timeline*: the map
+    // tiles the reaction second by second, so this is how long the output runs.
+    // The seconds a source declares are what the server measured on the file,
+    // which is why the reference's number comes from the artifact and never from
+    // the reaction — "the two recordings are the same length" is precisely the
+    // assumption ADR-135 exists to refuse.
     const reactionSeconds = Number(map.reactionMedia.durationTicks) *
       SECONDS_PER_TICK(session.clock.timebase)
+    const referenceSeconds = measured.get(map.referenceMedia.assetId)!.durationSeconds
+
+    // A clip that reads past the end of its file renders black or fails in
+    // FFmpeg, and the plan would have declared the file long enough to allow it.
+    const measuredByArtifactId = new Map(
+      [...measured.values()].map((source) => [source.artifactId, source] as const),
+    )
+    for (const clip of clips) {
+      for (const [artifactId, outFrame] of [
+        [clip.sourceArtifactId, clip.sourceOutFrame] as const,
+        [
+          clip.audioSourceArtifactId ?? clip.sourceArtifactId,
+          clip.audioSourceOutFrame ?? clip.sourceOutFrame,
+        ] as const,
+      ]) {
+        const source = measuredByArtifactId.get(artifactId)
+        assertDomain(
+          source !== undefined,
+          'INVALID_RENDER_INPUT',
+          `clip ${clip.id} reads from ${artifactId}, which this compile never resolved`,
+          { clipId: clip.id, artifactId },
+        )
+        const available = Math.round(source.durationSeconds * fps)
+        assertDomain(
+          outFrame <= available + 1,
+          'INVALID_RENDER_INPUT',
+          `clip ${clip.id} reads to frame ${outFrame} of ${artifactId}, which measures ${available} frames`,
+          { clipId: clip.id, artifactId, outFrame, available },
+        )
+      }
+    }
 
     const createdAt = dependencies.clock().toISOString()
     const plan = assembleDirectedEditPlan({
@@ -792,20 +1004,15 @@ export function compileReactPlaybackPlanService(dependencies: {
       objective: input.objective,
       ...(input.desiredAction ? { desiredAction: input.desiredAction } : {}),
       fps,
-      sources: [
-        {
-          id: `source-${map.reactionMedia.assetId}`,
-          artifactId: map.reactionMedia.assetId,
+      sources: recordings.map((recording) => {
+        const source = measured.get(recording.identity.assetId)!
+        return {
+          id: `source-${source.artifactId}`,
+          artifactId: source.artifactId,
           kind: 'video' as const,
-          durationSeconds: reactionSeconds,
-        },
-        {
-          id: `source-${map.referenceMedia.assetId}`,
-          artifactId: map.referenceMedia.assetId,
-          kind: 'video' as const,
-          durationSeconds: referenceSeconds,
-        },
-      ],
+          durationSeconds: source.durationSeconds,
+        }
+      }),
       clips,
       seams,
       markers,

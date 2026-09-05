@@ -275,36 +275,47 @@ export function assembleDirectedEditPlan(
   return validateDirectedEditPlan(plan)
 }
 
+/** The one field the plan's identity deliberately does not cover. See below. */
+const HASH_EXCLUDED_FIELD = 'createdAt' as const
+
 /**
- * The identity of a compiled plan: what it cuts, from what, in what order.
+ * The identity of a compiled plan: the whole document, minus when it was
+ * written.
  *
- * Deliberately not the plan object's own hash of everything — `createdAt` and
- * the plan id would make the same cut hash differently on two days, and the
- * question this answers is "have we already compiled this exact cut from this
- * exact derivation".
+ * This hash answers two questions, and until Wave 20's review it only answered
+ * the first:
+ *
+ * - **Have we already compiled this exact plan?** The replay key of
+ *   `renderable_plan_snapshots`, so a recompile of an unmoved derivation is one
+ *   row rather than a conflict.
+ * - **Is the stored document still the one the compiler produced?**
+ *   `hydrate` (`infrastructure/prisma/renderable-plan-snapshot-repository.ts`)
+ *   recomputes this over the parsed `planJson` and refuses a row that no longer
+ *   matches. A hash over a *projection* of the plan — clips, sources,
+ *   transitions, markers — left everything else outside it: `director.decisions`
+ *   (the one field the module comment above says a reader must never be able to
+ *   believe), `overlayTracks` (burned-in copy), `subtitleTracks`, `composition`,
+ *   `movementPolicy`, `subtitlePolicy`, `editorial.exclusions`,
+ *   `retimedTranscript`, `state`, `schemaVersion` and `protectedElements`. An
+ *   UPDATE that injected a fabricated critic decision and a CTA overlay
+ *   recomputed to the same digest and read back clean.
+ *
+ * So every field of the plan is hashed. `createdAt` is the single exclusion,
+ * because it is the only field that would make the same cut, from the same
+ * derivation at the same hash, hash differently on two days — turning a replay
+ * into a `PERSISTENCE_CONFLICT` against a row nobody changed. Everything else,
+ * including the plan id and `projectVersionId`, is in: the same cut belonging to
+ * two project versions is two plans.
  */
 export function calculateRenderablePlanHash(plan: Readonly<DirectedEditPlan>): string {
-  const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+  const document: Record<string, unknown> = { ...plan }
+  delete document[HASH_EXCLUDED_FIELD]
   return calculateCanonicalHash({
-    schemaVersion: 'renderable-edit-plan/v1',
+    // Bumped from v1 with the change above: a digest computed under the old
+    // projection is not this one, and a row carrying it must fail to hydrate
+    // rather than be read as if it had been verified.
+    schemaVersion: 'renderable-edit-plan-hash/v2',
     compilerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
-    id: plan.id,
-    // In, because the same cut belonging to two project versions is two plans:
-    // leaving it out let a recompile under a newer version replay the older
-    // plan's row and hand back a plan pointing at a version nobody asked for.
-    projectVersionId: plan.projectVersionId,
-    storyPlanId: plan.storyPlanId,
-    treatmentPlanId: plan.treatmentPlanId,
-    directorRunId: plan.directorRunId,
-    fps: Number(plan.fps.toFixed(6)),
-    durationFrames: plan.durationFrames,
-    audioTimelineHash: plan.audioTimelineHash,
-    desiredActionHash: plan.desiredActionRef.actionHash,
-    sources: plan.sources.map((source) => ({ ...source })),
-    clips: clips.map((clip) => ({ ...clip })),
-    transitions: plan.transitions.map((transition) => ({ ...transition })),
-    markers: plan.markers.map((marker) => ({ ...marker, ruleIds: [...marker.ruleIds] })),
-    lineageRefs: [...plan.lineageRefs],
-    retainedSourceRanges: plan.editorial.retainedSourceRanges.map((range) => ({ ...range })),
+    plan: document,
   })
 }

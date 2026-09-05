@@ -10,7 +10,7 @@ import {
   calculateRenderablePlanHash,
   type RenderablePlanOrigin,
 } from '../../application/renderable-edit-plan.ts'
-import type { DirectedEditPlan } from '../../domain/director-run.ts'
+import { validateDirectedEditPlan, type DirectedEditPlan } from '../../domain/director-run.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { childRowId } from './child-row-id.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
@@ -41,13 +41,23 @@ interface SnapshotRow {
  *
  * The hash is recomputed from the parsed plan rather than trusted from the
  * column, so an UPDATE underneath the application — a clip's frame numbers
- * edited by hand, a source swapped — makes the row unreadable instead of
- * making the renderer produce a cut nobody compiled.
+ * edited by hand, a source swapped, a critic decision injected — makes the row
+ * unreadable instead of making the renderer produce a cut nobody compiled. It
+ * covers the whole document (`calculateRenderablePlanHash`), which is what makes
+ * it worth recomputing: a hash over a projection would leave the rest of the
+ * plan writable by anyone with an UPDATE.
+ *
+ * The validator runs too, and after the hash on purpose. The hash answers "is
+ * this the document the compiler wrote"; the validator answers "is this a plan
+ * at all". A row that fails the first is tampered and says so; a row that
+ * carries a self-consistent hash over a document the domain would refuse is a
+ * plan written by something that is not this compiler, and it must not reach a
+ * renderer either.
  */
 function hydrate(row: SnapshotRow): Readonly<StoredRenderablePlanSnapshot> {
-  let plan: Readonly<DirectedEditPlan>
+  let parsed: Readonly<DirectedEditPlan>
   try {
-    plan = JSON.parse(row.planJson) as Readonly<DirectedEditPlan>
+    parsed = JSON.parse(row.planJson) as Readonly<DirectedEditPlan>
   } catch {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
@@ -61,12 +71,22 @@ function hydrate(row: SnapshotRow): Readonly<StoredRenderablePlanSnapshot> {
       { origin: row.origin },
     )
   }
-  const recomputed = calculateRenderablePlanHash(plan)
+  const recomputed = calculateRenderablePlanHash(parsed)
   if (recomputed !== row.planHash) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',
       `Stored renderable plan ${row.planId} does not match its hash`,
       { planId: row.planId, storedHash: row.planHash, recomputedHash: recomputed },
+    )
+  }
+  let plan: Readonly<DirectedEditPlan>
+  try {
+    plan = validateDirectedEditPlan(parsed)
+  } catch (error) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored renderable plan ${row.planId} is not a renderable plan any more`,
+      { planId: row.planId, reason: error instanceof Error ? error.message : String(error) },
     )
   }
   return Object.freeze({

@@ -252,6 +252,7 @@ import {
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
+import { PrismaRenderSourceRepository } from './prisma/render-source-repository.ts'
 import { FfmpegPlaybackFingerprinter } from './media/ffmpeg-playback-fingerprint.ts'
 import {
   buildReactPlaybackMapService,
@@ -2367,6 +2368,7 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
   const repository = createPlaybackMapRepository()
   const sessions = createCaptureSessionRepository()
   const snapshots = createRenderablePlanSnapshotRepository()
+  const sources = createRenderSourceRepository()
   const clock = () => new Date()
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
@@ -2374,25 +2376,38 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
     workRoot ? { workRoot } : {},
   )
   return Object.freeze({
-    build: buildReactPlaybackMapService({ repository, sessions, media, observations, clock }),
+    build: buildReactPlaybackMapService({ repository, sessions, media, observations, snapshots, clock }),
     anchor: editReactPlaybackAnchorService({ repository, snapshots, clock }),
     read: readReactPlaybackMapService({ repository }),
     listVersions: listReactPlaybackMapVersionsService({ repository }),
     listReferenceDependents: listReferenceDependentsService({ repository }),
-    compile: compileReactPlaybackPlanService({ repository, sessions, snapshots, clock }),
+    compile: compileReactPlaybackPlanService({ repository, sessions, sources, snapshots, clock }),
   })
+}
+
+/**
+ * The files a compiled plan may cut from, resolved the way the renderer will.
+ *
+ * Deliberately the project's media-asset links rather than `media_artifacts`
+ * directly: `PrismaProjectProxyRenderRepository` resolves a plan's sources
+ * through those links, so an artifact this returns is one the render path can
+ * find, and one it omits is a compile-time refusal instead of a render-time one.
+ */
+export function createRenderSourceRepository() {
+  return new PrismaRenderSourceRepository(resolveV2Client())
 }
 
 /**
  * The synthesis-to-render bridge, assembled (F4.016 condition 6).
  *
- * The synthesis is read from its own repository and the plan is kept beside it;
- * the caller brings ids and the measured identity of the sources, and nothing
- * else.
+ * The synthesis is read from its own repository, the sources it cuts from are
+ * measured by the server through the project's media-asset links, and the plan
+ * is kept beside the synthesis. The caller brings ids and nothing else.
  */
 export function createSynthesisRenderPlanService() {
   return compileSynthesisRenderPlanService({
     syntheses: createEditorialSynthesisRepository(),
+    sources: createRenderSourceRepository(),
     snapshots: createRenderablePlanSnapshotRepository(),
     clock: () => new Date(),
   })
