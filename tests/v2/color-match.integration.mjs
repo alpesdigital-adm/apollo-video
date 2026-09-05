@@ -448,3 +448,248 @@ test('T-F4.014 clipping declared as creative intent is still rejected on real fr
   assert.equal(report.cause, 'irreversible-technical-defect')
   assert.ok(report.issues.some((issue) => issue.dimension === 'clipping' && issue.severity === 'hard'))
 })
+
+/**
+ * A verified-storage stand-in for the evidence crops.
+ *
+ * The only thing this substitutes is the object store; the crops are real PNGs
+ * FFmpeg wrote, and their bytes are hashed the way the adapter hashes them.
+ */
+function localStorageDriver(directory) {
+  const promoted = []
+  return {
+    promoted,
+    async promoteDerived({ sourcePath, sha256, extension, prefix }) {
+      const key = `${prefix}/${sha256}.${extension}`
+      const target = join(directory, `${sha256}.${extension}`)
+      await copyFile(sourcePath, target)
+      const size = (await stat(target)).size
+      promoted.push({ key, sha256, byteSize: size, path: target })
+      return { key, sha256, byteSize: size }
+    },
+  }
+}
+
+/**
+ * A resolved pipeline whose OUTPUT stage really converts, and converts
+ * something a decoder does not silently undo: the transfer function.
+ *
+ * A limited → full range conversion would have been the obvious choice and the
+ * wrong one — it is a change of encoding, and every decoder reverses it on the
+ * way to RGB, so the two sides would measure the same picture and the test
+ * would prove nothing. A transfer conversion moves the light.
+ */
+function convertingPipeline() {
+  const linear = Object.freeze({ ...METADATA, transfer: 'linear' })
+  const zscaleParameters = Object.freeze({ mode: 'convert' })
+  const stages = [
+    transform('technical-identity', 'technical', 'ffmpeg-zscale', { mode: 'identity' }),
+    transform('match-global', 'match', 'apollo-match', { mode: 'bypass' }),
+    transform('creative-none', 'creative-lut', 'apollo-lut', { mode: 'none' }),
+    Object.freeze({
+      id: 'output-convert', kind: 'output', version: 'v1', enabled: true,
+      input: METADATA, output: linear,
+      implementation: Object.freeze({
+        provider: 'ffmpeg-zscale', version: 'v1',
+        parameters: zscaleParameters, parametersHash: calculateCanonicalHash(zscaleParameters),
+      }),
+    }),
+  ]
+  const content = {
+    schemaVersion: 'resolved-color-pipeline/v1',
+    sourceMetadata: METADATA,
+    outputMetadata: linear,
+    stages,
+    target: { sourceId: 'artifact-b', cameraId: 'cam-b', segmentId: 'clip-2' },
+  }
+  return Object.freeze({
+    ...content,
+    manifestKey: stages.map((s) => `${s.kind}:${s.id}@${s.version}:${s.implementation.parametersHash}`).join('>'),
+    pipelineHash: calculateCanonicalHash(content),
+  })
+}
+
+test('T-F4.014 the critic measures the chain WITHOUT the output transform against the delivered file', async () => {
+  // The cheaper lie this adapter exists to avoid is measuring the delivered
+  // file twice and reporting the difference as zero. The output stage here is a
+  // real limited → full range conversion, so the two sides cannot be the same
+  // bytes: if the "before" side were the delivered file, or if the output stage
+  // were not actually disabled, the two measurements would agree.
+  const pipeline = convertingPipeline()
+  const execution = { pipeline, executionHash: calculateCanonicalHash({ kind: 'critic', pipelineHash: pipeline.pipelineHash }) }
+  const deliveredPath = join(root, 'cameraB-delivered-linear.mp4')
+  const delivered = await processor.process({
+    sourcePath: files.get('cameraB').path,
+    outputPath: deliveredPath,
+    execution,
+  })
+  assert.equal(delivered.probe.color.metadata.transfer, 'linear',
+    'the delivered file really carries the converted transfer')
+
+  const workRoot = join(root, 'critic-work')
+  const evidenceRoot = join(root, 'critic-evidence')
+  await mkdir(evidenceRoot, { recursive: true })
+  const storage = localStorageDriver(evidenceRoot)
+  const evaluator = new FfmpegColorCriticEvaluator({ workRoot, storage, timeoutMs: 120_000 })
+
+  const source = files.get('cameraB')
+  const measured = await evaluator.measureStages({
+    workspaceId: 'workspace-integration',
+    operationId: 'operation-critic-integration',
+    fps: RATE,
+    clips: [{
+      clipId: 'clip-2', cameraId: 'cam-b',
+      sourceArtifactId: 'artifact-b',
+      pipelineHash: pipeline.pipelineHash,
+      sourceInFrame: 0, sourceOutFrame: RATE * SECONDS,
+      timelineInFrame: 0, timelineOutFrame: RATE * SECONDS,
+    }],
+    sources: [{ artifactId: 'artifact-b', path: source.path, sha256: source.sha256, pipeline }],
+    deliveredPath,
+    deliveredArtifactId: 'artifact-proxy',
+    deliveredSha256: delivered.sha256,
+  })
+
+  assert.equal(measured.before.length, 1)
+  assert.equal(measured.after.length, 1)
+  // The two sides are measurements of two different files.
+  assert.notEqual(measured.before[0].sourceSha256, measured.after[0].sourceSha256)
+  assert.equal(measured.after[0].sourceSha256, delivered.sha256)
+  assert.notEqual(measured.before[0].sourceSha256, delivered.sha256,
+    'measuring the delivered file twice and calling the difference zero is the cheaper lie this adapter exists to avoid')
+
+  // The before side stopped where the creative LUT left it, so it still carries
+  // the source transfer; the delivered file carries the converted one. That is
+  // the output stage, reported by the instrument rather than by the request.
+  assert.equal(measured.before[0].technical.metadata.transfer, METADATA.transfer)
+  assert.equal(measured.after[0].technical.metadata.transfer, 'linear')
+
+  const exposureOf = (measurement) => measuredValue(measurement, 'exposure')
+  const beforeExposure = exposureOf(measured.before[0])
+  const afterExposure = exposureOf(measured.after[0])
+  const moved = Math.abs(afterExposure - beforeExposure) / beforeExposure
+  console.log(`T-F4.014 stage measurement N=1 beforeExposure=${beforeExposure.toFixed(6)} afterExposure=${afterExposure.toFixed(6)} moved=${(moved * 100).toFixed(2)}% beforeSpread=${measuredComponent(measured.before[0], 'contrast', 'spread').toFixed(6)} afterSpread=${measuredComponent(measured.after[0], 'contrast', 'spread').toFixed(6)}`)
+  assert.ok(moved > 0.1,
+    `the output transform moved nothing measurable (${beforeExposure} → ${afterExposure}); the "before" side is not the chain without it`)
+
+  // Two crops, from two different files, both really written and promoted.
+  assert.equal(measured.evidence.length, 2)
+  assert.deepEqual(measured.evidence.map((crop) => crop.stage).sort(),
+    ['after-output-transform', 'before-output-transform'])
+  assert.equal(new Set(measured.evidence.map((crop) => crop.sha256)).size, 2,
+    'one picture cannot be evidence of both sides of the transform')
+  for (const crop of measured.evidence) {
+    assert.equal(crop.cameraId, 'cam-b')
+    assert.ok(crop.byteSize > 0)
+    const promoted = storage.promoted.find((entry) => entry.sha256 === crop.sha256)
+    assert.ok(promoted, `crop ${crop.stage} was never promoted`)
+    assert.equal((await stat(promoted.path)).size, crop.byteSize)
+  }
+
+  // The intermediate is a real re-encode on disk, and cleanup removes it.
+  const workDirectory = join(workRoot, 'color-critic-operation-critic-integration')
+  const wrote = await readdir(workDirectory)
+  assert.ok(wrote.some((name) => name.startsWith('color-before-') && name.endsWith('.mp4')),
+    `the critic wrote no intermediate: ${wrote.join(', ')}`)
+  await evaluator.cleanup('operation-critic-integration')
+  await assert.rejects(() => readdir(workDirectory), (error) => error.code === 'ENOENT',
+    'a full re-encode of every source per render is not a cache')
+})
+
+test('T-F4.014 two clips of one file under two pipelines are measured against two intermediates', async () => {
+  // A per-segment match override is how two clips of the same recording come to
+  // carry different colour chains, and the renderer writes one pre-pass per
+  // (source x pipelineHash). One intermediate per ARTIFACT would judge the
+  // second clip against a chain that was never applied to it.
+  const base = convertingPipeline()
+  const brightened = (() => {
+    const parameters = Object.freeze({ brightness: 0.2, contrast: 1, mode: 'adjust', saturation: 1 })
+    const stages = [
+      base.stages[0],
+      Object.freeze({
+        ...base.stages[1], enabled: true,
+        implementation: Object.freeze({
+          provider: 'apollo-match', version: 'v1',
+          parameters, parametersHash: calculateCanonicalHash(parameters),
+        }),
+      }),
+      base.stages[2],
+      base.stages[3],
+    ]
+    const content = {
+      schemaVersion: base.schemaVersion,
+      sourceMetadata: base.sourceMetadata,
+      outputMetadata: base.outputMetadata,
+      stages,
+      target: { sourceId: 'artifact-b', cameraId: 'cam-c', segmentId: 'clip-3' },
+    }
+    return Object.freeze({
+      ...content,
+      manifestKey: stages.map((s) => `${s.kind}:${s.id}@${s.version}:${s.implementation.parametersHash}`).join('>'),
+      pipelineHash: calculateCanonicalHash(content),
+    })
+  })()
+  assert.notEqual(base.pipelineHash, brightened.pipelineHash)
+  assert.notEqual(
+    colorCriticSourceKey('artifact-b', base.pipelineHash),
+    colorCriticSourceKey('artifact-b', brightened.pipelineHash),
+  )
+
+  const deliveredPath = join(root, 'cameraB-delivered-two-pipelines.mp4')
+  const delivered = await processor.process({
+    sourcePath: files.get('cameraB').path,
+    outputPath: deliveredPath,
+    execution: { pipeline: base, executionHash: calculateCanonicalHash({ kind: 'two', pipelineHash: base.pipelineHash }) },
+  })
+
+  const workRoot = join(root, 'critic-work-two')
+  const evidenceRoot = join(root, 'critic-evidence-two')
+  await mkdir(evidenceRoot, { recursive: true })
+  const evaluator = new FfmpegColorCriticEvaluator({
+    workRoot, storage: localStorageDriver(evidenceRoot), timeoutMs: 120_000,
+  })
+  const source = files.get('cameraB')
+  const half = (RATE * SECONDS) / 2
+  const measured = await evaluator.measureStages({
+    workspaceId: 'workspace-integration',
+    operationId: 'operation-critic-two-pipelines',
+    fps: RATE,
+    clips: [
+      {
+        clipId: 'clip-2', cameraId: 'cam-b', sourceArtifactId: 'artifact-b',
+        pipelineHash: base.pipelineHash,
+        sourceInFrame: 0, sourceOutFrame: half, timelineInFrame: 0, timelineOutFrame: half,
+      },
+      {
+        clipId: 'clip-3', cameraId: 'cam-c', sourceArtifactId: 'artifact-b',
+        pipelineHash: brightened.pipelineHash,
+        sourceInFrame: half, sourceOutFrame: half * 2, timelineInFrame: half, timelineOutFrame: half * 2,
+      },
+    ],
+    sources: [
+      { artifactId: 'artifact-b', path: source.path, sha256: source.sha256, pipeline: base },
+      { artifactId: 'artifact-b', path: source.path, sha256: source.sha256, pipeline: brightened },
+    ],
+    deliveredPath,
+    deliveredArtifactId: 'artifact-proxy-two',
+    deliveredSha256: delivered.sha256,
+  })
+
+  assert.equal(measured.before.length, 2)
+  const byCamera = new Map(measured.before.map((entry) => [entry.cameraId, entry]))
+  const plain = byCamera.get('cam-b')
+  const lifted = byCamera.get('cam-c')
+  assert.ok(plain && lifted)
+  assert.notEqual(plain.sourceSha256, lifted.sourceSha256,
+    'one intermediate served both pipelines; the second clip was judged against a chain nobody applied to it')
+  const plainExposure = measuredValue(plain, 'exposure')
+  const liftedExposure = measuredValue(lifted, 'exposure')
+  console.log(`T-F4.014 per-pipeline intermediates N=2 plain=${plainExposure.toFixed(6)} lifted=${liftedExposure.toFixed(6)} ratio=${(liftedExposure / plainExposure).toFixed(4)}`)
+  assert.ok(liftedExposure > plainExposure * 1.1,
+    `the overridden clip was not measured through its own chain (${plainExposure} vs ${liftedExposure})`)
+
+  const wrote = (await readdir(join(workRoot, 'color-critic-operation-critic-two-pipelines')))
+    .filter((name) => name.startsWith('color-before-') && name.endsWith('.mp4'))
+  assert.equal(wrote.length, 2, `one pre-pass per (source x pipeline): ${wrote.join(', ')}`)
+  await evaluator.cleanup('operation-critic-two-pipelines')
+})
