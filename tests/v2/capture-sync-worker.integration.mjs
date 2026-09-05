@@ -273,12 +273,12 @@ const LINEAGE = {
 function part(overrides) {
   return {
     partId: overrides.partId,
-    ordinal: 0,
+    ordinal: overrides.ordinal ?? 0,
     sourceAssetId: overrides.sourceAssetId,
     timebase: FRAME_TIMEBASE,
     coverage: overrides.coverage,
     streamIndex: 0,
-    splitReason: 'single-file',
+    splitReason: overrides.splitReason ?? 'single-file',
     evidence: {
       ingestArtifactId: overrides.artifactId,
       ingestSha256: digest(overrides.character),
@@ -342,13 +342,27 @@ function sessionWith(candidate, sessionTimebase = FRAME_TIMEBASE) {
       role: candidate.role ?? 'camera-alt',
       syncAudioPolicy: 'sync-only',
       includeInFinalMix: false,
-      parts: [part({
-        partId: candidate.partId,
-        sourceAssetId: candidate.sourceAssetId,
-        artifactId: candidate.artifactId,
-        character: '2',
-        coverage: createTickInterval(BigInt(0), frames(CANDIDATE_SECONDS)),
-      })],
+      parts: candidate.parts
+        // A recorder that split its take: each file is its own asset with its
+        // own artifact, and the coverage says where in the track's ticks it
+        // sits. Two parts sharing an asset and a stream is the same stream
+        // claimed twice, which the aggregate refuses.
+        ? candidate.parts.map((entry, index) => part({
+          partId: entry.partId,
+          ordinal: index,
+          sourceAssetId: entry.sourceAssetId,
+          artifactId: entry.artifactId,
+          character: String(index + 2),
+          coverage: entry.coverage,
+          splitReason: entry.splitReason,
+        }))
+        : [part({
+          partId: candidate.partId,
+          sourceAssetId: candidate.sourceAssetId,
+          artifactId: candidate.artifactId,
+          character: '2',
+          coverage: createTickInterval(BigInt(0), frames(CANDIDATE_SECONDS)),
+        })],
     }),
     lineage: { ...LINEAGE, operation: 'add-track', commandId: 'command-2' },
   })
@@ -479,11 +493,11 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
   }
 
   /** Encode one generated candidate and hand back its path. */
-  async function encodeCandidate(name, samples) {
+  async function encodeCandidate(name, samples, durationSeconds = CANDIDATE_SECONDS) {
     const pcm = join(workRoot, `${name}.pcm`)
     await writeFile(pcm, toPcm(samples))
     return encodeWithAudio({
-      durationSeconds: CANDIDATE_SECONDS,
+      durationSeconds,
       pcmPath: pcm,
       outputPath: join(workRoot, `${name}.mp4`),
     })
@@ -500,6 +514,18 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
   const babblePath = await encodeCandidate(
     'babble',
     buildBabbleSamples(reference, PROJECTED_LAGS[1], 20_260_916),
+  )
+
+  // The same take, written as two files the way a recorder writes one when it
+  // reaches a size limit: nothing is missing between them, so the second file
+  // continues the first file's ticks exactly.
+  const splitSeconds = CANDIDATE_SECONDS / 2
+  const splitSamples = buildLaggedSamples(reference, PROJECTED_LAGS[1], 20_260_905)
+  const splitFirstPath = await encodeCandidate(
+    'split-a', splitSamples.slice(0, splitSeconds * SAMPLE_RATE), splitSeconds,
+  )
+  const splitSecondPath = await encodeCandidate(
+    'split-b', splitSamples.slice(splitSeconds * SAMPLE_RATE), splitSeconds,
   )
 
   const shuffledPcm = join(workRoot, 'shuffled.pcm')
@@ -771,6 +797,73 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
     assert.equal(result.insufficient, 1)
     assert.equal(runs.state.settled.status, 'succeeded')
     assert.equal(media.state.resolved, media.state.released)
+  })
+
+  await t.test('a recorder that split its take is measured file by file', async () => {
+    // The shape no fixture in this slice had: a non-reference track with more
+    // than one part, and both files carrying real audio.
+    //
+    // Before, this could not reach an assertion at all. `buildMapPieces` opened
+    // the second piece with `file-split`, a discontinuous cause, and
+    // `createPiecewiseClockMap` refuses a discontinuous cause whose source ticks
+    // continue without a gap — so the DomainError escaped `runCaptureSyncWorker`
+    // and left the run claimed and never settled.
+    const session = sessionWith({
+      trackId: 'track-camera-alt',
+      parts: [
+        {
+          partId: 'part-alt-1',
+          sourceAssetId: 'asset-alt-1',
+          artifactId: 'artifact-alt-1',
+          splitReason: 'file-size-limit',
+          coverage: createTickInterval(BigInt(0), frames(splitSeconds)),
+        },
+        {
+          partId: 'part-alt-2',
+          sourceAssetId: 'asset-alt-2',
+          artifactId: 'artifact-alt-2',
+          splitReason: 'file-size-limit',
+          coverage: createTickInterval(frames(splitSeconds), frames(CANDIDATE_SECONDS)),
+        },
+      ],
+    })
+    const sessions = fakeSessions(session)
+    const runs = fakeRuns(session.sessionHash)
+    const media = fakeMedia(new Map([
+      ['artifact-reference', referencePath],
+      ['artifact-alt-1', splitFirstPath],
+      ['artifact-alt-2', splitSecondPath],
+    ]))
+    const result = await runCaptureSyncWorker({
+      sessions,
+      runs,
+      signals: signalSource(media),
+      owner: 'worker-integration',
+      clock: () => new Date(at(10)),
+    })()
+
+    assert.equal(result.settled, true)
+    assert.equal(result.mapRefused, 0, 'a contiguous split is a legal map')
+    assert.equal(runs.state.settled.status, 'succeeded')
+    const record = sessions.evidence[0]
+    assert.equal(record.assessments.length, 2, 'one measurement per file, not one per track')
+    // Both files were measured, separately, and both landed on the same lag —
+    // so one law describes the whole take and the map says so with one piece.
+    const offsets = record.assessments.map((entry) => Number(entry.sessionOffsetTicks))
+    assert.deepEqual(offsets, [frames(PROJECTED_LAGS[1]), frames(PROJECTED_LAGS[1])].map(Number))
+    assert.equal(sessions.maps[0].pieces.length, 1)
+    assert.deepEqual(
+      { ...sessions.maps[0].pieces[0].sourceCoverage },
+      { start: BigInt(0), end: frames(CANDIDATE_SECONDS) },
+    )
+    assert.equal(sessions.maps[0].boundaries.length, 0)
+    assert.equal(media.state.resolved, media.state.released, 'three files opened, three released')
+    console.log(
+      `T-F4.012 split take: signals=${record.assessments.map((entry) =>
+        `${entry.signalId}@${entry.sessionOffsetTicks}f`).join(' ')} ` +
+      `pieces=${sessions.maps[0].pieces.length} outcome=${record.outcome} ` +
+      `resolved=${media.state.resolved} released=${media.state.released}`,
+    )
   })
 
   await t.test('a session that moved after the claim is abandoned, not filed', async () => {
