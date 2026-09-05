@@ -643,6 +643,36 @@ test('T-F4.012 a part nobody measured inherits the law and says so in its confid
   assert.equal(pieces[1].map.offsetTicks, t(4_500))
 })
 
+test('T-F4.012 a track the domain will not map is refused, not thrown out of the run', async () => {
+  // Two parts claiming the same ticks with two different offsets: two laws for
+  // one instant, which `createPiecewiseClockMap` refuses and should. What must
+  // not happen is what used to: the DomainError escaping `runCaptureSyncWorker`
+  // and leaving the run claimed with no status, no failure reason and a lease
+  // to expire — and the `--once` driver dead on an unhandled rejection.
+  const session = twoPartPhoneSession(createTickInterval(sec(200), sec(600)))
+  const sessions = fakeSessions(session)
+  const runs = fakeRuns({ baseSessionHash: session.sessionHash })
+  const result = await runCaptureSyncWorker({
+    sessions,
+    runs,
+    signals: perPartSignals([
+      { partId: 'part-phone-1', coverage: createTickInterval(t(0), sec(300)), offsetTicks: t(4_500) },
+      { partId: 'part-phone-2', coverage: createTickInterval(sec(200), sec(600)), offsetTicks: t(94_500) },
+    ]),
+    owner: 'worker-1',
+    clock: () => new Date(at(10)),
+  })()
+
+  assert.equal(result.settled, true, 'the run is settled, not orphaned')
+  assert.equal(runs.state.settled.status, 'succeeded')
+  assert.equal(result.mapRefused, 1, 'the refusal is counted, not swallowed and not thrown')
+  assert.equal(sessions.maps.length, 0)
+  // The verdict was still filed: the cascade did answer, and an operator needs
+  // to see both the answer and the fact that no map could be built from it.
+  assert.equal(sessions.evidence.length, 1)
+  assert.equal(result.coverageRefused, 1, 'two parts claiming one instant is a human decision')
+})
+
 test('T-F4.012 the piece carries the residual the elected signal measured', async () => {
   // The mutation this catches: reverting `residualBoundTicks` to a hardcoded
   // zero left every suite green, because every fixture measured a residual of
