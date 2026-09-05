@@ -81,6 +81,9 @@ function currentColorPlan(extra = {}) {
 const TARGETS = Object.freeze([
   Object.freeze({ sourceId: 'artifact-a', cameraId: 'cam-a', segmentId: 'clip-1' }),
   Object.freeze({ sourceId: 'artifact-b', cameraId: 'cam-b', segmentId: 'clip-2' }),
+  // Camera B is cut to twice, so a shot can be removed from the EditPlan
+  // without removing the camera with it.
+  Object.freeze({ sourceId: 'artifact-b', cameraId: 'cam-b', segmentId: 'clip-2b' }),
 ])
 
 /** A capture session shaped exactly as the repository hands one back. */
@@ -300,17 +303,19 @@ function requestFingerprintOf(request, canonicalPlan) {
 }
 
 function fakeColorPlanWriter(options = {}) {
-  const targets = options.targets ?? TARGETS
   const state = {
     current: options.current ?? currentColorPlan(),
     versionId: 'version-1',
     baseHash: PROJECT_BASE_HASH,
+    // Mutable, because an EditPlan is: a shot removed from the timeline is a
+    // target that stops existing while the ColorPlan still carries its layer.
+    targets: options.targets ?? TARGETS,
     writes: [],
     idempotency: new Map(),
   }
   const readContext = async () => ({
     currentVersion: { id: state.versionId, baseHash: state.baseHash, sequence: 1, snapshotRefs: [] },
-    targets,
+    targets: state.targets,
     trustedSourceMetadata: { 'artifact-a': METADATA, 'artifact-b': METADATA },
     currentDurationFrames: 240,
     proxyVariantId: '16:9',
@@ -346,7 +351,7 @@ function fakeColorPlanWriter(options = {}) {
       error.code = 'VERSION_CONFLICT'
       throw error
     }
-    for (const target of targets) resolveColorPlan(canonical, target)
+    for (const target of state.targets) resolveColorPlan(canonical, target)
     state.writes.push({ plan: canonical, request })
     state.current = canonical
     state.versionId = `version-${state.writes.length + 1}`
@@ -785,6 +790,44 @@ test('T-F4.013 a range override changes one segment and leaves the sibling camer
   const reason = writer.state.writes.at(-1).request.reason
   assert.match(reason, /range override ovr-1 on camera cam-b by human user-1/)
   assert.match(reason, /practical lamp drifts warm/)
+})
+
+test('T-F4.013 a layer whose camera left the EditPlan is reported as pruned, not deleted in silence', async () => {
+  // Three cameras, then the editor re-cuts and stops using one of them.
+  const third = session({
+    tracks: [...session().tracks, Object.freeze({
+      ...session().tracks[1],
+      trackId: 'cam-c',
+      parts: Object.freeze([Object.freeze({ ...session().tracks[1].parts[0], partId: 'part-c' })]),
+    })],
+  })
+  const targets = [
+    ...TARGETS.filter((target) => target.segmentId !== 'clip-2b'),
+    Object.freeze({ sourceId: 'artifact-b', cameraId: 'cam-c', segmentId: 'clip-3' }),
+  ]
+  const { derive, writer } = wire({
+    session: third,
+    targets,
+    cameras: {
+      'cam-a': { rOverG: 1, bOverG: 0.9, exposure: 0.5 },
+      'cam-b': { rOverG: 1.1, bOverG: 0.6, exposure: 0.42 },
+      'cam-c': { rOverG: 1.05, bOverG: 0.75, exposure: 0.46 },
+    },
+  })
+  await derive(deriveRequest())
+  assert.deepEqual(Object.keys(writer.state.current.cameras).sort(), ['cam-a', 'cam-b', 'cam-c'])
+
+  // `assertPlanTargets` refuses a ColorPlan carrying a key outside the current
+  // EditPlan, so the stale layer has to go — but the write names what it took,
+  // because that key can carry a transform of another kind with it.
+  writer.state.targets = targets.filter((target) => target.cameraId !== 'cam-c')
+  const rederived = await derive(deriveRequest({
+    projectBaseVersionId: writer.state.versionId,
+    projectBaseHash: writer.state.baseHash,
+  }))
+  assert.deepEqual(rederived.colorPlan.prunedCameraIds, ['cam-c'])
+  assert.deepEqual(rederived.colorPlan.prunedSegmentIds, [])
+  assert.deepEqual(Object.keys(writer.state.current.cameras).sort(), ['cam-a', 'cam-b'])
 })
 
 test('T-F4.013 an override fenced on a stale plan version loses and is told what is current', async () => {

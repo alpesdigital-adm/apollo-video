@@ -301,6 +301,27 @@ test(
     })
     assert.equal((await reports.read({ workspaceId, reportId: rejection.reportId }))?.reportHash, rejection.reportHash)
 
+    // The measurement citations are the FK trail that says WHICH bytes were
+    // judged. They sit outside the hashed body and outside every CHECK — so
+    // deleting one used to be accepted and the rejection still read back
+    // intact, unciteable. A report that no longer cites what it was reached
+    // over is refused like any other edited row.
+    const citations = await client.v2ColorCriticReportMeasurement.findMany({
+      where: { workspaceId },
+      orderBy: { id: 'asc' },
+    })
+    assert.ok(citations.length >= 2, `the verdict cites nothing: ${citations.length} rows`)
+    const [dropped] = citations
+    await client.v2ColorCriticReportMeasurement.delete({ where: { id: dropped.id } })
+    await assert.rejects(
+      () => reports.read({ workspaceId, reportId: rejection.reportId }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /cite the measurements/.test(error.message),
+      'a verdict that no longer names the measurements behind it must be refused, not believed',
+    )
+    await client.v2ColorCriticReportMeasurement.create({ data: dropped })
+    assert.equal((await reports.read({ workspaceId, reportId: rejection.reportId }))?.reportHash, rejection.reportHash)
+    console.log(`E2E-FR-184 citation tamper: ${citations.length} rows cited, deleting ${dropped.stage}/${dropped.ordinal} refused the read`)
+
     // ---- 2/3. a rejection blocks the gate and cannot be acknowledged --------
     const proxyReview = (inputHash, criticIssues) => evaluateRenderedProxy({
       projectVersionId,
