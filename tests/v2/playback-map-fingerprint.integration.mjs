@@ -15,9 +15,14 @@ import {
   buildPlaybackMap,
   createPlaybackMap,
   createPlaybackPolicy,
+  resolveReactionTick,
 } from '../../src/v2/domain/playback-map.ts'
 import { createTickInterval, timebaseFromRate } from '../../src/v2/domain/session-time.ts'
-import { FfmpegPlaybackFingerprinter } from '../../src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts'
+import {
+  FfmpegPlaybackFingerprinter,
+  MAXIMUM_ABSENCE_CONFIDENCE,
+  confidenceFromPeakRatio,
+} from '../../src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts'
 import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 
 const execFileAsync = promisify(execFile)
@@ -63,8 +68,14 @@ const TRUTH = Object.freeze([
   { mode: 'playing', from: 0, to: 10, reference: 0 },
   { mode: 'paused', from: 10, to: 18, reference: null },
   { mode: 'playing', from: 18, to: 23, reference: 10 },
-  { mode: 'commentary-only', from: 23, to: 41, reference: null },
-  { mode: 'rewind', from: 41, to: 49, reference: 8 },
+  { mode: 'commentary-only', from: 23, to: 37, reference: null },
+  // The reference resumes at the tick it left (15), which is the only thing
+  // that makes the stretch before it a pause-class gap at all. Without this
+  // segment the commentary was followed by a reference resuming BEHIND, and the
+  // aggregate refuses to call that a pause: "paused then rewound" and "played on
+  // unobserved then rewound further back" both fit the same evidence.
+  { mode: 'playing', from: 37, to: 41, reference: 15 },
+  { mode: 'replay', from: 41, to: 49, reference: 8 },
   { mode: 'seek', from: 49, to: 53, reference: 19 },
   { mode: 'hidden', from: 53, to: 57, reference: 23 },
   { mode: 'playing', from: 57, to: 60, reference: 27 },
@@ -311,7 +322,7 @@ function mediaFor(probedReferenceSeconds, probedReactionSeconds) {
 
 const framesOf = (ticks) => Number(ticks) / (TICKS_PER_SECOND / FPS)
 
-test('T-F4.015 a real react recording resolves into playing, paused, commentary, rewind, seek and a stretch only a person can answer', async (t) => {
+test('T-F4.015 a real react recording resolves into playing, paused, commentary, replay, seek and a stretch only a person can answer', async (t) => {
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-playback-fingerprint-'))
   t.after(async () => {
     // AGENTS.md: an ephemeral artefact of a test is cleaned up by the test that
@@ -386,7 +397,8 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
     'paused',
     'playing',
     'commentary-only',
-    'rewind',
+    'playing',
+    'replay',
     'seek',
     'uncovered/manual-anchor-required',
     'playing',
@@ -396,7 +408,7 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
     `worst boundary error ${worstFrames} frames exceeds the declared ${BOUNDARY_TOLERANCE_FRAMES}`,
   )
 
-  const [opening, paused, resumed, commentary, rewind, seek, tail] = map.pieces
+  const [opening, paused, resumed, commentary, resumedAgain, replay, seek, tail] = map.pieces
 
   // During the pause the reference does not advance, and playback resumes from
   // the tick it left — measured in frames, not asserted in prose.
@@ -409,13 +421,43 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
 
   assert.equal(commentary.mode, 'commentary-only')
   assert.equal(commentary.referenceRange, null)
+  assert.ok(
+    Math.abs(framesOf(resumedAgain.referenceRange.start - resumed.referenceRange.end)) <= BOUNDARY_TOLERANCE_FRAMES,
+    'the reference resumed where it stopped after the commentary too',
+  )
 
-  assert.equal(rewind.direction, 'backward')
-  assert.equal(rewind.discontinuityReason, 'rewind')
-  assert.ok(rewind.referenceRange.start < resumed.referenceRange.start, 'the reference went back')
+  // Back to reference ground already covered: a replay, not a rewind, because
+  // nothing past what had been played is reached.
+  assert.equal(replay.mode, 'replay')
+  assert.equal(replay.direction, 'backward')
+  assert.equal(replay.discontinuityReason, 'rewind')
+  assert.ok(replay.referenceRange.start < resumedAgain.referenceRange.start, 'the reference went back')
+  assert.ok(replay.referenceRange.end <= resumedAgain.referenceRange.end, 'and did not reach new ground')
 
   assert.equal(seek.discontinuityReason, 'seek')
-  assert.ok(seek.referenceRange.start > rewind.referenceRange.end)
+  assert.ok(seek.referenceRange.start > replay.referenceRange.end)
+
+  // Every window the detector refused reports confidence in the ABSENCE, never
+  // the peak-over-runner-up ratio of the match it rejected. Measured here rather
+  // than asserted: the fixture's reactor noise routinely produces sharp ratios
+  // over correlations far under the floor, which is the exact shape that used to
+  // travel as a high confidence and land on the `paused` piece.
+  const refused = observations.filter((entry) => entry.referenceTick === null)
+  const sharpButRefused = refused.filter((entry) => entry.peakRatio >= 1.2)
+  assert.ok(refused.length > 0 && sharpButRefused.length > 0, 'the fixture contains refused windows with sharp ratios')
+  for (const entry of refused) assert.ok(entry.confidence <= MAXIMUM_ABSENCE_CONFIDENCE)
+  for (const entry of sharpButRefused) {
+    assert.notEqual(
+      entry.confidence,
+      confidenceFromPeakRatio(entry.peakRatio),
+      'a refused window carried the confidence of the match it refused',
+    )
+  }
+  console.log(
+    `playback refused windows: ${refused.length} (${sharpButRefused.length} with ratio >= 1.2), ` +
+    `confidence ${Math.min(...refused.map((entry) => entry.confidence)).toFixed(3)}` +
+    `-${Math.max(...refused.map((entry) => entry.confidence)).toFixed(3)}`,
+  )
 
   assert.equal(map.status, 'needs-input')
   assert.equal(map.uncovered.length, 1)
@@ -433,19 +475,30 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
   // The person answers the one thing the audio could not.
   // ------------------------------------------------------------------
   const hidden = TRUTH.find((segment) => segment.mode === 'hidden')
+  // Deliberately NOT the head of the uncovered stretch. An operator reads the
+  // clock off whatever frame is legible, and an anchor placed anywhere but the
+  // head used to shift the whole resolved piece by the distance between the two.
+  const hiddenRange = map.uncovered[0].range
+  const anchorTick = hiddenRange.start + (hiddenRange.end - hiddenRange.start) / 2n
+  const anchorReference = seconds(hidden.reference) + (anchorTick - hiddenRange.start)
   const resolved = applyPlaybackAnchor(map, {
     expectedVersion: map.version,
     expectedHash: map.mapHash,
     anchor: {
       anchorId: 'anchor-hidden-player',
-      reactionTick: map.uncovered[0].range.start,
-      referenceTick: seconds(hidden.reference),
+      reactionTick: anchorTick,
+      referenceTick: anchorReference,
       mode: 'playing',
       actorId: 'operator-7',
       note: 'player overlay hid the video; read the clock from the frame',
       createdAt: at(900),
     },
   })
+  // The instant the operator named resolves to the instant they named, and the
+  // piece starts where the truth says the hidden stretch started.
+  const atAnchor = resolveReactionTick(resolved, anchorTick)
+  assert.equal(atAnchor.status, 'resolved')
+  assert.equal(atAnchor.referenceTick, anchorReference)
   assert.equal(resolved.status, 'resolved')
   assert.equal(resolved.uncovered.length, 0)
   assert.equal(resolved.version, map.version + 1)
@@ -529,9 +582,47 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
     observations,
     policy: POLICY,
   })
+  // The measured duration, from ffprobe, is the only authority for how long the
+  // reference is — and it is half the reaction.
+  const measuredReference = seconds(Math.round(referenceProbe.duration))
+  assert.equal(media.reference.durationTicks, measuredReference)
+  assert.notEqual(measuredReference, media.reaction.durationTicks)
+
+  // The lie is not caught at construction, because in this phase nothing
+  // measures the reference for `buildPlaybackMap` — the duration is declared by
+  // the caller, and that is a stated limitation of the domain slice. What the
+  // fixture can prove is that the declared duration is load-bearing, and that
+  // ffprobe's number is the one that refuses.
+  //
+  // The lie made concrete: the last piece extended to play reference time only a
+  // sixty-second reference would have. The same body is refused under the
+  // measured thirty seconds and accepted under the copied sixty.
+  const overreaching = [
+    ...map.pieces.slice(0, -1),
+    { ...tail, rate: null, referenceRange: createTickInterval(tail.referenceRange.start, media.reaction.durationTicks) },
+  ]
+  const assemble = (referenceMedia) => () => createPlaybackMap({
+    mapId: 'playback-map-lie-checked',
+    workspaceId: session.workspaceId,
+    sessionId: session.sessionId,
+    sessionVersion: session.version,
+    referenceEpoch: session.referenceEpoch,
+    reactionTrackId: track.reaction.trackId,
+    referenceTrackId: track.reference.trackId,
+    referenceMedia,
+    reactionMedia: media.reaction,
+    pieces: overreaching,
+    uncovered: map.uncovered,
+  })
   assert.throws(
-    () => assert.equal(lied.referenceMedia.durationTicks, seconds(Math.round(referenceProbe.duration))),
-    'a reference duration copied from the reaction contradicts what ffprobe measured',
+    assemble(media.reference),
+    (error) => error.code === 'INVALID_ARGUMENT' &&
+      /plays reference time the reference does not have/.test(error.message) &&
+      error.details.referenceDurationTicks === measuredReference.toString(),
+  )
+  assert.doesNotThrow(
+    assemble({ ...media.reference, durationTicks: media.reaction.durationTicks }),
+    'only the copied duration makes the overreaching piece legal, which is what makes the lie a lie',
   )
   // And the lie changes the answer: the honest map knows the last piece runs to
   // the end of the reference, the lying one does not.
