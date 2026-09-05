@@ -224,7 +224,9 @@ CREATE TABLE "multicam_longform_gate_checks" (
       AND char_length(btrim("detail")) >= 1
       AND "referenceCount" BETWEEN 0 AND 16
       AND "unverifiedReferenceCount" BETWEEN 0 AND "referenceCount"
-      AND ("referenceCount" > 0 OR "failureReason" = 'evidence-missing')
+      -- `IS NOT DISTINCT FROM` rather than `=`: failureReason is NULL on a
+      -- passing check, and `FALSE OR NULL` is NULL, which a CHECK accepts.
+      AND ("referenceCount" > 0 OR "failureReason" IS NOT DISTINCT FROM 'evidence-missing')
       AND ("passed" = FALSE OR ("referenceCount" > 0 AND "unverifiedReferenceCount" = 0))
     )
 );
@@ -273,9 +275,15 @@ CREATE TABLE "multicam_longform_gate_evidence" (
       AND "ordinal" BETWEEN 0 AND 15
       AND char_length(btrim("resourceId")) >= 3
     ),
+    -- Written as CASE rather than as `(hash IS NULL AND NOT verified) OR hash ~
+    -- '...'`, which is what this constraint said until PostgreSQL accepted a
+    -- row it was meant to refuse: with a NULL hash the second disjunct
+    -- evaluates to NULL, `FALSE OR NULL` is NULL, and a CHECK passes on NULL.
     CONSTRAINT "multicam_longform_gate_evidence_hash_check" CHECK (
-      ("resourceHash" IS NULL AND "verified" = FALSE)
-      OR "resourceHash" ~ '^[a-f0-9]{64}$'
+      CASE
+        WHEN "resourceHash" IS NULL THEN "verified" = FALSE
+        ELSE "resourceHash" ~ '^[a-f0-9]{64}$'
+      END
     )
 );
 
