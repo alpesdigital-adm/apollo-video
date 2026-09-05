@@ -62,19 +62,19 @@ const coverage = Object.freeze({
     evidence: 'Wave20 fences on the same project version pair and additionally closes the protected selection to four fields, so a caller cannot smuggle attestedBy into a human override: the note is theirs and the identity is the authenticated actor, concatenated rather than one replacing the other',
   },
   'apollo.projects.capture-sessions.color-match.derive': {
-    mode: 'base-version-bound-action',
+    mode: 'fenced-natural-idempotent-action',
     evidence: 'Wave20 requires the capture session version id and hash the reference camera was chosen against and refuses a stale one with the current pair, and separately requires the project version pair the ColorPlan layers must land on; the only colour input is which camera is the reference, and every delta and confidence is measured from decoded frames',
   },
   'apollo.projects.capture-sessions.color-match.overrides.add': {
-    mode: 'base-version-bound-action',
+    mode: 'fenced-natural-idempotent-action',
     evidence: 'Wave20 requires the match plan version id as <sessionId>:match:v<n> plus the plan hash, parsed so a fence from another chain is refused rather than matching on the number, and refuses an amendment whose pair is no longer the head with the current version and hash in the failure',
   },
   'apollo.projects.capture-sessions.playback-map.build': {
-    mode: 'base-version-bound-action',
+    mode: 'fenced-natural-idempotent-action',
     evidence: 'Wave20 requires the capture session version id and hash the build was requested against and refuses a session that has moved, because a rebuild against different tracks would fingerprint different recordings and call the result the same map',
   },
   'apollo.projects.capture-sessions.playback-map.anchors.add': {
-    mode: 'base-version-bound-action',
+    mode: 'fenced-natural-idempotent-action',
     evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and enforces the fence inside the append; an anchor is refused unless its instant falls inside a stretch the detector left uncovered, so answering an absence can never become overruling a measurement',
   },
   'apollo.projects.editorial-syntheses.create': {
@@ -710,6 +710,18 @@ test('every external mutation has an explicit precondition strategy', () => {
       requiresImmutableBase(capability)
       assert.equal(capability.idempotency, 'required')
     }
+    // The same fence, without a caller-supplied key. Separated from
+    // `base-version-bound-action` because the two differ in what the caller has
+    // to send: this one must NOT advertise `Idempotency-Key`, because no route
+    // behind it reads one, and `idempotency: 'required'` on a capability whose
+    // route never touches the header publishes a mandatory parameter that
+    // nothing consumes. Idempotence here is the fence plus a content-addressed
+    // replay inside the service; `wave20-public-contract.test.mjs` checks the
+    // declaration against the route source.
+    if (decision.mode === 'fenced-natural-idempotent-action') {
+      requiresImmutableBase(capability)
+      assert.equal(capability.idempotency, 'natural')
+    }
     if (decision.mode === 'production-batch-revision-action') {
       requiresProductionBatchRevision(capability, decision.itemRevision === true)
       assert.equal(capability.idempotency, 'required')
@@ -759,7 +771,8 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 16,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 29,
+    'base-version-bound-action': 25,
+    'fenced-natural-idempotent-action': 4,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,

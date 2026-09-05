@@ -14963,6 +14963,22 @@ const w20RateSchema = { type: 'string', pattern: '^[0-9]+/[0-9]+$' }
  * server itself produced.
  */
 const w20DerivedIdSchema = { type: 'string', minLength: 1, maxLength: 300 }
+/**
+ * How one link of a capture-session derivation chain is named on the wire.
+ *
+ * `<sessionId>:v<n>`, `<sessionId>:match:v<n>`, `<sessionId>:direction:v<n>`,
+ * `<sessionId>:playback:<trackId>:v<n>` — every one of these is BUILT BY THE
+ * SERVER out of ids the caller was allowed to choose, and every one of them is
+ * then handed back to the server as the base of the next fence. Publishing them
+ * as `idSchema` bounded the composite at the 128 characters that bound one of
+ * its parts: a 128-character session id and a 128-character track id make a
+ * 269-character playback ref, so the API advertised a fence it hands out and
+ * would not accept back. The same schema is used on both sides — the eight
+ * `versionRef` properties and the four request `baseVersionId` fields that
+ * carry one — because a value the server emits and the caller echoes has to be
+ * one grammar, not two.
+ */
+const w20VersionRefSchema = { type: 'string', minLength: 3, maxLength: 300 }
 const w20EvidenceRefsSchema = { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } }
 const w20ReasonSchema = { type: 'string', minLength: 1, maxLength: 2_000 }
 
@@ -15219,7 +15235,7 @@ const multicamDirectionReadProperties = {
   direction: multicamDirectionSchema,
   version: { type: 'integer', minimum: 1 },
   previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
-  versionRef: idSchema,
+  versionRef: w20VersionRefSchema,
   // False when an older link was read. A superseded direction quoted as the
   // current one would name an angle this cut no longer uses.
   isHead: { type: 'boolean' },
@@ -15239,7 +15255,7 @@ const directedSessionSchema = {
     // be the wrong answer dressed as the right one.
     direction: { oneOf: [multicamDirectionSchema, { type: 'null' }] },
     directionVersion: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-    versionRef: { oneOf: [idSchema, { type: 'null' }] },
+    versionRef: { oneOf: [w20VersionRefSchema, { type: 'null' }] },
     projectVersion: {
       type: 'object',
       additionalProperties: false,
@@ -15951,7 +15967,7 @@ const playbackMapSchema = {
 
 const playbackMapReadProperties = {
   map: playbackMapSchema,
-  versionRef: idSchema,
+  versionRef: w20VersionRefSchema,
   manualReviewRequired: { type: 'boolean' },
 }
 
@@ -26675,8 +26691,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         // The one colour decision a caller makes: which camera the others are
         // corrected towards. Every delta below is measured from decoded frames.
         referenceCameraId: { type: 'string', pattern: '^[a-z0-9][a-z0-9._/-]{0,127}$' },
-        // The capture-session version that choice was made against.
-        baseVersionId: idSchema,
+        // The capture-session version that choice was made against, as
+        // `<sessionId>:v<n>` — a ref the server built, so it is bounded as one.
+        baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         // The project version the ColorPlan layers must land on. Neither fence
         // stands in for the other: a session that moved means the cameras
@@ -26698,7 +26715,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         // The match plan link this amendment was computed against, as
         // `<sessionId>:match:v<n>` plus the plan hash.
-        baseVersionId: idSchema,
+        baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         projectBaseVersionId: idSchema,
         projectBaseHash: sha256Schema,
@@ -26750,7 +26767,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         plan: multicamMatchPlanSchema,
         version: { type: 'integer', minimum: 1 },
-        versionRef: idSchema,
+        versionRef: w20VersionRefSchema,
         colorPlan: matchColorPlanWriteSchema,
         // Advisory. Nothing here marks these stale; a superseded plan already
         // names its successor, and this says which readers should look again.
@@ -26778,7 +26795,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       properties: {
         plan: multicamMatchPlanSchema,
         version: { type: 'integer', minimum: 1 },
-        versionRef: idSchema,
+        versionRef: w20VersionRefSchema,
         colorPlan: matchColorPlanWriteSchema,
         replayed: { type: 'boolean' },
       },
@@ -26796,7 +26813,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         plan: multicamMatchPlanSchema,
         version: { type: 'integer', minimum: 1 },
         previousVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
-        versionRef: idSchema,
+        versionRef: w20VersionRefSchema,
         isHead: { type: 'boolean' },
       },
     }),
@@ -26869,7 +26886,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['baseVersionId', 'baseHash'],
       properties: {
-        baseVersionId: idSchema,
+        // The capture-session version the build was requested against, as
+        // `<sessionId>:v<n>`.
+        baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         // Only needed when a session legitimately carries more than one
         // reactor: two reaction tracks are two edits, and picking the first
@@ -26887,7 +26906,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       additionalProperties: false,
       required: ['baseVersionId', 'baseHash', 'reactionTrackId', 'anchor'],
       properties: {
-        baseVersionId: idSchema,
+        // `<sessionId>:playback:<trackId>:v<n>`. Two 128-character ids inside
+        // one ref is 269 characters, which `idSchema` would have refused — the
+        // caller cannot echo back a fence the server itself handed them.
+        baseVersionId: w20VersionRefSchema,
         baseHash: sha256Schema,
         reactionTrackId: idSchema,
         anchor: {
@@ -26921,7 +26943,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       ],
       properties: {
         map: playbackMapSchema,
-        versionRef: idSchema,
+        versionRef: w20VersionRefSchema,
         manualReviewRequired: { type: 'boolean' },
         supersededMapId: { oneOf: [w20DerivedIdSchema, { type: 'null' }] },
         carriedAnchors: { type: 'integer', minimum: 0 },
@@ -26943,7 +26965,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       required: ['map', 'versionRef', 'manualReviewRequired', 'invalidated', 'replayed'],
       properties: {
         map: playbackMapSchema,
-        versionRef: idSchema,
+        versionRef: w20VersionRefSchema,
         manualReviewRequired: { type: 'boolean' },
         invalidated: strandedPlanSchema,
         replayed: { type: 'boolean' },

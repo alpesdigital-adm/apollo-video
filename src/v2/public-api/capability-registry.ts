@@ -6975,18 +6975,32 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
   // is refused by name rather than ignored, because a field that is accepted
   // and dropped teaches the next caller to keep sending it.
   //
-  // All six commands declare `idempotency: 'required'`, and only the two
-  // direction commands read the header. That is deliberate rather than
-  // forgotten: `directMulticamSessionService` takes an idempotency key bound to
-  // the whole actor — workspace, client, credential, authentication kind and
-  // any delegated user — and refuses a key reused with a different request. The
-  // other four have a natural key that is stronger than a header: the write is
-  // fenced on the exact version and hash the caller read, and the repository
-  // collapses a retry that produced the same content-addressed document into a
-  // replay. The Wave 19 precedent (`sync-diagnostic.generate`,
-  // `sync-diagnostic.anchors.edit`) is the same, and so is the precondition
-  // audit's rule, which requires `'required'` of every base-version-bound
-  // action.
+  // Two of the six commands declare `idempotency: 'required'` and four declare
+  // `'natural'`, and the split is the truth about which of them reads a header.
+  //
+  // The two direction commands read `Idempotency-Key` in their routes and hand
+  // it to `directMulticamSessionService`, which binds it to the whole actor —
+  // workspace, client, credential, authentication kind and any delegated user —
+  // and refuses a key reused with a different request.
+  //
+  // The other four never read the header, so they must not advertise one. An
+  // earlier revision declared `'required'` for all six on the strength of a
+  // natural-key argument, which put a mandatory `Idempotency-Key` into the
+  // published OpenAPI and a required `idempotencyKey` into every agent tool
+  // that nothing on the server would ever consume. The natural key is real —
+  // each write is fenced on the exact version and hash the caller read, and
+  // each service collapses a repeat into `replayed: true` (`derive` when the
+  // head already carries the same measurements, `overrides.add` when the plan
+  // already carries the override, `playback-map.build` when the fingerprint is
+  // unchanged, `anchors.add` through the fenced append) — but a real natural
+  // key is `'natural'`, not `'required'`. `'required'` without a route that
+  // reads the key is a contract that documents a parameter into existence.
+  //
+  // The precondition audit distinguishes the two as
+  // `base-version-bound-action` (fence plus caller key) and
+  // `fenced-natural-idempotent-action` (fence plus content-addressed replay),
+  // and `wave20-public-contract.test.mjs` checks each declaration against the
+  // route source, so this cannot drift back.
   // ---------------------------------------------------------------------------
   {
     id: 'apollo.projects.capture-sessions.direction.run',
@@ -7115,7 +7129,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     costClass: 'medium',
     confirmation: 'human-approval',
     successStatuses: [201, 200],
-    idempotency: 'required',
+    idempotency: 'natural',
     requestBodyRequired: true,
   },
   {
@@ -7156,7 +7170,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     costClass: 'low',
     confirmation: 'human-approval',
     successStatuses: [201, 200],
-    idempotency: 'required',
+    idempotency: 'natural',
     requestBodyRequired: true,
   },
   {
@@ -7238,7 +7252,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     costClass: 'medium',
     confirmation: 'none',
     successStatuses: [201, 200],
-    idempotency: 'required',
+    idempotency: 'natural',
     requestBodyRequired: true,
   },
   {
@@ -7304,7 +7318,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     costClass: 'low',
     confirmation: 'human-approval',
     successStatuses: [201, 200],
-    idempotency: 'required',
+    idempotency: 'natural',
     requestBodyRequired: true,
   },
   {

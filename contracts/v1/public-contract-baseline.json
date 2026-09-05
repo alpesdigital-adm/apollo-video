@@ -3192,7 +3192,7 @@
         201,
         200
       ],
-      "idempotency": "required",
+      "idempotency": "natural",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -3218,7 +3218,7 @@
         201,
         200
       ],
-      "idempotency": "required",
+      "idempotency": "natural",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -3590,7 +3590,7 @@
         201,
         200
       ],
-      "idempotency": "required",
+      "idempotency": "natural",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -3616,7 +3616,7 @@
         201,
         200
       ],
-      "idempotency": "required",
+      "idempotency": "natural",
       "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
@@ -11383,7 +11383,7 @@
         "baseVersionId": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 128
+          "maxLength": 300
         },
         "baseHash": {
           "type": "string",
@@ -11513,7 +11513,7 @@
         "baseVersionId": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 128
+          "maxLength": 300
         },
         "baseHash": {
           "type": "string",
@@ -25673,7 +25673,7 @@
         "baseVersionId": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 128
+          "maxLength": 300
         },
         "baseHash": {
           "type": "string",
@@ -46282,7 +46282,7 @@
         "baseVersionId": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 128
+          "maxLength": 300
         },
         "baseHash": {
           "type": "string",
@@ -79307,7 +79307,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "isHead": {
               "type": "boolean"
@@ -80374,7 +80374,7 @@
                     {
                       "type": "string",
                       "minLength": 3,
-                      "maxLength": 128
+                      "maxLength": 300
                     },
                     {
                       "type": "null"
@@ -80855,7 +80855,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "isHead": {
               "type": "boolean"
@@ -81883,7 +81883,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "colorPlan": {
               "type": "object",
@@ -82973,7 +82973,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "colorPlan": {
               "type": "object",
@@ -84099,7 +84099,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "isHead": {
               "type": "boolean"
@@ -84440,7 +84440,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "isHead": {
               "type": "boolean"
@@ -165254,7 +165254,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "manualReviewRequired": {
               "type": "boolean"
@@ -165635,7 +165635,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "manualReviewRequired": {
               "type": "boolean"
@@ -166031,7 +166031,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "manualReviewRequired": {
               "type": "boolean"
@@ -166376,7 +166376,7 @@
             "versionRef": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 128
+              "maxLength": 300
             },
             "manualReviewRequired": {
               "type": "boolean"

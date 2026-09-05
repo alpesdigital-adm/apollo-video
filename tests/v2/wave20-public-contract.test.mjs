@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import test from 'node:test'
 
 import {
@@ -315,7 +317,13 @@ test('T-F4.012 the fifteen Wave 20 capabilities obey the query and command rules
     commands.push(entry)
     assert.equal(entry.operationKind, 'command')
     assert.deepEqual([...entry.requiredScopes], ['projects:write'])
-    assert.equal(entry.idempotency, 'required')
+    // Not all six the same: two read a caller key and four do not, and the
+    // declaration has to say which. `the idempotency a Wave 20 command
+    // declares is the one its route reads` below is what pins it to the code.
+    assert.ok(
+      entry.idempotency === 'required' || entry.idempotency === 'natural',
+      `${id} must declare an idempotency a caller can act on`,
+    )
     assert.deepEqual([...entry.successStatuses], [201, 200])
     assert.equal(entry.requestBodyRequired, true)
     assert.equal(entry.endpoint.method, 'POST')
@@ -383,4 +391,161 @@ test('T-F4.012 each new endpoint resolves to exactly one capability before the h
     ),
     'trackId',
   )
+})
+
+// ---------------------------------------------------------------------------
+// What the routes actually emit, and what they actually read
+//
+// Two reviewers independently showed that every gate in this repository stayed
+// green while a Wave 20 route was mutated: the response wrapper was renamed,
+// `replayed` was hardcoded, a field the service never produces was added, and
+// `requireScope` was deleted. Nothing validated a route's emitted shape against
+// the `outputSchemaRef` it advertises, and nothing tied a request parser to the
+// `inputSchemaRef` the precondition audit reads its fence off. The checks below
+// are the pins. They are deliberately structural — they read the route source —
+// because the alternative is booting Next to exercise fifteen handlers, and a
+// text check that fails on the exact mutations is worth more than a runtime
+// check that does not exist.
+// ---------------------------------------------------------------------------
+
+/** `/v1/projects/{projectId}/...` -> `src/app/v1/projects/[projectId]/.../route.ts`. */
+function routeFileFor(entry) {
+  const segments = entry.endpoint.path
+    .replace(/^\//, '')
+    .split('/')
+    .map((segment) => (segment.startsWith('{') ? `[${segment.slice(1, -1)}]` : segment))
+  return path.join('src', 'app', ...segments, 'route.ts')
+}
+
+/** The body of one exported handler, up to the next top-level export. */
+function handlerSource(source, method) {
+  const opening = `export async function ${method}(`
+  const start = source.indexOf(opening)
+  assert.ok(start >= 0, `route must export ${method}`)
+  const rest = source.slice(start + opening.length)
+  const end = rest.indexOf('\nexport ')
+  return end === -1 ? rest : rest.slice(0, end)
+}
+
+const WAVE20_ROUTES = WAVE20_IDS.map((id) => {
+  const entry = capability(id)
+  const file = routeFileFor(entry)
+  assert.ok(existsSync(file), `${id} must have a route file at ${file}`)
+  return { entry, file, source: readFileSync(file, 'utf8') }
+})
+
+test('T-F4.012 every Wave 20 route emits its response through one named presenter', () => {
+  // A route that assembles its own wrapper is a second source of truth for a
+  // published schema, and the schema side is guarded while the emitting side is
+  // not: `presentSuccess({ direction: ..., replayed: true, extra: 'x' })`
+  // violated `multicam-direction-directed/v1` in three ways and every gate
+  // passed. With one named builder per capability, the wrapper the route emits
+  // is the wrapper the published example is built from, and Ajv checks that
+  // example against the schema on every `api:v1:validate`.
+  const examples = readFileSync('src/v2/public-api/schema-examples.ts', 'utf8')
+  for (const { entry, file, source } of WAVE20_ROUTES) {
+    const handler = handlerSource(source, entry.endpoint.method)
+    const calls = handler.match(/presentSuccess\(/g) ?? []
+    assert.equal(calls.length, 1, `${entry.id} must build exactly one success body`)
+    const named = /presentSuccess\(\s*(present[A-Za-z0-9]*)\(/.exec(handler)
+    assert.ok(
+      named,
+      `${entry.id} must pass presentSuccess a named presenter, not an object literal assembled in ${file}`,
+    )
+    const presenter = named[1]
+    assert.ok(
+      source.includes(`\n  ${presenter},\n`) || source.includes(`import { ${presenter} }`),
+      `${entry.id} must import ${presenter} from a contract module`,
+    )
+    // The published example for the same schema is built by the same function,
+    // so the shape Ajv validates is the shape the route emits.
+    const start = examples.indexOf(`'${entry.outputSchemaRef}': [`)
+    assert.ok(start >= 0, `${entry.outputSchemaRef} must publish an example`)
+    assert.ok(
+      examples.slice(start, start + 400).includes(`data: ${presenter}(`),
+      `the ${entry.outputSchemaRef} example must be built by ${presenter}, as the route is`,
+    )
+  }
+})
+
+test('T-F4.012 every Wave 20 route requires the scope its capability declares', () => {
+  // Defence in depth rather than the only gate — `authenticateExternalRequest`
+  // already enforces `requiredScopes` before the handler body runs. Pinned
+  // because deleting the line changed no gate at all, and the day a registry
+  // entry loses a scope the route is the last thing standing.
+  for (const { entry, source } of WAVE20_ROUTES) {
+    assert.equal(entry.requiredScopes.length, 1, `${entry.id} must declare exactly one scope`)
+    const handler = handlerSource(source, entry.endpoint.method)
+    assert.ok(
+      handler.includes(`requireScope(actor, '${entry.requiredScopes[0]}')`),
+      `${entry.id} must call requireScope(actor, '${entry.requiredScopes[0]}') in its ${entry.endpoint.method} handler`,
+    )
+  }
+})
+
+test('T-F4.012 the idempotency a Wave 20 command declares is the one its route reads', () => {
+  // `idempotency: 'required'` puts a mandatory `Idempotency-Key` header into the
+  // published OpenAPI and a required `idempotencyKey` into the agent tool. Four
+  // of the six Wave 20 commands declared it while no route and no service read
+  // a key — a parameter documented into existence. They declare `'natural'`
+  // now, which is what they are: fenced on the exact version and hash the
+  // caller read, with a repeat collapsing into `replayed: true`.
+  for (const { entry, source } of WAVE20_ROUTES) {
+    if (entry.operationKind !== 'command') {
+      assert.equal(entry.idempotency, 'not-applicable')
+      continue
+    }
+    const reads = /idempotency-key/i.test(source)
+    if (entry.idempotency === 'required') {
+      assert.ok(reads, `${entry.id} advertises Idempotency-Key; its route must read it`)
+      assert.ok(
+        /idempotency: \{ clientId: actor\.clientId, key: idempotencyKey \}/.test(source),
+        `${entry.id} must bind the key to the authenticated client, never to the request alone`,
+      )
+    } else {
+      assert.equal(entry.idempotency, 'natural')
+      assert.equal(
+        reads,
+        false,
+        `${entry.id} declares a natural key; reading Idempotency-Key without threading it is worse than not reading it`,
+      )
+    }
+  }
+})
+
+/**
+ * The same rule across the whole published surface, with the debt named.
+ *
+ * Every capability declaring `idempotency: 'required'` must have a route that
+ * reads the header. The eight below were already shipped that way by Waves 18
+ * and 19; they are listed so the count cannot grow and so nobody reads this
+ * suite as saying the surface is clean. Wave 20 is not on the list.
+ */
+const IDEMPOTENCY_HEADER_DEBT = Object.freeze([
+  'apollo.projects.capture-sessions.create',
+  'apollo.projects.capture-sessions.tracks.add',
+  'apollo.projects.capture-sessions.track-parts.add',
+  'apollo.projects.capture-sessions.reference-track.change',
+  'apollo.projects.capture-sessions.protocol.evaluate',
+  'apollo.projects.capture-sessions.sync-diagnostic.generate',
+  'apollo.projects.capture-sessions.sync-diagnostic.anchors.edit',
+  'apollo.projects.editorial-syntheses.create',
+])
+
+test('no NEW capability advertises an Idempotency-Key nothing reads', () => {
+  const unread = FOUNDATION_CAPABILITIES
+    .filter((entry) => entry.idempotency === 'required' && entry.endpoint)
+    .filter((entry) => {
+      const file = routeFileFor(entry)
+      return !existsSync(file) || !/idempotency-key/i.test(readFileSync(file, 'utf8'))
+    })
+    .map((entry) => entry.id)
+  assert.deepEqual(
+    [...unread].sort(),
+    [...IDEMPOTENCY_HEADER_DEBT].sort(),
+    'a capability that requires an idempotency key must have a route that reads one',
+  )
+  for (const id of IDEMPOTENCY_HEADER_DEBT) {
+    assert.ok(!WAVE20_IDS.includes(id), `${id} is Wave 20 and must not be on the debt list`)
+  }
 })

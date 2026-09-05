@@ -50,6 +50,23 @@ export function identifier(value: unknown, field: string): string {
   return value.trim()
 }
 
+/**
+ * The half of a fence that names which chain and which link.
+ *
+ * Wider than `identifier` because it is not an id a caller chose: the server
+ * builds `<sessionId>:playback:<trackId>:v<n>` out of two ids that may each be
+ * 128 characters, hands it to the caller as `versionRef`, and then requires it
+ * back as `baseVersionId`. Held to the 200 characters `identifier` allows —
+ * still less than the 269 that composite can reach — the boundary would refuse
+ * a fence it issued itself. The published schema carries the same bound.
+ */
+export function versionRef(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length < 3 || value.trim().length > 300) {
+    throw new DomainError('INVALID_ARGUMENT', `${field} is invalid`)
+  }
+  return value.trim()
+}
+
 export function sha256(value: unknown, field: string): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) {
     throw new DomainError('INVALID_ARGUMENT', `${field} must be a sha256 digest`)

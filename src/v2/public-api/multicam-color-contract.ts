@@ -32,6 +32,7 @@ import {
   sha256,
   text,
   tick,
+  versionRef,
 } from './capture-derivation-contract.ts'
 
 /**
@@ -470,7 +471,7 @@ export function parseDeriveMatchPlanBody(raw: unknown): ParsedDeriveMatchPlanBod
   )
   return Object.freeze({
     referenceCameraId: token(body.referenceCameraId, 'referenceCameraId'),
-    baseVersionId: identifier(body.baseVersionId, 'baseVersionId'),
+    baseVersionId: versionRef(body.baseVersionId, 'baseVersionId'),
     baseHash: sha256(body.baseHash, 'baseHash'),
     projectBaseVersionId: identifier(body.projectBaseVersionId, 'projectBaseVersionId'),
     projectBaseHash: sha256(body.projectBaseHash, 'projectBaseHash'),
@@ -542,7 +543,7 @@ export function parseMatchRangeOverrideBody(raw: unknown): ParsedMatchRangeOverr
     })
   }
   return Object.freeze({
-    baseVersionId: identifier(body.baseVersionId, 'baseVersionId'),
+    baseVersionId: versionRef(body.baseVersionId, 'baseVersionId'),
     baseHash: sha256(body.baseHash, 'baseHash'),
     projectBaseVersionId: identifier(body.projectBaseVersionId, 'projectBaseVersionId'),
     projectBaseHash: sha256(body.projectBaseHash, 'projectBaseHash'),

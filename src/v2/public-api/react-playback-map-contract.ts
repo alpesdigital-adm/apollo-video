@@ -22,6 +22,7 @@ import {
   sha256,
   text,
   tick,
+  versionRef,
 } from './capture-derivation-contract.ts'
 
 /**
@@ -225,7 +226,7 @@ export function parseBuildPlaybackMapBody(raw: unknown): ParsedBuildPlaybackMapB
   const body = record(raw, 'body')
   exactFields(body, ['baseVersionId', 'baseHash', 'reactionTrackId'], 'body')
   return Object.freeze({
-    baseVersionId: identifier(body.baseVersionId, 'baseVersionId'),
+    baseVersionId: versionRef(body.baseVersionId, 'baseVersionId'),
     baseHash: sha256(body.baseHash, 'baseHash'),
     ...(body.reactionTrackId === undefined
       ? {}
@@ -260,7 +261,7 @@ export function parsePlaybackAnchorBody(raw: unknown): ParsedPlaybackAnchorBody 
     )
   }
   return Object.freeze({
-    baseVersionId: identifier(body.baseVersionId, 'baseVersionId'),
+    baseVersionId: versionRef(body.baseVersionId, 'baseVersionId'),
     baseHash: sha256(body.baseHash, 'baseHash'),
     reactionTrackId: identifier(body.reactionTrackId, 'reactionTrackId'),
     anchor: Object.freeze({
