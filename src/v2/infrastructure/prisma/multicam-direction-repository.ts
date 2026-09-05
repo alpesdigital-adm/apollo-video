@@ -7,6 +7,7 @@ import type {
   StoredMulticamDirection,
 } from '../../application/ports/multicam-direction-repository.ts'
 import { parseWithTicks, stringifyWithTicks } from './bigint-json.ts'
+import { childRowId } from './child-row-id.ts'
 import { colorCameraIdForTrack } from '../../domain/camera-identity.ts'
 import type { CaptureTrackRole } from '../../domain/capture-session.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -69,11 +70,11 @@ function parseTicks<T>(json: string, what: string): T {
 
 /** `<sessionId>:md<version>` — one row per link of the chain. */
 function directionRowId(sessionId: string, version: number): string {
-  return `${sessionId}:md${version}`
+  return childRowId([sessionId, `md${version}`], 160)
 }
 
 function shotRowId(directionId: string, ordinal: number): string {
-  return `${directionId}:s${ordinal}`
+  return childRowId([directionId, `s${ordinal}`], 160)
 }
 
 /**
@@ -434,7 +435,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
     createdAt: string
   }): Promise<Readonly<{ set: Readonly<MulticamEvidenceSet>; replayed: boolean }>> {
     const { set } = input
-    const id = `${set.sessionId}:ev-${set.evidenceHash.slice(0, 16)}`
+    const id = childRowId([set.sessionId, `ev-${set.evidenceHash.slice(0, 16)}`], 128)
     const at = new Date(input.createdAt)
     try {
       await this.client.$transaction(async (transaction) => {
@@ -455,7 +456,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
         if (set.observations.length === 0) return
         await transaction.v2MulticamObservation.createMany({
           data: set.observations.map((observation) => ({
-            id: `${id}:${observation.observationId}`,
+            id: childRowId([id, observation.observationId], 160),
             workspaceId: set.workspaceId,
             evidenceSetId: id,
             observationId: observation.observationId,
@@ -590,7 +591,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
             },
           })
 
-          const candidateRowId = `${shotId}:c0`
+          const candidateRowId = childRowId([shotId, 'c0'], 160)
           await transaction.v2MulticamAngleCandidate.create({
             data: {
               id: candidateRowId,
@@ -632,7 +633,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
             data: ANGLE_SCORE_COMPONENT_NAMES.map((name) => {
               const component = shot.chosen.scoreComponents[name]
               return {
-                id: `${candidateRowId}:${name}`,
+                id: childRowId([candidateRowId, name], 160),
                 workspaceId: direction.workspaceId,
                 candidateId: candidateRowId,
                 name,
@@ -646,7 +647,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
           if (shot.alternatives.length > 0) {
             await transaction.v2MulticamShotAlternative.createMany({
               data: shot.alternatives.map((alternative, index) => ({
-                id: `${shotId}:a${index}`,
+                id: childRowId([shotId, `a${index}`], 160),
                 workspaceId: direction.workspaceId,
                 shotId,
                 directionId: id,
