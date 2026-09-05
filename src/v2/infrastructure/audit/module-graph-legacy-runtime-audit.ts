@@ -25,7 +25,19 @@ import {
  * drifted allowlist fails the gate for the wrong reason.
  */
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
+/**
+ * The repository root, resolved from this file rather than from `cwd`.
+ *
+ * Not `new URL('../../../../', import.meta.url)`, which is what this was: that
+ * exact pattern is the one webpack treats as an asset reference, so it tried to
+ * resolve the repository root as a module and `next build` failed with
+ * "Can't resolve '../../../../'" for every `/v1` route, because they all reach
+ * this module through `repository-factory`. `createRequire(import.meta.url)`
+ * elsewhere in `infrastructure/` builds fine; it is `new URL` plus a literal
+ * that webpack intercepts. Splitting the two keeps the same path at runtime and
+ * leaves webpack nothing to resolve.
+ */
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const V2_ROOT = join(REPOSITORY_ROOT, 'src', 'v2')
 const LEGACY_RUNTIME_ROOT = join(REPOSITORY_ROOT, 'src', 'lib')
 const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.js'] as const
