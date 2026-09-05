@@ -693,3 +693,74 @@ test('T-F4.014 two clips of one file under two pipelines are measured against tw
   assert.equal(wrote.length, 2, `one pre-pass per (source x pipeline): ${wrote.join(', ')}`)
   await evaluator.cleanup('operation-critic-two-pipelines')
 })
+
+test('T-F4.014 the before-side crop is taken on the source’s own frame rate, not the timeline’s', async () => {
+  // A 24 fps camera on a 30 fps timeline. The intermediate keeps the SOURCE's
+  // rate — the processor passes no `-r` — so converting a source frame index
+  // through the timeline rate would crop a different moment than the one the
+  // measurement resolved, and would do it without ever failing.
+  const SOURCE_RATE = 24
+  await encode(
+    'camera24',
+    'null',
+    `testsrc2=size=${WIDTH}x${HEIGHT}:rate=${SOURCE_RATE}:duration=${SECONDS}`,
+  )
+  await encodeFrom('delivered30', 'camera24', `fps=${RATE}`)
+  const pipeline = convertingPipeline()
+  const workRoot = join(root, 'critic-work-rate')
+  const evidenceRoot = join(root, 'critic-evidence-rate')
+  await mkdir(evidenceRoot, { recursive: true })
+  const evaluator = new FfmpegColorCriticEvaluator({
+    workRoot, storage: localStorageDriver(evidenceRoot), timeoutMs: 120_000,
+  })
+  const source = files.get('camera24')
+  const delivered = files.get('delivered30')
+  const operationId = 'operation-critic-rate'
+  const measured = await evaluator.measureStages({
+    workspaceId: 'workspace-integration',
+    operationId,
+    fps: RATE,
+    clips: [{
+      clipId: 'clip-24', cameraId: 'cam-b', sourceArtifactId: 'artifact-b',
+      pipelineHash: pipeline.pipelineHash,
+      sourceInFrame: 0, sourceOutFrame: SOURCE_RATE * SECONDS,
+      timelineInFrame: 0, timelineOutFrame: RATE * SECONDS,
+    }],
+    sources: [{ artifactId: 'artifact-b', path: source.path, sha256: source.sha256, pipeline }],
+    deliveredPath: delivered.path,
+    deliveredArtifactId: 'artifact-proxy-rate',
+    deliveredSha256: delivered.sha256,
+  })
+
+  const workDirectory = join(workRoot, `color-critic-${operationId}`)
+  const intermediateName = (await readdir(workDirectory))
+    .find((name) => name.startsWith('color-before-') && name.endsWith('.mp4'))
+  assert.ok(intermediateName, 'the critic wrote no intermediate to crop from')
+  const intermediate = join(workDirectory, intermediateName)
+
+  /** The adapter's own crop command, so only the instant differs. */
+  const cropAt = async (name, atSeconds) => {
+    const path = join(root, `${name}.png`)
+    await run(ffmpeg, [
+      '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+      '-ss', atSeconds.toFixed(6),
+      '-i', intermediate,
+      '-frames:v', '1',
+      '-vf', 'scale=320:-2:flags=area',
+      '-f', 'image2', path,
+    ], { windowsHide: true, timeout: 120_000 })
+    return createHash('sha256').update(await readFile(path)).digest('hex')
+  }
+  const middleSourceFrame = (SOURCE_RATE * SECONDS) / 2
+  const onSourceRate = await cropAt('crop-source-rate', middleSourceFrame / SOURCE_RATE)
+  const onTimelineRate = await cropAt('crop-timeline-rate', middleSourceFrame / RATE)
+  assert.notEqual(onSourceRate, onTimelineRate,
+    'the fixture does not change between the two instants; the test could not tell them apart')
+
+  const beforeCrop = measured.evidence.find((crop) => crop.stage === 'before-output-transform')
+  console.log(`T-F4.014 crop rate N=1 sourceFps=${SOURCE_RATE} timelineFps=${RATE} atSourceRate=${(middleSourceFrame / SOURCE_RATE).toFixed(3)}s atTimelineRate=${(middleSourceFrame / RATE).toFixed(3)}s cropSha=${beforeCrop.sha256.slice(0, 16)}`)
+  assert.equal(beforeCrop.sha256, onSourceRate,
+    'the evidence crop shows a different moment than the one the critic measured')
+  assert.notEqual(beforeCrop.sha256, onTimelineRate)
+  await evaluator.cleanup(operationId)
+})
