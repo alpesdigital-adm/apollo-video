@@ -1051,6 +1051,41 @@ test('T-FR-150 a tampered direction fails integrity; one tick of difference is a
   assert.equal(roundTrip.shots[0].sessionRange.start.$tick, '90000')
 })
 
+test('T-FR-150 falsification: the direction hash binds which angle each shot chose, and everything under it', () => {
+  const world = podcastWorld()
+  const honest = world.direct()
+  const shot = honest.shots[1]
+  assert.equal(shot.chosen.trackId, 'track-camera-b')
+  // A forgery that keeps shotId, ordinal, sessionRange and audioTrackId and
+  // swaps only the angle — with the candidate and shot hashes recomputed so the
+  // artifact is internally consistent. If the direction hash did not bind the
+  // choice, this would be the same bytes as the honest direction.
+  const alternative = deriveAngleCandidates({ ...world.inputs, window: shot.sessionRange, previousShot: null })
+    .find((candidate) => candidate.trackId === 'track-camera-a')
+  assert.equal(alternative.eligible, true, 'camera A really could have been cut there — the forgery is plausible')
+  const reseal = (changes) => {
+    const { decisionHash: _decisionHash, ...shotBody } = shot
+    const forgedShotBody = { ...shotBody, ...changes }
+    const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
+    const { directionHash: _directionHash, ...body } = honest
+    const forgedBody = { ...body, shots: honest.shots.map((entry) => (entry.shotId === shot.shotId ? forgedShot : entry)) }
+    return { ...forgedBody, directionHash: calculateMulticamDirectionHash(forgedBody) }
+  }
+  const swappedAngle = reseal({ chosen: alternative })
+  assert.equal(swappedAngle.shots[1].shotId, shot.shotId)
+  assert.equal(swappedAngle.shots[1].ordinal, shot.ordinal)
+  assert.equal(swappedAngle.shots[1].audioTrackId, shot.audioTrackId)
+  assert.deepEqual(swappedAngle.shots[1].sessionRange, shot.sessionRange)
+  assert.equal(assertMulticamDirectionIntegrity(swappedAngle), swappedAngle, 'the forgery is internally consistent — only the hash can tell')
+  assert.notEqual(swappedAngle.directionHash, honest.directionHash, 'the direction hash binds the chosen track')
+  // Each field the shot decided by is bound on its own, and so is everything the
+  // shot hash covers but the direction body does not name.
+  assert.notEqual(reseal({ rule: 'conservative-hold' }).directionHash, honest.directionHash, 'the rule that decided the shot is bound')
+  assert.notEqual(reseal({ confidence: 0.5 }).directionHash, honest.directionHash, 'the confidence is bound')
+  assert.notEqual(reseal({ reason: 'because somebody said so' }).directionHash, honest.directionHash, 'the shot hash reaches the direction hash')
+  console.log(`falsify honest=${honest.directionHash.slice(0, 12)} swapped=${swappedAngle.directionHash.slice(0, 12)}`)
+})
+
 test('T-FR-150 a shot maps to the Director decision shape with evidence, alternatives and the angle category', () => {
   const direction = podcastWorld().direct()
   const decision = toAngleDecision(direction.shots[1])
