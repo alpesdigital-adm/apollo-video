@@ -532,3 +532,66 @@ test('T-F4.015 a react playback map survives its own anchor and keeps the versio
       `v2 pieces=${anchored.pieces.length} status=${anchored.status}`,
   )
 })
+
+test('T-F4.015 anchors answered out of tick order come back in the order they were placed', async () => {
+  const kit = await load()
+  const client = createMemoryPrismaClient()
+  const maps = new kit.PrismaPlaybackMapRepository(client)
+
+  // Two stretches the map refuses to guess at, and an operator who answers the
+  // LATER one first — the ordinary case where the second stretch is the one on
+  // screen. `applyPlaybackAnchor` appends, so the anchor array is [late, early]
+  // and the map hash covers it in exactly that order. Storing the anchors
+  // without their position and re-deriving the order on read by
+  // `(reactionTick, anchorId)` handed back [early, late]: a different hash, a
+  // PERSISTENCE_CONFLICT, and a version that was written successfully and could
+  // never be read again.
+  const world = kit.buildPlaybackWorld({
+    workspaceId: A, sessionId: REACT, projectId: PROJECT_A, uncoveredStretches: 2,
+  })
+  assert.equal(world.map.uncovered.length, 2, 'the fixture must leave two stretches for a person')
+
+  const late = kit.anchorPlaybackMap(world.map, {
+    anchorId: 'w20j-anchor-late', actorId: 'operator-7',
+    note: 'the player was off screen here', createdAt: at(40), stretch: 1,
+  })
+  const both = kit.anchorPlaybackMap(late, {
+    anchorId: 'w20j-anchor-early', actorId: 'operator-7',
+    note: 'phone rang, player hidden', createdAt: at(41), stretch: 0,
+  })
+  assert.deepEqual(
+    both.anchors.map((anchor) => anchor.anchorId),
+    ['w20j-anchor-late', 'w20j-anchor-early'],
+    'the domain appends anchors; it does not sort them',
+  )
+  assert.ok(
+    both.anchors[0].reactionTick > both.anchors[1].reactionTick,
+    'the stored order must not be tick order, or this test proves nothing',
+  )
+
+  for (const [map, second] of [[world.map, 42], [late, 43], [both, 44]]) {
+    await maps.appendVersion({ map, occurredAt: at(second) })
+  }
+  for (const [version, expected] of [[1, world.map], [2, late], [3, both]]) {
+    identical(
+      kit.stringifyWithTicks,
+      await maps.readVersion({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK, version }),
+      expected,
+      `playback map version ${version} with anchors out of tick order`,
+    )
+  }
+
+  // The position is a stored column, not a re-derivation: row 0 is the late
+  // anchor because that is where the map put it.
+  const stored = client.rows('V2PlaybackAnchor')
+    .filter((row) => row.workspaceId === A && row.mapId.endsWith('pm3'))
+    .sort((left, right) => left.ordinal - right.ordinal)
+  assert.deepEqual(
+    stored.map((row) => [row.ordinal, row.anchorId]),
+    [[0, 'w20j-anchor-late'], [1, 'w20j-anchor-early']],
+  )
+
+  console.log(
+    `playback anchor order: stored ${stored.map((row) => `${row.ordinal}:${row.anchorId}`).join(' ')}`,
+  )
+})

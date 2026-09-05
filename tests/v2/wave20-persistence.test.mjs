@@ -85,6 +85,13 @@ const commandMigration = readFileSync(
   `${root}prisma/v2/migrations/20260905093000_direct_multicam_session_command/migration.sql`,
   'utf8',
 )
+// The third Wave 20 migration. It was read by nothing here until a reviewer
+// pointed out that the ordinal columns — the only thing standing between a
+// stored aggregate and an unreadable one — had no structural guard at all.
+const rehydration = readFileSync(
+  `${root}prisma/v2/migrations/20260905120000_wave20_aggregate_rehydration/migration.sql`,
+  'utf8',
+)
 const schema = readFileSync(`${root}prisma/v2/schema.prisma`, 'utf8')
 
 const TABLES = Object.freeze([
@@ -454,10 +461,88 @@ test('T-F4.012 versioned aggregates are chains with heads, and instants are clai
 })
 
 test('T-F4.012 the migration is committed as LF and the command type is closed', () => {
-  for (const [name, text] of [['aggregates', sql], ['command type', commandMigration]]) {
+  for (const [name, text] of [
+    ['aggregates', sql],
+    ['command type', commandMigration],
+    ['rehydration', rehydration],
+  ]) {
     assert.equal(text.includes('\r'), false, `the ${name} migration must be committed with LF endings`)
     assert.equal(text.includes('\u0000'), false, `the ${name} migration must not contain NUL bytes`)
   }
   assert.match(commandMigration, /ALTER TABLE "edit_commands" DROP CONSTRAINT "edit_commands_type_check";/)
   assert.match(commandMigration, /'direct-multicam-session'/)
+})
+
+/** One `model X { … }` block of the Prisma schema, brace-balanced. */
+function modelBlock(model) {
+  const anchor = schema.indexOf(`model ${model} {`)
+  assert.notEqual(anchor, -1, `${model} is not declared by the Prisma schema`)
+  const end = schema.indexOf('\n}', anchor)
+  return schema.slice(anchor, end)
+}
+
+/**
+ * Every child collection whose order the aggregate hash covers.
+ *
+ * `playback_anchors` is on this list because it was the one that was not: the
+ * anchors were read back unordered and re-sorted by `(reactionTick, anchorId)`,
+ * which is the order they are in only when a map has at most one anchor. A
+ * second anchor placed before an existing one — the operator who answers the
+ * later uncovered stretch first — wrote a map that could never be read again.
+ */
+const ORDERED_CHILDREN = Object.freeze([
+  ['multicam_observations', 'evidenceSetId', 'multicam_observations_set_ordinal_key', 'V2MulticamObservation'],
+  ['match_plan_measurements', 'planId', 'match_plan_measurements_plan_ordinal_key', 'V2MatchPlanMeasurement'],
+  ['match_range_overrides', 'planId', 'match_range_overrides_plan_ordinal_key', 'V2MatchRangeOverride'],
+  ['color_critic_proposed_deltas', 'reportId', 'color_critic_proposed_deltas_report_ordinal_key', 'V2ColorCriticProposedDelta'],
+  ['playback_anchors', 'mapId', 'playback_anchors_map_ordinal_key', 'V2PlaybackAnchor'],
+])
+
+test('T-F4.015 every hashed child collection stores the order it is hashed in', () => {
+  for (const [table, owner, index, model] of ORDERED_CHILDREN) {
+    assert.ok(
+      rehydration.includes(`ALTER TABLE "${table}" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;`),
+      `${table} must carry the position its owner hashed it in`,
+    )
+    assert.ok(
+      rehydration.includes(`ALTER TABLE "${table}" ALTER COLUMN "ordinal" DROP DEFAULT;`),
+      `${table}.ordinal must not keep a default a forgotten write could lean on`,
+    )
+    assert.ok(
+      rehydration.includes(`ADD CONSTRAINT "${table}_ordinal_check" CHECK ("ordinal" >= 0)`),
+      `${table}.ordinal must be a position and not a signed number`,
+    )
+    assert.ok(
+      rehydration.includes(
+        `CREATE UNIQUE INDEX "${index}" ON "${table}"("workspaceId", "${owner}", "ordinal");`,
+      ),
+      `${table} must refuse two children claiming one position`,
+    )
+    // The schema has to agree, or Prisma writes rows ordered by a column it
+    // does not know about — which is the same as not ordering them.
+    assert.match(modelBlock(model), /\n\s+ordinal\s+Int\b/, `${model} must declare the ordinal column`)
+  }
+})
+
+test('T-F4.013 the rehydration migration adds the columns the hash covers', () => {
+  for (const [table, column, constraint] of [
+    ['multicam_angle_candidates', 'evidenceJson', 'multicam_angle_candidates_evidence_check'],
+    ['camera_match_transforms', 'transformJson', 'camera_match_transforms_transform_check'],
+    ['match_range_overrides', 'transformJson', 'match_range_overrides_transform_check'],
+  ]) {
+    assert.ok(
+      rehydration.includes(
+        `ALTER TABLE "${table}"\n    ADD COLUMN "${column}" TEXT NOT NULL DEFAULT '{}';`,
+      ),
+      `${table}.${column} must exist`,
+    )
+    assert.ok(
+      rehydration.includes(`ALTER TABLE "${table}" ALTER COLUMN "${column}" DROP DEFAULT;`),
+      `${table}.${column} must not keep a default that hides a forgotten write`,
+    )
+    assert.ok(
+      rehydration.includes(`ADD CONSTRAINT "${constraint}"`),
+      `${table}.${column} must be constrained by ${constraint}`,
+    )
+  }
 })

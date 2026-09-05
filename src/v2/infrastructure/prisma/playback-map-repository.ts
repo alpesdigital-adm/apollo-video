@@ -108,6 +108,7 @@ function hydratePiece(row: {
 
 function hydrateAnchor(row: {
   anchorId: string
+  ordinal: number
   origin: string
   reactionTick: bigint
   referenceTick: bigint | null
@@ -203,12 +204,14 @@ function hydrateMap(row: MapRow): Readonly<PlaybackMap> {
         reason: range.reason as PlaybackUncoveredReason,
       })),
     ),
+    // The order the map was hashed in, read back from the column that stores
+    // it. Deriving it from `(reactionTick, anchorId)` was the same order only
+    // while every map had at most one anchor: `applyPlaybackAnchor` appends,
+    // so an operator who answers the later uncovered stretch first holds
+    // [late, early], and a re-derived sort hands back [early, late] — a
+    // different hash, and a map that could never be read again.
     anchors: Object.freeze(
-      [...row.anchors]
-        .sort((left, right) => (left.reactionTick === right.reactionTick
-          ? left.anchorId.localeCompare(right.anchorId)
-          : left.reactionTick < right.reactionTick ? -1 : 1))
-        .map(hydrateAnchor),
+      [...row.anchors].sort((left, right) => left.ordinal - right.ordinal).map(hydrateAnchor),
     ),
     status: row.status as PlaybackMapStatus,
     warnings: Object.freeze(
@@ -225,7 +228,7 @@ function hydrateMap(row: MapRow): Readonly<PlaybackMap> {
 
 const MAP_INCLUDE = {
   pieces: { orderBy: { ordinal: 'asc' } },
-  anchors: true,
+  anchors: { orderBy: { ordinal: 'asc' } },
   uncovered: { orderBy: { ordinal: 'asc' } },
 } as const
 
@@ -311,13 +314,16 @@ export class PrismaPlaybackMapRepository implements PlaybackMapRepository {
 
         if (map.anchors.length > 0) {
           await transaction.v2PlaybackAnchor.createMany({
-            data: map.anchors.map((anchor) => {
+            data: map.anchors.map((anchor, ordinal) => {
               const actor = anchor.origin === 'manual' ? manualActorOf(anchor) : null
               return {
                 id: childRowId([id, anchor.anchorId], 160),
                 workspaceId: map.workspaceId,
                 mapId: id,
                 anchorId: anchor.anchorId,
+                // The index in the array the map hash covers, not a re-derived
+                // rank: the anchors are appended, never sorted.
+                ordinal,
                 origin: anchor.origin,
                 reactionTick: anchor.reactionTick,
                 referenceTick: anchor.referenceTick,

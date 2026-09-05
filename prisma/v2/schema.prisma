@@ -9897,6 +9897,7 @@ model V2PlaybackAnchor {
   workspaceId   String   @db.VarChar(128)
   mapId         String   @db.VarChar(160)
   anchorId      String   @db.VarChar(128)
+  ordinal       Int
   origin        String   @db.VarChar(16)
   reactionTick  BigInt
   referenceTick BigInt?
@@ -9914,6 +9915,7 @@ model V2PlaybackAnchor {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, mapId, anchorId])
+  @@unique([workspaceId, mapId, ordinal], map: "playback_anchors_map_ordinal_key")
   @@index([workspaceId, mapId, origin])
   @@map("playback_anchors")
 }

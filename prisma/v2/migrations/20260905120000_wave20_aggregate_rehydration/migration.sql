@@ -50,7 +50,7 @@ ALTER TABLE "match_range_overrides"
           AND "transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion"
           AND "transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb);
 
--- The other half of the same problem: four child collections are ordered by
+-- The other half of the same problem: five child collections are ordered by
 -- the aggregate that owns them, and their tables had no way to say so.
 --
 -- An evidence set sorts its observations with its own comparator before
@@ -85,3 +85,20 @@ ALTER TABLE "color_critic_proposed_deltas" ALTER COLUMN "ordinal" DROP DEFAULT;
 ALTER TABLE "color_critic_proposed_deltas"
     ADD CONSTRAINT "color_critic_proposed_deltas_ordinal_check" CHECK ("ordinal" >= 0);
 CREATE UNIQUE INDEX "color_critic_proposed_deltas_report_ordinal_key" ON "color_critic_proposed_deltas"("workspaceId", "reportId", "ordinal");
+
+-- The fifth, missed the first time round because every fixture had at most one
+-- anchor, where any order is sorted order.
+--
+-- A playback map hashes its anchors as an array (playback-map.ts:472-482) and
+-- `applyPlaybackAnchor` appends the new one (playback-map.ts:1554) — it never
+-- sorts. An operator who answers the later uncovered stretch first therefore
+-- holds a map whose anchors are [late, early]. Read back unordered and
+-- re-sorted by (reactionTick, anchorId), that map comes back as [early, late],
+-- hashes differently, and `assertPlaybackMapIntegrity` refuses it: the write
+-- succeeded and the row can never be read again. The anchors carry their
+-- position for exactly the same reason the other four do.
+ALTER TABLE "playback_anchors" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "playback_anchors" ALTER COLUMN "ordinal" DROP DEFAULT;
+ALTER TABLE "playback_anchors"
+    ADD CONSTRAINT "playback_anchors_ordinal_check" CHECK ("ordinal" >= 0);
+CREATE UNIQUE INDEX "playback_anchors_map_ordinal_key" ON "playback_anchors"("workspaceId", "mapId", "ordinal");

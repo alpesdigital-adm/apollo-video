@@ -498,7 +498,14 @@ function playbackTrack({ trackId, role, assetId, deviceId, endSecond, syncAudioP
   }
 }
 
-export function buildPlaybackWorld({ workspaceId, sessionId, projectId }) {
+/**
+ * @param uncoveredStretches How many stretches the map leaves for a person.
+ *   Two of them is the case that broke persistence: the operator answers the
+ *   later one first, `applyPlaybackAnchor` appends, and the anchor array is no
+ *   longer in tick order. Anything that re-derives the order on read hands
+ *   back a different map than the one that was stored.
+ */
+export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncoveredStretches = 1 }) {
   const reaction = playbackTrack({
     trackId: 'track-reaction',
     role: 'reaction',
@@ -554,11 +561,19 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId }) {
       })
     }
   }
+  // With a second stretch asked for, the player is hidden from six to ten
+  // seconds and the reference comes back one second AHEAD of where it stopped:
+  // played through, paused-then-seeked and scrubbed all fit that evidence, so
+  // the map names none of them and asks a person (ADR-135). The one-second
+  // shift is carried through the pause that follows, so the rest of the story
+  // — the seek back, the seek forward, the hidden stretch at 34s — is the same
+  // in both shapes.
+  const shift = uncoveredStretches >= 2 ? 1 : 0
   push(0, 6, 0)
   push(6, 10, null)
-  push(10, 14, 6)
+  push(10, 14, 6 + shift)
   push(14, 25, null)
-  push(25, 28, 10)
+  push(25, 28, 10 + shift)
   push(28, 31, 2)
   push(31, 34, 20)
   push(34, 36, null)
@@ -578,10 +593,17 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId }) {
   return { session, map, referenceMedia, reactionMedia }
 }
 
-/** The next version of a map, produced by a person answering one uncovered stretch. */
-export function anchorPlaybackMap(map, { anchorId, actorId, note, createdAt }) {
-  const target = map.uncovered[0]
-  if (!target) throw new Error('the playback fixture has no uncovered stretch to anchor')
+/**
+ * The next version of a map, produced by a person answering one uncovered
+ * stretch.
+ *
+ * `stretch` picks which one. It exists because answering them in tick order is
+ * the easy case: a map anchored [late, early] is the one that stopped being
+ * readable when the anchors were stored without their position.
+ */
+export function anchorPlaybackMap(map, { anchorId, actorId, note, createdAt, stretch = 0 }) {
+  const target = map.uncovered[stretch]
+  if (!target) throw new Error(`the playback fixture has no uncovered stretch ${stretch} to anchor`)
   const reactionTick = target.range.start
   return applyPlaybackAnchor(map, {
     expectedVersion: map.version,
