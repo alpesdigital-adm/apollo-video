@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -465,6 +466,56 @@ test(
         },
       }))
 
+    // The composition root, executed rather than only type-checked.
+    //
+    // `createReactPlaybackMapServices` and the two repository factories had no
+    // caller anywhere — not a route, not a worker, not a test — so the claim
+    // that this is "where the compiler proves the adapters satisfy the ports"
+    // was a `tsc` structural check and nothing more. Three of them now run
+    // against this database. The build/anchor/compile half of the factory still
+    // has no caller: it needs a capture session read from PostgreSQL, and this
+    // journey seeds only the session head, which is phase 3's work.
+    const {
+      createReactPlaybackMapServices,
+      createRenderSourceRepository,
+      createRenderablePlanSnapshotRepository,
+    } = await import('../../src/v2/infrastructure/repository-factory.ts')
+    const { disconnectV2PostgresClient } = await import(
+      '../../src/v2/infrastructure/prisma-postgres/client.ts'
+    )
+    t.after(async () => { await disconnectV2PostgresClient() })
+
+    const assembled = createReactPlaybackMapServices({
+      ...process.env,
+      // The media resolver is constructed here even though this test never
+      // opens a file; without a root it refuses at construction time.
+      APOLLO_V2_ARTIFACT_ROOT: tmpdir(),
+    })
+    const viaFactory = await assembled.read({
+      workspaceId: A, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+    })
+    assert.equal(viaFactory.map.mapHash, resolved.map.mapHash)
+    const dependents = await assembled.listReferenceDependents({
+      workspaceId: A,
+      referenceAssetId: world.map.referenceMedia.assetId,
+      referenceSha256: world.map.referenceMedia.sha256,
+    })
+    assert.equal(dependents.length, 2, 'both versions are built on the reference bytes')
+    const factoryPlans = createRenderablePlanSnapshotRepository()
+    assert.equal(
+      (await factoryPlans.readLatestForSource({
+        workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
+      })).planHash,
+      compiled.planHash,
+    )
+    assert.deepEqual(
+      (await createRenderSourceRepository().resolveForProject({
+        workspaceId: A, projectId: PROJECT_A,
+        artifactIds: recordings.map((recording) => recording.artifactId),
+      })).map((source) => [source.artifactId, source.durationSeconds]),
+      recordings.map((recording) => [recording.artifactId, recording.durationSeconds]),
+    )
+
     // Hash-verified hydration of the PLAN, which is the guard commit fc11d484
     // is named after and which no test exercised: removing the recompute left
     // every suite green, this journey included.
@@ -601,7 +652,9 @@ test(
       `sources ${compiled.plan.sources.map((source) => `${source.artifactId}@${source.durationSeconds}s`).join(' + ')} ` +
       `all linked to ${PROJECT_A}; stored plan refused after a CHECK-passing clip shift ` +
       `(${shifted.code}), after a rehashed unrenderable document (${invalid.code}) ` +
-      `and after unlinking the reference (${unresolvable.code})`,
+      `and after unlinking the reference (${unresolvable.code}); ` +
+      `composition root executed: read v${viaFactory.map.version} and ` +
+      `${dependents.length} reference dependents through createReactPlaybackMapServices`,
     )
   },
 )
