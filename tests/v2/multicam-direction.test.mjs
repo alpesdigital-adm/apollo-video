@@ -1083,7 +1083,16 @@ test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap p
   }
   const forgedCandidate = { ...forgedBody, candidateHash: calculateAngleCandidateHash(forgedBody) }
   const { decisionHash: _decisionHash, ...shotBody } = fallback
-  const forgedShotBody = { ...shotBody, chosen: forgedCandidate, rule: 'speech-prefers-active-speaker' }
+  // The forger has to replace camera B in the evaluated window too, not only in
+  // `chosen`: since the decided window is retained (ADR-118) a shot whose chosen
+  // angle is absent from its own candidates is refused for that alone, and the
+  // point here is a forgery the hashes cannot tell from an honest cut.
+  const forgedShotBody = {
+    ...shotBody,
+    chosen: forgedCandidate,
+    evaluated: shotBody.evaluated.map((candidate) => (candidate.trackId === 'track-camera-b' ? forgedCandidate : candidate)),
+    rule: 'speech-prefers-active-speaker',
+  }
   const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
   const { directionHash: _directionHash, ...directionBody } = honest
   const forgedDirectionBody = { ...directionBody, shots: honest.shots.map((shot) => (shot.shotId === fallback.shotId ? forgedShot : shot)) }
@@ -1151,7 +1160,14 @@ test('T-FR-150 falsification: the direction hash binds which angle each shot cho
   assert.equal(alternative.eligible, true, 'camera A really could have been cut there — the forgery is plausible')
   const reseal = (changes) => {
     const { decisionHash: _decisionHash, ...shotBody } = shot
-    const forgedShotBody = { ...shotBody, ...changes }
+    // Swapping the angle means swapping it in the retained window as well —
+    // `assertMulticamDirectionIntegrity` refuses a shot cut to a candidate it
+    // never evaluated — so the forgery stays internally consistent and only the
+    // hash is left to tell it apart.
+    const swapped = changes.chosen
+      ? { evaluated: shotBody.evaluated.map((candidate) => (candidate.trackId === changes.chosen.trackId ? changes.chosen : candidate)) }
+      : {}
+    const forgedShotBody = { ...shotBody, ...swapped, ...changes }
     const forgedShot = { ...forgedShotBody, decisionHash: calculateShotDecisionHash(forgedShotBody) }
     const { directionHash: _directionHash, ...body } = honest
     const forgedBody = { ...body, shots: honest.shots.map((entry) => (entry.shotId === shot.shotId ? forgedShot : entry)) }

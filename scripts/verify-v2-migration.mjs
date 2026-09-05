@@ -980,6 +980,9 @@ const requiredChecks = [
   'multicam_angle_candidates_continuity_check',
   'multicam_angle_candidates_range_check',
   'multicam_angle_candidates_protected_check',
+  // ADR-118: the rejected angles are rows now, and this is the CHECK that keeps
+  // eligibility, the reason list and its count one fact rather than three.
+  'multicam_angle_candidates_eligibility_check',
   'multicam_angle_score_components_name_check',
   'camera_color_measurements_range_check',
   'camera_color_measurements_technical_check',
