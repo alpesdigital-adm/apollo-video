@@ -10,6 +10,7 @@ import {
   readReactPlaybackMapService,
 } from '../../src/v2/application/react-playback-map.ts'
 import { RENDERABLE_PLAN_ORIGINS } from '../../src/v2/application/renderable-edit-plan.ts'
+import { createCaptureSession } from '../../src/v2/domain/capture-session.ts'
 import { validateDirectedEditPlan } from '../../src/v2/domain/director-run.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
 import { assertPlaybackMapIntegrity } from '../../src/v2/domain/playback-map.ts'
@@ -36,6 +37,10 @@ const PROJECT = 'p-playback-service'
 const SESSION = 's-playback-service'
 const REACTION_TRACK = 'track-reaction'
 const REFERENCE_ASSET = 'asset-reference-1'
+// The ids the render path resolves by: `CaptureTrackPart.evidence.ingestArtifactId`,
+// not the capture asset the recorder wrote.
+const REACTION_ARTIFACT = 'artifact-track-reaction'
+const REFERENCE_ARTIFACT = 'artifact-track-reference'
 
 const at = (second) => new Date(Date.parse('2029-06-01T09:00:00.000Z') + second * 1_000).toISOString()
 
@@ -182,6 +187,45 @@ function memorySnapshots() {
   }
 }
 
+/**
+ * The project's media-asset links, as the compiler will ask for them.
+ *
+ * Derived from the session rather than typed in: the artifact id is the part's
+ * `evidence.ingestArtifactId` — the id `CaptureMediaResolver` fetches the bytes
+ * by and the id the render path resolves a plan's sources by — and the duration
+ * is the part's own measured coverage. A fixture that repeated the numbers by
+ * hand would agree with a compiler that had them wrong.
+ */
+function renderSourcesFor(session) {
+  return session.tracks.map((track) => {
+    const part = track.parts[0]
+    return {
+      artifactId: part.evidence.ingestArtifactId,
+      sha256: part.evidence.ingestSha256,
+      byteSize: 4_096,
+      mediaType: 'video',
+      durationSeconds: Number(part.coverage.end - part.coverage.start) /
+        (Number(part.timebase.secondsPerTick.den) / Number(part.timebase.secondsPerTick.num)),
+    }
+  })
+}
+
+function fakeRenderSources(entries) {
+  const rows = new Map(entries.map((entry) => [entry.artifactId, entry]))
+  const asked = []
+  return {
+    rows,
+    asked,
+    async resolveForProject({ workspaceId, projectId, artifactIds }) {
+      asked.push({ workspaceId, projectId, artifactIds: [...artifactIds] })
+      return artifactIds.flatMap((artifactId) => {
+        const row = rows.get(artifactId)
+        return row ? [row] : []
+      })
+    },
+  }
+}
+
 /** Counts what it hands out, so a forgotten `release` is a failing number. */
 function fakeMedia() {
   const state = { opened: 0, released: 0, paths: [] }
@@ -210,13 +254,20 @@ function fakeDetector(observations) {
   }
 }
 
-function wire(world, { observations, snapshots = memorySnapshots(), maps = memoryPlaybackMaps() } = {}) {
+function wire(world, {
+  observations,
+  snapshots = memorySnapshots(),
+  maps = memoryPlaybackMaps(),
+  sources = fakeRenderSources(renderSourcesFor(world.session)),
+  compileSession = world.session,
+} = {}) {
   const media = fakeMedia()
   const detector = fakeDetector(observations ?? world.observations)
   const clock = clockFrom()
   return {
     maps,
     snapshots,
+    sources,
     media,
     detector,
     build: buildReactPlaybackMapService({
@@ -224,6 +275,7 @@ function wire(world, { observations, snapshots = memorySnapshots(), maps = memor
       sessions: fakeSessions(world.session),
       media,
       observations: detector,
+      snapshots,
       clock,
     }),
     anchor: editReactPlaybackAnchorService({ repository: maps, snapshots, clock }),
@@ -231,7 +283,11 @@ function wire(world, { observations, snapshots = memorySnapshots(), maps = memor
     dependents: listReferenceDependentsService({ repository: maps }),
     compile: compileReactPlaybackPlanService({
       repository: maps,
-      sessions: fakeSessions(world.session),
+      // Separately nameable so a test can compile against a session that moved
+      // past the one the map was derived from — the fence at the top of the
+      // compiler, which nothing reached while both stubs returned one session.
+      sessions: fakeSessions(compileSession),
+      sources,
       snapshots,
       clock,
     }),
@@ -395,17 +451,51 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   validateDirectedEditPlan(compiled.plan)
   assert.equal(compiled.plan.durationFrames, 40 * 30, 'the reaction is 40 s at 30 fps')
   assert.notEqual(compiled.plan.durationFrames, 30 * 30, 'the reference is 30 s and is not the output length')
+
+  // The sources are the two artifacts, each declaring the duration the SERVER
+  // measured on that file. This is the assertion a mutation battery walked
+  // through: replacing the reference's duration with the reaction's — "the two
+  // recordings are the same length by assumption", the exact falsifier ADR-135
+  // names — changed the stored provenance of the cut and no test noticed.
+  assert.deepEqual(
+    compiled.plan.sources.map((source) => source.artifactId).sort(),
+    [REACTION_ARTIFACT, REFERENCE_ARTIFACT].sort(),
+  )
+  const declared = new Map(compiled.plan.sources.map((source) => [source.artifactId, source.durationSeconds]))
+  assert.equal(declared.get(REACTION_ARTIFACT), 40)
+  assert.equal(declared.get(REFERENCE_ARTIFACT), 30)
+  assert.notEqual(
+    declared.get(REACTION_ARTIFACT),
+    declared.get(REFERENCE_ARTIFACT),
+    'a sixty-minute reaction to a thirty-minute video is the normal case, not a defect',
+  )
+  // And the assumption the plan carries quotes both numbers, so a compiler that
+  // took one from the other would write a sentence that contradicts the sources.
+  const adr135 = compiled.plan.director.assumptions.find((entry) => entry.includes('ADR-135'))
+  assert.ok(adr135, `assumptions were ${compiled.plan.director.assumptions.join(' | ')}`)
+  assert.match(adr135, /reaction's 40\.000 s/)
+  assert.match(adr135, /reference's 30\.000 s/)
+  // The compiler asked the project for exactly the two artifacts it declares.
+  assert.equal(kit.sources.asked.length, 1)
+  assert.equal(kit.sources.asked[0].projectId, PROJECT)
+  assert.deepEqual(
+    [...kit.sources.asked[0].artifactIds].sort(),
+    [REACTION_ARTIFACT, REFERENCE_ARTIFACT].sort(),
+  )
   assert.equal(compiled.plan.transitions.length, compiled.plan.videoTracks[0].clips.length - 1)
   assert.ok(compiled.plan.videoTracks[0].clips.every((clip) => clip.rate === 1))
-  // Every clip's audio is the reaction's, whatever its picture is.
+  // Every clip's audio is the reaction's, whatever its picture is — and it is
+  // named by MEDIA ARTIFACT id, which is what the render path resolves a plan's
+  // sources by. The capture asset id the map carries (`asset-reaction-1`) would
+  // have made every source in this plan unresolvable.
   assert.deepEqual(
     [...new Set(compiled.plan.videoTracks[0].clips.map((clip) => clip.audioSourceArtifactId))],
-    ['asset-reaction-1'],
+    [REACTION_ARTIFACT],
   )
   // A paused stretch shows the reactor: its picture comes from the reaction.
   const pausedPiece = built.map.pieces.find((piece) => piece.mode === 'paused')
   const pausedClip = compiled.plan.videoTracks[0].clips.find((clip) => clip.id === `clip-${pausedPiece.pieceId}`)
-  assert.equal(pausedClip.sourceArtifactId, 'asset-reaction-1')
+  assert.equal(pausedClip.sourceArtifactId, REACTION_ARTIFACT)
   // The rewind and the seek survive into the plan as markers a person can find.
   const ruleIds = compiled.plan.markers.flatMap((marker) => marker.ruleIds)
   assert.ok(ruleIds.includes('playback:replay'), `markers were ${ruleIds.join(', ')}`)
@@ -420,7 +510,7 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   // This one does neither: the replay goes back, and the paused and
   // commentary stretches contribute no reference time at all.
   const referenceClips = compiled.plan.videoTracks[0].clips
-    .filter((clip) => clip.sourceArtifactId === 'asset-reference-1')
+    .filter((clip) => clip.sourceArtifactId === REFERENCE_ARTIFACT)
   const referenceFrames = referenceClips
     .reduce((total, clip) => total + (clip.sourceOutFrame - clip.sourceInFrame), 0)
   assert.ok(
@@ -568,7 +658,7 @@ test('T-F4.015 replacing the reference supersedes the map and drops the anchors 
   assert.ok(dependents.every((entry) => entry.isHead === false), 'none of them is the head any more')
 })
 
-test('T-F4.015 an anchor on a compiled map reports the plan it made stale', async () => {
+test('T-F4.015 the stored plan names the version that was compiled, not the one that was built', async () => {
   const fixture = world()
   const kit = wire(fixture)
   const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
@@ -622,6 +712,234 @@ test('T-F4.015 another workspace cannot read or build over this session', async 
     workspaceId: OTHER_WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
   }).then(() => null, (caught) => caught)
   assert.equal(missing?.code, 'PLAYBACK_MAP_NOT_FOUND')
+})
+
+test('T-F4.015 a map compiled against a session that has moved past it is refused, naming the session', async () => {
+  for (const [what, moved] of [
+    ['version', (session) => ({ ...session, version: session.version + 1 })],
+    ['referenceEpoch', (session) => ({ ...session, referenceEpoch: session.referenceEpoch + 1 })],
+  ]) {
+    const fixture = world()
+    const kit = wire(fixture, { compileSession: moved(fixture.session) })
+    const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+    const head = await kit.read({
+      workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+    })
+    await kit.anchor({
+      actor,
+      sessionId: SESSION,
+      reactionTrackId: REACTION_TRACK,
+      baseVersionId: head.versionRef,
+      baseHash: built.map.mapHash,
+      anchor: {
+        anchorId: 'anchor-ana-1',
+        reactionTick: built.map.uncovered[0].range.start,
+        referenceTick: null,
+        mode: 'commentary-only',
+      },
+    })
+
+    const error = await kit.compile({
+      actor,
+      sessionId: SESSION,
+      reactionTrackId: REACTION_TRACK,
+      projectVersionId: 'version-react-1',
+      objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    }).then(() => null, (caught) => caught)
+
+    // The SESSION moved, so the refusal is the session's: a UI told the map was
+    // stale would reload the map, which is exactly where it already is.
+    assert.equal(error?.code, 'CAPTURE_SESSION_VERSION_STALE', `moving ${what} must be refused`)
+    assert.equal(error.details.mapSessionVersion, fixture.session.version)
+    assert.equal(error.details.mapReferenceEpoch, fixture.session.referenceEpoch)
+    assert.equal(error.details.currentVersion, moved(fixture.session).version)
+    assert.equal(kit.snapshots.rows.length, 0, 'a refused compile must not leave a snapshot behind')
+  }
+})
+
+test('T-F4.015 a recording the project cannot render from is refused before a plan is assembled', async () => {
+  const complete = renderSourcesFor(world().session)
+  const cases = [
+    [
+      'not linked to the project',
+      complete.filter((entry) => entry.artifactId !== REFERENCE_ARTIFACT),
+      'MEDIA_ARTIFACT_NOT_FOUND',
+    ],
+    [
+      'holding different bytes than the map measured',
+      complete.map((entry) => entry.artifactId === REFERENCE_ARTIFACT
+        ? { ...entry, sha256: 'd'.repeat(64) }
+        : entry),
+      'MEDIA_ARTIFACT_IDENTITY_MISMATCH',
+    ],
+    [
+      'carrying no measured duration',
+      complete.map((entry) => entry.artifactId === REFERENCE_ARTIFACT
+        ? { ...entry, durationSeconds: null }
+        : entry),
+      'INVALID_RENDER_INPUT',
+    ],
+    [
+      'shorter than the cut reads from it',
+      complete.map((entry) => entry.artifactId === REFERENCE_ARTIFACT
+        ? { ...entry, durationSeconds: 5 }
+        : entry),
+      'INVALID_RENDER_INPUT',
+    ],
+  ]
+  for (const [what, entries, code] of cases) {
+    const fixture = world()
+    const kit = wire(fixture, { sources: fakeRenderSources(entries) })
+    const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+    const head = await kit.read({
+      workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+    })
+    await kit.anchor({
+      actor,
+      sessionId: SESSION,
+      reactionTrackId: REACTION_TRACK,
+      baseVersionId: head.versionRef,
+      baseHash: built.map.mapHash,
+      anchor: {
+        anchorId: 'anchor-ana-1',
+        reactionTick: built.map.uncovered[0].range.start,
+        referenceTick: null,
+        mode: 'commentary-only',
+      },
+    })
+
+    const error = await kit.compile({
+      actor,
+      sessionId: SESSION,
+      reactionTrackId: REACTION_TRACK,
+      projectVersionId: 'version-react-1',
+      objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    }).then(() => null, (caught) => caught)
+
+    assert.equal(error?.code, code, `a reference ${what} must be refused`)
+    assert.equal(kit.snapshots.rows.length, 0, 'a refused compile must not leave a snapshot behind')
+  }
+})
+
+test('T-F4.015 a rebuild reports the compiled plan it stranded, and so does the anchor that follows it', async () => {
+  const fixture = world()
+  const maps = memoryPlaybackMaps()
+  const snapshots = memorySnapshots()
+  const kit = wire(fixture, { maps, snapshots })
+  const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+  assert.equal(built.invalidated, null, 'the first build had nothing to strand')
+  const head = await kit.read({
+    workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+  })
+  const resolved = await kit.anchor({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    baseVersionId: head.versionRef,
+    baseHash: built.map.mapHash,
+    anchor: {
+      anchorId: 'anchor-ana-1',
+      reactionTick: built.map.uncovered[0].range.start,
+      referenceTick: null,
+      mode: 'commentary-only',
+    },
+  })
+  assert.equal(resolved.invalidated, null, 'nothing had been compiled yet')
+  const compiled = await kit.compile({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    projectVersionId: 'version-react-1',
+    objective: 'discovery',
+    planFps: rational(BigInt(30), BigInt(1)),
+  })
+
+  // The session gains a version — a track added, a lineage event — without the
+  // two recordings changing. The rebuild therefore keeps the map id, advances
+  // the chain, and leaves the stretch the operator answered uncovered again.
+  const moved = { ...fixture.session, version: fixture.session.version + 1 }
+  const rebuilt = await wire({ ...fixture, session: moved }, { maps, snapshots })
+    .build({ actor, sessionId: SESSION, ...baseOf(moved) })
+  assert.equal(rebuilt.map.version, 3)
+  assert.equal(rebuilt.manualReviewRequired, true, 'the answered stretch is unanswered again')
+  assert.ok(rebuilt.invalidated, 'the rebuild moved the head out from under a compiled plan')
+  assert.equal(rebuilt.invalidated.planId, compiled.plan.id)
+  assert.equal(rebuilt.invalidated.planHash, compiled.planHash)
+  assert.equal(
+    rebuilt.invalidated.compiledFromHash,
+    resolved.map.mapHash,
+    'the plan still describes version 2, which is no longer the head',
+  )
+
+  // And the anchor that answers the rebuilt map says the same thing, which is
+  // the case the old comparison — "compiled from exactly this version" — could
+  // never reach: compiling refuses an uncovered map and anchoring refuses an
+  // instant that is not inside an uncovered stretch, so the two were mutually
+  // exclusive and the field was always null.
+  const rebuiltHead = await kit.read({
+    workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+  })
+  const answered = await kit.anchor({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    baseVersionId: rebuiltHead.versionRef,
+    baseHash: rebuilt.map.mapHash,
+    anchor: {
+      anchorId: 'anchor-ana-2',
+      reactionTick: rebuilt.map.uncovered[0].range.start,
+      referenceTick: null,
+      mode: 'commentary-only',
+    },
+  })
+  assert.equal(answered.map.version, 4)
+  assert.ok(answered.invalidated, 'the stored plan describes neither version 3 nor version 4')
+  assert.equal(answered.invalidated.planId, compiled.plan.id)
+  assert.equal(answered.invalidated.compiledFromHash, resolved.map.mapHash)
+})
+
+test('T-F4.015 a session id at the domain limit still yields a map id the domain accepts', async () => {
+  // `createPlaybackMap` refuses an id outside this, and a session id may be 128
+  // characters on its own, so `<session>:<track>:playback-<n>` overflows.
+  const ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$/
+  const shared = 'a'.repeat(111)
+  const ids = [`${shared}${'x'.repeat(17)}`, `${shared}${'y'.repeat(17)}`]
+  const produced = []
+  for (const sessionId of ids) {
+    assert.equal(sessionId.length, 128)
+    const fixture = world()
+    const long = createCaptureSession({
+      workspaceId: WORKSPACE,
+      projectId: PROJECT,
+      sessionId,
+      clock: { timebase: fixture.session.clock.timebase, rounding: fixture.session.clock.rounding },
+      referenceTrackId: 'track-reference',
+      tracks: fixture.session.tracks,
+      lineage: {
+        commandId: 'command-create-long',
+        operation: 'create-session',
+        actorKind: 'human',
+        actorId: 'operator-ana',
+        occurredAt: at(0),
+        note: null,
+      },
+      createdAt: at(0),
+    })
+    const kit = wire({ ...fixture, session: long })
+    const built = await kit.build({ actor, sessionId, ...baseOf(long) })
+    produced.push(built.map.mapId)
+    assert.ok(built.map.mapId.length <= 128, `the map id was ${built.map.mapId.length} characters`)
+    assert.match(built.map.mapId, ID)
+    assert.ok(
+      built.map.mapId.startsWith(shared),
+      'the id keeps a readable head; a digest alone would name nothing',
+    )
+  }
+  // Two sessions sharing the first 111 characters are the collision truncation
+  // alone would create. The digest is what keeps them two maps.
+  assert.notEqual(produced[0], produced[1])
 })
 
 test('T-F4.015 the migration CHECK names exactly the origins the compilers can produce', () => {

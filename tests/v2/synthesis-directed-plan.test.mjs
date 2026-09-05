@@ -108,6 +108,30 @@ const OPTIONS = Object.freeze({
   createdAt: '2029-06-01T09:00:00.000Z',
 })
 
+/**
+ * The project's media-asset links, as the service will ask for them.
+ *
+ * The service takes no sources from its caller any more: it resolves every
+ * `range.lineage.sourceArtifactId` here — the same lookup the render path uses —
+ * and reads the digest and the measured duration off the artifact.
+ */
+function fakeRenderSources(entries = [
+  { artifactId: 'artifact-master', sha256: MASTER_SHA, byteSize: 4_096, mediaType: 'video', durationSeconds: 7_200 },
+]) {
+  const rows = new Map(entries.map((entry) => [entry.artifactId, entry]))
+  const asked = []
+  return {
+    asked,
+    async resolveForProject({ workspaceId, projectId, artifactIds }) {
+      asked.push({ workspaceId, projectId, artifactIds: [...artifactIds] })
+      return artifactIds.flatMap((artifactId) => {
+        const row = rows.get(artifactId)
+        return row ? [row] : []
+      })
+    },
+  }
+}
+
 function memorySnapshots() {
   const rows = []
   return {
@@ -222,9 +246,56 @@ test('T-F4.016 a source whose bytes are no longer the selected ones is refused',
   )
 })
 
+test('T-F4.016 a declared duration that the ranges contradict is refused', () => {
+  const cut = synthesis()
+  // A five-second master whose ranges read to the two-hour mark. The only check
+  // this used to face was "finite and positive", so it compiled: the stored plan
+  // then carried five seconds as the provenance of a cut taken from two hours.
+  assert.throws(
+    () => compileSynthesisToDirectedPlan(cut, {
+      ...OPTIONS,
+      sources: [{ artifactId: 'artifact-master', sha256: MASTER_SHA, durationSeconds: 5 }],
+    }),
+    (error) => error.code === 'INVALID_RENDER_INPUT' && error.details.lastReadMs === 7_015_000,
+  )
+  // Long enough for every range, and still not the master the synthesis says it
+  // selected from: the aggregate declares two hours, the file measures three.
+  assert.throws(
+    () => compileSynthesisToDirectedPlan(cut, {
+      ...OPTIONS,
+      sources: [{ artifactId: 'artifact-master', sha256: MASTER_SHA, durationSeconds: 10_800 }],
+    }),
+    (error) => error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.declaredMs === TWO_HOURS_MS,
+  )
+})
+
+test('T-F4.016 a splice whose clip cannot be found is refused, not anchored at frame 0', () => {
+  const cut = synthesis()
+  // Frame 0 is a legitimate position — it is the first clip's `timelineInFrame`
+  // — so a lookup miss defaulted to 0 was indistinguishable from a real marker
+  // on the opening frame, in a document a reviewer navigates by.
+  const renamed = {
+    ...cut,
+    editPlan: {
+      ...cut.editPlan,
+      videoTracks: cut.editPlan.videoTracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => ({ ...clip, clipId: `renamed-${clip.clipId}` })),
+      })),
+    },
+  }
+  assert.throws(
+    () => compileSynthesisToDirectedPlan(renamed, OPTIONS),
+    (error) => error.code === 'INVALID_RENDER_INPUT' &&
+      error.details.joinAfterRangeId === cut.joins[0].afterRangeId,
+  )
+})
+
 test('T-F4.016 the service stores one snapshot per cut and replays a recompile', async () => {
   const cut = synthesis()
   const snapshots = memorySnapshots()
+  const sources = fakeRenderSources()
   const compile = compileSynthesisRenderPlanService({
     syntheses: {
       async read({ synthesisId }) {
@@ -234,26 +305,21 @@ test('T-F4.016 the service stores one snapshot per cut and replays a recompile',
       async list() { return [] },
       async listByMoment() { return [] },
     },
+    sources,
     snapshots,
     clock: () => new Date(OPTIONS.createdAt),
   })
+  const call = (overrides = {}) => compile({
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    synthesisId: 'synthesis-1',
+    projectVersionId: 'version-1',
+    objective: 'discovery',
+    ...overrides,
+  })
 
-  const first = await compile({
-    workspaceId: 'workspace-1',
-    projectId: 'project-1',
-    synthesisId: 'synthesis-1',
-    projectVersionId: 'version-1',
-    objective: 'discovery',
-    sources: OPTIONS.sources,
-  })
-  const second = await compile({
-    workspaceId: 'workspace-1',
-    projectId: 'project-1',
-    synthesisId: 'synthesis-1',
-    projectVersionId: 'version-1',
-    objective: 'discovery',
-    sources: OPTIONS.sources,
-  })
+  const first = await call()
+  const second = await call()
 
   assert.equal(first.replayed, false)
   assert.equal(second.replayed, true)
@@ -261,14 +327,60 @@ test('T-F4.016 the service stores one snapshot per cut and replays a recompile',
   assert.equal(snapshots.rows.length, 1)
   assert.equal(snapshots.rows[0].sourceHash, cut.synthesisHash)
   assert.equal(snapshots.rows[0].clipCount, cut.ranges.length)
-
-  const missing = await compile({
+  // The measurements in the stored plan came from the server, and the input
+  // carries no field a caller could have put them in.
+  assert.deepEqual(
+    first.plan.sources.map((source) => ({ ...source })),
+    [{ id: 'source-artifact-master', artifactId: 'artifact-master', kind: 'video', durationSeconds: 7_200 }],
+  )
+  assert.deepEqual(sources.asked[0], {
     workspaceId: 'workspace-1',
     projectId: 'project-1',
-    synthesisId: 'synthesis-absent',
+    artifactIds: ['artifact-master'],
+  })
+
+  const missing = await call({ synthesisId: 'synthesis-absent' })
+    .then(() => null, (error) => error)
+  assert.equal(missing?.code, 'EDITORIAL_SYNTHESIS_NOT_FOUND')
+})
+
+test('T-F4.016 the service refuses a master the project cannot render from, and never takes one from the caller', async () => {
+  const cut = synthesis()
+  const snapshots = memorySnapshots()
+  const syntheses = {
+    async read({ synthesisId }) {
+      return synthesisId === cut.id ? { synthesis: cut, createdAt: OPTIONS.createdAt } : null
+    },
+    async persist() { throw new Error('unused') },
+    async list() { return [] },
+    async listByMoment() { return [] },
+  }
+  const compileWith = (sources) => compileSynthesisRenderPlanService({
+    syntheses, sources, snapshots, clock: () => new Date(OPTIONS.createdAt),
+  })({
+    workspaceId: 'workspace-1',
+    projectId: 'project-1',
+    synthesisId: 'synthesis-1',
     projectVersionId: 'version-1',
     objective: 'discovery',
-    sources: OPTIONS.sources,
-  }).then(() => null, (error) => error)
-  assert.equal(missing?.code, 'EDITORIAL_SYNTHESIS_NOT_FOUND')
+    // Named on purpose: an input the service does not read. Under the old
+    // signature these three fields were the only measurements it had.
+    sources: [{ artifactId: 'artifact-master', sha256: MASTER_SHA, durationSeconds: 7_200 }],
+  })
+
+  const unlinked = await compileWith(fakeRenderSources([])).then(() => null, (error) => error)
+  assert.equal(unlinked?.code, 'MEDIA_ARTIFACT_NOT_FOUND')
+  assert.equal(unlinked.details.artifactId, 'artifact-master')
+
+  const swapped = await compileWith(fakeRenderSources([{
+    artifactId: 'artifact-master', sha256: h(9), byteSize: 4_096, mediaType: 'video', durationSeconds: 7_200,
+  }])).then(() => null, (error) => error)
+  assert.equal(swapped?.code, 'MEDIA_ARTIFACT_IDENTITY_MISMATCH')
+
+  const unprobed = await compileWith(fakeRenderSources([{
+    artifactId: 'artifact-master', sha256: MASTER_SHA, byteSize: 4_096, mediaType: 'video', durationSeconds: null,
+  }])).then(() => null, (error) => error)
+  assert.equal(unprobed?.code, 'INVALID_RENDER_INPUT')
+
+  assert.equal(snapshots.rows.length, 0, 'no refusal may leave a snapshot behind')
 })
