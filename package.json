@@ -64,6 +64,7 @@
     "test:e2e:multicam-longform-gate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-longform-gate.e2e.mjs",
     "test:e2e:wave20-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-persistence-journey.e2e.mjs",
     "test:e2e:sync-diagnostic-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-browser.e2e.mjs",
+    "test:e2e:wave20-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-operator-browser.e2e.mjs",
     "test:e2e:sync-diagnostic-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-diagnostic-journey.e2e.mjs",
     "test:integration:marker-robustness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/marker-robustness.integration.mjs",
     "test:integration:sync-marker-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-marker-render.integration.mjs",
