@@ -2007,7 +2007,7 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
   }
   const clips: Array<Readonly<CompiledShotClip>> = []
   const sources = new Map<string, { record: Omit<CompiledShotSource, 'kinds'>; kinds: Set<'audio' | 'video'> }>()
-  const useSource = (record: Omit<CompiledShotSource, 'kinds'>, kind: 'audio' | 'video') => {
+  const recordSourceUse = (record: Omit<CompiledShotSource, 'kinds'>, kind: 'audio' | 'video') => {
     const known = sources.get(record.sourceAssetId)
     if (!known) {
       sources.set(record.sourceAssetId, { record, kinds: new Set([kind]) })
@@ -2077,7 +2077,7 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     // so claiming anything else would make the plan disagree with the file.
     const timelineSpan = sourceOutFrame - sourceInFrame
     const cameraId = cameraIds.get(video.track.trackId)!
-    useSource({
+    recordSourceUse({
       sourceAssetId: part.sourceAssetId,
       trackId: video.track.trackId,
       partId: part.partId,
@@ -2103,7 +2103,7 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
         'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
         `shot ${shot.shotId} would bind ${audio.audioSourceOutFrame! - audio.audioSourceInFrame!} audio frames to ${sourceOutFrame - sourceInFrame} video frames, which the renderer refuses`,
       )
-      useSource({
+      recordSourceUse({
         sourceAssetId: audioPart.sourceAssetId,
         trackId: bed.track.trackId,
         partId: audioPart.partId,
