@@ -23,6 +23,8 @@ import {
   timebaseFromRate,
 } from '../../src/v2/domain/session-time.ts'
 import {
+  MAXIMUM_ABSENCE_CONFIDENCE,
+  absenceConfidence,
   confidenceFromPeakRatio,
   correlateAudioWindows,
 } from '../../src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts'
@@ -769,6 +771,41 @@ test('T-F4.015 the hash covers every tick and refuses a body that changed undern
   }
   assert.throws(() => assertPlaybackMapIntegrity(tampered), (error) =>
     error.code === 'PERSISTENCE_CONFLICT')
+
+  // The map-level body too, not only the pieces. Rewriting a piece exercises
+  // `calculatePlaybackPieceHash`; everything the map hash adds on top of the
+  // piece hashes — the uncovered list, the reference identity, the status —
+  // went unproved, and dropping `uncovered` from the hashed body left the whole
+  // suite green.
+  const mapLevelTampering = [
+    ['uncovered reason', {
+      ...first,
+      uncovered: first.uncovered.map((entry) => ({ ...entry, reason: 'conflicting-evidence' })),
+    }],
+    ['uncovered range', {
+      ...first,
+      uncovered: first.uncovered.map((entry) => ({
+        ...entry,
+        range: createTickInterval(entry.range.start, entry.range.end + 1n),
+      })),
+    }],
+    ['reference duration', {
+      ...first,
+      referenceMedia: { ...first.referenceMedia, durationTicks: seconds(60) },
+    }],
+    ['reference identity', {
+      ...first,
+      referenceMedia: { ...first.referenceMedia, sha256: digest('e') },
+    }],
+    ['status', { ...first, status: 'resolved' }],
+  ]
+  for (const [what, body] of mapLevelTampering) {
+    assert.throws(
+      () => assertPlaybackMapIntegrity(body),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+      `${what} changed underneath the hash and the read accepted it`,
+    )
+  }
 })
 
 test('T-F4.015 the default policy states its calibration and converts thresholds into ticks once', () => {
@@ -856,6 +893,79 @@ test('T-F4.015 a silent window gets no lag at all, not lag zero', () => {
     assert.equal(window.lagSamples, null, 'silence names no instant; lag 0 would name the first sample')
     assert.equal(window.confidence, 0)
   }
+
+  // Non-finite PCM is silence as far as this function is concerned. `NaN <
+  // energyFloor` is false and `NaN === 0` is false, so both gates used to be
+  // skipped, every score came back NaN, the sort was a no-op and the winner was
+  // whatever the loop started with — offset 0. That is exactly the answer this
+  // type's doc comment says must never be produced.
+  for (const filler of [NaN, Infinity, -Infinity]) {
+    const broken = correlateAudioWindows({
+      reference,
+      candidate: new Float64Array(2 * sampleRate).fill(filler),
+      sampleRate,
+      windowMs: 1_000,
+      hopMs: 500,
+    })
+    assert.ok(broken.length > 0)
+    for (const window of broken) {
+      assert.equal(window.lagSamples, null, `${filler} samples named the first sample of the reference`)
+      assert.equal(window.confidence, 0)
+    }
+  }
+
+  // A non-finite window or hop is bad input, not an empty measurement: `NaN <= 0`
+  // is false, so it slipped past the guard and produced zero windows, which the
+  // domain reads as "the reference was never playing".
+  for (const bad of [{ windowMs: NaN }, { hopMs: NaN }, { windowMs: Infinity }, { hopMs: -Infinity }]) {
+    assert.throws(
+      () => correlateAudioWindows({ reference, candidate, sampleRate, windowMs: 1_000, hopMs: 500, ...bad }),
+      TypeError,
+      `${JSON.stringify(bad)} was accepted`,
+    )
+  }
+})
+
+test('T-F4.015 a refused window reports confidence in the absence, not the ratio of the match it refused', () => {
+  const floor = 0.5
+  // Far below the correlation floor: nothing in the window is explained by the
+  // reference, and the shortfall is the measurement.
+  assert.ok(absenceConfidence(0.06, floor) > 0.85)
+  assert.ok(absenceConfidence(0.06, floor) <= MAXIMUM_ABSENCE_CONFIDENCE)
+  // Just below it: half the window could be the reference, so the absence is
+  // barely established at all.
+  assert.ok(absenceConfidence(0.485, floor) < 0.05)
+  // At or above the floor the window is ambiguity, not absence: the reference is
+  // plausibly there and only the runner-up test refused it.
+  assert.equal(absenceConfidence(0.5, floor), 0)
+  assert.equal(absenceConfidence(0.9, floor), 0)
+  // Silence is the strongest absence this detector can measure, and still not 1:
+  // a reference can play a silent passage.
+  assert.equal(absenceConfidence(0, floor), MAXIMUM_ABSENCE_CONFIDENCE)
+  assert.ok(MAXIMUM_ABSENCE_CONFIDENCE < 1)
+
+  // And the number that reaches the domain is that one. A gap piece's confidence
+  // is the least confident absent window in the run — never the peak-over-
+  // runner-up ratio of a correlation the detector rejected.
+  const windows = []
+  for (let tick = 0; tick < 6; tick += 0.5) windows.push(observation(tick, tick))
+  for (let tick = 6; tick < 10; tick += 0.5) {
+    windows.push(observation(tick, null, { confidence: tick === 7 ? 0.31 : 0.88, peakRatio: 0 }))
+  }
+  for (let tick = 10; tick < 14; tick += 0.5) windows.push(observation(tick, 6 + (tick - 10)))
+  const map = buildPlaybackMap({
+    mapId: 'playback-map-absence',
+    session: reactSession(),
+    reactionTrack: reactionTrack(),
+    referenceTrack: referenceTrack(),
+    referenceMedia: REFERENCE_MEDIA,
+    reactionMedia: { ...REACTION_MEDIA, durationTicks: seconds(14) },
+    observations: windows,
+    policy: POLICY,
+  })
+  const paused = map.pieces.find((piece) => piece.mode === 'paused')
+  assert.ok(paused, 'the reference resumed where it left, so the gap is a pause')
+  assert.equal(paused.confidence, 0.31, 'the weakest observer of an absence sets the number')
 })
 
 test('T-F4.015 confidence is a documented function of the peak ratio and never reaches one', () => {
@@ -865,4 +975,245 @@ test('T-F4.015 confidence is a documented function of the peak ratio and never r
   assert.equal(Math.round(confidenceFromPeakRatio(1.5) * 100) / 100, 0.8)
   assert.ok(confidenceFromPeakRatio(1000) < 1)
   assert.ok(confidenceFromPeakRatio(1e9) < 1)
+})
+
+/**
+ * A map body straight from the outside, bypassing `buildPlaybackMap`.
+ *
+ * The four invariants below cannot be produced by the builder — it tiles by
+ * construction and names its own modes — which is exactly why they went
+ * untested: deleting each guard left both suites green. A rehydrated aggregate
+ * comes from a row, not from the builder, so `createPlaybackMap` is the surface
+ * that has to refuse them.
+ */
+function handBuiltMap(pieces, uncovered = []) {
+  return () => createPlaybackMap({
+    mapId: 'playback-map-hand',
+    workspaceId: 'workspace-1',
+    sessionId: 'capture-session-react',
+    sessionVersion: 1,
+    referenceEpoch: 1,
+    reactionTrackId: 'track-reaction',
+    referenceTrackId: 'track-reference',
+    referenceMedia: REFERENCE_MEDIA,
+    reactionMedia: REACTION_MEDIA,
+    pieces,
+    uncovered,
+  })
+}
+
+function handBuiltMapWith(referenceMedia, pieces) {
+  return () => createPlaybackMap({
+    mapId: 'playback-map-hand',
+    workspaceId: 'workspace-1',
+    sessionId: 'capture-session-react',
+    sessionVersion: 1,
+    referenceEpoch: 1,
+    reactionTrackId: 'track-reaction',
+    referenceTrackId: 'track-reference',
+    referenceMedia,
+    reactionMedia: REACTION_MEDIA,
+    pieces,
+  })
+}
+
+function playingPiece(pieceId, reactionRange, referenceRange, overrides = {}) {
+  return {
+    pieceId,
+    mode: 'playing',
+    reactionRange,
+    referenceRange,
+    direction: 'forward',
+    confidence: 0.9,
+    evidenceRefs: [`fingerprint:${reactionRange.start}`],
+    detectionMethod: 'audio-fingerprint',
+    ...overrides,
+  }
+}
+
+test('T-F4.015 the reactor lived each instant once: overlapping reaction ranges are refused', () => {
+  assert.throws(
+    handBuiltMap([
+      playingPiece('p-000', createTickInterval(0n, seconds(20)), createTickInterval(0n, seconds(20))),
+      playingPiece('p-001', createTickInterval(seconds(19), seconds(40)), createTickInterval(seconds(19), seconds(29))),
+    ]),
+    (error) => error.code === 'INVALID_ARGUMENT' && /overlaps the piece before it/.test(error.message),
+  )
+})
+
+test('T-F4.015 a hole no uncovered stretch accounts for is refused, not silently skipped', () => {
+  assert.throws(
+    handBuiltMap([
+      playingPiece('p-000', createTickInterval(0n, seconds(10)), createTickInterval(0n, seconds(10))),
+      // Reaction seconds 10-20 belong to nothing at all, and no `uncovered`
+      // entry claims them. A map with a hole answers "no piece here" for an
+      // instant it never examined.
+      playingPiece('p-001', createTickInterval(seconds(20), seconds(40)), createTickInterval(seconds(10), seconds(30)), {
+        discontinuityReason: 'coverage-gap',
+      }),
+    ]),
+    (error) => error.code === 'INVALID_ARGUMENT' &&
+      /tile the reaction without gaps or overlap/.test(error.message),
+  )
+  // The same two pieces with the hole declared are a legal map.
+  assert.doesNotThrow(handBuiltMap(
+    [
+      playingPiece('p-000', createTickInterval(0n, seconds(10)), createTickInterval(0n, seconds(10))),
+      playingPiece('p-001', createTickInterval(seconds(20), seconds(40)), createTickInterval(seconds(10), seconds(30)), {
+        discontinuityReason: 'coverage-gap',
+      }),
+    ],
+    [{ range: createTickInterval(seconds(10), seconds(20)), reason: 'manual-anchor-required' }],
+  ))
+})
+
+test('T-F4.015 a seek must say it is a seek, and a rewind must be reached backwards', () => {
+  const opening = playingPiece('p-000', createTickInterval(0n, seconds(20)), createTickInterval(0n, seconds(20)))
+  assert.throws(
+    handBuiltMap([
+      opening,
+      playingPiece('p-001', createTickInterval(seconds(20), seconds(40)), createTickInterval(seconds(25), seconds(30)), {
+        mode: 'seek',
+        discontinuityReason: 'coverage-gap',
+      }),
+    ]),
+    (error) => error.code === 'INVALID_ARGUMENT' && /must record .seek. as the reason it begins/.test(error.message),
+  )
+  for (const mode of ['rewind', 'replay']) {
+    assert.throws(
+      handBuiltMap([
+        opening,
+        playingPiece('p-001', createTickInterval(seconds(20), seconds(40)), createTickInterval(seconds(5), seconds(15)), {
+          mode,
+          direction: 'forward',
+          discontinuityReason: 'rewind',
+        }),
+      ]),
+      (error) => error.code === 'INVALID_ARGUMENT' && /must be reached by going backwards/.test(error.message),
+      `a ${mode} reached forwards was accepted`,
+    )
+  }
+})
+
+test('T-F4.015 a rate is refused whichever way its sign or its zero is spelled', () => {
+  // `rational()` normalises the sign, but a `Rational` is a bare {num, den} and
+  // a rehydrated piece never goes through it. Guarding only the numerator let
+  // 1/-2 — the same -0.5 as -1/2 — into a map that passed integrity, and the
+  // lookup then answered with a reference tick outside the piece's own range.
+  for (const rate of [rational(-1n, 2n), { num: 1n, den: -2n }, { num: -1n, den: -2n }, { num: 1n, den: 0n }]) {
+    assert.throws(
+      handBuiltMap([
+        playingPiece('p-000', createTickInterval(0n, seconds(40)), createTickInterval(0n, seconds(20)), { rate }),
+      ]),
+      (error) => error.code === 'INVALID_ARGUMENT' && /strictly positive/.test(error.message),
+      `rate ${rate.num}/${rate.den} was accepted`,
+    )
+  }
+  // A legal rate still resolves, and never outside the range the piece names.
+  const map = createPlaybackMap({
+    mapId: 'playback-map-rate',
+    workspaceId: 'workspace-1',
+    sessionId: 'capture-session-react',
+    sessionVersion: 1,
+    referenceEpoch: 1,
+    reactionTrackId: 'track-reaction',
+    referenceTrackId: 'track-reference',
+    referenceMedia: REFERENCE_MEDIA,
+    reactionMedia: REACTION_MEDIA,
+    pieces: [
+      playingPiece('p-000', createTickInterval(0n, seconds(40)), createTickInterval(seconds(4), seconds(24)), {
+        rate: { num: 1n, den: 2n },
+      }),
+    ],
+  })
+  for (const second of [0, 1, 20, 39]) {
+    const answer = resolveReactionTick(map, seconds(second))
+    assert.equal(answer.status, 'resolved')
+    assert.ok(
+      answer.referenceTick >= seconds(4) && answer.referenceTick < seconds(24),
+      `resolving second ${second} left the piece's own reference range`,
+    )
+  }
+})
+
+test('T-F4.015 a gap after which the reference resumes behind is uncovered, not a pause', () => {
+  const windows = []
+  for (let tick = 0; tick < 6; tick += 0.5) windows.push(observation(tick, tick))
+  for (let tick = 6; tick < 10; tick += 0.5) windows.push(observation(tick, null))
+  // The reference left at second 6 and comes back at second 2. "Paused, then
+  // rewound" and "played on unobserved, then rewound further back" both fit, so
+  // the aggregate names neither.
+  for (let tick = 10; tick < 16; tick += 0.5) windows.push(observation(tick, 2 + (tick - 10)))
+  const map = buildPlaybackMap({
+    mapId: 'playback-map-resume-behind',
+    session: reactSession(),
+    reactionTrack: reactionTrack(),
+    referenceTrack: referenceTrack(),
+    referenceMedia: REFERENCE_MEDIA,
+    reactionMedia: { ...REACTION_MEDIA, durationTicks: seconds(16) },
+    observations: windows,
+    policy: POLICY,
+  })
+  assert.ok(!map.pieces.some((piece) => piece.mode === 'paused'), 'the player was not observed to stop')
+  assert.equal(map.uncovered.length, 1)
+  assert.equal(map.uncovered[0].reason, 'manual-anchor-required')
+  assert.equal(map.status, 'needs-input')
+  assert.ok(map.warnings.includes('manual-anchor-required'))
+  assert.throws(
+    () => compilePlaybackToShots(map, {
+      planFps: rational(30n, 1n),
+      referenceTimebase: REFERENCE_TIMEBASE,
+      reactionTimebase: REACTION_TIMEBASE,
+    }),
+    (error) => error.code === 'PLAYBACK_MAP_UNRESOLVED',
+  )
+})
+
+test('T-F4.015 the reference and the reaction cannot be the same recording', () => {
+  assert.throws(
+    () => buildPlaybackMap({
+      mapId: 'playback-map-same-file',
+      session: reactSession(),
+      reactionTrack: reactionTrack(),
+      referenceTrack: referenceTrack(),
+      // Two different tracks, one file. Every shot would then carry the same
+      // bytes as source and as audio source, in every mode.
+      referenceMedia: { ...REFERENCE_MEDIA, assetId: REACTION_MEDIA.assetId, sha256: REACTION_MEDIA.sha256 },
+      reactionMedia: REACTION_MEDIA,
+      observations: scenarioObservations(),
+      policy: POLICY,
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT' && /cannot be the same recording/.test(error.message),
+  )
+  // Either half on its own is enough to refuse it.
+  for (const shared of [{ assetId: REACTION_MEDIA.assetId }, { sha256: REACTION_MEDIA.sha256 }]) {
+    assert.throws(
+      handBuiltMapWith(
+        { ...REFERENCE_MEDIA, ...shared },
+        [playingPiece('p-000', createTickInterval(0n, seconds(40)), createTickInterval(0n, seconds(20)))],
+      ),
+      (error) => error.code === 'INVALID_ARGUMENT' && /cannot be the same recording/.test(error.message),
+      `${JSON.stringify(Object.keys(shared))} shared was accepted`,
+    )
+  }
+})
+
+test('T-F4.015 an observation peak ratio must be a finite measurement, like the confidence beside it', () => {
+  for (const peakRatio of [Infinity, NaN, -1]) {
+    assert.throws(
+      () => buildPlaybackMap({
+        mapId: 'playback-map-ratio',
+        session: reactSession(),
+        reactionTrack: reactionTrack(),
+        referenceTrack: referenceTrack(),
+        referenceMedia: REFERENCE_MEDIA,
+        reactionMedia: { ...REACTION_MEDIA, durationTicks: seconds(4) },
+        observations: [observation(0, 0, { peakRatio }), observation(0.5, 0.5, { peakRatio })],
+        policy: POLICY,
+      }),
+      (error) => error.code === 'INVALID_ARGUMENT' &&
+        /peak ratio must be a finite, non-negative measurement/.test(error.message),
+      `peakRatio ${peakRatio} was admitted`,
+    )
+  }
 })
