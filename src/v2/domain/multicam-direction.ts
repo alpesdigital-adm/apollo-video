@@ -92,10 +92,55 @@ import {
  */
 
 export const ANGLE_CANDIDATE_SCHEMA_VERSION = 'angle-candidate/v1' as const
-export const SHOT_DECISION_SCHEMA_VERSION = 'shot-decision/v1' as const
-export const MULTICAM_DIRECTION_SCHEMA_VERSION = 'multicam-direction/v1' as const
+/**
+ * v2: `calculateShotDecisionHash` now hashes `evaluated` — every candidate the
+ * shot weighed, not only the one it cut to.
+ *
+ * The version had to move with the hash. A shot written by the phase-2 code
+ * carries a `decisionHash` computed over a body that had no `evaluated` in it;
+ * left at v1 that row would pass the schema gate on read
+ * (`prisma/multicam-direction-repository.ts:312`) and then fail
+ * `assertMulticamDirectionIntegrity` with "hash does not match its body", which
+ * names no cause and points a reader at corruption that never happened. At v2
+ * it is refused by the gate, by name: this direction predates the retained
+ * evaluated window.
+ */
+export const SHOT_DECISION_SCHEMA_VERSION = 'shot-decision/v2' as const
+/**
+ * v2 for the same reason, one level up: `calculateMulticamDirectionHash` folds
+ * in each shot's `decisionHash`, so every direction hash moved when the shot
+ * hash did, and the row has to be refused by its version rather than by an
+ * unexplained mismatch.
+ */
+export const MULTICAM_DIRECTION_SCHEMA_VERSION = 'multicam-direction/v2' as const
 export const DIRECTION_POLICY_SCHEMA_VERSION = 'direction-policy/v1' as const
 export const MULTICAM_SHOT_COMPILATION_SCHEMA_VERSION = 'multicam-shot-compilation/v1' as const
+
+/**
+ * The measured screen activity that counts as "as busy as a screen gets".
+ *
+ * `ScreenActivityValue.activityBps` is basis points OF FULL SCALE: the mean
+ * absolute luma difference between consecutive frames, divided by 255. That is
+ * a physical measurement and it is deliberately not rescaled at the adapter,
+ * but full scale is enormous compared to any recording. Measured with the
+ * production pass over generated sources (`multicam-visual-evidence.integration.mjs`
+ * prints the table): a still colour field is 0 bps, a slideshow changing every
+ * two seconds is 4 bps, a moving test pattern is 103 bps, a mandelbrot zoom is
+ * 137 bps, and full-frame random noise — more change than a screen share can
+ * physically contain — is 3151 bps (one run per source; the generators are
+ * deterministic and there is no clock or RNG seed in the measurement path).
+ *
+ * Dividing that by 10 000, as this rule did, gave a busy screen a demonstration
+ * term of 0.01 against a speaker baseline of 0.3: the limb was inert wherever
+ * the measurement was real, and only the in-memory fakes (which asserted 4200
+ * bps, a number no camera produces) ever exercised it. 400 bps is therefore the
+ * saturation point — comfortably above structured motion, at or below noise —
+ * and anything past it is simply "as active as this scoring can tell".
+ *
+ * It is calibration, which is why it lives here and not on the caller's side of
+ * any boundary, and why changing it moves `calibrationVersion` with it.
+ */
+export const SCREEN_ACTIVITY_SATURATION_BPS = 400
 
 export const ANGLE_CONTEXTS = Object.freeze(['speaker', 'reaction', 'screen', 'wide', 'reference-video'] as const)
 export type AngleContext = (typeof ANGLE_CONTEXTS)[number]
@@ -219,7 +264,12 @@ export interface DirectionPolicy {
 
 export const DEFAULT_DIRECTION_POLICY: Readonly<DirectionPolicy> = Object.freeze({
   schemaVersion: DIRECTION_POLICY_SCHEMA_VERSION,
-  calibrationVersion: 'multicam-direction-2026-09-v1',
+  // v2: `SCREEN_ACTIVITY_SATURATION_BPS` replaced a division by 10 000 that put
+  // the measured screen activity two orders of magnitude below every other
+  // term. The scores this calibration produces are different numbers, so it
+  // gets a different name — a direction stored under v1 was scored by a rule
+  // this file no longer contains.
+  calibrationVersion: 'multicam-direction-2026-09-v2',
   minimumShotMs: 1_200,
   maxCutawayMs: 4_000,
   jumpCutSameAngleMs: 2_000,
@@ -251,6 +301,23 @@ export const DEFAULT_DIRECTION_POLICY: Readonly<DirectionPolicy> = Object.freeze
     '1:1': Object.freeze({ wide: 0.75 }),
   }),
 })
+
+/**
+ * Order two ids by code unit, never by the process locale.
+ *
+ * `String.prototype.localeCompare` was used for every one of these sorts, and
+ * every one of them lands inside a content hash: the order of `evaluated` is
+ * hashed by `calculateShotDecisionHash`, the alternatives are hashed by the
+ * shot, the chosen audio track by the direction, the compiled sources by the
+ * compilation. Locale collation answers with ICU's rules, which are a property
+ * of the process and not of the data — two nodes with different ICU defaults
+ * disagree about `track-B` versus `track_a`, and would therefore disagree about
+ * the directionHash for identical inputs, or refuse a correctly stored
+ * direction on read. `<` is the same everywhere.
+ */
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
 
 const MS_TIMEBASE = createTimebase(rational(BigInt(1), BigInt(1_000)))
 
@@ -559,7 +626,7 @@ function deriveAudioSource(session: Readonly<CaptureSession>): Readonly<{ trackI
       const byPreference = roleOrder(left) - roleOrder(right)
       if (byPreference !== 0) return byPreference
       const byRole = ROLE_RANK[left.role] - ROLE_RANK[right.role]
-      return byRole !== 0 ? byRole : left.trackId.localeCompare(right.trackId)
+      return byRole !== 0 ? byRole : compareIds(left.trackId, right.trackId)
     })
   let chosen: string | null = null
   for (const track of preferred) {
@@ -926,7 +993,9 @@ function deriveCandidate(
       ...(context === 'screen' ? observationsOverlapping(ctx.evidence, window, { kinds: ['screen-activity'], trackId: track.trackId }) : []),
     ],
     window,
-    (observation) => (observation.value.kind === 'screen-activity' ? observation.value.activityBps / 10_000 : 1),
+    (observation) => (observation.value.kind === 'screen-activity'
+      ? Math.min(1, observation.value.activityBps / SCREEN_ACTIVITY_SATURATION_BPS)
+      : 1),
   )
 
   const reaction = weightedEvidence(
@@ -1045,7 +1114,7 @@ function compareCandidates(ctx: DirectionContext, left: Readonly<AngleCandidate>
   if (leftReference !== rightReference) return leftReference - rightReference
   const byRole = ROLE_RANK[left.role] - ROLE_RANK[right.role]
   if (byRole !== 0) return byRole
-  return left.trackId.localeCompare(right.trackId)
+  return compareIds(left.trackId, right.trackId)
 }
 
 function deriveCandidatesWith(
@@ -1055,7 +1124,7 @@ function deriveCandidatesWith(
 ): readonly Readonly<AngleCandidate>[] {
   return Object.freeze(
     [...ctx.session.tracks]
-      .sort((left, right) => left.trackId.localeCompare(right.trackId))
+      .sort((left, right) => compareIds(left.trackId, right.trackId))
       .map((track) => deriveCandidate(ctx, track, window, previousShot)),
   )
 }
@@ -1475,7 +1544,7 @@ function alternativesOf(decisions: readonly WindowDecision[], chosenTrackId: str
     }
   }
   return Object.freeze([...best.values()]
-    .sort((left, right) => left.trackId.localeCompare(right.trackId))
+    .sort((left, right) => compareIds(left.trackId, right.trackId))
     .map(({ eligible: _eligible, ...alternative }) => Object.freeze(alternative)))
 }
 
@@ -1864,7 +1933,7 @@ export function assertMulticamDirectionIntegrity(direction: Readonly<MulticamDir
       )
       seenCandidates.add(candidate.candidateId)
       assertDomain(
-        position === 0 || shot.evaluated[position - 1]!.trackId.localeCompare(candidate.trackId) < 0,
+        position === 0 || compareIds(shot.evaluated[position - 1]!.trackId, candidate.trackId) < 0,
         'PERSISTENCE_CONFLICT',
         `shot ${shot.shotId} evaluated candidates are not in track order at ${candidate.candidateId}`,
       )
@@ -2251,7 +2320,7 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     clips: Object.freeze(clips),
     sources: Object.freeze([...sources.values()]
       .map((entry) => Object.freeze({ ...entry.record, kinds: Object.freeze([...entry.kinds].sort()) }))
-      .sort((left, right) => left.sourceAssetId.localeCompare(right.sourceAssetId))),
+      .sort((left, right) => compareIds(left.sourceAssetId, right.sourceAssetId))),
   }
   return Object.freeze({
     ...body,

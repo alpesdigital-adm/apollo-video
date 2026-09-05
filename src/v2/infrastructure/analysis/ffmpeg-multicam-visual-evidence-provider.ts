@@ -15,10 +15,16 @@ import { DomainError } from '../../domain/errors.ts'
  * Screen activity and technical quality of a capture window, from FFmpeg
  * (F4.012, spec 05 §20).
  *
- * One decode per window with `signalstats` and `scdet`, in the shape
+ * One decode per window with `signalstats`, in the shape
  * `ffmpeg-contiguous-visual-evidence-provider.ts:253-350` established: the
  * filter graph prints per-frame metadata, this class averages the frames of the
  * window, and nothing here decides anything about angles.
+ *
+ * The graph carried `scdet=threshold=10` and the method string said
+ * `ffmpeg/signalstats+scdet`, and nothing ever read a single `lavfi.scd.*` key:
+ * a provenance that names a filter which contributed nothing is a claimed
+ * measurement with no command behind it, so the filter and the name went
+ * together. What that costs is stated below rather than hidden.
  *
  * What each number IS, because a plausible-looking basis-point value with no
  * stated derivation is the thing this codebase refuses:
@@ -26,9 +32,23 @@ import { DomainError } from '../../domain/errors.ts'
  * - **activity** is `YDIF`, the mean absolute luma difference between
  *   consecutive frames, as a fraction of full scale. A slide that never changes
  *   measures near zero and produces NO observation; a screen share being
- *   scrolled measures a real number. Scene cuts are counted separately and
- *   reported, but they do not inflate the activity: a hard cut every ten
- *   seconds is not continuous activity.
+ *   scrolled measures a real number. A hard cut inside the window raises YDIF
+ *   for the one frame it lands on and this pass does NOT separate it out — with
+ *   a 30 s window and 30 fps a single cut moves the mean by about 1/900 of full
+ *   scale, which is smaller than the spread between the sources measured in
+ *   `multicam-visual-evidence.integration.mjs`. It is a known limit of the
+ *   number, not a correction applied behind the reader's back.
+ *
+ *   **The axis is full scale, and full scale is enormous compared to real
+ *   footage.** Measured with this exact code over generated sources (the
+ *   integration suite prints the table): a still colour field is 0 bps, a
+ *   slideshow changing every two seconds is 4 bps, a moving test pattern is
+ *   103 bps, a mandelbrot zoom is 137 bps, and full-frame random noise — more
+ *   change than any real recording contains — is 3151 bps. So a busy screen
+ *   share lives in the low hundreds of basis points OF FULL SCALE, and the
+ *   domain converts it with `SCREEN_ACTIVITY_SATURATION_BPS` rather than by
+ *   dividing by 10 000. This paragraph exists because the two numbers used to
+ *   disagree by two orders of magnitude and only the fakes knew.
  * - **stability** is `1 - TOUT`, the complement of the temporal-outlier ratio:
  *   pixels whose value disagrees violently with their temporal neighbours are
  *   sensor noise and shake, and a frame full of them is not stable footage.
@@ -55,7 +75,7 @@ const execFileAsync = promisify(execFile)
 const FULL_SCALE = 255
 const MID_GREY = 128
 
-export const MULTICAM_VISUAL_EVIDENCE_METHOD = 'ffmpeg/signalstats+scdet'
+export const MULTICAM_VISUAL_EVIDENCE_METHOD = 'ffmpeg/signalstats'
 
 function bps(fraction: number): number {
   return Math.max(0, Math.min(10_000, Math.round(fraction * 10_000)))
@@ -127,7 +147,7 @@ export class FfmpegMulticamVisualEvidenceProvider implements MulticamVisualEvide
             '-t', (durationMs / 1_000).toFixed(3),
             '-i', window.path,
             '-map', '0:v:0',
-            '-vf', 'setpts=PTS-STARTPTS,signalstats=stat=tout+vrep+brng,scdet=threshold=10,metadata=mode=print',
+            '-vf', 'setpts=PTS-STARTPTS,signalstats=stat=tout+vrep+brng,metadata=mode=print',
             '-an', '-f', 'null', '-',
           ],
           {

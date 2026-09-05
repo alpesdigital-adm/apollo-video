@@ -225,7 +225,7 @@ test(
       rangeStartTicks: rangeStart,
       rangeEndTicks: rangeEnd,
       aspectRatio: '9:16',
-      policyCalibrationVersion: 'multicam-direction-2026-09-v1',
+      policyCalibrationVersion: 'multicam-direction-2026-09-v2',
       policyJson: JSON.stringify({ schemaVersion: 'direction-policy/v1' }),
       audioTrackId: 'track-master-audio',
       shotCount: 2,

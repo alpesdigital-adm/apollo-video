@@ -239,7 +239,12 @@ function memoryCommands({ world, versionId = 'project-version-1', baseHash = 'a'
   }
 }
 
-function fakeVisual({ activityBps = 4_200, stabilityBps = 9_100, exposureBps = 8_800, frames = 30 } = {}) {
+// The default `activityBps` is the number the production FFmpeg pass actually
+// measured over a moving test pattern (`multicam-visual-evidence.integration.mjs`
+// prints the table: 103 bps of full scale). It used to be 4200 — a value no
+// camera produces — which is how the screen-activity limb came to be exercised
+// at forty times its real magnitude here and to be inert in production.
+function fakeVisual({ activityBps = 103, stabilityBps = 9_100, exposureBps = 8_800, frames = 30 } = {}) {
   const seen = []
   return {
     seen,

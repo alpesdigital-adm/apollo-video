@@ -21,10 +21,17 @@
 -- would fail `assertMulticamDirectionIntegrity` — so it is stored rather than
 -- re-derived from a sort the reader would have to guess.
 --
--- Backfill: the table can only hold chosen candidates so far, one per shot, all
--- of them eligible with an empty rejection list. The column defaults say exactly
--- that, and `ordinal` is numbered per shot rather than left at zero so the new
--- unique index is satisfied even if a row somewhere was written twice.
+-- Backfill: any row already in this table is a CHOSEN candidate, one per shot,
+-- eligible with an empty rejection list — so the column defaults describe it
+-- correctly and `ordinal` is numbered per shot rather than left at zero, or the
+-- new unique index would refuse two chosen candidates of two shots that both
+-- sat at position 0. The backfill exists because such rows CAN exist, not
+-- because they can be read afterwards: no UPDATE can recompute a decisionHash,
+-- so `SHOT_DECISION_SCHEMA_VERSION` moved to `shot-decision/v2` (and the
+-- direction to `multicam-direction/v2`) in the same change, and hydration
+-- refuses a pre-existing direction by name — "carries an unknown schema
+-- version" — instead of by an unexplained hash mismatch. This DDL keeps the
+-- table well formed; the schema version is what keeps it honest.
 
 ALTER TABLE "multicam_angle_candidates"
     ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0,
@@ -42,12 +49,17 @@ FROM (
 ) AS "numbered"
 WHERE "numbered"."id" = "candidate"."id";
 
--- The two columns that are one fact must be written together, and the writer
--- must state both rather than inherit them: a row that says nothing about its
--- eligibility is a row nobody measured.
+-- The columns that are one fact must be written together, and the writer must
+-- state all of them rather than inherit them: a row that says nothing about its
+-- eligibility is a row nobody measured. All four defaults go, not two — an
+-- INSERT that named `eligible` and let `rejectionReasonsJson` and
+-- `rejectionCount` default would have claimed an eligibility it never stated
+-- the evidence for, and would still have satisfied the CHECK below.
 ALTER TABLE "multicam_angle_candidates"
     ALTER COLUMN "ordinal" DROP DEFAULT,
-    ALTER COLUMN "eligible" DROP DEFAULT;
+    ALTER COLUMN "eligible" DROP DEFAULT,
+    ALTER COLUMN "rejectionReasonsJson" DROP DEFAULT,
+    ALTER COLUMN "rejectionCount" DROP DEFAULT;
 
 -- Eligibility IS the emptiness of the rejection list (multicam-direction.ts
 -- deriveCandidate: `eligible: rejections.size === 0`), and the count IS the

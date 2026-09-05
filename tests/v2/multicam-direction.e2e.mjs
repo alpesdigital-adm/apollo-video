@@ -515,7 +515,9 @@ test(
           return windows.map((window) => ({
             ...window,
             sampledFrameCount: 30,
-            activityBps: window.trackId === 'track-screen' ? 3100 : null,
+            // 103 bps is what the production pass measures over a moving test
+            // pattern; see multicam-visual-evidence.integration.mjs.
+            activityBps: window.trackId === 'track-screen' ? 103 : null,
             sharpnessBps: null,
             stabilityBps: 9000,
             exposureBps: 8500,
