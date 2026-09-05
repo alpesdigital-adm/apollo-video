@@ -1131,6 +1131,18 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
 
     const session = await dependencies.sessions.readHead({ workspaceId, sessionId })
     if (!session) throw new DomainError('CAPTURE_SESSION_NOT_FOUND', `Capture session ${sessionId} was not found`)
+    // The session port is scoped to the workspace and nothing else, so the
+    // project segment of the path has to be enforced here or it means nothing:
+    // without this, one workspace's session could re-cut a different project's
+    // timeline, because everything downstream — the EditPlan, the project
+    // version, the outbox event — comes from `readContext({ workspaceId,
+    // projectId })` while the shots come from this session. The colour path
+    // asserts the same containment at multicam-color-match.ts.
+    assertDomain(
+      session.projectId === projectId,
+      'INVALID_ARGUMENT',
+      `Capture session ${sessionId} belongs to another project`,
+    )
     const diagnostic = await dependencies.diagnostics.readHead({ workspaceId, sessionId })
     if (!diagnostic) {
       throw new DomainError(

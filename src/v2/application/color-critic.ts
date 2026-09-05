@@ -388,7 +388,7 @@ export function evaluateColorCriticService(dependencies: {
     // caller that could send `0` could reopen a loop this repository exists to
     // keep closed.
     const previous = await dependencies.reports.listForProjectVersion({
-      workspaceId, projectId, projectVersionId, limit: 50,
+      workspaceId, projectId, projectVersionId, limit: COLOR_CRITIC_BUDGET_WINDOW,
     })
     const correctionsApplied = previous.filter((report) => report.action === 'bounded-correction').length
 
@@ -483,6 +483,18 @@ export function evaluateColorCriticService(dependencies: {
 const COLOR_CRITIC_LISTING_MAX = 100
 
 /**
+ * The window the correction budget is counted over.
+ *
+ * `evaluate` counts bounded corrections off this many rows before it decides
+ * whether another one is allowed. The listing has to count off the same window
+ * or it answers a different question: with the presentation `limit` folded into
+ * the count, `?limit=1` reported a budget as unspent for a version the
+ * evaluator will refuse — a derived truth an agent acts on moving because the
+ * caller changed a page size.
+ */
+export const COLOR_CRITIC_BUDGET_WINDOW = 50
+
+/**
  * The verdicts recorded about one project version, newest evaluation first.
  *
  * A list rather than "the latest": a project version can have been judged
@@ -508,17 +520,24 @@ export function listColorCriticReportsService(dependencies: {
       'INVALID_ARGUMENT',
       `limit must be between 1 and ${COLOR_CRITIC_LISTING_MAX}`,
     )
+    const workspaceId = id(input.workspaceId, 'workspaceId')
+    const projectId = id(input.projectId, 'projectId')
+    const projectVersionId = id(input.projectVersionId, 'projectVersionId')
     const reports = await dependencies.reports.listForProjectVersion({
-      workspaceId: id(input.workspaceId, 'workspaceId'),
-      projectId: id(input.projectId, 'projectId'),
-      projectVersionId: id(input.projectVersionId, 'projectVersionId'),
-      limit,
+      workspaceId, projectId, projectVersionId, limit,
     })
-    // Counted here the same way `evaluate` counts it, off the same rows: how
-    // many bounded corrections a version has already had is what decides
-    // whether another one is allowed, and a reader deciding what to do next
-    // needs the same number the evaluator will use.
-    const correctionsApplied = reports.filter((report) => report.action === 'bounded-correction').length
+    // Counted off the window `evaluate` counts off — NOT off the page the
+    // caller asked for. The two are different questions: `?limit=1` sees one
+    // row, and a budget derived from it would tell a reader another bounded
+    // correction is allowed on a version whose next correction the evaluator
+    // will refuse. A second read is cheaper than a number that moves with a
+    // page size; when the page already IS the window there is nothing to read.
+    const budgetRows = limit === COLOR_CRITIC_BUDGET_WINDOW
+      ? reports
+      : await dependencies.reports.listForProjectVersion({
+        workspaceId, projectId, projectVersionId, limit: COLOR_CRITIC_BUDGET_WINDOW,
+      })
+    const correctionsApplied = budgetRows.filter((report) => report.action === 'bounded-correction').length
     return Object.freeze({
       reports,
       correctionsApplied,
@@ -527,18 +546,33 @@ export function listColorCriticReportsService(dependencies: {
   }
 }
 
+/**
+ * One verdict, read under the project that owns it.
+ *
+ * `projectId` is required rather than decorative: the endpoint is
+ * `/v1/projects/{projectId}/color-critic-reports/{reportId}`, and a path
+ * segment that names a project must be enforced or it must not be in the path.
+ * The narrowing is applied twice on purpose — in the query, so the row never
+ * leaves the database, and against the hydrated report, so a repository that
+ * ignores the hint still cannot return another project's verdict. A mismatch is
+ * NOT_FOUND rather than a refusal that would confirm the report exists
+ * somewhere else.
+ */
 export function readColorCriticReportService(dependencies: {
   reports: Pick<ColorCriticReportRepository, 'read'>
 }) {
   return async function read(input: Readonly<{
     workspaceId: string
+    projectId: string
     reportId: string
   }>): Promise<Readonly<ColorCriticReport>> {
+    const projectId = id(input.projectId, 'projectId')
     const report = await dependencies.reports.read({
       workspaceId: id(input.workspaceId, 'workspaceId'),
       reportId: id(input.reportId, 'reportId'),
+      projectId,
     })
-    if (!report) {
+    if (!report || report.projectId !== projectId) {
       throw new DomainError(
         'COLOR_CRITIC_REPORT_NOT_FOUND',
         `Colour critic report ${input.reportId} was not found`,
@@ -576,6 +610,7 @@ export function listColorCriticIssuesService(dependencies: {
   const read = readColorCriticReportService(dependencies)
   return async function list(input: Readonly<{
     workspaceId: string
+    projectId: string
     reportId: string
     severity?: ColorCriticSeverity
     dimension?: ColorCriticDimension

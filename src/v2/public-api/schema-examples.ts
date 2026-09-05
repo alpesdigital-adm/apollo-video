@@ -69,14 +69,14 @@ import { timebaseFromRate } from '../domain/session-time.ts'
 import { createTrackCoverage } from '../domain/track-coverage.ts'
 import {
   presentAngleCandidateListing,
-  presentDirectedSession,
+  presentDirectedSessionResponse,
   presentMulticamDirectionRead,
   presentShotDecisionListing,
 } from './multicam-direction-contract.ts'
 import {
   presentColorCriticIssueListing,
-  presentColorCriticReport,
-  presentColorCriticReportSummary,
+  presentColorCriticReportListing,
+  presentColorCriticReportResponse,
   presentDerivedMatchPlan,
   presentMatchOverrideResult,
   presentMulticamMatchPlanRead,
@@ -13978,10 +13978,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/multicam-direction-directed/v1': [
       {
-        data: {
-          directed: presentDirectedSession(w20DirectedSessionExample),
-          replayed: false,
-        },
+        data: presentDirectedSessionResponse({ ...w20DirectedSessionExample, replayed: false }),
         meta: { apiVersion: 'v1' },
       },
     ],
@@ -14075,16 +14072,18 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
     ],
     'apollo://schemas/color-critic-report-list/v1': [
       {
-        data: {
-          reports: [presentColorCriticReportSummary(w20CriticReportExample)],
+        data: presentColorCriticReportListing({
+          reports: [w20CriticReportExample],
+          // One bounded correction spent of the two the budget allows — counted
+          // by the service over the evaluator's window, never over the page.
           correctionsApplied: 1,
           correctionBudgetExhausted: false,
-        },
+        }),
         meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/color-critic-report-read/v1': [
-      { data: { report: presentColorCriticReport(w20CriticReportExample) }, meta: { apiVersion: 'v1' } },
+      { data: presentColorCriticReportResponse(w20CriticReportExample), meta: { apiVersion: 'v1' } },
     ],
     'apollo://schemas/color-critic-issue-list/v1': [
       {

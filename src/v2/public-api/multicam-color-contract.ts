@@ -414,6 +414,32 @@ export function presentColorCriticIssueListing(listing: Readonly<ColorCriticIssu
   })
 }
 
+/** The whole body of a `color-critic-reports.read` response. */
+export function presentColorCriticReportResponse(report: Readonly<ColorCriticReport>) {
+  return Object.freeze({ report: presentColorCriticReport(report) })
+}
+
+/**
+ * The whole body of a `color-critic-reports.list` response.
+ *
+ * The two counters travel with the page because they are what a reader decides
+ * with, and they are NOT derived from the page: the service counts them over
+ * the window the evaluator counts over, so the answer does not move when the
+ * caller changes `limit`. Presented here rather than assembled in the route so
+ * the published example and the emitted body cannot drift apart.
+ */
+export function presentColorCriticReportListing(listing: Readonly<{
+  reports: readonly Readonly<ColorCriticReport>[]
+  correctionsApplied: number
+  correctionBudgetExhausted: boolean
+}>) {
+  return Object.freeze({
+    reports: listing.reports.map(presentColorCriticReportSummary),
+    correctionsApplied: listing.correctionsApplied,
+    correctionBudgetExhausted: listing.correctionBudgetExhausted,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------

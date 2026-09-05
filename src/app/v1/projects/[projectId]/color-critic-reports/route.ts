@@ -6,7 +6,7 @@ import { createColorCriticReportReadServices } from '@/v2/infrastructure/reposit
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { identifier, integerParameter } from '@/v2/public-api/capture-derivation-contract'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
-import { presentColorCriticReportSummary } from '@/v2/public-api/multicam-color-contract'
+import { presentColorCriticReportListing } from '@/v2/public-api/multicam-color-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
 export const dynamic = 'force-dynamic'
@@ -38,11 +38,7 @@ export async function GET(
       ...(limit === undefined ? {} : { limit }),
     })
     return NextResponse.json(
-      presentSuccess({
-        reports: result.reports.map(presentColorCriticReportSummary),
-        correctionsApplied: result.correctionsApplied,
-        correctionBudgetExhausted: result.correctionBudgetExhausted,
-      }),
+      presentSuccess(presentColorCriticReportListing(result)),
       { status: 200, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

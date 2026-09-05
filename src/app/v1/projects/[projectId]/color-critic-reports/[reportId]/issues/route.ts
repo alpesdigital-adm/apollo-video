@@ -18,7 +18,7 @@ const FILTERS = ['severity', 'dimension']
 
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ reportId: string }> },
+  context: { params: Promise<{ projectId: string; reportId: string }> },
 ) {
   const requestId = resolveRequestId(request)
   try {
@@ -30,11 +30,12 @@ export async function GET(
         throw new DomainError('INVALID_ARGUMENT', `${name} is not a supported singular filter`)
       }
     }
-    const { reportId } = await context.params
+    const { projectId, reportId } = await context.params
     const severity = parseIssueSeverity(params.get('severity'))
     const dimension = parseIssueDimension(params.get('dimension'))
     const result = await createColorCriticReportReadServices().listIssues({
       workspaceId: actor.workspaceId,
+      projectId,
       reportId,
       ...(severity === undefined ? {} : { severity }),
       ...(dimension === undefined ? {} : { dimension }),

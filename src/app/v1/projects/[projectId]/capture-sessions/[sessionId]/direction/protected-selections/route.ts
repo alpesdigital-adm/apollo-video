@@ -7,7 +7,7 @@ import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import {
   parseProtectMulticamSelectionBody,
-  presentDirectedSession,
+  presentDirectedSessionResponse,
 } from '@/v2/public-api/multicam-direction-contract'
 import { presentSuccess } from '@/v2/public-api/presenters'
 
@@ -56,7 +56,7 @@ export async function POST(
       idempotency: { clientId: actor.clientId, key: idempotencyKey },
     })
     return NextResponse.json(
-      presentSuccess({ directed: presentDirectedSession(result), replayed: result.replayed }),
+      presentSuccess(presentDirectedSessionResponse(result)),
       { status: result.replayed ? 200 : 201, headers: publicApiHeaders(requestId) },
     )
   } catch (error) {

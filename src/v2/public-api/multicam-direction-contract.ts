@@ -280,6 +280,25 @@ export function presentDirectedSession(result: Readonly<PresentableDirectedSessi
   })
 }
 
+/**
+ * The whole body of a `direction.run` / `protected-selections.direct` response.
+ *
+ * The wrapper lives here and not in the route because it is part of the
+ * published contract (`multicam-direction-directed/v1`), and a wrapper assembled
+ * independently in the route and again in the example is two sources of truth
+ * for one schema. With one builder, `wave20-public-contract.test.mjs` can check
+ * the shape the route actually emits against the schema the registry
+ * advertises; with two, it could only check the example.
+ */
+export function presentDirectedSessionResponse(
+  result: Readonly<PresentableDirectedSession & { replayed: boolean }>,
+) {
+  return Object.freeze({
+    directed: presentDirectedSession(result),
+    replayed: result.replayed,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------
