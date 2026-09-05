@@ -1283,9 +1283,17 @@ test(
       where: { workspaceId: A, measurementId: citedMeasurement.measurementId },
       select: { id: true },
     })
-    await refused(
-      /color_critic_report_measurements_measurementId_workspaceId_fkey|[Ff]oreign key constraint/,
+    await assert.rejects(
       () => client.v2CameraColorMeasurement.delete({ where: { id: citedRow.id } }),
+      (error) => {
+        assert.match(
+          String(error?.message ?? ''),
+          /color_critic_report_measurements_measurementId_workspaceId_fkey|[Ff]oreign key constraint/,
+          `the delete was refused, but not by the citation's foreign key: ${error?.message}`,
+        )
+        return true
+      },
+      'a measurement a standing verdict rests on was deleted',
     )
 
     // The confidence and its band move together, so the row stays legal — and
