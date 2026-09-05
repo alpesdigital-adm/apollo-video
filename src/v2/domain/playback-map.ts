@@ -1392,8 +1392,27 @@ function gapPiece(
  * caller-supplied reference *replacing* the actor would erase the only trace of
  * who overrode a measurement.
  */
+/**
+ * How long a note an operator may attach to an anchor.
+ *
+ * A bound exists because the evidence string is DERIVED from the note: the
+ * audit trail carries `operator:<actorId> (<note>)`, and an unbounded note
+ * makes an unbounded evidence string. Stored, that was not a refusal anyone
+ * could classify — PostgreSQL raised 22001 "value too long for type character
+ * varying" from underneath the repository, taking the whole map version with
+ * it. A justification is a sentence or two; a thousand characters is already
+ * generous, and the number is asserted against the column that holds it.
+ */
+export const PLAYBACK_ANCHOR_NOTE_MAX = 1_000
+
 function anchorEvidenceRef(actorId: string, note: string | undefined): string {
   const trimmed = note?.trim()
+  assertDomain(
+    trimmed === undefined || trimmed.length <= PLAYBACK_ANCHOR_NOTE_MAX,
+    'INVALID_ARGUMENT',
+    `a playback anchor note is at most ${PLAYBACK_ANCHOR_NOTE_MAX} characters`,
+    { length: trimmed?.length ?? 0 },
+  )
   return trimmed && trimmed.length > 0 ? `operator:${actorId} (${trimmed})` : `operator:${actorId}`
 }
 

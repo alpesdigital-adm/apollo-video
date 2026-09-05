@@ -559,6 +559,57 @@ function unstorableDoubles(node, path, found = []) {
   return found
 }
 
+test('T-F4.015 a manual anchor keeps a note the operator actually typed', async () => {
+  const kit = await load()
+  const { PLAYBACK_ANCHOR_NOTE_MAX } = await import('../../src/v2/domain/playback-map.ts')
+  const client = createMemoryPrismaClient()
+  const maps = new kit.PrismaPlaybackMapRepository(client)
+  const world = kit.buildPlaybackWorld({
+    workspaceId: A, sessionId: REACT, projectId: PROJECT_A, uncoveredStretches: 2,
+  })
+  await maps.appendVersion({ map: world.map, occurredAt: at(50) })
+
+  // A note with a line break in it. The repository projects the actor back out
+  // of the evidence string, and a pattern whose `.` stops at a newline made
+  // this valid aggregate unstorable: the projection threw, appendVersion threw
+  // with it, and the map, its pieces and its uncovered ranges went with it.
+  const multiline = kit.anchorPlaybackMap(world.map, {
+    anchorId: 'w20j-anchor-multiline', actorId: 'operator-7',
+    note: 'player off screen\nsecond line: he says he skipped ahead', createdAt: at(51), stretch: 0,
+  })
+  await maps.appendVersion({ map: multiline, occurredAt: at(52) })
+  identical(
+    kit.stringifyWithTicks,
+    await maps.readVersion({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK, version: 2 }),
+    multiline,
+    'playback map with a two-line anchor note',
+  )
+  const row = client.rows('V2PlaybackAnchor').find((entry) => entry.anchorId === 'w20j-anchor-multiline')
+  assert.equal(row.actorId, 'operator-7', 'the actor is projected, not lost to the line break')
+  assert.equal(row.note, 'player off screen\nsecond line: he says he skipped ahead')
+
+  // The longest note the domain accepts still fits the evidence column it is
+  // built into, and one character more is a domain refusal rather than a
+  // PostgreSQL 22001 from underneath the repository.
+  const longest = kit.anchorPlaybackMap(world.map, {
+    anchorId: 'w20j-anchor-long', actorId: 'operator-7',
+    note: 'x'.repeat(PLAYBACK_ANCHOR_NOTE_MAX), createdAt: at(53), stretch: 1,
+  })
+  assert.ok(longest.anchors[0].evidenceRef.length <= 1_200, 'the evidence column holds 1200 characters')
+  assert.throws(
+    () => kit.anchorPlaybackMap(world.map, {
+      anchorId: 'w20j-anchor-too-long', actorId: 'operator-7',
+      note: 'x'.repeat(PLAYBACK_ANCHOR_NOTE_MAX + 1), createdAt: at(54), stretch: 1,
+    }),
+    (error) => {
+      assert.equal(error.code, 'INVALID_ARGUMENT')
+      assert.match(error.message, /note is at most/)
+      return true
+    },
+    'a note past the bound must be refused where it is written, not where it is stored',
+  )
+})
+
 test('T-F4.013 no Wave 20 aggregate carries a number its column cannot hand back', async () => {
   const kit = await load()
   const match = kit.buildMatchWorld({ workspaceId: A, projectId: PROJECT_A, sessionId: SESSION })

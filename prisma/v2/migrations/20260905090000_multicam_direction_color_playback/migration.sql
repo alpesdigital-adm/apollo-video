@@ -1161,7 +1161,14 @@ CREATE TABLE "playback_anchors" (
     "mode" VARCHAR(24),
     "method" VARCHAR(24) NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
-    "evidenceRef" VARCHAR(512) NOT NULL,
+    -- Wide enough to hold what the constraint below DERIVES from the other
+    -- three columns: 'operator:' + actorId(128) + ' (' + note + ')'. At 512
+    -- this refused any note past about 490 characters with a raw 22001 —
+    -- "value too long for type character varying" — which is not a refusal an
+    -- application can classify, and it took the whole map version with it. The
+    -- domain bounds the note at PLAYBACK_ANCHOR_NOTE_MAX (playback-map.ts), and
+    -- 1200 is that bound plus the longest actor and the decoration around it.
+    "evidenceRef" VARCHAR(1200) NOT NULL,
     "actorKind" VARCHAR(16),
     "actorId" VARCHAR(128),
     "note" VARCHAR(1024),

@@ -52,6 +52,7 @@ import {
 } from '../../src/v2/domain/color-critic-report.ts'
 import {
   NO_REFERENCE_PLAYBACK_MODES,
+  PLAYBACK_ANCHOR_NOTE_MAX,
   PLAYBACK_DETECTION_METHODS,
   PLAYBACK_DIRECTIONS,
   PLAYBACK_DISCONTINUITY_REASONS,
@@ -522,6 +523,38 @@ test('T-F4.015 every hashed child collection stores the order it is hashed in', 
     // does not know about — which is the same as not ordering them.
     assert.match(modelBlock(model), /\n\s+ordinal\s+Int\b/, `${model} must declare the ordinal column`)
   }
+})
+
+/** The declared width of one `"column" VARCHAR(n)` inside one CREATE TABLE. */
+function varcharWidth(table, column) {
+  const anchor = sql.indexOf(`CREATE TABLE "${table}" (`)
+  assert.notEqual(anchor, -1, `${table} is not created by the migration`)
+  const body = sql.slice(anchor, sql.indexOf('\n);', anchor))
+  const match = new RegExp(`"${column}" VARCHAR\\((\\d+)\\)`).exec(body)
+  assert.notEqual(match, null, `${table}.${column} is not a VARCHAR`)
+  return Number(match[1])
+}
+
+test('T-F4.015 an anchor note the domain accepts fits the column its evidence is built into', () => {
+  // playback_anchors_actor_check DERIVES the evidence string from the actor and
+  // the note: 'operator:' || actorId || ' (' || btrim(note) || ')'. A note the
+  // domain accepts but the evidence column cannot hold is not a constraint
+  // violation an application can classify — PostgreSQL raises 22001 from
+  // underneath the repository and the whole map version is lost.
+  const decoration = 'operator:'.length + ' ()'.length
+  const actorId = varcharWidth('playback_anchors', 'actorId')
+  const note = varcharWidth('playback_anchors', 'note')
+  const evidenceRef = varcharWidth('playback_anchors', 'evidenceRef')
+
+  assert.ok(
+    note >= PLAYBACK_ANCHOR_NOTE_MAX,
+    `playback_anchors.note holds ${note} characters but the domain accepts ${PLAYBACK_ANCHOR_NOTE_MAX}`,
+  )
+  assert.ok(
+    evidenceRef >= decoration + actorId + PLAYBACK_ANCHOR_NOTE_MAX,
+    `playback_anchors.evidenceRef holds ${evidenceRef} characters, short of the `
+      + `${decoration + actorId + PLAYBACK_ANCHOR_NOTE_MAX} the CHECK can derive from the columns beside it`,
+  )
 })
 
 test('T-F4.013 the rehydration migration adds the columns the hash covers', () => {

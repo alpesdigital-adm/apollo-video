@@ -56,7 +56,11 @@ function mapRowId(workspaceId: string, sessionId: string, reactionTrackId: strin
  * refused rather than stored with an invented actor.
  */
 function manualActorOf(anchor: Readonly<PlaybackAnchor>): Readonly<{ actorId: string; note: string | null }> {
-  const match = /^operator:([^\s(]+)(?: \((.+)\))?$/.exec(anchor.evidenceRef)
+  // `[\s\S]` and not `.`: a note is free text an operator typed, and `.` stops
+  // at a newline. A two-line justification made a perfectly valid map version
+  // unstorable — the projection threw, `appendVersion` threw with it, and the
+  // map, its pieces and its uncovered ranges were all lost.
+  const match = /^operator:([^\s(]+)(?: \(([\s\S]+)\))?$/.exec(anchor.evidenceRef)
   if (!match || !match[1]) {
     throw new DomainError(
       'PERSISTENCE_CONFLICT',

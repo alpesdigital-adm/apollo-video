@@ -9904,7 +9904,7 @@ model V2PlaybackAnchor {
   mode          String?  @db.VarChar(24)
   method        String   @db.VarChar(24)
   confidence    Float
-  evidenceRef   String   @db.VarChar(512)
+  evidenceRef   String   @db.VarChar(1200)
   actorKind     String?  @db.VarChar(16)
   actorId       String?  @db.VarChar(128)
   note          String?  @db.VarChar(1024)
