@@ -144,6 +144,7 @@ export default function MulticamLongformGatePage() {
   const [sessionId, setSessionId] = useState('')
   const [catalogue, setCatalogue] = useState<CriterionCatalogueEntry[]>([])
   const [gate, setGate] = useState<GateRecord | null>(null)
+  const [latestGateId, setLatestGateId] = useState<string | null>(null)
   const [outstanding, setOutstanding] = useState<OutstandingEntry[]>([])
   const [artifacts, setArtifacts] = useState<GateArtifact[]>([])
   const [history, setHistory] = useState<GateRecord[]>([])
@@ -210,6 +211,7 @@ export default function MulticamLongformGatePage() {
         // Not an error, and emphatically not "reprovado": nobody has run it.
         // The ten criteria are still shown, all of them unanswered.
         setGate(null)
+        setLatestGateId(null)
         setOutstanding([])
         setArtifacts([])
         setHistory([])
@@ -222,6 +224,7 @@ export default function MulticamLongformGatePage() {
         return
       }
       setGate(body.data.gate)
+      setLatestGateId(body.data.gate.id)
       await loadOutstanding(project.trim())
       await loadArtifacts(project.trim(), body.data.gate.id)
       await loadHistory(project.trim())
@@ -307,8 +310,13 @@ export default function MulticamLongformGatePage() {
   const resultByCriterion = new Map(
     (gate?.report.criteria ?? []).map((criterion) => [criterion.criterion, criterion]),
   )
+  // "O que falta" is always about the newest evaluation, so it is shown only
+  // while the newest one is the one on screen. Rendering it beside a historical
+  // record would answer about a different set of rows than the criteria above
+  // it — the sort of quiet mismatch that makes an operator distrust the page.
+  const viewingLatest = gate !== null && gate.id === latestGateId
   const outstandingByCriterion = new Map(
-    outstanding.map((entry) => [entry.criterion, entry]),
+    viewingLatest ? outstanding.map((entry) => [entry.criterion, entry]) : [],
   )
 
   return (
@@ -498,7 +506,14 @@ export default function MulticamLongformGatePage() {
         </ol>
       </section>
 
-      {outstanding.length > 0 && (
+      {gate && !viewingLatest && (
+        <p data-testid="viewing-historical" role="status">
+          Esta é uma avaliação anterior. O que falta hoje é calculado sobre a
+          avaliação mais recente e não é mostrado aqui.
+        </p>
+      )}
+
+      {viewingLatest && outstanding.length > 0 && (
         <section>
           <h2>O que falta, na ordem de fazer</h2>
           <ol data-testid="outstanding-list">
