@@ -988,6 +988,71 @@ test('T-FR-150 every measurement is re-verified against its own hash before the 
   )
 })
 
+test('T-FR-150 a range no part covers is refused even when one clock-map piece spans it', () => {
+  // The map and the parts are separate derivations. A fitter that saw
+  // continuous ticks across a recorder restart produces one piece spanning the
+  // whole file, and the only thing standing between the direction and material
+  // the recorder never wrote is the part check. Everywhere else in this suite
+  // the coverage gate or `isSessionRangeResolvable` refuses first, so that
+  // check is never the gate under test — here both are deliberately silent.
+  const world = podcastWorld({ cameraAGap: true })
+  const source = createSourceClock({ sourceId: 'asset-cam-a', timebase: TB, provenance: 'original-capture' })
+  const oneWidePiece = createPiecewiseClockMap({
+    workspaceId: WORKSPACE,
+    sessionId: SESSION,
+    sourceId: 'asset-cam-a',
+    clock: world.clock,
+    derivedFrom: { sessionVersion: world.session.version, referenceEpoch: world.session.referenceEpoch },
+    pieces: [{
+      pieceId: 'track-camera-a-piece-0',
+      mapping: createSourceToSessionMapping({
+        clock: world.clock,
+        source,
+        sourceCoverage: createTickInterval(t(0), sec(600)),
+        driftRate: rational(1),
+        offsetTicks: t(45_000),
+        residualBoundTicks: t(0),
+        confidence: 'high',
+        anchorIds: ['anchor-track-camera-a'],
+        evidenceRefs: ['marker-track-camera-a'],
+      }),
+    }],
+  })
+  // A coverage with no defect anywhere in the file: the coverage gate has
+  // nothing to say about the hole, because nobody measured a hole.
+  const clean = createTrackCoverage({
+    workspaceId: WORKSPACE,
+    trackId: 'track-camera-a',
+    derivedFrom: captureSessionDerivationRef(world.session),
+    timebase: TB,
+    claims: [{ partId: 'part-track-camera-a', ordinal: 0, timebase: TB, interval: createTickInterval(t(0), sec(600)), confidenceBps: 9_800, evidence: { kind: 'packet-scan', ref: 'probe-a' } }],
+  })
+  const inputs = {
+    ...world.inputs,
+    coverages: [world.coverages[0], clean, world.coverages[2]],
+    clockMaps: [oneWidePiece, world.clockMaps[1]],
+  }
+  // Camera A wrote nothing between source 125 s and 155 s; with its half-second
+  // offset that is session 125.5 s to 155.5 s.
+  const inHole = deriveAngleCandidates({ ...inputs, window: createTickInterval(sec(130), sec(150)), previousShot: null })
+    .find((candidate) => candidate.trackId === 'track-camera-a')
+  assert.equal(inHole.eligible, false)
+  assert.equal(inHole.sourceRange, null, 'no source range is invented for material that was never written')
+  assert.deepEqual([...inHole.rejectionReasons], ['sync-uncovered'], 'the part check is the only gate that fired')
+  assert.deepEqual([clean.gaps.length, clean.corrupt.length, clean.unverified.length], [0, 0, 0], 'the coverage measured no defect anywhere in the file')
+  assert.equal(inHole.coverage.availability, 'unmeasured', 'with no source range there is nothing to ask the coverage about, and nothing is guessed')
+  // Either side of the hole the same track, map and coverage resolve normally.
+  const before = deriveAngleCandidates({ ...inputs, window: createTickInterval(sec(100), sec(120)), previousShot: null })
+    .find((candidate) => candidate.trackId === 'track-camera-a')
+  assert.equal(before.eligible, true)
+  assert.equal(before.sourcePartId, 'part-track-camera-a')
+  const after = deriveAngleCandidates({ ...inputs, window: createTickInterval(sec(300), sec(320)), previousShot: null })
+    .find((candidate) => candidate.trackId === 'track-camera-a')
+  assert.equal(after.eligible, true)
+  assert.equal(after.sourcePartId, 'part-track-camera-a-2')
+  console.log(`part-gate inHole=${inHole.rejectionReasons.join(',')} before=${before.sourcePartId} after=${after.sourcePartId}`)
+})
+
 // ---------------------------------------------------------------------------
 // Falsification: a forged eligible candidate over a gap is refused at compile time.
 // ---------------------------------------------------------------------------
@@ -995,7 +1060,10 @@ test('T-FR-150 every measurement is re-verified against its own hash before the 
 test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap passes the hash check and is refused by the compiler', () => {
   const world = podcastWorld({ cameraBGap: true })
   const honest = world.direct()
-  const fallback = honest.shots[2]
+  // The shot the gap forced, found by the gap rather than by ordinal: an index
+  // asserts how the runs happened to merge, which is not what is under test.
+  const fallback = honest.shots.find((shot) => shot.sessionRange.start <= sec(245) && sec(245) < shot.sessionRange.end)
+  assert.ok(fallback, 'some shot covers the middle of camera B\'s gap')
   assert.equal(fallback.chosen.trackId, 'track-camera-a')
   const forgedRange = fallback.sessionRange
   const real = deriveAngleCandidates({ ...world.inputs, window: forgedRange, previousShot: null }).find((candidate) => candidate.trackId === 'track-camera-b')
@@ -1030,18 +1098,28 @@ test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap p
       && error.details.cause === 'in-discontinuity',
     'the map refuses the forged range without consulting anybody\'s eligibility flag',
   )
-  // And a forged candidate whose map is continuous but whose coverage is corrupt is refused by the coverage gate.
+  // And a shot whose map is continuous but whose coverage turns out to be
+  // corrupt is refused by the coverage gate. The defect is placed over the
+  // source range the direction ACTUALLY cut — read off the chosen candidate —
+  // rather than over a session interval the shots were assumed to span, so the
+  // assertion cannot pass or fail on how the runs happened to merge.
+  const damaged = honest.shots.find((shot) => shot.chosen.trackId === 'track-camera-a')
+  assert.ok(damaged && damaged.chosen.sourceRange, 'the direction cut camera A somewhere')
   const corrupt = createTrackCoverage({
     workspaceId: WORKSPACE,
     trackId: 'track-camera-a',
     derivedFrom: captureSessionDerivationRef(world.session),
     timebase: TB,
     claims: [{ partId: 'part-track-camera-a', ordinal: 0, timebase: TB, interval: createTickInterval(t(0), sec(600)), confidenceBps: 9_800, evidence: { kind: 'packet-scan', ref: 'probe-a' } }],
-    defects: [{ availability: 'corrupt', interval: createTickInterval(sec(240), sec(250)), evidence: { kind: 'decoder-walk', ref: 'decoder reported broken GOP' } }],
+    defects: [{ availability: 'corrupt', interval: damaged.chosen.sourceRange, evidence: { kind: 'decoder-walk', ref: 'decoder reported broken GOP' } }],
   })
   assert.throws(
     () => compileShotsToSourceRanges(honest, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: [corrupt] }),
-    (error) => error.code === 'DIRECTION_RANGE_UNRESOLVABLE' && error.details.cause === 'coverage-corrupt',
+    (error) => error.code === 'DIRECTION_RANGE_UNRESOLVABLE'
+      && error.details.cause === 'coverage-corrupt'
+      && error.details.shotId === damaged.shotId
+      && error.details.trackId === 'track-camera-a',
+    'the shot named in the refusal is the shot whose material is broken',
   )
 })
 
