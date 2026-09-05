@@ -101,6 +101,19 @@ const HASH = /^[a-f0-9]{64}$/
  * calibration: the weights, the context baselines, the confidence a hold is
  * worth, the name of the calibration itself. Letting a request set those would
  * let it set the score, which is the one thing the server exists to derive.
+ *
+ * `qualityFloorBps` and `reactionIntensityFloorBps` were on this list and are
+ * NOT editorial preferences, which a reviewer proved with the lane's own
+ * fixture: `qualityFloorBps` is the exact threshold `deriveCandidate` compares
+ * a measured quality against before stamping `quality-below-floor`
+ * (`domain/multicam-direction.ts:957`), so a request that set it to 0 flipped
+ * camera B from rejected to eligible and changed which angle was on screen —
+ * caller-supplied eligibility through the back door, in the module whose whole
+ * premise is that a caller cannot supply one. They are thresholds on a
+ * measurement, i.e. calibration, and they are refused by name like the rest of
+ * it. An operator who genuinely wants a low-quality angle on screen says so
+ * with a `protectedSelection`, which names who decided and why; a threshold
+ * names nobody.
  */
 export const DIRECTION_POLICY_OVERRIDE_KEYS = Object.freeze([
   'minimumShotMs',
@@ -108,8 +121,6 @@ export const DIRECTION_POLICY_OVERRIDE_KEYS = Object.freeze([
   'jumpCutSameAngleMs',
   'redundancyThreshold',
   'ambiguityMargin',
-  'qualityFloorBps',
-  'reactionIntensityFloorBps',
 ] as const)
 export type DirectionPolicyOverrideKey = (typeof DIRECTION_POLICY_OVERRIDE_KEYS)[number]
 export type DirectionPolicyOverrides = Readonly<Partial<Record<DirectionPolicyOverrideKey, number>>>
@@ -126,11 +137,17 @@ export type DirectionPolicyOverrides = Readonly<Partial<Record<DirectionPolicyOv
  */
 export const DIRECTION_FORBIDDEN_REQUEST_FIELDS = Object.freeze([
   'approved',
+  // Who attested a protected selection is the authenticated actor, never a
+  // request field: a note that could also name its own author would let a
+  // caller put somebody else's name on a human override.
+  'attestedBy',
   'candidates',
+  'chosen',
   'confidence',
   'coverageBps',
   'directionHash',
   'eligible',
+  'evaluated',
   'evidence',
   'evidenceHash',
   'evidenceRefs',
@@ -142,7 +159,29 @@ export const DIRECTION_FORBIDDEN_REQUEST_FIELDS = Object.freeze([
   'scoreComponents',
   'shots',
   'syncConfidence',
+  'uncovered',
+  'warnings',
 ] as const)
+
+/**
+ * The four fields a protected selection may carry, and nothing else.
+ *
+ * The list is closed for the same reason the request scan exists: a key that is
+ * accepted and dropped teaches the next caller to keep sending it. Being on
+ * `DIRECTION_FORBIDDEN_REQUEST_FIELDS` covers the derivations by name; this
+ * covers everything else, including a typo, so the caller is told which key of
+ * theirs went nowhere.
+ */
+const PROTECTED_SELECTION_KEYS = Object.freeze([
+  'selectionId',
+  'trackId',
+  'sessionStartTicks',
+  'sessionEndTicks',
+  'note',
+] as const)
+
+/** How deep a legitimate direction request nests: `protectedSelections[i].note` is three. */
+const MAX_REQUEST_DEPTH = 6
 
 function refuseDerivation(field: string, why: string): never {
   throw new DomainError(
@@ -153,7 +192,16 @@ function refuseDerivation(field: string, why: string): never {
 }
 
 function assertNoCallerDerivations(value: unknown, path: string, depth = 0): void {
-  if (depth > 6 || value === null || typeof value !== 'object') return
+  if (value === null || typeof value !== 'object') return
+  // Refused rather than skipped. Stopping the walk at the cap would make the
+  // deepest nesting the one place a derivation could still be smuggled in, and
+  // "the scan gave up here" is not something a caller can be told after the
+  // fact — no legitimate request nests past `protectedSelections[i].note`.
+  assertDomain(
+    depth <= MAX_REQUEST_DEPTH,
+    'INVALID_ARGUMENT',
+    `direction request field '${path}' is nested deeper than ${MAX_REQUEST_DEPTH} levels, which no direction request is`,
+  )
   if (Array.isArray(value)) {
     value.forEach((entry, index) => assertNoCallerDerivations(entry, `${path}[${index}]`, depth + 1))
     return
@@ -260,8 +308,33 @@ function sessionRangeForSourceMs(input: {
   return createTickInterval(start, end)
 }
 
-function partOfTrack(track: Readonly<CaptureTrack>, artifactId: string): Readonly<CaptureTrackPart> | null {
-  return track.parts.find((part) => part.sourceAssetId === artifactId) ?? null
+/**
+ * The track AND the part a stored analysis of one file belongs to.
+ *
+ * Every part, not `track.sourceAssetId` — which is documented as "the asset
+ * that gives the track its identity, its FIRST part's source"
+ * (`capture-session.ts:178-179`). A recorder that stopped and restarted
+ * produces a second file on the same track (`addCaptureSessionTrackPart`), and
+ * a lookup by track identity alone would neither ask for that file's
+ * diarization nor recognise a run that arrived for it — dropping the run with
+ * the reason "no capture track carries this artifact", which is false: a track
+ * does carry it, as a later part. The milliseconds of a run are relative to the
+ * file it analysed, so the part is what they must be mapped through.
+ */
+function locateArtifact(
+  session: Readonly<CaptureSession>,
+  artifactId: string,
+): Readonly<{ track: Readonly<CaptureTrack>; part: Readonly<CaptureTrackPart> }> | null {
+  for (const track of session.tracks) {
+    const part = track.parts.find((entry) => entry.sourceAssetId === artifactId)
+    if (part) return Object.freeze({ track, part })
+  }
+  return null
+}
+
+/** Every file of the session, in a stable order: one per part, deduplicated. */
+function sessionArtifactIds(session: Readonly<CaptureSession>): readonly string[] {
+  return [...new Set(session.tracks.flatMap((track) => track.parts.map((part) => part.sourceAssetId)))].sort()
 }
 
 export interface DeriveMulticamEvidenceDependencies {
@@ -332,7 +405,7 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
     const note = (source: string, reason: string) => skipped.push(Object.freeze({ source, reason }))
 
     // (a) Speech, from the diarization already persisted for these files.
-    const artifactIds = [...new Set(session.tracks.map((track) => track.sourceAssetId))].sort()
+    const artifactIds = sessionArtifactIds(session)
     const runs = await dependencies.diarization.listLatestRunsForArtifacts({
       workspaceId: request.workspaceId,
       projectId: request.projectId,
@@ -340,12 +413,12 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
     })
     const speech: MulticamObservation[] = []
     for (const run of runs) {
-      const track = session.tracks.find((entry) => entry.sourceAssetId === run.sourceArtifactId)
-      const part = track ? partOfTrack(track, run.sourceArtifactId) : null
-      if (!track || !part) {
-        note(`diarization:${run.runId}`, 'no capture track carries this artifact')
+      const located = locateArtifact(session, run.sourceArtifactId)
+      if (!located) {
+        note(`diarization:${run.runId}`, 'no part of any capture track carries this artifact')
         continue
       }
+      const { track, part } = located
       for (const segment of run.segments) {
         const range = sessionRangeForSourceMs({
           session,
@@ -420,17 +493,36 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
         try {
           media = await dependencies.media.resolve({ workspaceId: request.workspaceId, part })
           const windows: MulticamVisualWindow[] = []
-          for (let start = 0; start < durationMs && windows.length < maxWindows; start += windowMs) {
-            const end = Math.min(durationMs, start + windowMs)
-            if (end - start < 200) break
+          // `cursor` outlives the loop on purpose: what the sweep did NOT reach
+          // is reported below. A ceiling that silently stopped at 32 minutes of
+          // a two-hour recording would leave the direction reading the other 88
+          // minutes as "nobody measured", with nothing anywhere saying a policy
+          // rather than the footage caused it.
+          let cursor = 0
+          for (; cursor < durationMs && windows.length < maxWindows; cursor += windowMs) {
+            const end = Math.min(durationMs, cursor + windowMs)
+            if (end - cursor < 200) {
+              note(
+                `${track.trackId}:${part.partId}`,
+                `the last ${end - cursor} ms of this part are shorter than one measurable window and were not measured`,
+              )
+              cursor = end
+              break
+            }
             windows.push({
               trackId: track.trackId,
               partId: part.partId,
               sourceArtifactId: part.sourceAssetId,
               path: media.path,
-              sourceStartMs: start,
+              sourceStartMs: cursor,
               sourceEndMs: end,
             })
+          }
+          if (cursor < durationMs) {
+            note(
+              `${track.trackId}:${part.partId}`,
+              `the sweep stopped at its ceiling of ${maxWindows} window(s); ${durationMs - cursor} ms of this part were not measured`,
+            )
           }
           const measured = windows.length === 0
             ? []
@@ -514,12 +606,12 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
         sourceArtifactIds: artifactIds,
       })
       for (const timeline of timelines) {
-        const track = session.tracks.find((entry) => entry.sourceAssetId === timeline.sourceArtifactId)
-        const part = track ? partOfTrack(track, timeline.sourceArtifactId) : null
-        if (!track || !part) {
-          note(`perception:${timeline.timelineId}`, 'no capture track carries this artifact')
+        const located = locateArtifact(session, timeline.sourceArtifactId)
+        if (!located) {
+          note(`perception:${timeline.timelineId}`, 'no part of any capture track carries this artifact')
           continue
         }
+        const { track, part } = located
         for (const entry of timeline.entries) {
           const range = sessionRangeForSourceMs({
             session,
@@ -728,6 +820,12 @@ export function buildMulticamEditPlan(input: {
     subtitleTracks: Object.freeze([]),
     effectTracks: Object.freeze([]),
     transitions: Object.freeze(transitions),
+    // Dropped for the same reason as the cues, and said out loud for the same
+    // reason: an editorial-cut marker carries `sourceStartSeconds` /
+    // `sourceEndSeconds` of the ONE recording the old timeline was trimmed from
+    // (`director-run.ts:56-62`), which describes nothing once the picture is cut
+    // from several cameras. Emptied silently it would look like a plan that
+    // never had markers.
     markers: Object.freeze([]),
     // The exclusions and retained ranges named source seconds of the single
     // recording the old timeline was trimmed from; after a re-cut across
@@ -846,6 +944,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
       'Subtitle cues from the timeline this direction replaced are dropped: their frames named a different cut, and a caption over the wrong angle is worse than none.',
       'The retimed transcript is emptied for the same reason; re-running the Director over this plan restores both.',
       'The editorial exclusions and retained source ranges are cleared: they named seconds of the single recording the old timeline was trimmed from, and this timeline is cut from several.',
+      'The editorial-cut markers are dropped with them: each one names source seconds of that same single recording, so keeping them would point a reviewer at an instant this cut no longer contains.',
       ...(omittedShots > 0
         ? [`${omittedShots} shot decision(s) exceed the 64-decision cap and are stored in full in the direction rather than in this log.`]
         : []),
@@ -916,6 +1015,19 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
     // choose whose name sits on a human override.
     const attestedBy = `${authenticationAudit.clientId}${authenticationAudit.delegatedUserId ? `/${authenticationAudit.delegatedUserId}` : ''}`
     const protectedSelections: Readonly<ProtectedSelection>[] = (request.protectedSelections ?? []).map((selection, index) => {
+      assertDomain(
+        typeof selection === 'object' && selection !== null && !Array.isArray(selection),
+        'INVALID_ARGUMENT',
+        `protectedSelections[${index}] must be an object`,
+      )
+      for (const key of Object.keys(selection)) {
+        if (!(PROTECTED_SELECTION_KEYS as readonly string[]).includes(key)) {
+          refuseDerivation(
+            `protectedSelections[${index}].${key}`,
+            'is not one of the four things a protected selection says (selectionId, trackId, sessionStartTicks, sessionEndTicks, note)',
+          )
+        }
+      }
       const note = typeof selection.note === 'string' ? selection.note.trim() : ''
       assertDomain(note.length > 0 && note.length <= 400, 'INVALID_ARGUMENT', `protectedSelections[${index}].note must say why`)
       return Object.freeze({
