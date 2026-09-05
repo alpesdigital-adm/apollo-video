@@ -10,6 +10,7 @@ import {
   COLOR_MEASUREMENT_MINIMUM_FRAMES,
   measuredComponent,
   measuredValue,
+  serializeTicksDeep,
   type CameraColorMeasurement,
 } from './color-measurement.ts'
 import { assertDomain } from './errors.ts'
@@ -259,16 +260,6 @@ function sameMetadata(left: Readonly<ColorMetadata>, right: Readonly<ColorMetada
   return calculateCanonicalHash(left) === calculateCanonicalHash(right)
 }
 
-/** Ticks as decimal text, structure otherwise untouched; what gets hashed. */
-function ticksAsText(value: unknown): unknown {
-  if (typeof value === 'bigint') return value.toString()
-  if (Array.isArray(value)) return value.map(ticksAsText)
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, ticksAsText(nested)]))
-  }
-  return value
-}
-
 // ---------------------------------------------------------------------------
 // Match-stage transforms
 // ---------------------------------------------------------------------------
@@ -448,7 +439,7 @@ export function assertMatchStagePosition(transforms: readonly Readonly<ColorTran
 export type MulticamMatchPlanContent = Omit<MulticamMatchPlan, 'planHash'>
 
 export function calculateMulticamMatchPlanHash(content: Readonly<MulticamMatchPlanContent>): string {
-  return calculateCanonicalHash(ticksAsText(content))
+  return calculateCanonicalHash(serializeTicksDeep(content))
 }
 
 function normalizedSelection(

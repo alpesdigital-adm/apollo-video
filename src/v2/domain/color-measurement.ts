@@ -294,6 +294,27 @@ function deriveComparability(input: {
 
 export type CameraColorMeasurementContent = Omit<CameraColorMeasurement, 'measurementHash'>
 
+/**
+ * Every `bigint` leaf as decimal text, structure otherwise untouched.
+ *
+ * The canonical hasher throws on a `bigint` rather than guessing a
+ * representation (`canonical-hash.ts:27`), so a tick-bearing aggregate has to
+ * be flattened before it is hashed. `serializeTickInterval` does it for one
+ * interval; this does it for an aggregate that carries intervals several
+ * levels down, and produces the identical `{ start, end }` text pair for each
+ * of them, so the two ways of hashing never disagree.
+ */
+export function serializeTicksDeep(value: unknown): unknown {
+  if (typeof value === 'bigint') return value.toString()
+  if (Array.isArray(value)) return value.map(serializeTicksDeep)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, serializeTicksDeep(nested)]),
+    )
+  }
+  return value
+}
+
 /** The bytes that are hashed: ticks as decimal text, keys sorted by the hasher. */
 export function calculateCameraColorMeasurementHash(content: Readonly<CameraColorMeasurementContent>): string {
   return calculateCanonicalHash({ ...content, range: serializeTickInterval(content.range) })
