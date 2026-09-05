@@ -232,6 +232,33 @@ model V2Workspace {
   editorialSyntheses                     V2EditorialSynthesis[]
   editorialSynthesisRanges               V2EditorialSynthesisRange[]
   editorialSynthesisJoins                V2EditorialSynthesisJoin[]
+  multicamEvidenceSets                   V2MulticamEvidenceSet[]
+  multicamObservations                   V2MulticamObservation[]
+  multicamDirections                     V2MulticamDirection[]
+  multicamDirectionHeads                 V2MulticamDirectionHead[]
+  multicamShotDecisions                  V2MulticamShotDecision[]
+  multicamShotAlternatives               V2MulticamShotAlternative[]
+  multicamAngleCandidates                V2MulticamAngleCandidate[]
+  multicamAngleScoreComponents           V2MulticamAngleScoreComponent[]
+  cameraColorMeasurements                V2CameraColorMeasurement[]
+  colorMeasurementDimensions             V2ColorMeasurementDimension[]
+  colorMeasurementComponents             V2ColorMeasurementComponent[]
+  multicamMatchPlans                     V2MulticamMatchPlan[]
+  multicamMatchPlanHeads                 V2MulticamMatchPlanHead[]
+  matchPlanMeasurements                  V2MatchPlanMeasurement[]
+  cameraMatchTransforms                  V2CameraMatchTransform[]
+  matchRangeOverrides                    V2MatchRangeOverride[]
+  matchNonComparableRanges               V2MatchNonComparableRange[]
+  matchPlanIssues                        V2MatchPlanIssue[]
+  colorCriticReports                     V2ColorCriticReport[]
+  colorCriticDimensionResults            V2ColorCriticDimensionResult[]
+  colorCriticIssues                      V2ColorCriticIssue[]
+  colorCriticProposedDeltas              V2ColorCriticProposedDelta[]
+  playbackMaps                           V2PlaybackMap[]
+  playbackMapHeads                       V2PlaybackMapHead[]
+  playbackPieces                         V2PlaybackPiece[]
+  playbackAnchors                        V2PlaybackAnchor[]
+  playbackUncoveredRanges                V2PlaybackUncoveredRange[]
   transformationProviders                V2TransformationProviderDefinition[]
   transformationProviderCapabilities     V2TransformationProviderCapability[]
   transformationProviderHealth           V2TransformationProviderHealth[]
@@ -733,6 +760,9 @@ model V2Project {
   captureSessionHeads                    V2CaptureSessionHead[]
   captureSyncRuns                        V2CaptureSyncRun[]
   editorialSyntheses                     V2EditorialSynthesis[]
+  multicamMatchPlans                     V2MulticamMatchPlan[]
+  multicamMatchPlanHeads                 V2MulticamMatchPlanHead[]
+  colorCriticReports                     V2ColorCriticReport[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -940,6 +970,7 @@ model V2ProjectVersion {
   providerJobs                     V2ProviderJob[]
   transformationBriefs             V2TransformationBrief[]
   transformationProviderSelections V2TransformationProviderSelection[]
+  colorCriticReports               V2ColorCriticReport[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -8485,19 +8516,27 @@ model V2CaptureSessionHead {
   createdAt   DateTime @db.Timestamptz(3)
   updatedAt   DateTime @db.Timestamptz(3)
 
-  workspace     V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project       V2Project                @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  clock         V2CaptureSessionClock?
-  clockMaps     V2CaptureClockMap[]
-  coverages     V2CaptureTrackCoverage[]
-  syncEvidence  V2CaptureSyncEvidence[]
-  driftFits     V2CaptureDriftFit[]
-  syncRuns      V2CaptureSyncRun[]
-  protocolEvaluations V2CaptureProtocolEvaluation[]
-  attachedProtocol    V2CaptureSessionProtocol?
-  syncMarkers         V2SyncMarker[]
-  syncDiagnostics     V2SyncDiagnostic[]
-  syncDiagnosticHead  V2SyncDiagnosticHead?
+  workspace               V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                 V2Project                     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  clock                   V2CaptureSessionClock?
+  clockMaps               V2CaptureClockMap[]
+  coverages               V2CaptureTrackCoverage[]
+  syncEvidence            V2CaptureSyncEvidence[]
+  driftFits               V2CaptureDriftFit[]
+  syncRuns                V2CaptureSyncRun[]
+  protocolEvaluations     V2CaptureProtocolEvaluation[]
+  attachedProtocol        V2CaptureSessionProtocol?
+  syncMarkers             V2SyncMarker[]
+  syncDiagnostics         V2SyncDiagnostic[]
+  syncDiagnosticHead      V2SyncDiagnosticHead?
+  multicamEvidenceSets    V2MulticamEvidenceSet[]
+  multicamDirections      V2MulticamDirection[]
+  multicamDirectionHead   V2MulticamDirectionHead?
+  cameraColorMeasurements V2CameraColorMeasurement[]
+  multicamMatchPlans      V2MulticamMatchPlan[]
+  multicamMatchPlanHeads  V2MulticamMatchPlanHead[]
+  playbackMaps            V2PlaybackMap[]
+  playbackMapHeads        V2PlaybackMapHead[]
 
   @@unique([id, workspaceId])
   @@unique([sessionId, workspaceId])
@@ -8962,8 +9001,8 @@ model V2SyncMarker {
   markerHash     String   @db.Char(64)
   createdAt      DateTime @db.Timestamptz(3)
 
-  workspace  V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  session    V2CaptureSessionHead   @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  workspace  V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session    V2CaptureSessionHead    @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
   detections V2SyncMarkerDetection[]
 
   @@unique([id, workspaceId])
@@ -9053,4 +9092,835 @@ model V2SyncDiagnosticHead {
   @@unique([sessionId, workspaceId])
   @@index([workspaceId, status])
   @@map("sync_diagnostic_heads")
+}
+
+// ---------------------------------------------------------------------------
+// F4.012 / FR-150 — multicam evidence, angle candidates, shots and directions.
+//
+// A direction is an immutable chain (V2MulticamDirection) plus a mutable head
+// (V2MulticamDirectionHead), the shape Wave 18/19 use for capture sessions and
+// sync diagnostics. The aggregate itself carries no version field: the chain
+// position lives only in these rows, so `version` and `previousVersionHash`
+// are storage columns and the CHECK that ties them is the only thing keeping
+// the chain honest.
+//
+// Shots, their alternatives, the candidates of each decided window and the
+// components of each score are rows rather than JSON, because a rejected
+// candidate has to be inspectable (ADR-118) and an overlap between two shots
+// has to be refusable by the database rather than by whoever wrote last.
+// ---------------------------------------------------------------------------
+
+model V2MulticamEvidenceSet {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  sessionId        String   @db.VarChar(128)
+  schemaVersion    String   @db.VarChar(64)
+  sessionVersion   Int
+  referenceEpoch   Int
+  observationCount Int
+  generatedAt      DateTime @db.Timestamptz(3)
+  evidenceHash     String   @db.Char(64)
+  createdAt        DateTime @db.Timestamptz(3)
+
+  workspace    V2Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session      V2CaptureSessionHead    @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  observations V2MulticamObservation[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, evidenceHash])
+  @@index([workspaceId, sessionId, generatedAt(sort: Desc)])
+  @@map("multicam_evidence_sets")
+}
+
+model V2MulticamObservation {
+  id              String   @id @db.VarChar(160)
+  workspaceId     String   @db.VarChar(128)
+  evidenceSetId   String   @db.VarChar(128)
+  observationId   String   @db.VarChar(128)
+  trackId         String   @db.VarChar(128)
+  rangeStartTicks BigInt
+  rangeEndTicks   BigInt
+  kind            String   @db.VarChar(24)
+  valueJson       String   @db.Text
+  confidence      Float
+  method          String   @db.VarChar(128)
+  evaluatorKind   String   @db.VarChar(16)
+  evidenceRef     String   @db.VarChar(512)
+  producedAt      DateTime @db.Timestamptz(3)
+
+  workspace   V2Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  evidenceSet V2MulticamEvidenceSet @relation(fields: [evidenceSetId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, evidenceSetId, observationId], map: "multicam_observations_set_observation_key")
+  @@index([workspaceId, evidenceSetId, kind])
+  @@map("multicam_observations")
+}
+
+model V2MulticamDirection {
+  id                       String   @id @db.VarChar(160)
+  workspaceId              String   @db.VarChar(128)
+  sessionId                String   @db.VarChar(128)
+  schemaVersion            String   @db.VarChar(64)
+  version                  Int
+  previousVersionHash      String?  @db.Char(64)
+  sessionVersion           Int
+  referenceEpoch           Int
+  diagnosticVersion        Int
+  diagnosticHash           String   @db.Char(64)
+  evidenceHash             String   @db.Char(64)
+  rangeStartTicks          BigInt
+  rangeEndTicks            BigInt
+  aspectRatio              String   @db.VarChar(8)
+  policyCalibrationVersion String   @db.VarChar(128)
+  policyJson               String   @db.Text
+  audioTrackId             String?  @db.VarChar(128)
+  audioRejectedJson        String   @default("[]") @db.Text
+  shotCount                Int
+  lowConfidenceShotCount   Int      @default(0)
+  uncoveredJson            String   @default("[]") @db.Text
+  uncoveredCount           Int      @default(0)
+  warningsJson             String   @default("[]") @db.Text
+  warningCount             Int      @default(0)
+  manualReviewRequired     Boolean
+  generatedAt              DateTime @db.Timestamptz(3)
+  directionHash            String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead     @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  shots     V2MulticamShotDecision[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, version])
+  @@unique([workspaceId, directionHash])
+  @@index([workspaceId, sessionId, generatedAt(sort: Desc)])
+  @@index([workspaceId, sessionId, diagnosticHash])
+  @@index([workspaceId, evidenceHash])
+  @@map("multicam_directions")
+}
+
+model V2MulticamDirectionHead {
+  id                   String   @id @db.VarChar(128)
+  workspaceId          String   @db.VarChar(128)
+  sessionId            String   @db.VarChar(128)
+  version              Int
+  directionHash        String   @db.Char(64)
+  shotCount            Int
+  manualReviewRequired Boolean
+  createdAt            DateTime @db.Timestamptz(3)
+  updatedAt            DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([sessionId, workspaceId])
+  @@index([workspaceId, manualReviewRequired])
+  @@map("multicam_direction_heads")
+}
+
+model V2MulticamShotDecision {
+  id                    String  @id @db.VarChar(160)
+  workspaceId           String  @db.VarChar(128)
+  directionId           String  @db.VarChar(160)
+  sessionId             String  @db.VarChar(128)
+  shotId                String  @db.VarChar(128)
+  ordinal               Int
+  schemaVersion         String  @db.VarChar(64)
+  sessionStartTicks     BigInt
+  sessionEndTicks       BigInt
+  trackId               String  @db.VarChar(128)
+  cameraId              String  @db.VarChar(128)
+  candidateId           String  @db.VarChar(128)
+  candidateHash         String  @db.Char(64)
+  sourcePieceId         String? @db.VarChar(128)
+  sourcePartId          String? @db.VarChar(128)
+  audioTrackId          String? @db.VarChar(128)
+  rule                  String  @db.VarChar(32)
+  reason                String  @db.VarChar(1024)
+  evidenceRefsJson      String  @default("[]") @db.Text
+  evidenceRefCount      Int
+  evidenceRefsTruncated Int     @default(0)
+  confidence            Float
+  confidenceBand        String  @db.VarChar(16)
+  alternativeCount      Int     @default(0)
+  decisionHash          String  @db.Char(64)
+
+  workspace    V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  direction    V2MulticamDirection         @relation(fields: [directionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  alternatives V2MulticamShotAlternative[]
+  candidates   V2MulticamAngleCandidate[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, directionId, ordinal])
+  @@unique([workspaceId, directionId, shotId])
+  @@index([workspaceId, sessionId, trackId])
+  @@map("multicam_shot_decisions")
+}
+
+model V2MulticamShotAlternative {
+  id              String @id @db.VarChar(160)
+  workspaceId     String @db.VarChar(128)
+  shotId          String @db.VarChar(160)
+  directionId     String @db.VarChar(160)
+  candidateId     String @db.VarChar(128)
+  trackId         String @db.VarChar(128)
+  ordinal         Int
+  scoreTotal      Float
+  rejectedBecause String @db.VarChar(512)
+
+  workspace V2Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  shot      V2MulticamShotDecision @relation(fields: [shotId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, shotId, candidateId])
+  @@index([workspaceId, directionId])
+  @@map("multicam_shot_alternatives")
+}
+
+model V2MulticamAngleCandidate {
+  id                    String  @id @db.VarChar(160)
+  workspaceId           String  @db.VarChar(128)
+  shotId                String  @db.VarChar(160)
+  directionId           String  @db.VarChar(160)
+  candidateId           String  @db.VarChar(128)
+  schemaVersion         String  @db.VarChar(64)
+  trackId               String  @db.VarChar(128)
+  sourceAssetId         String  @db.VarChar(128)
+  role                  String  @db.VarChar(24)
+  context               String  @db.VarChar(24)
+  sessionStartTicks     BigInt
+  sessionEndTicks       BigInt
+  sourceStartTicks      BigInt?
+  sourceEndTicks        BigInt?
+  sourcePieceId         String? @db.VarChar(128)
+  sourcePartId          String? @db.VarChar(128)
+  sourcePartAssetId     String? @db.VarChar(128)
+  coverageAvailability  String  @db.VarChar(16)
+  coverageConfidenceBps Int?
+  syncStatus            String? @db.VarChar(16)
+  syncConfidence        Float?
+  previousTrackId       String? @db.VarChar(128)
+  sameAngleTicks        BigInt
+  spatialRelation       String  @db.VarChar(16)
+  protectedSelectionId  String? @db.VarChar(128)
+  protectedReason       String? @db.VarChar(512)
+  eligible              Boolean
+  rejectionReasonsJson  String  @default("[]") @db.Text
+  rejectionCount        Int     @default(0)
+  scoreTotal            Float
+  candidateHash         String  @db.Char(64)
+
+  workspace  V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  shot       V2MulticamShotDecision          @relation(fields: [shotId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  components V2MulticamAngleScoreComponent[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, shotId, candidateId])
+  @@index([workspaceId, directionId, eligible])
+  @@index([workspaceId, trackId])
+  @@map("multicam_angle_candidates")
+}
+
+model V2MulticamAngleScoreComponent {
+  id               String @id @db.VarChar(160)
+  workspaceId      String @db.VarChar(128)
+  candidateId      String @db.VarChar(160)
+  name             String @db.VarChar(32)
+  value            Float
+  evidenceRefsJson String @default("[]") @db.Text
+  evidenceRefCount Int    @default(0)
+
+  workspace V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  candidate V2MulticamAngleCandidate @relation(fields: [candidateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, candidateId, name], map: "multicam_angle_score_components_candidate_name_key")
+  @@map("multicam_angle_score_components")
+}
+
+// ---------------------------------------------------------------------------
+// F4.013 / FR-151 — camera colour measurements and multicam match plans.
+//
+// A measurement is its own aggregate, not a copy inside every plan that reads
+// it: the same measured range is cited by a match plan and by a colour critic
+// report, and two copies would be two answers. Each dimension is a row so that
+// "unavailable" can be a first-class answer with no number beside it, and each
+// named component (rOverG, bOverG, percentiles) is a row under its dimension.
+//
+// A match plan is a chain plus a head per project and session. `pipelineStage`
+// is a literal CHECK rather than a value set: a match transform that ran after
+// the creative LUT is not a match, and the database says so before the render
+// does.
+// ---------------------------------------------------------------------------
+
+model V2CameraColorMeasurement {
+  id                 String   @id @db.VarChar(128)
+  workspaceId        String   @db.VarChar(128)
+  sessionId          String?  @db.VarChar(128)
+  schemaVersion      String   @db.VarChar(64)
+  measurementId      String   @db.VarChar(128)
+  sourceAssetId      String   @db.VarChar(128)
+  sourceSha256       String   @db.Char(64)
+  cameraId           String   @db.VarChar(128)
+  rangeStartTicks    BigInt
+  rangeEndTicks      BigInt
+  sourceStartFrame   Int
+  sourceEndFrame     Int
+  sampledFrames      Int
+  pixelFormat        String   @db.VarChar(32)
+  hdrMode            String   @db.VarChar(8)
+  metadataJson       String   @db.Text
+  comparable         Boolean
+  comparabilityJson  String   @default("[]") @db.Text
+  confidence         Float
+  issuesJson         String   @default("[]") @db.Text
+  measuredDimensions Int      @default(0)
+  measurementHash    String   @db.Char(64)
+  createdAt          DateTime @db.Timestamptz(3)
+
+  workspace  V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session    V2CaptureSessionHead?         @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  dimensions V2ColorMeasurementDimension[]
+  matchPlans V2MatchPlanMeasurement[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, measurementHash])
+  @@index([workspaceId, cameraId, sourceAssetId], map: "camera_color_measurements_camera_source_idx")
+  @@index([workspaceId, sessionId])
+  @@map("camera_color_measurements")
+}
+
+model V2ColorMeasurementDimension {
+  id               String  @id @db.VarChar(160)
+  workspaceId      String  @db.VarChar(128)
+  measurementId    String  @db.VarChar(128)
+  dimension        String  @db.VarChar(24)
+  status           String  @db.VarChar(16)
+  value            Float?
+  unit             String? @db.VarChar(24)
+  evaluatorId      String? @db.VarChar(128)
+  evaluatorKind    String? @db.VarChar(16)
+  evaluatorVersion String? @db.VarChar(64)
+  evidenceRef      String? @db.VarChar(512)
+  reason           String? @db.VarChar(512)
+
+  workspace   V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  measurement V2CameraColorMeasurement      @relation(fields: [measurementId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  components  V2ColorMeasurementComponent[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, measurementId, dimension], map: "color_measurement_dimensions_measurement_dimension_key")
+  @@index([workspaceId, dimension, status], map: "color_measurement_dimensions_dimension_status_idx")
+  @@map("color_measurement_dimensions")
+}
+
+model V2ColorMeasurementComponent {
+  id          String @id @db.VarChar(160)
+  workspaceId String @db.VarChar(128)
+  dimensionId String @db.VarChar(160)
+  name        String @db.VarChar(64)
+  value       Float
+
+  workspace V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  dimension V2ColorMeasurementDimension @relation(fields: [dimensionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, dimensionId, name], map: "color_measurement_components_dimension_name_key")
+  @@map("color_measurement_components")
+}
+
+model V2MulticamMatchPlan {
+  id                          String   @id @db.VarChar(160)
+  workspaceId                 String   @db.VarChar(128)
+  projectId                   String   @db.VarChar(128)
+  sessionId                   String   @db.VarChar(128)
+  schemaVersion               String   @db.VarChar(64)
+  planId                      String   @db.VarChar(128)
+  version                     Int
+  previousVersionHash         String?  @db.Char(64)
+  supersedesPlanId            String?  @db.VarChar(128)
+  sessionVersion              Int
+  referenceEpoch              Int
+  referenceCameraId           String   @db.VarChar(128)
+  selectedByKind              String   @db.VarChar(16)
+  selectedById                String   @db.VarChar(128)
+  selectedAt                  DateTime @db.Timestamptz(3)
+  selectionBaseVersionId      String   @db.VarChar(160)
+  selectionBaseHash           String   @db.Char(64)
+  confidence                  Float
+  pipelineStage               String   @db.VarChar(16)
+  humanReviewRequired         Boolean
+  transformCount              Int      @default(0)
+  overrideCount               Int      @default(0)
+  issueCount                  Int      @default(0)
+  nonComparableCount          Int      @default(0)
+  reviewIssueCount            Int      @default(0)
+  lineageJson                 String   @db.Text
+  dependsOnMeasurementIdsJson String   @default("[]") @db.Text
+  planHash                    String   @db.Char(64)
+  createdAt                   DateTime @db.Timestamptz(3)
+
+  workspace           V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project             V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  session             V2CaptureSessionHead        @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  measurements        V2MatchPlanMeasurement[]
+  cameraTransforms    V2CameraMatchTransform[]
+  rangeOverrides      V2MatchRangeOverride[]
+  nonComparableRanges V2MatchNonComparableRange[]
+  issues              V2MatchPlanIssue[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, sessionId, version], map: "multicam_match_plans_project_session_version_key")
+  @@unique([workspaceId, planHash])
+  @@index([workspaceId, sessionId, createdAt(sort: Desc)])
+  @@index([workspaceId, referenceCameraId])
+  @@map("multicam_match_plans")
+}
+
+model V2MulticamMatchPlanHead {
+  id                  String   @id @db.VarChar(160)
+  workspaceId         String   @db.VarChar(128)
+  projectId           String   @db.VarChar(128)
+  sessionId           String   @db.VarChar(128)
+  planId              String   @db.VarChar(128)
+  version             Int
+  planHash            String   @db.Char(64)
+  referenceCameraId   String   @db.VarChar(128)
+  humanReviewRequired Boolean
+  createdAt           DateTime @db.Timestamptz(3)
+  updatedAt           DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project            @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([projectId, sessionId, workspaceId])
+  @@index([workspaceId, humanReviewRequired])
+  @@map("multicam_match_plan_heads")
+}
+
+model V2MatchPlanMeasurement {
+  id            String  @id @db.VarChar(160)
+  workspaceId   String  @db.VarChar(128)
+  planId        String  @db.VarChar(160)
+  measurementId String  @db.VarChar(128)
+  cameraId      String  @db.VarChar(128)
+  isReference   Boolean
+
+  workspace   V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  plan        V2MulticamMatchPlan      @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  measurement V2CameraColorMeasurement @relation(fields: [measurementId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, measurementId], map: "match_plan_measurements_plan_measurement_key")
+  @@index([workspaceId, measurementId])
+  @@map("match_plan_measurements")
+}
+
+model V2CameraMatchTransform {
+  id               String  @id @db.VarChar(160)
+  workspaceId      String  @db.VarChar(128)
+  planId           String  @db.VarChar(160)
+  cameraId         String  @db.VarChar(128)
+  transformId      String  @db.VarChar(128)
+  provider         String  @db.VarChar(32)
+  providerVersion  String  @db.VarChar(8)
+  mode             String  @db.VarChar(16)
+  enabled          Boolean
+  parametersJson   String  @db.Text
+  deltasJson       String  @db.Text
+  brightness       Float?
+  contrast         Float?
+  saturation       Float?
+  redGain          Float?
+  greenGain        Float?
+  blueGain         Float?
+  exposureEv       Float?
+  derivedFromJson  String  @default("[]") @db.Text
+  derivedFromCount Int     @default(0)
+  rangePairs       Int
+  confidence       Float
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  plan      V2MulticamMatchPlan @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, cameraId])
+  @@index([workspaceId, cameraId])
+  @@map("camera_match_transforms")
+}
+
+model V2MatchRangeOverride {
+  id              String  @id @db.VarChar(160)
+  workspaceId     String  @db.VarChar(128)
+  planId          String  @db.VarChar(160)
+  overrideId      String  @db.VarChar(128)
+  cameraId        String  @db.VarChar(128)
+  segmentId       String? @db.VarChar(128)
+  rangeStartTicks BigInt?
+  rangeEndTicks   BigInt?
+  transformId     String  @db.VarChar(128)
+  provider        String  @db.VarChar(32)
+  providerVersion String  @db.VarChar(8)
+  parametersJson  String  @db.Text
+  reason          String  @db.VarChar(1024)
+  actorKind       String  @db.VarChar(16)
+  actorId         String  @db.VarChar(128)
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  plan      V2MulticamMatchPlan @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, overrideId])
+  @@index([workspaceId, planId, cameraId])
+  @@map("match_range_overrides")
+}
+
+model V2MatchNonComparableRange {
+  id              String @id @db.VarChar(160)
+  workspaceId     String @db.VarChar(128)
+  planId          String @db.VarChar(160)
+  ordinal         Int
+  cameraId        String @db.VarChar(128)
+  measurementId   String @db.VarChar(128)
+  rangeStartTicks BigInt
+  rangeEndTicks   BigInt
+  reason          String @db.VarChar(1024)
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  plan      V2MulticamMatchPlan @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, ordinal])
+  @@index([workspaceId, planId, cameraId])
+  @@map("match_non_comparable_ranges")
+}
+
+model V2MatchPlanIssue {
+  id                  String  @id @db.VarChar(160)
+  workspaceId         String  @db.VarChar(128)
+  planId              String  @db.VarChar(160)
+  ordinal             Int
+  code                String  @db.VarChar(64)
+  cameraId            String? @db.VarChar(128)
+  message             String  @db.VarChar(1024)
+  humanReviewRequired Boolean
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  plan      V2MulticamMatchPlan @relation(fields: [planId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planId, ordinal])
+  @@index([workspaceId, code])
+  @@map("match_plan_issues")
+}
+
+// ---------------------------------------------------------------------------
+// F4.014 / FR-152 — colour critic reports.
+//
+// The report is content-addressed and not versioned: a second look at the same
+// bytes with the same thresholds is the same report. What the CHECKs encode is
+// the cause table of ADR-147 — the action is the one the cause maps to, an
+// approval carries no blocking issue and no unread dimension, a rejection
+// localizes at least one, and a bounded correction exists exactly when the
+// verdict is `bounded-correction`, within its iteration budget and above its
+// confidence floor.
+// ---------------------------------------------------------------------------
+
+model V2ColorCriticReport {
+  id                        String   @id @db.VarChar(128)
+  workspaceId               String   @db.VarChar(128)
+  projectId                 String   @db.VarChar(128)
+  projectVersionId          String   @db.VarChar(128)
+  schemaVersion             String   @db.VarChar(64)
+  reportId                  String   @db.VarChar(128)
+  subjectKind               String   @db.VarChar(16)
+  subjectSourceAssetId      String?  @db.VarChar(128)
+  subjectCameraId           String?  @db.VarChar(128)
+  subjectArtifactId         String?  @db.VarChar(128)
+  subjectRangeStartTicks    BigInt?
+  subjectRangeEndTicks      BigInt?
+  referenceCameraId         String?  @db.VarChar(128)
+  matchPlanId               String?  @db.VarChar(128)
+  matchPlanHash             String?  @db.Char(64)
+  sectionCount              Int
+  sectionsJson              String   @db.Text
+  stagePairsJson            String   @default("[]") @db.Text
+  bytesEvaluatedJson        String   @default("[]") @db.Text
+  bytesEvaluatedCount       Int      @default(0)
+  evaluatorsJson            String   @db.Text
+  dimensionCount            Int
+  unavailableDimensionCount Int      @default(0)
+  issueCount                Int      @default(0)
+  hardIssueCount            Int      @default(0)
+  insufficientEvidenceCount Int      @default(0)
+  creativeIntentDeclared    Boolean
+  creativeIntentJson        String   @db.Text
+  castAllowedDelta          Float?
+  maxDeclaredCastAllowance  Float
+  cause                     String   @db.VarChar(40)
+  action                    String   @db.VarChar(24)
+  correctionIteration       Int?
+  correctionMaxIterations   Int?
+  correctionReason          String?  @db.VarChar(1024)
+  proposedDeltaCount        Int      @default(0)
+  confidence                Float
+  confidenceBand            String   @db.VarChar(16)
+  thresholdVersion          String   @db.VarChar(64)
+  thresholdsJson            String   @db.Text
+  evaluatedAt               DateTime @db.Timestamptz(3)
+  reportHash                String   @db.Char(64)
+  createdAt                 DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion               @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
+  dimensions     V2ColorCriticDimensionResult[]
+  issues         V2ColorCriticIssue[]
+  proposedDeltas V2ColorCriticProposedDelta[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, reportHash])
+  @@index([workspaceId, projectId, evaluatedAt(sort: Desc)])
+  @@index([workspaceId, projectVersionId, action])
+  @@index([workspaceId, matchPlanId])
+  @@map("color_critic_reports")
+}
+
+model V2ColorCriticDimensionResult {
+  id               String  @id @db.VarChar(160)
+  workspaceId      String  @db.VarChar(128)
+  reportId         String  @db.VarChar(128)
+  dimension        String  @db.VarChar(24)
+  status           String  @db.VarChar(16)
+  stage            String  @db.VarChar(32)
+  value            Float?
+  unit             String? @db.VarChar(24)
+  threshold        Float?
+  classification   String? @db.VarChar(24)
+  reason           String? @db.VarChar(512)
+  evaluatorIdsJson String  @default("[]") @db.Text
+  evidenceRefsJson String  @default("[]") @db.Text
+  cameraIdsJson    String  @default("[]") @db.Text
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report    V2ColorCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, reportId, dimension], map: "color_critic_dimension_results_report_dimension_key")
+  @@index([workspaceId, dimension, status], map: "color_critic_dimension_results_dimension_status_idx")
+  @@map("color_critic_dimension_results")
+}
+
+model V2ColorCriticIssue {
+  id                 String  @id @db.VarChar(160)
+  workspaceId        String  @db.VarChar(128)
+  reportId           String  @db.VarChar(128)
+  ordinal            Int
+  code               String  @db.VarChar(64)
+  dimension          String  @db.VarChar(24)
+  severity           String  @db.VarChar(16)
+  classification     String  @db.VarChar(24)
+  cause              String  @db.VarChar(40)
+  stage              String  @db.VarChar(32)
+  cameraId           String? @db.VarChar(128)
+  rangeStartTicks    BigInt?
+  rangeEndTicks      BigInt?
+  measured           Float?
+  threshold          Float?
+  thresholdVersion   String  @db.VarChar(64)
+  confidence         Float
+  evidenceRefsJson   String  @default("[]") @db.Text
+  evidenceArtifactId String? @db.VarChar(128)
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report    V2ColorCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, reportId, ordinal])
+  @@index([workspaceId, reportId, severity])
+  @@map("color_critic_issues")
+}
+
+model V2ColorCriticProposedDelta {
+  id            String @id @db.VarChar(160)
+  workspaceId   String @db.VarChar(128)
+  reportId      String @db.VarChar(128)
+  cameraId      String @db.VarChar(128)
+  exposureEv    Float?
+  redGain       Float?
+  greenGain     Float?
+  blueGain      Float?
+  saturation    Float?
+  maxExposureEv Float
+  maxGain       Float
+  minSaturation Float
+  maxSaturation Float
+
+  workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report    V2ColorCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, reportId, cameraId])
+  @@map("color_critic_proposed_deltas")
+}
+
+// ---------------------------------------------------------------------------
+// F4.015 / FR-153 — react playback maps.
+//
+// The map is a chain plus a head per session and reaction track. The reference
+// recording's identity is stored as columns rather than buried in JSON because
+// that identity is the invalidation key: different reference bytes mean every
+// reference tick means something else, so the old map is superseded rather
+// than amended, and the dependants of a reference are an index scan over those
+// two columns.
+//
+// The nullability of `referenceRange` is conditioned on the mode: a `paused`
+// or `commentary-only` piece that claimed reference time would be asserting
+// the reference advanced while it was stopped.
+// ---------------------------------------------------------------------------
+
+model V2PlaybackMap {
+  id                     String   @id @db.VarChar(160)
+  workspaceId            String   @db.VarChar(128)
+  sessionId              String   @db.VarChar(128)
+  schemaVersion          String   @db.VarChar(64)
+  mapId                  String   @db.VarChar(128)
+  version                Int
+  previousVersionHash    String?  @db.Char(64)
+  supersedesMapId        String?  @db.VarChar(128)
+  sessionVersion         Int
+  referenceEpoch         Int
+  reactionTrackId        String   @db.VarChar(128)
+  referenceTrackId       String   @db.VarChar(128)
+  referenceAssetId       String   @db.VarChar(128)
+  referenceSha256        String   @db.Char(64)
+  referenceDurationTicks BigInt
+  referenceTimebaseNum   BigInt
+  referenceTimebaseDen   BigInt
+  reactionAssetId        String   @db.VarChar(128)
+  reactionSha256         String   @db.Char(64)
+  reactionDurationTicks  BigInt
+  status                 String   @db.VarChar(16)
+  warningsJson           String   @default("[]") @db.Text
+  pieceCount             Int
+  referencedPieceCount   Int      @default(0)
+  uncoveredCount         Int      @default(0)
+  anchorCount            Int      @default(0)
+  manualAnchorCount      Int      @default(0)
+  mapHash                String   @db.Char(64)
+  createdAt              DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead       @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  pieces    V2PlaybackPiece[]
+  anchors   V2PlaybackAnchor[]
+  uncovered V2PlaybackUncoveredRange[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, reactionTrackId, version], map: "playback_maps_session_reaction_version_key")
+  @@unique([workspaceId, mapHash])
+  @@index([workspaceId, sessionId, status])
+  @@index([workspaceId, referenceAssetId, referenceSha256])
+  @@map("playback_maps")
+}
+
+model V2PlaybackMapHead {
+  id              String   @id @db.VarChar(160)
+  workspaceId     String   @db.VarChar(128)
+  sessionId       String   @db.VarChar(128)
+  reactionTrackId String   @db.VarChar(128)
+  mapId           String   @db.VarChar(128)
+  version         Int
+  mapHash         String   @db.Char(64)
+  status          String   @db.VarChar(16)
+  createdAt       DateTime @db.Timestamptz(3)
+  updatedAt       DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session   V2CaptureSessionHead @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sessionId, reactionTrackId])
+  @@index([workspaceId, status])
+  @@map("playback_map_heads")
+}
+
+model V2PlaybackPiece {
+  id                  String  @id @db.VarChar(160)
+  workspaceId         String  @db.VarChar(128)
+  mapId               String  @db.VarChar(160)
+  pieceId             String  @db.VarChar(128)
+  ordinal             Int
+  mode                String  @db.VarChar(24)
+  reactionStartTicks  BigInt
+  reactionEndTicks    BigInt
+  referenceStartTicks BigInt?
+  referenceEndTicks   BigInt?
+  rateNum             BigInt?
+  rateDen             BigInt?
+  direction           String  @db.VarChar(16)
+  confidence          Float
+  evidenceRefsJson    String  @default("[]") @db.Text
+  evidenceRefCount    Int
+  detectionMethod     String  @db.VarChar(24)
+  residualTicks       BigInt?
+  discontinuityReason String? @db.VarChar(32)
+  pieceHash           String  @db.Char(64)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  map       V2PlaybackMap @relation(fields: [mapId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, mapId, ordinal])
+  @@unique([workspaceId, mapId, pieceId])
+  @@index([workspaceId, mapId, mode])
+  @@map("playback_pieces")
+}
+
+model V2PlaybackAnchor {
+  id            String   @id @db.VarChar(160)
+  workspaceId   String   @db.VarChar(128)
+  mapId         String   @db.VarChar(160)
+  anchorId      String   @db.VarChar(128)
+  origin        String   @db.VarChar(16)
+  reactionTick  BigInt
+  referenceTick BigInt?
+  mode          String?  @db.VarChar(24)
+  method        String   @db.VarChar(24)
+  confidence    Float
+  evidenceRef   String   @db.VarChar(512)
+  actorKind     String?  @db.VarChar(16)
+  actorId       String?  @db.VarChar(128)
+  note          String?  @db.VarChar(1024)
+  createdAt     DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  map       V2PlaybackMap @relation(fields: [mapId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, mapId, anchorId])
+  @@index([workspaceId, mapId, origin])
+  @@map("playback_anchors")
+}
+
+model V2PlaybackUncoveredRange {
+  id                 String @id @db.VarChar(160)
+  workspaceId        String @db.VarChar(128)
+  mapId              String @db.VarChar(160)
+  ordinal            Int
+  reactionStartTicks BigInt
+  reactionEndTicks   BigInt
+  reason             String @db.VarChar(32)
+
+  workspace V2Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  map       V2PlaybackMap @relation(fields: [mapId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, mapId, ordinal])
+  @@index([workspaceId, mapId, reason])
+  @@map("playback_uncovered_ranges")
 }
