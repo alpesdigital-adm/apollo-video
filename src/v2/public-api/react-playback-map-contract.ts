@@ -167,6 +167,7 @@ export function presentBuiltPlaybackMap(result: Readonly<BuildReactPlaybackMapRe
     map: presentPlaybackMap(result.map),
     versionRef: `${result.map.sessionId}:playback:${result.map.reactionTrackId}:v${result.map.version}`,
     manualReviewRequired: result.manualReviewRequired,
+    replayed: result.replayed,
     supersededMapId: result.supersededMapId,
     carriedAnchors: result.carriedAnchors,
     // Anchors that could not be carried because the recording they point into
@@ -181,6 +182,7 @@ export function presentBuiltPlaybackMap(result: Readonly<BuildReactPlaybackMapRe
 
 export function presentAnchoredPlaybackMap(result: Readonly<{
   map: Readonly<PlaybackMap>
+  replayed: boolean
   manualReviewRequired: boolean
   invalidated: Readonly<StrandedRenderablePlan> | null
 }>) {
@@ -188,6 +190,7 @@ export function presentAnchoredPlaybackMap(result: Readonly<{
     map: presentPlaybackMap(result.map),
     versionRef: `${result.map.sessionId}:playback:${result.map.reactionTrackId}:v${result.map.version}`,
     manualReviewRequired: result.manualReviewRequired,
+    replayed: result.replayed,
     invalidated: presentStrandedPlan(result.invalidated),
   })
 }

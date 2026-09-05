@@ -1470,6 +1470,29 @@ export interface MulticamAngleCandidateListing extends MulticamDirectionRead {
 }
 
 /**
+ * One shot's decided window, as the candidate listing publishes it.
+ *
+ * Exported so the listing, its published example and any future caller derive
+ * the window the same way. A second mapping written beside this one is a second
+ * answer to "which candidates were offered here".
+ */
+export function toAngleCandidateWindow(
+  shot: Readonly<ShotDecision>,
+  trackId?: string,
+): Readonly<MulticamAngleCandidateWindow> {
+  return Object.freeze({
+    shotId: shot.shotId,
+    ordinal: shot.ordinal,
+    sessionRange: shot.sessionRange,
+    rule: shot.rule,
+    chosenCandidateId: shot.chosen.candidateId,
+    candidates: Object.freeze(trackId === undefined
+      ? [...shot.evaluated]
+      : shot.evaluated.filter((candidate) => candidate.trackId === trackId)),
+  })
+}
+
+/**
  * What was on offer at each instant of a range, and why the rest lost.
  *
  * Read out of the stored direction rather than re-derived: re-running the
@@ -1488,16 +1511,7 @@ export function listMulticamAngleCandidatesService(dependencies: { directions: M
     const read = await readDirection(dependencies.directions, input)
     const matching = read.direction.shots
       .filter((shot) => overlapsWindow(shot.sessionRange, input))
-      .map((shot) => Object.freeze({
-        shotId: shot.shotId,
-        ordinal: shot.ordinal,
-        sessionRange: shot.sessionRange,
-        rule: shot.rule,
-        chosenCandidateId: shot.chosen.candidateId,
-        candidates: Object.freeze(input.trackId === undefined
-          ? [...shot.evaluated]
-          : shot.evaluated.filter((candidate) => candidate.trackId === input.trackId)),
-      }))
+      .map((shot) => toAngleCandidateWindow(shot, input.trackId))
       // A track filter that leaves a window with nothing to say drops the
       // window: an empty candidate list would read as "this track was evaluated
       // here and lost", which is a different fact from "it was never offered".

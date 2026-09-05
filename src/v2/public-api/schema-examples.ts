@@ -41,6 +41,52 @@ import { OUTPUT_FORMAT_REGISTRY } from '../domain/output-format-registry.ts'
 import { RESPONSIVE_VISUAL_GOLDENS } from '../domain/responsive-output.ts'
 import { quickSubtitlePreview, SUBTITLE_STYLE_REGISTRY } from '../domain/subtitle-system.ts'
 import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
+// Wave 20 — F4.012 to F4.015. Same rule as Wave 19: the aggregate comes out of
+// the constructor the endpoint uses and goes through the presenter the route
+// uses, so a published example cannot describe a response the code does not
+// produce.
+import { buildDirectMulticamSessionCommand } from '../application/direct-multicam-session.ts'
+import { directionVersionRef, toAngleCandidateWindow } from '../application/multicam-direction.ts'
+import { matchPlanVersionRef } from '../application/multicam-color-match.ts'
+import { captureSessionDerivationRef } from '../domain/capture-session.ts'
+import { evaluateColorCritic } from '../domain/color-critic-report.ts'
+import { createCameraColorMeasurement } from '../domain/color-measurement.ts'
+import { directMulticam } from '../domain/multicam-direction.ts'
+import { createMulticamEvidenceSet } from '../domain/multicam-evidence.ts'
+import {
+  addMulticamMatchRangeOverride,
+  deriveMulticamMatchPlan,
+} from '../domain/multicam-match-plan.ts'
+import { createPiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
+import { applyPlaybackAnchor, buildPlaybackMap, defaultPlaybackPolicy } from '../domain/playback-map.ts'
+import { createProjectVersion } from '../domain/project-version.ts'
+import {
+  createSessionClock,
+  createSourceClock,
+  createSourceToSessionMapping,
+} from '../domain/session-clock.ts'
+import { timebaseFromRate } from '../domain/session-time.ts'
+import { createTrackCoverage } from '../domain/track-coverage.ts'
+import {
+  presentAngleCandidateListing,
+  presentDirectedSession,
+  presentMulticamDirectionRead,
+  presentShotDecisionListing,
+} from './multicam-direction-contract.ts'
+import {
+  presentColorCriticIssueListing,
+  presentColorCriticReport,
+  presentColorCriticReportSummary,
+  presentDerivedMatchPlan,
+  presentMatchOverrideResult,
+  presentMulticamMatchPlanRead,
+} from './multicam-color-contract.ts'
+import {
+  presentAnchoredPlaybackMap,
+  presentBuiltPlaybackMap,
+  presentPlaybackMapRead,
+  presentPlaybackPieceListing,
+} from './react-playback-map-contract.ts'
 
 const createdAt = '2026-07-12T20:00:00.000Z'
 
@@ -6214,6 +6260,653 @@ const editorialSynthesisExample = Object.freeze({
   ],
   synthesisHash: 'c'.repeat(64),
   createdAt: '2029-04-02T14:30:00.000Z',
+})
+
+/**
+ * Wave 20 fixtures (F4.012–F4.015).
+ *
+ * Every aggregate below comes out of the same constructor the endpoint uses:
+ * the direction from `directMulticam`, the match plan from
+ * `deriveMulticamMatchPlan`, the verdict from `evaluateColorCritic`, the map
+ * from `buildPlaybackMap`. The only literals are the service result records
+ * that have no factory — a ColorPlan write receipt and an idempotency replay
+ * flag — which is the same exception `w19MarkerArtifactExample` already makes.
+ *
+ * The published shapes are deliberately not all healthy. Camera B stops
+ * recording a third of the way through the panel, so its candidacies carry real
+ * `coverage-out-of-bounds` rejections; the reaction pauses, talks over a stopped
+ * reference and leaves a stretch nobody could resolve, so the playback example
+ * publishes a `needs-input` map with an uncovered range. An example that only
+ * ever shows the happy path documents the one case a naive client also gets
+ * right.
+ */
+
+const w20Hz = 90_000
+const w20Timebase = timebaseFromRate(w20Hz)
+const w20Ticks = (seconds: number): bigint => BigInt(Math.round(seconds * w20Hz))
+const w20At = (second: number) => new Date(Date.parse('2026-09-04T09:00:00.000Z') + second * 1000).toISOString()
+const w20Digest = (seed: string) => seed.repeat(64).slice(0, 64)
+const w20Session = 'capture-session-multicam-panel'
+
+function w20Part(input: {
+  partId: string
+  sourceAssetId: string
+  coverage: Readonly<{ start: bigint; end: bigint }>
+  ingestSha256: string
+}) {
+  return {
+    partId: input.partId,
+    ordinal: 0,
+    sourceAssetId: input.sourceAssetId,
+    timebase: w20Timebase,
+    coverage: createTickInterval(input.coverage.start, input.coverage.end),
+    streamIndex: 0,
+    splitReason: 'single-file' as const,
+    evidence: {
+      ingestArtifactId: `artifact-${input.sourceAssetId}`,
+      ingestSha256: input.ingestSha256,
+      probeHash: w20Digest('b'),
+      probeSource: 'packet-scan' as const,
+      observedAt: w20At(0),
+    },
+  }
+}
+
+function w20Track(input: {
+  trackId: string
+  role: 'master-audio' | 'camera-main' | 'reaction' | 'reference-video'
+  deviceId: string
+  assetId: string
+  endSeconds: number
+  ingestSha256: string
+  syncAudioPolicy?: 'sync-only' | 'final-candidate'
+  includeInFinalMix?: boolean
+}) {
+  return {
+    trackId: input.trackId,
+    role: input.role,
+    device: { deviceId: input.deviceId, recorderId: `recorder-${input.deviceId}`, make: null, model: null, serial: null },
+    sourceAssetId: input.assetId,
+    timebase: w20Timebase,
+    streamIndex: 0,
+    syncAudioPolicy: input.syncAudioPolicy ?? 'sync-only',
+    includeInFinalMix: input.includeInFinalMix ?? false,
+    parts: [w20Part({
+      partId: `part-${input.trackId}`,
+      sourceAssetId: input.assetId,
+      coverage: { start: BigInt(0), end: w20Ticks(input.endSeconds) },
+      ingestSha256: input.ingestSha256,
+    })],
+  }
+}
+
+const w20Lineage = {
+  commandId: 'command-open-panel',
+  operation: 'create-session' as const,
+  actorKind: 'human' as const,
+  actorId: 'user-editor-1',
+  occurredAt: w20At(0),
+  note: null,
+}
+
+/**
+ * A two-camera panel on a master audio recorder.
+ *
+ * Camera B stops two hundred seconds in. That is the fact the candidate listing
+ * exists to publish: after that instant B is refused by name rather than
+ * silently missing from the offer.
+ */
+const w20DirectionSessionExample = createCaptureSession({
+  workspaceId,
+  projectId,
+  sessionId: w20Session,
+  clock: { timebase: w20Timebase, rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-master-audio',
+  tracks: [
+    w20Track({
+      trackId: 'track-master-audio',
+      role: 'master-audio',
+      deviceId: 'device-recorder',
+      assetId: 'asset-master-audio',
+      endSeconds: 600,
+      ingestSha256: w20Digest('a'),
+      syncAudioPolicy: 'final-candidate',
+      includeInFinalMix: true,
+    }),
+    w20Track({
+      trackId: 'track-camera-a',
+      role: 'camera-main',
+      deviceId: 'device-camera-a',
+      assetId: 'asset-camera-a',
+      endSeconds: 600,
+      ingestSha256: w20Digest('c'),
+    }),
+    w20Track({
+      trackId: 'track-camera-b',
+      role: 'camera-main',
+      deviceId: 'device-camera-b',
+      assetId: 'asset-camera-b',
+      endSeconds: 200,
+      ingestSha256: w20Digest('d'),
+    }),
+  ],
+  lineage: w20Lineage,
+  createdAt: w20At(0),
+})
+
+const w20SessionClock = createSessionClock({
+  sessionId: w20Session,
+  timebase: w20Timebase,
+  frameRate: rational(30, 1),
+  authority: {
+    origin: 'master-audio',
+    sourceId: 'asset-master-audio',
+    provenance: 'original-capture',
+    evidenceRef: 'probe-master-audio',
+  },
+  establishedAt: w20At(0),
+})
+
+function w20ClockMap(trackId: string, offsetTicks: bigint) {
+  const track = w20DirectionSessionExample.tracks.find((entry) => entry.trackId === trackId)!
+  const source = createSourceClock({
+    sourceId: track.sourceAssetId,
+    timebase: track.timebase,
+    provenance: 'original-capture',
+  })
+  return createPiecewiseClockMap({
+    workspaceId,
+    sessionId: w20Session,
+    sourceId: track.sourceAssetId,
+    clock: w20SessionClock,
+    derivedFrom: {
+      sessionVersion: w20DirectionSessionExample.version,
+      referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+    },
+    pieces: track.parts.map((piece) => ({
+      pieceId: `${trackId}-piece-${piece.ordinal}`,
+      mapping: createSourceToSessionMapping({
+        clock: w20SessionClock,
+        source,
+        sourceCoverage: piece.coverage,
+        driftRate: rational(1),
+        offsetTicks,
+        residualBoundTicks: BigInt(0),
+        confidence: 'high',
+        anchorIds: [`anchor-${trackId}`],
+        evidenceRefs: [`marker-${trackId}`],
+      }),
+    })),
+  })
+}
+
+function w20Coverage(trackId: string) {
+  const track = w20DirectionSessionExample.tracks.find((entry) => entry.trackId === trackId)!
+  return createTrackCoverage({
+    workspaceId,
+    trackId,
+    derivedFrom: captureSessionDerivationRef(w20DirectionSessionExample),
+    timebase: track.timebase,
+    claims: track.parts.map((piece) => ({
+      partId: piece.partId,
+      ordinal: piece.ordinal,
+      timebase: piece.timebase,
+      interval: piece.coverage,
+      confidenceBps: 9_800,
+      evidence: { kind: 'packet-scan' as const, ref: `probe-${piece.partId}` },
+    })),
+  })
+}
+
+function w20TrackDiagnostic(input: { trackId: string; offsetMs: number; coverageBps: number }) {
+  const base = {
+    trackId: input.trackId,
+    methods: ['apollo-marker'],
+    confidence: 0.94,
+    offsetMs: input.offsetMs,
+    residualMs: 6,
+    driftPpm: null,
+    coverageBps: input.coverageBps,
+    gaps: [],
+    automaticAnchors: [],
+    manualAnchors: [],
+    pieceIds: [],
+    warnings: [],
+    previewSampleMs: [],
+  }
+  return { ...base, status: deriveTrackStatus({ ...base, hasContradictoryAnchors: false }) }
+}
+
+const w20DirectionDiagnosticExample = createSyncDiagnostic({
+  workspaceId,
+  sessionId: w20Session,
+  referenceTrackId: 'track-master-audio',
+  version: 3,
+  previousVersionHash: w20Digest('e'),
+  sessionVersion: w20DirectionSessionExample.version,
+  referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+  tracks: [
+    w20TrackDiagnostic({ trackId: 'track-camera-a', offsetMs: 500, coverageBps: 9_800 }),
+    w20TrackDiagnostic({ trackId: 'track-camera-b', offsetMs: 30_000, coverageBps: 9_000 }),
+  ],
+  protocolCeiling: 'automatic',
+  generatedAt: w20At(120),
+})
+
+function w20Speech(trackId: string, fromSecond: number, toSecond: number) {
+  const id = `obs-active-speaker-${trackId}-${fromSecond}-${toSecond}`
+  return {
+    observationId: id,
+    trackId,
+    range: createTickInterval(w20Ticks(fromSecond), w20Ticks(toSecond)),
+    kind: 'active-speaker' as const,
+    // `identityResolved: false` is the literal the domain allows: a diarization
+    // cluster is a voice nobody has named, and the type refuses the claim that
+    // it is a known person.
+    value: { kind: 'active-speaker' as const, speakerKey: `cluster-${trackId}`, identityResolved: false as const },
+    confidence: 0.9,
+    provenance: {
+      method: 'diarization/pyannote',
+      evaluatorKind: 'measured' as const,
+      evidenceRef: `diarization-run:${id}`,
+      producedAt: w20At(60),
+    },
+  }
+}
+
+const w20EvidenceExample = createMulticamEvidenceSet({
+  session: w20DirectionSessionExample,
+  observations: [
+    w20Speech('track-camera-a', 1, 60),
+    w20Speech('track-camera-b', 60, 130),
+    w20Speech('track-camera-a', 130, 260),
+    w20Speech('track-camera-b', 260, 300),
+  ],
+  generatedAt: w20At(130),
+})
+
+const w20DirectionExample = directMulticam({
+  session: w20DirectionSessionExample,
+  coverages: ['track-master-audio', 'track-camera-a', 'track-camera-b'].map(w20Coverage),
+  clockMaps: [
+    w20ClockMap('track-camera-a', w20Ticks(0.5)),
+    w20ClockMap('track-camera-b', w20Ticks(30)),
+  ],
+  diagnostic: w20DirectionDiagnosticExample,
+  protocolCeiling: 'automatic',
+  evidence: w20EvidenceExample,
+  format: { aspectRatio: '16:9' },
+  range: createTickInterval(w20Ticks(1), w20Ticks(300)),
+  generatedAt: w20At(140),
+})
+
+const w20DirectionVersion = 4
+
+const w20DirectionReadExample = Object.freeze({
+  direction: w20DirectionExample,
+  version: w20DirectionVersion,
+  previousVersionHash: w20Digest('f'),
+  versionRef: directionVersionRef(w20Session, w20DirectionVersion),
+  isHead: true,
+})
+
+const w20DirectedCommandExample = buildDirectMulticamSessionCommand({
+  commandId: 'edit-command-direct-panel',
+  workspaceId,
+  projectId,
+  baseVersionId: 'project-version-panel-7',
+  baseHash: w20Digest('1'),
+  resultVersionId: 'project-version-panel-8',
+  author: { type: 'api-client', id: 'client-editor-console' },
+  direction: w20DirectionExample,
+  durationFrames: 8_970,
+  outputReferences: [
+    { artifactId: 'artifact-proxy-panel', kind: 'proxy', sourceVersionId: 'project-version-panel-7', variantId: 'variant-16x9' },
+  ],
+  idempotencyKey: 'direct-panel-2026-09-04-1',
+  createdAt: w20At(140),
+})
+
+const w20DirectedProjectVersionExample = createProjectVersion({
+  id: 'project-version-panel-8',
+  workspaceId,
+  projectId,
+  sequence: 8,
+  parentVersionId: 'project-version-panel-7',
+  snapshotRefs: {
+    brief: 'project-snapshot-brief-1',
+    editPlan: 'project-snapshot-edit-plan-8',
+    policies: 'project-snapshot-policies-1',
+  },
+  baseHash: w20DirectedCommandExample.resultBaseHash,
+  createdBy: 'client-editor-console',
+  commandId: 'edit-command-direct-panel',
+  createdAt: w20At(140),
+})
+
+const w20DirectedSessionExample = Object.freeze({
+  direction: w20DirectionExample,
+  directionVersion: w20DirectionVersion,
+  version: w20DirectedProjectVersionExample,
+  command: w20DirectedCommandExample.command,
+  impact: w20DirectedCommandExample.impact,
+  evidenceReplayed: false,
+})
+
+// --- F4.013 / F4.014 -------------------------------------------------------
+
+const w20ColorMetadata = Object.freeze({
+  colorSpace: 'rec709',
+  transfer: 'bt709',
+  primaries: 'bt709',
+  matrix: 'bt709',
+  range: 'limited' as const,
+  bitDepth: 8,
+})
+
+const w20StatisticsEvaluator = Object.freeze({
+  id: 'ffmpeg-rgb24-statistics',
+  kind: 'measured' as const,
+  version: '1.0.0',
+})
+
+function w20Measurement(input: {
+  measurementId: string
+  cameraId: string
+  sourceAssetId: string
+  sourceSha256: string
+  exposure: number
+  rOverG: number
+  bOverG: number
+  saturation: number
+}) {
+  const evidenceRef = `rawvideo-rgb24:${input.measurementId}`
+  const measured = (value: number, unit: string, components?: Readonly<Record<string, number>>) => ({
+    status: 'measured' as const,
+    value,
+    unit,
+    evaluator: w20StatisticsEvaluator,
+    evidenceRef,
+    ...(components ? { components } : {}),
+  })
+  return createCameraColorMeasurement({
+    measurementId: input.measurementId,
+    sessionId: w20Session,
+    sourceAssetId: input.sourceAssetId,
+    sourceSha256: input.sourceSha256,
+    cameraId: input.cameraId,
+    range: createTickInterval(BigInt(0), w20Ticks(20)),
+    sourceRange: { startFrame: 0, endFrame: 600 },
+    sampledFrames: 12,
+    technical: { metadata: w20ColorMetadata, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+    dimensions: {
+      whiteBalance: measured(input.bOverG / input.rOverG, 'ratio', {
+        rOverG: input.rOverG,
+        bOverG: input.bOverG,
+        bOverR: input.bOverG / input.rOverG,
+      }),
+      exposure: measured(input.exposure, 'normalized-luma'),
+      contrast: measured(0.2, 'normalized-luma', { p5: 0.1, p95: 0.9, spread: 0.8 }),
+      blacks: measured(0.001, 'ratio', { threshold: 4 / 255 }),
+      highlights: measured(0.001, 'ratio', { threshold: 251 / 255 }),
+      saturation: measured(input.saturation, 'normalized-chroma'),
+      tonalResponse: measured(0.5, 'normalized-luma', {
+        p1: 0.02, p5: 0.1, p25: 0.3, p50: 0.5, p75: 0.7, p95: 0.9, p99: 0.98,
+      }),
+      skin: {
+        status: 'not-applicable' as const,
+        reason: 'fewer than 2% of sampled pixels fall in the skin band; no skin-band region to measure',
+      },
+    },
+    confidence: 1,
+  })
+}
+
+const w20MatchMeasurements = [
+  w20Measurement({
+    measurementId: 'ccm-panel-camera-a',
+    cameraId: 'camera-a',
+    sourceAssetId: 'asset-camera-a',
+    sourceSha256: w20Digest('c'),
+    exposure: 0.5,
+    rOverG: 1,
+    bOverG: 0.9,
+    saturation: 0.1,
+  }),
+  w20Measurement({
+    measurementId: 'ccm-panel-camera-b',
+    cameraId: 'camera-b',
+    sourceAssetId: 'asset-camera-b',
+    sourceSha256: w20Digest('d'),
+    exposure: 0.42,
+    rOverG: 1.06,
+    bOverG: 0.86,
+    saturation: 0.09,
+  }),
+]
+
+const w20MatchPlanExample = deriveMulticamMatchPlan({
+  planId: 'mmp-panel-1',
+  workspaceId,
+  projectId,
+  sessionId: w20Session,
+  sessionVersion: w20DirectionSessionExample.version,
+  referenceEpoch: w20DirectionSessionExample.referenceEpoch,
+  referenceCameraId: 'camera-a',
+  referenceCameraSelection: {
+    selectedBy: { kind: 'human', id: 'user-colourist-1' },
+    selectedAt: w20At(200),
+    baseVersionId: `${w20Session}:v${w20DirectionSessionExample.version}`,
+    baseHash: w20DirectionSessionExample.sessionHash,
+  },
+  measurements: w20MatchMeasurements,
+  lineage: { colorProbeIds: ['probe-camera-a', 'probe-camera-b'] },
+  createdAt: w20At(210),
+})
+
+const w20MatchPlanOverriddenExample = addMulticamMatchRangeOverride(w20MatchPlanExample, {
+  planId: 'mmp-panel-1.o1',
+  createdAt: w20At(260),
+  override: {
+    overrideId: 'override-panel-wide-1',
+    cameraId: 'camera-b',
+    range: createTickInterval(w20Ticks(120), w20Ticks(180)),
+    parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
+    reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+    actor: { kind: 'human', id: 'user-colourist-1' },
+  },
+})
+
+/**
+ * The ColorPlan write receipt.
+ *
+ * No factory: it is what `setProjectColorPlanService` reports back after the
+ * layers land, so it is written out here the way `w19MarkerArtifactExample`
+ * writes out an artifact reference.
+ */
+const w20ColorPlanWriteExample = Object.freeze({
+  colorPlanId: 'color-plan-panel-3',
+  colorPlanHash: w20Digest('2'),
+  compiledManifestHash: w20Digest('3'),
+  resultVersionId: 'project-version-panel-9',
+  replayed: false,
+  omittedCameraIds: [],
+  prunedCameraIds: [],
+  prunedSegmentIds: [],
+})
+
+const w20CriticReportExample = evaluateColorCritic({
+  reportId: 'ccr-panel-1',
+  workspaceId,
+  projectId,
+  projectVersionId: 'project-version-panel-9',
+  subject: { kind: 'output', artifactId: 'artifact-proxy-panel' },
+  before: [
+    w20Measurement({
+      measurementId: 'ccm-before-camera-a',
+      cameraId: 'camera-a',
+      sourceAssetId: 'artifact-intermediate-panel',
+      sourceSha256: w20Digest('4'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+    w20Measurement({
+      measurementId: 'ccm-before-camera-b',
+      cameraId: 'camera-b',
+      sourceAssetId: 'artifact-intermediate-panel',
+      sourceSha256: w20Digest('4'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+  ],
+  after: [
+    w20Measurement({
+      measurementId: 'ccm-after-camera-a',
+      cameraId: 'camera-a',
+      sourceAssetId: 'artifact-proxy-panel',
+      sourceSha256: w20Digest('5'),
+      exposure: 0.5,
+      rOverG: 1,
+      bOverG: 0.9,
+      saturation: 0.1,
+    }),
+    // Camera B leaves the output transform warmer than it went in. The example
+    // publishes a verdict with something in it: a report whose issue list is
+    // empty documents the one case a client also gets right by ignoring it.
+    w20Measurement({
+      measurementId: 'ccm-after-camera-b',
+      cameraId: 'camera-b',
+      sourceAssetId: 'artifact-proxy-panel',
+      sourceSha256: w20Digest('5'),
+      exposure: 0.5,
+      rOverG: 1.12,
+      bOverG: 0.86,
+      saturation: 0.1,
+    }),
+  ],
+  matchPlan: w20MatchPlanExample,
+  creativeIntent: { declared: false },
+  evaluatedAt: w20At(300),
+})
+
+// --- F4.015 ----------------------------------------------------------------
+
+const w20ReactionTrack = w20Track({
+  trackId: 'track-reaction',
+  role: 'reaction',
+  deviceId: 'device-webcam',
+  assetId: 'asset-reaction',
+  endSeconds: 40,
+  ingestSha256: w20Digest('6'),
+  syncAudioPolicy: 'final-candidate',
+  includeInFinalMix: true,
+})
+
+const w20ReferenceVideoTrack = w20Track({
+  trackId: 'track-reference',
+  role: 'reference-video',
+  deviceId: 'device-screen',
+  assetId: 'asset-reference',
+  endSeconds: 30,
+  ingestSha256: w20Digest('7'),
+})
+
+const w20ReactSessionExample = createCaptureSession({
+  workspaceId,
+  projectId,
+  sessionId: 'capture-session-react-watchalong',
+  clock: { timebase: w20Timebase, rounding: 'nearest-half-even' },
+  referenceTrackId: 'track-reference',
+  tracks: [w20ReactionTrack, w20ReferenceVideoTrack],
+  lineage: { ...w20Lineage, commandId: 'command-open-watchalong' },
+  createdAt: w20At(0),
+})
+
+/**
+ * Forty seconds of reaction over a thirty-second reference: play, pause, play,
+ * commentary, play, and a stretch where the player was hidden.
+ *
+ * The hidden stretch is the one that matters. "Played on unobserved",
+ * "paused then scrubbed" and "seeked" all fit it equally, so the aggregate
+ * leaves it uncovered and asks for a person instead of picking one.
+ */
+function w20PlaybackObservations() {
+  const windows: { reactionTick: bigint; referenceTick: bigint | null; confidence: number; method: 'audio-fingerprint'; evidenceRef: string; peakRatio: number }[] = []
+  const push = (fromSecond: number, toSecond: number, reference: number | null) => {
+    for (let second = fromSecond; second < toSecond; second += 0.5) {
+      const reactionTick = w20Ticks(second)
+      windows.push({
+        reactionTick,
+        referenceTick: reference === null ? null : w20Ticks(reference + (second - fromSecond)),
+        confidence: 0.9,
+        method: 'audio-fingerprint',
+        evidenceRef: `fingerprint:${reactionTick}`,
+        peakRatio: 4,
+      })
+    }
+  }
+  push(0, 6, 0)
+  push(6, 10, null)
+  push(10, 14, 6)
+  push(14, 25, null)
+  push(25, 28, 10)
+  push(28, 34, 13)
+  push(34, 36, null)
+  push(36, 40, 21)
+  return windows
+}
+
+const w20PlaybackMapExample = buildPlaybackMap({
+  mapId: 'capture-session-react-watchalong:track-reaction:playback-1',
+  session: w20ReactSessionExample,
+  reactionTrack: w20ReactSessionExample.tracks.find((track) => track.trackId === 'track-reaction')!,
+  referenceTrack: w20ReactSessionExample.tracks.find((track) => track.trackId === 'track-reference')!,
+  referenceMedia: {
+    assetId: 'asset-reference',
+    sha256: w20Digest('7'),
+    durationTicks: w20Ticks(30),
+    timebase: w20Timebase,
+  },
+  reactionMedia: {
+    assetId: 'asset-reaction',
+    sha256: w20Digest('6'),
+    durationTicks: w20Ticks(40),
+  },
+  observations: w20PlaybackObservations(),
+  policy: defaultPlaybackPolicy(w20Timebase),
+})
+
+const w20PlaybackReadExample = Object.freeze({
+  map: w20PlaybackMapExample,
+  versionRef: `capture-session-react-watchalong:playback:track-reaction:v${w20PlaybackMapExample.version}`,
+  manualReviewRequired: w20PlaybackMapExample.uncovered.length > 0,
+})
+
+/**
+ * The stretch nobody could measure, answered by a person.
+ *
+ * The anchor lands inside the map's own uncovered range because that is the
+ * only place `applyPlaybackAnchor` accepts one: an anchor over a measured piece
+ * would be an operator overruling a measurement rather than resolving an
+ * absence, and the aggregate refuses it.
+ */
+const w20PlaybackUncoveredExample = w20PlaybackMapExample.uncovered[0]!
+const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample, {
+  expectedVersion: w20PlaybackMapExample.version,
+  expectedHash: w20PlaybackMapExample.mapHash,
+  anchor: {
+    anchorId: 'anchor-hidden-player-1',
+    reactionTick: (w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2),
+    referenceTick: w20Ticks(20),
+    mode: 'playing',
+    actorId: 'user-editor-1',
+    note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+    createdAt: w20At(400),
+  },
 })
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
@@ -13253,6 +13946,225 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           retryable: false,
           requestId: 'request-export-matrix-example-1',
         },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.012 multicam direction
+    // -----------------------------------------------------------------------
+    'apollo://schemas/direct-multicam-session-request/v1': [
+      {
+        baseVersionId: 'project-version-panel-7',
+        baseHash: w20Digest('1'),
+        format: { aspectRatio: '16:9' },
+        range: { sessionStartTicks: w20Ticks(1).toString(), sessionEndTicks: w20Ticks(300).toString() },
+        reason: 'Re-cut the panel across both cameras now that the second camera is synced.',
+      },
+    ],
+    'apollo://schemas/protect-multicam-selection-request/v1': [
+      {
+        baseVersionId: 'project-version-panel-7',
+        baseHash: w20Digest('1'),
+        format: { aspectRatio: '16:9' },
+        protectedSelections: [
+          {
+            selectionId: 'protected-selection-demo-1',
+            trackId: 'track-camera-b',
+            sessionStartTicks: w20Ticks(60).toString(),
+            sessionEndTicks: w20Ticks(90).toString(),
+            note: 'Hold on camera B through the demo: the scorer prefers the speaker, and the thing being demonstrated is on the other side of the table.',
+          },
+        ],
+      },
+    ],
+    'apollo://schemas/multicam-direction-directed/v1': [
+      {
+        data: {
+          directed: presentDirectedSession(w20DirectedSessionExample),
+          replayed: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-direction-read/v1': [
+      { data: presentMulticamDirectionRead(w20DirectionReadExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-angle-candidate-list/v1': [
+      {
+        data: presentAngleCandidateListing({
+          ...w20DirectionReadExample,
+          // One window, with every track that was evaluated over it — the
+          // chosen one and the two that lost, each with its own reasons.
+          windows: w20DirectionExample.shots.slice(0, 1).map((shot) => toAngleCandidateWindow(shot)),
+          omittedWindows: Math.max(0, w20DirectionExample.shots.length - 1),
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-shot-decision-list/v1': [
+      {
+        data: presentShotDecisionListing({
+          ...w20DirectionReadExample,
+          shots: w20DirectionExample.shots.slice(0, 1),
+          omittedShots: Math.max(0, w20DirectionExample.shots.length - 1),
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.013 colour match, F4.014 colour critic
+    // -----------------------------------------------------------------------
+    'apollo://schemas/derive-multicam-match-plan-request/v1': [
+      {
+        referenceCameraId: 'camera-a',
+        baseVersionId: `${w20Session}:v${w20DirectionSessionExample.version}`,
+        baseHash: w20DirectionSessionExample.sessionHash,
+        projectBaseVersionId: 'project-version-panel-8',
+        projectBaseHash: w20DirectedProjectVersionExample.baseHash,
+        note: 'Camera A is the one lit for the guest; B is the wide.',
+      },
+    ],
+    'apollo://schemas/add-multicam-match-override-request/v1': [
+      {
+        baseVersionId: matchPlanVersionRef(w20Session, 1),
+        baseHash: w20MatchPlanExample.planHash,
+        projectBaseVersionId: 'project-version-panel-9',
+        projectBaseHash: w20Digest('8'),
+        override: {
+          overrideId: 'override-panel-wide-1',
+          cameraId: 'camera-b',
+          range: { start: w20Ticks(120).toString(), end: w20Ticks(180).toString() },
+          parameters: { brightness: 0.04, contrast: 1, saturation: 1 },
+          reason: 'The wide shot sits under the window; the practical behind the guest reads a third of a stop hotter there than anywhere else.',
+        },
+      },
+    ],
+    'apollo://schemas/multicam-match-plan-derived/v1': [
+      {
+        data: presentDerivedMatchPlan({
+          plan: w20MatchPlanExample,
+          version: 1,
+          replayed: false,
+          colorPlan: w20ColorPlanWriteExample,
+          invalidated: { matchPlanIds: [], colorCriticReportIds: [] },
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-match-override-applied/v1': [
+      {
+        data: presentMatchOverrideResult({
+          plan: w20MatchPlanOverriddenExample,
+          version: 2,
+          replayed: false,
+          colorPlan: { ...w20ColorPlanWriteExample, resultVersionId: 'project-version-panel-10' },
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-match-plan-read/v1': [
+      {
+        data: presentMulticamMatchPlanRead({
+          plan: w20MatchPlanOverriddenExample,
+          version: 2,
+          previousVersionHash: w20MatchPlanExample.planHash,
+          versionRef: matchPlanVersionRef(w20Session, 2),
+          isHead: true,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/color-critic-report-list/v1': [
+      {
+        data: {
+          reports: [presentColorCriticReportSummary(w20CriticReportExample)],
+          correctionsApplied: 1,
+          correctionBudgetExhausted: false,
+        },
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/color-critic-report-read/v1': [
+      { data: { report: presentColorCriticReport(w20CriticReportExample) }, meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/color-critic-issue-list/v1': [
+      {
+        data: presentColorCriticIssueListing({
+          reportId: w20CriticReportExample.reportId,
+          projectId: w20CriticReportExample.projectId,
+          projectVersionId: w20CriticReportExample.projectVersionId,
+          action: w20CriticReportExample.action,
+          cause: w20CriticReportExample.cause,
+          referenceCameraId: w20CriticReportExample.referenceCameraId,
+          matchPlanId: w20CriticReportExample.matchPlanId,
+          evaluatedAt: w20CriticReportExample.evaluatedAt,
+          reportHash: w20CriticReportExample.reportHash,
+          issues: w20CriticReportExample.issues.filter((issue) => issue.severity === 'hard'),
+          filteredOut: w20CriticReportExample.issues.filter((issue) => issue.severity !== 'hard').length,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.015 react playback map
+    // -----------------------------------------------------------------------
+    'apollo://schemas/build-react-playback-map-request/v1': [
+      {
+        baseVersionId: `capture-session-react-watchalong:v${w20ReactSessionExample.version}`,
+        baseHash: w20ReactSessionExample.sessionHash,
+        reactionTrackId: 'track-reaction',
+      },
+    ],
+    'apollo://schemas/add-react-playback-anchor-request/v1': [
+      {
+        baseVersionId: w20PlaybackReadExample.versionRef,
+        baseHash: w20PlaybackMapExample.mapHash,
+        reactionTrackId: 'track-reaction',
+        anchor: {
+          anchorId: 'anchor-hidden-player-1',
+          reactionTick: ((w20PlaybackUncoveredExample.range.start + w20PlaybackUncoveredExample.range.end) / BigInt(2)).toString(),
+          referenceTick: w20Ticks(20).toString(),
+          mode: 'playing',
+          note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
+        },
+      },
+    ],
+    'apollo://schemas/react-playback-map-built/v1': [
+      {
+        data: presentBuiltPlaybackMap({
+          map: w20PlaybackMapExample,
+          replayed: false,
+          manualReviewRequired: w20PlaybackMapExample.uncovered.length > 0,
+          supersededMapId: null,
+          carriedAnchors: 0,
+          droppedAnchors: 0,
+          invalidated: null,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/react-playback-map-anchored/v1': [
+      {
+        data: presentAnchoredPlaybackMap({
+          map: w20AnchoredPlaybackMapExample,
+          replayed: false,
+          manualReviewRequired: w20AnchoredPlaybackMapExample.uncovered.length > 0,
+          invalidated: null,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/react-playback-map-read/v1': [
+      { data: presentPlaybackMapRead(w20PlaybackReadExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/react-playback-piece-list/v1': [
+      {
+        data: presentPlaybackPieceListing({
+          ...w20PlaybackReadExample,
+          pieces: w20PlaybackMapExample.pieces,
+          filteredOut: 0,
+          omittedPieces: 0,
+        }),
+        meta: { apiVersion: 'v1' },
       },
     ],
     'apollo://schemas/openapi-document/v1': [

@@ -243,6 +243,10 @@ export function presentDerivedMatchPlan(result: Readonly<DeriveMulticamMatchPlan
     plan: presentMulticamMatchPlan(result.plan),
     version: result.version,
     versionRef: `${result.plan.sessionId}:match:v${result.version}`,
+    // A retry that measured the same bytes produced the same content-addressed
+    // measurements and therefore the same plan: the first answer arriving
+    // twice, not a second derivation.
+    replayed: result.replayed,
     colorPlan: presentColorPlanWrite(result.colorPlan),
     // Advisory. Nothing here marks these stale; a superseded plan already names
     // its successor, and this says which readers should look again.
@@ -258,6 +262,9 @@ export function presentMatchOverrideResult(result: Readonly<AddMulticamMatchRang
     plan: presentMulticamMatchPlan(result.plan),
     version: result.version,
     versionRef: `${result.plan.sessionId}:match:v${result.version}`,
+    // True when the plan already carried this override id: the amendment is
+    // already in force and nothing new is written.
+    replayed: result.replayed,
     colorPlan: presentColorPlanWrite(result.colorPlan),
   })
 }
