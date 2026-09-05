@@ -55,6 +55,14 @@ test(
     const measurementId = 'w20-measurement-camera-a'
     const hash = (char) => char.repeat(64)
     const at = (second) => new Date(Date.parse('2029-05-01T09:00:00.000Z') + second * 1_000)
+    // The ColorMetadata a match transform declares on both sides of itself
+    // (color-and-export.ts:16-23). Rec.709 limited-range 8-bit is the plain
+    // case; nothing here is testing the metadata, it is testing that a
+    // transform row carries a whole transform.
+    const colorMetadata = {
+      colorSpace: 'bt709', transfer: 'bt709', primaries: 'bt709',
+      matrix: 'bt709', range: 'limited', bitDepth: 8,
+    }
 
     // 90 kHz for ten minutes is 54,000,000 ticks; this is past 2^53, where a
     // double stops counting by ones.
@@ -329,6 +337,17 @@ test(
       eligible: true,
       rejectionReasonsJson: JSON.stringify([]),
       rejectionCount: 0,
+      // The four readings the candidate hash covers, in the shape
+      // `candidateEvidenceOf` writes (multicam-direction-repository.ts:101).
+      // NOT NULL with the default dropped: a row without it never reaches a
+      // CHECK, it is refused by the ORM, and every refusal below would then
+      // assert against an argument error instead of the constraint it names.
+      evidenceJson: JSON.stringify({
+        activeSpeaker: { score: 0.82, observationRefs: ['observation-1'] },
+        screenActivity: { score: 0.1, observationRefs: [] },
+        reaction: { score: 0.3, observationRefs: ['observation-1'] },
+        technicalQuality: { score: 0.95, observationRefs: [] },
+      }),
       scoreTotal: 1.35,
       candidateHash: hash('a'),
     }
@@ -489,6 +508,27 @@ test(
           id: `${planId}:camera-alt`, workspaceId, planId, cameraId: 'camera-alt',
           transformId: 'match-camera-alt', provider: 'apollo-match', providerVersion: 'v2',
           mode: 'adjust', enabled: true,
+          // The transform the projected columns are a projection OF. Without
+          // it the row never reaches a CHECK — Prisma refuses the call for a
+          // missing required argument, and `refused()` would be asserting
+          // against an ORM message rather than against
+          // camera_match_transforms_bounds_check. It agrees with `provider`,
+          // `providerVersion`, `parametersJson` and `enabled` on purpose, so
+          // the only thing left to refuse is the channel gain of four.
+          transformJson: JSON.stringify({
+            id: 'match-camera-alt',
+            kind: 'match',
+            version: 'v1',
+            enabled: true,
+            input: colorMetadata,
+            output: colorMetadata,
+            implementation: {
+              provider: 'apollo-match',
+              version: 'v2',
+              parameters: { mode: 'adjust' },
+              parametersHash: hash('9'),
+            },
+          }),
           parametersJson: JSON.stringify({ mode: 'adjust' }),
           deltasJson: JSON.stringify({}),
           brightness: 0.1, contrast: 1.05, saturation: 1.02,
@@ -669,7 +709,8 @@ test(
 
     await client.v2PlaybackAnchor.create({
       data: {
-        id: `${mapId}:anchor-1`, workspaceId, mapId, anchorId: 'anchor-1', origin: 'manual',
+        id: `${mapId}:anchor-1`, workspaceId, mapId, anchorId: 'anchor-1', ordinal: 0,
+        origin: 'manual',
         reactionTick: half, referenceTick: null, mode: 'commentary-only', method: 'manual-anchor',
         confidence: 0.9, evidenceRef: 'operator:operator-1 (the player was off screen)',
         actorKind: 'human', actorId: 'operator-1', note: 'the player was off screen',
@@ -681,7 +722,8 @@ test(
     await refused('playback_anchors_actor_check', () =>
       client.v2PlaybackAnchor.create({
         data: {
-          id: `${mapId}:anchor-2`, workspaceId, mapId, anchorId: 'anchor-2', origin: 'manual',
+          id: `${mapId}:anchor-2`, workspaceId, mapId, anchorId: 'anchor-2', ordinal: 1,
+          origin: 'manual',
           reactionTick: half, referenceTick: null, mode: 'commentary-only', method: 'manual-anchor',
           confidence: 0.9, evidenceRef: 'the player was off screen',
           actorKind: 'human', actorId: 'operator-1', note: 'the player was off screen',
