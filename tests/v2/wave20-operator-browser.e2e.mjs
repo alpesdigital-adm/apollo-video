@@ -547,9 +547,23 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
         'a referência não andou',
         'a stretch where the reference produced no time was given an interval',
       )
+      // Scoped to the row, not to the table: a piece the fingerprinter DID
+      // measure at 1/1 is a measurement and belongs on screen. What must never
+      // appear is that same string on a row where nothing was measured.
+      const row = (await page.getByTestId(`piece-${piece.pieceId}`).textContent()) ?? ''
+      assert.doesNotMatch(row, /1\/1/, 'a piece with no measured rate was rendered as 1/1')
     }
-    const pieceTable = (await page.getByTestId('pieces').textContent()) ?? ''
-    assert.doesNotMatch(pieceTable, /1\/1/, 'an unmeasured rate was rendered as 1/1 somewhere in the table')
+    // And a measured rate must still be shown as measured, or "não medida"
+    // would be proved by a page that says it everywhere.
+    const ratedPieces = pieceListing.pieces.filter((piece) => piece.rate !== null)
+    assert.ok(ratedPieces.length > 0, 'the fixture must also carry pieces with a measured rate')
+    for (const piece of ratedPieces) {
+      assert.equal(
+        (await page.getByTestId(`rate-${piece.pieceId}`).textContent())?.trim(),
+        piece.rate,
+        'a measured rate was not shown as the server measured it',
+      )
+    }
 
     await page.getByTestId('uncovered-0').waitFor({ state: 'visible' })
     await page.getByTestId('anchor-editor').waitFor({ state: 'visible' })
