@@ -769,9 +769,27 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
       }
       // Two different cuts claiming one link of the chain. Picking either would
       // discard a decision somebody made.
+      //
+      // This is the path a concurrent second writer actually takes, and it used
+      // to say so without saying what to do about it. The direction row id is
+      // derived from (workspace, session, version), so two writers that both
+      // computed against version 1 collide on the PRIMARY KEY before either
+      // reaches the head's UPDATE predicate: the fence holds, but the branch
+      // that carries `currentVersion`/`currentHash` for the UI to offer a reload
+      // is the one that never runs. The head is read here so the loser is told
+      // the same thing in both paths (CONTRACT §2: a stale-version error carries
+      // the current version and hash).
+      const current = await this.client.v2MulticamDirectionHead.findFirst({
+        where: { workspaceId: direction.workspaceId, sessionId: direction.sessionId },
+        select: { version: true, directionHash: true },
+      })
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
         `The direction for ${direction.sessionId} already has a different version ${version}`,
+        {
+          currentVersion: current?.version ?? null,
+          currentHash: current?.directionHash ?? null,
+        },
       )
     }
   }
