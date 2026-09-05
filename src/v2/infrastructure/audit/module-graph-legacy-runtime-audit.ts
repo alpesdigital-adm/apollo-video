@@ -25,7 +25,14 @@ import {
  * drifted allowlist fails the gate for the wrong reason.
  */
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
+// Resolved from this module's own directory rather than through
+// `new URL('../../../../', import.meta.url)`. Webpack treats that exact shape
+// — a string literal against `import.meta.url` — as an asset request and tries
+// to resolve the directory as a module, which fails the production build for
+// every route: `repository-factory.ts` imports this file, and every `/v1`
+// route imports that. `fileURLToPath(import.meta.url)` on its own is not the
+// shape the parser rewrites, so the path is computed at runtime as intended.
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..')
 const V2_ROOT = join(REPOSITORY_ROOT, 'src', 'v2')
 const LEGACY_RUNTIME_ROOT = join(REPOSITORY_ROOT, 'src', 'lib')
 const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.js'] as const

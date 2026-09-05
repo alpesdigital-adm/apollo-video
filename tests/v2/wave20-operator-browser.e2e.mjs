@@ -512,12 +512,15 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const issueText = (await page.getByTestId('critic-issues').textContent()) ?? ''
     for (const issue of issueListing.issues) {
       assert.ok(issueText.includes(issue.code), `the issue ${issue.code} never reached the screen`)
+      // An insufficient-evidence issue has nothing measured, and the page has
+      // to say that rather than print a number — so the expected text is
+      // derived from the answer, not assumed to be a number.
       assert.ok(
-        issueText.includes(issue.measured.toFixed(3)),
+        issueText.includes(issue.measured === null ? 'não medido' : issue.measured.toFixed(3)),
         `the issue ${issue.code} was shown without the number that was measured`,
       )
       assert.ok(
-        issueText.includes(issue.threshold.toFixed(3)),
+        issueText.includes(issue.threshold === null ? 'não medido' : issue.threshold.toFixed(3)),
         `the issue ${issue.code} was shown without the threshold that bounded it`,
       )
     }
