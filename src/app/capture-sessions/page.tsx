@@ -385,6 +385,14 @@ export default function CaptureSessionsPage() {
         </a>
       </p>
 
+      <p data-testid="open-color-match">
+        <a
+          href={`/color-match?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
+        >
+          Casar a cor entre as câmeras
+        </a>
+      </p>
+
       {sync && (
         <section data-testid="sync-detail">
           <h2>
