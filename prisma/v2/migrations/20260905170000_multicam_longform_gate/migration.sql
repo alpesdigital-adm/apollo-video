@@ -124,6 +124,7 @@ CREATE TABLE "multicam_longform_gate_criteria" (
     "failedCheckCount" INTEGER NOT NULL,
     "missingCheckCount" INTEGER NOT NULL,
     "unverifiedReferenceCount" INTEGER NOT NULL DEFAULT 0,
+    "unhashedReferenceCount" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "multicam_longform_gate_criteria_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "multicam_longform_gate_criteria_criterion_check" CHECK (
@@ -146,7 +147,12 @@ CREATE TABLE "multicam_longform_gate_criteria" (
       AND "failedCheckCount" BETWEEN 0 AND "checkCount"
       AND "missingCheckCount" BETWEEN 0 AND "failedCheckCount"
       AND "unverifiedReferenceCount" >= 0
+      AND "unhashedReferenceCount" >= 0
       AND "passed" = ("failedCheckCount" = 0)
+      -- A reference the reader recomputed and found wrong forbids a pass. A
+      -- reference to a table that stores no hash of its own does not: there
+      -- was nothing to recompute, and counting the two together made four of
+      -- the ten criteria impossible to record as satisfied.
       AND ("passed" = FALSE OR "unverifiedReferenceCount" = 0)
     )
 );
@@ -164,6 +170,7 @@ CREATE TABLE "multicam_longform_gate_checks" (
     "detail" VARCHAR(512) NOT NULL,
     "referenceCount" INTEGER NOT NULL,
     "unverifiedReferenceCount" INTEGER NOT NULL DEFAULT 0,
+    "unhashedReferenceCount" INTEGER NOT NULL DEFAULT 0,
 
     CONSTRAINT "multicam_longform_gate_checks_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "multicam_longform_gate_checks_code_check" CHECK (
@@ -224,9 +231,16 @@ CREATE TABLE "multicam_longform_gate_checks" (
       AND char_length(btrim("detail")) >= 1
       AND "referenceCount" BETWEEN 0 AND 16
       AND "unverifiedReferenceCount" BETWEEN 0 AND "referenceCount"
+      AND "unhashedReferenceCount" BETWEEN 0 AND "referenceCount"
+      -- The two are disjoint by construction: a reference either stores a hash
+      -- that did not recompute, or stores none at all.
+      AND ("unverifiedReferenceCount" + "unhashedReferenceCount") <= "referenceCount"
       -- `IS NOT DISTINCT FROM` rather than `=`: failureReason is NULL on a
       -- passing check, and `FALSE OR NULL` is NULL, which a CHECK accepts.
       AND ("referenceCount" > 0 OR "failureReason" IS NOT DISTINCT FROM 'evidence-missing')
+      -- A pass may cite a hash-less reference (a media artifact nobody
+      -- downloaded, a child row covered by its parent's hash); it may never
+      -- cite a hash that was recomputed and disagreed.
       AND ("passed" = FALSE OR ("referenceCount" > 0 AND "unverifiedReferenceCount" = 0))
     )
 );

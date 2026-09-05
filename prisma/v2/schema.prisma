@@ -10094,6 +10094,7 @@ model V2MulticamLongformGateCriterion {
   failedCheckCount         Int
   missingCheckCount        Int
   unverifiedReferenceCount Int     @default(0)
+  unhashedReferenceCount   Int     @default(0)
 
   workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   gate      V2MulticamLongformGate       @relation(fields: [gateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -10119,6 +10120,7 @@ model V2MulticamLongformGateCheck {
   detail                   String  @db.VarChar(512)
   referenceCount           Int
   unverifiedReferenceCount Int     @default(0)
+  unhashedReferenceCount   Int     @default(0)
 
   workspace       V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   criterionRecord V2MulticamLongformGateCriterion  @relation(fields: [criterionRowId, workspaceId], references: [id, workspaceId], onDelete: Cascade)

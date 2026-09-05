@@ -17,7 +17,14 @@ export interface MulticamLongformGateEvidenceQuery {
 }
 
 export interface MulticamLongformGateEvidenceContext {
-  /** The session the capture criteria were read against, when one was found. */
+  /**
+   * The session the capture criteria were read against, when one was found.
+   *
+   * Never the caller's filter echoed back. A `sessionId` the project does not
+   * have resolves to `null`, and a request that named no session resolves to
+   * whichever session the capture criteria actually read — so the record can
+   * say which session it judged instead of repeating what it was asked.
+   */
   resolvedSessionId: string | null
   /** The project version the project-side criteria were read against. */
   projectVersionId: string | null

@@ -174,7 +174,9 @@ export function evaluateMulticamLongformGateService(dependencies: {
     const report = evaluateMulticamLongformGate({
       workspaceId,
       projectId,
-      sessionId: context.resolvedSessionId ?? sessionId,
+      // The session the reader resolved, never the caller's filter: a record
+      // that names a session the server never found cannot be read back.
+      sessionId: context.resolvedSessionId,
       evidence,
       evaluatedAt: now.toISOString(),
     })
@@ -183,7 +185,7 @@ export function evaluateMulticamLongformGateService(dependencies: {
       id: identity(dependencies.createId(), 'gate.id'),
       workspaceId,
       projectId,
-      sessionId: context.resolvedSessionId ?? sessionId,
+      sessionId: context.resolvedSessionId,
       projectVersionId: context.projectVersionId,
       projectVersionHash: context.projectVersionHash,
       report,

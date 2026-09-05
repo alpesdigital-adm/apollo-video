@@ -32,6 +32,22 @@ import { assertDomain } from './errors.ts'
  *   A row edited underneath the product is the case the gate exists for. It
  *   reproves the criterion with `evidence-unverified` and the gate says which
  *   reference disagreed, instead of throwing and leaving no record.
+ *
+ * A reference therefore has three states, not two, and the report counts the
+ * last two apart because they mean different things:
+ *
+ * - `hash !== null, verified` — the reader recomputed the row's hash from its
+ *   content and it matched.
+ * - `hash !== null, not verified` — it recomputed and it did NOT match. This is
+ *   tampering, it is counted in `unverifiedReferenceCount`, and no check may
+ *   pass while citing one.
+ * - `hash === null` — the table stores no hash of its own, so there was nothing
+ *   to recompute (a media artifact whose sha256 would need a download, a child
+ *   row covered by its parent's hash). Counted in `unhashedReferenceCount`,
+ *   never in `unverifiedReferenceCount`: conflating "I could not check" with "I
+ *   checked and it was wrong" made four of the ten criteria impossible to
+ *   record as passing, because the migration refuses a passing row with an
+ *   unverified reference.
  */
 
 export const MULTICAM_LONGFORM_GATE_SCHEMA_VERSION =
@@ -433,10 +449,21 @@ function normalizeCriterion(input: MulticamLongformCriterionEvidenceInput) {
         check.failureReason === 'evidence-missing' &&
         check.references.length === 0,
     ).length,
+    // A reference the reader recomputed and found wrong. Not the same number
+    // as "references that carry no hash": the first is tampering and forbids a
+    // pass, the second is a table that stores no hash of its own.
     unverifiedReferenceCount: checks.reduce(
       (total, check) =>
         total +
-        check.references.filter((reference) => !reference.verified).length,
+        check.references.filter(
+          (reference) => reference.hash !== null && !reference.verified,
+        ).length,
+      0,
+    ),
+    unhashedReferenceCount: checks.reduce(
+      (total, check) =>
+        total +
+        check.references.filter((reference) => reference.hash === null).length,
       0,
     ),
     checks: Object.freeze(checks),
@@ -609,6 +636,7 @@ export function explainMulticamLongformGate(
         missingCheckCount: criterion.missingCheckCount,
         failedCheckCount: criterion.failedCheckCount,
         unverifiedReferenceCount: criterion.unverifiedReferenceCount,
+        unhashedReferenceCount: criterion.unhashedReferenceCount,
         blocking: Object.freeze(
           criterion.checks
             .filter((check) => !check.passed)

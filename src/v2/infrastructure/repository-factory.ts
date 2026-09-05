@@ -2387,12 +2387,17 @@ export function createLegacyRuntimeAudit(): LegacyRuntimeAuditPort {
  */
 export function createMulticamLongformGateRuntime(clock: () => Date = () => new Date()) {
   const repository = createMulticamLongformGateRepository()
+  // One scanner, not two. The exposed `legacyAudit` used to be a second
+  // instance the evaluation never touched, so a caller that inspected or
+  // configured it changed nothing about what the gate read — and every
+  // evaluation re-walked the module graph from disk twice over.
+  const legacyAudit = createLegacyRuntimeAudit()
   return Object.freeze({
     repository,
-    legacyAudit: createLegacyRuntimeAudit(),
+    legacyAudit,
     evaluate: evaluateMulticamLongformGateService({
       repository,
-      legacyAudit: createLegacyRuntimeAudit(),
+      legacyAudit,
       clock,
       createId: () => `mlg-${randomUUID()}`,
     }),

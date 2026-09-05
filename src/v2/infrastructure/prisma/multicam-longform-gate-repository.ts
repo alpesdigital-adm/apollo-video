@@ -13,13 +13,22 @@ import type {
   MulticamLongformGateRepository,
   PersistedMulticamLongformGate,
 } from '../../application/ports/multicam-longform-gate-repository.ts'
-import { RENDERABLE_PLAN_ORIGINS } from '../../application/renderable-edit-plan.ts'
+import type { RenderablePlanOrigin } from '../../application/renderable-edit-plan.ts'
 import {
   calculateCanonicalHash,
   stableSerialize,
 } from '../../domain/canonical-hash.ts'
+import { SYNC_CEILINGS } from '../../domain/capture-protocol.ts'
+import { PODCAST_PARTICIPANT_ROLES } from '../../domain/capture-session.ts'
 import { COLOR_TRANSFORM_ORDER, resolveColorPlan } from '../../domain/color-and-export.ts'
+import { COLOR_CRITIC_ACTIONS } from '../../domain/color-critic-report.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { PLAYBACK_MODES } from '../../domain/playback-map.ts'
+import {
+  canAutoEdit,
+  DIAGNOSTIC_STATUSES,
+  RECOMMENDED_ACTIONS,
+} from '../../domain/sync-diagnostic.ts'
 import {
   assertMulticamLongformGateReportIntegrity,
   MULTICAM_LONGFORM_CRITERION_CHECKS,
@@ -63,15 +72,71 @@ import { PrismaSyncDiagnosticRepository } from './sync-diagnostic-repository.ts'
  * artifact — are read directly. Their manifest is re-hashed here; the media
  * bytes are not, so an artifact reference carries `hash: null` and says so,
  * rather than claiming a verification that would need a download.
+ *
+ * That third state is load-bearing and is counted apart from tampering. A
+ * reference with no stored hash (a media artifact nobody downloaded, a
+ * playback piece or a camera transform whose parent's hash already covers it)
+ * lands in `unhashedReferenceCount`; a reference whose hash WAS recomputed and
+ * disagreed lands in `unverifiedReferenceCount` and forbids a pass. Counting
+ * them together is what made four of the ten criteria impossible to record as
+ * satisfied: the migration's CHECK refuses a passing row with an unverified
+ * reference, so `persist()` aborted the whole transaction and no gate record
+ * was written at all.
+ *
+ * Two rules the readers below follow so this cannot come back:
+ *
+ * - Every criterion goes through `guarded`, so no read — including one that
+ *   sits outside its own try/catch — can take the other nine down.
+ * - `check()` refuses to emit a pass beside a hashed reference that did not
+ *   verify: it downgrades the check to `evidence-unverified` here, rather than
+ *   letting the domain throw where a throw means no record at all.
  */
 
 const SHA_256_PATTERN = /^[a-f0-9]{64}$/
-const SYNCED_STATUSES = new Set(['synced-high', 'synced-medium'])
-const MANUAL_ACTIONS = new Set(['reshoot-with-marker', 'add-manual-anchor'])
-const INTERRUPTED_MODES = new Set(['paused', 'rewind', 'replay', 'seek', 'commentary-only'])
-const BLOCKING_CEILINGS = new Set(['manual-anchors-required', 'not-synchronizable'])
-const RESOLVED_CRITIC_ACTIONS = new Set(['approve', 'bounded-correction'])
-const PARTICIPANT_ROLES = new Set(['camera-main', 'camera-alt', 'phone', 'microphone', 'reaction'])
+
+/**
+ * Every vocabulary below is filtered out of the domain constant that owns it,
+ * never retyped.
+ *
+ * A retyped set does not fail loudly: it makes a criterion quietly stop firing,
+ * which is the shape of the failure this whole gate exists to catch. Filtering
+ * the authority makes a renamed member a compile error here — comparing a
+ * member of a literal union against a string that is not in it does not type —
+ * and `T-F4.016 the reader's vocabularies come from the domain` asserts each
+ * set is a non-empty subset of its authority.
+ */
+const SYNCED_STATUSES = new Set<string>(
+  DIAGNOSTIC_STATUSES.filter(
+    (status) => status === 'synced-high' || status === 'synced-medium',
+  ),
+)
+const MANUAL_ACTIONS = new Set<string>(
+  RECOMMENDED_ACTIONS.filter(
+    (action) => action === 'reshoot-with-marker' || action === 'add-manual-anchor',
+  ),
+)
+/** Every mode except `playing`: the reference stopped tracking the reaction. */
+const INTERRUPTED_MODES = new Set<string>(
+  PLAYBACK_MODES.filter((mode) => mode !== 'playing'),
+)
+const BLOCKING_CEILINGS = new Set<string>(
+  SYNC_CEILINGS.filter(
+    (ceiling) =>
+      ceiling === 'manual-anchors-required' || ceiling === 'not-synchronizable',
+  ),
+)
+const RESOLVED_CRITIC_ACTIONS = new Set<string>(
+  COLOR_CRITIC_ACTIONS.filter(
+    (action) => action === 'approve' || action === 'bounded-correction',
+  ),
+)
+const PARTICIPANT_ROLES = new Set<string>(PODCAST_PARTICIPANT_ROLES)
+/**
+ * Named rather than indexed. `RENDERABLE_PLAN_ORIGINS[0]` and `[1]` swap the
+ * two criteria the day somebody reorders a frozen array, and nothing fails.
+ */
+const REACT_PLAYBACK_ORIGIN: RenderablePlanOrigin = 'react-playback'
+const MULTI_RANGE_SYNTHESIS_ORIGIN: RenderablePlanOrigin = 'multi-range-synthesis'
 const SYNTHESIS_TARGET_MS = 120_000
 const DURATION_TOLERANCE_SECONDS = 1
 
@@ -102,17 +167,50 @@ function ref(
   return { type, id, hash: usable, verified: usable === null ? false : verified }
 }
 
+/**
+ * One check result.
+ *
+ * Two things this does that an object literal would not:
+ *
+ * - The failure reason is **required** on every failing branch. The earlier
+ *   `?? 'requirement-unmet'` turned "the reader forgot to say why" into a
+ *   plausible-looking answer, and the five reasons exist precisely because the
+ *   operator's next action differs for each: shoot it, investigate the row,
+ *   measure it, fix the content, re-run against the current version.
+ * - A pass that cites a hash the reader recomputed and found **wrong** is
+ *   downgraded to `evidence-unverified` here. The domain refuses that
+ *   combination by throwing, and a throw at this point takes the whole
+ *   evaluation down and leaves no record of the other nine criteria — the exact
+ *   failure this gate exists to prevent. A reference with no hash at all is a
+ *   different thing and stays a legitimate citation on a passing check.
+ */
 function check(
   code: MulticamLongformCheckCode,
   passed: boolean,
-  failureReason: MulticamLongformFailureReason | null,
+  failureReason: MulticamLongformFailureReason,
   detail: string,
   references: readonly MulticamLongformEvidenceReferenceInput[],
 ): MulticamLongformCheckEvidenceInput {
+  const tampered = references.filter(
+    (reference) => reference.hash !== null && !reference.verified,
+  )
+  if (passed && tampered.length > 0) {
+    return {
+      code,
+      passed: false,
+      failureReason: 'evidence-unverified',
+      detail: truncate(
+        `${detail} — but ${tampered
+          .map((reference) => `${reference.type} ${reference.id}`)
+          .join(', ')} did not re-derive to the stored hash`,
+      ),
+      references: [...references],
+    }
+  }
   return {
     code,
     passed,
-    failureReason: passed ? null : failureReason ?? 'requirement-unmet',
+    failureReason: passed ? null : failureReason,
     detail: truncate(detail),
     references: [...references],
   }
@@ -151,12 +249,27 @@ function parseJson(value: string, field: string): unknown {
 }
 
 /**
+ * A stored manifest that is not even JSON any more.
+ *
+ * Returned as `null` rather than thrown: a manifest edited underneath the
+ * product is `evidence-unverified` on criterion 9, not an exception that
+ * deletes the report of the other nine criteria.
+ */
+function manifestDocument(row: { manifestJson: string }): Record<string, unknown> | null {
+  try {
+    return record(JSON.parse(row.manifestJson) as unknown)
+  } catch {
+    return null
+  }
+}
+
+/**
  * Re-hash a stored media manifest. The manifest's own hash covers everything
  * except itself (`createMediaArtifactManifestV1`), so removing it and hashing
  * the rest is the check the writer's own factory performs.
  */
 function manifestVerified(row: { manifestJson: string; manifestHash: string }): boolean {
-  const manifest = record(parseJson(row.manifestJson, 'media artifact manifest'))
+  const manifest = manifestDocument(row)
   if (!manifest) return false
   const { manifestHash: embedded, ...body } = manifest
   return embedded === row.manifestHash &&
@@ -164,7 +277,7 @@ function manifestVerified(row: { manifestJson: string; manifestHash: string }): 
 }
 
 function manifestProbe(row: { manifestJson: string }) {
-  const manifest = record(parseJson(row.manifestJson, 'media artifact manifest'))
+  const manifest = manifestDocument(row)
   const probe = record(manifest?.probe)
   const artifact = record(manifest?.artifact)
   const value = (field: string) =>
@@ -206,6 +319,12 @@ function hydrateGate(
   if (
     stableSerialize(report) !== row.reportJson ||
     report.fingerprint !== row.reportFingerprint ||
+    // `evaluatedAt` is the ordering key of readLatest and list, so an UPDATE to
+    // that one column silently changes which evaluation the product calls the
+    // latest. The column is not inside the hashed record — the record carries
+    // `createdAt` — so this cross-check is the only thing that ties it to the
+    // report whose fingerprint was signed.
+    report.evaluatedAt !== row.evaluatedAt.toISOString() ||
     report.approved !== row.approved ||
     report.satisfied !== row.satisfied ||
     report.evaluated !== row.evaluated ||
@@ -254,6 +373,25 @@ type CriterionRows = {
 }
 
 /**
+ * A criterion's answer plus the session it read it from.
+ *
+ * The session travels back so the record can name the session it judged rather
+ * than the filter the caller typed. `null` on the criteria whose evidence is
+ * project-shaped rather than session-shaped.
+ */
+type CriterionReading = {
+  evidence: MulticamLongformCriterionEvidenceInput
+  sessionId: string | null
+}
+
+/** A session, and the protocol whose scenario placed it there. */
+type ScenarioBinding = {
+  sessionId: string
+  protocolId: string
+  protocolVersion: number
+}
+
+/**
  * Project the report onto the criterion, check and evidence rows.
  *
  * The rows are derived from the report rather than assembled beside it, so a
@@ -279,6 +417,7 @@ function projectRows(
       failedCheckCount: criterion.failedCheckCount,
       missingCheckCount: criterion.missingCheckCount,
       unverifiedReferenceCount: criterion.unverifiedReferenceCount,
+      unhashedReferenceCount: criterion.unhashedReferenceCount,
     })
     criterion.checks.forEach((item, checkOrdinal) => {
       const checkRowId = `${criterionRowId}:${item.code}`
@@ -294,8 +433,13 @@ function projectRows(
         failureReason: item.failureReason,
         detail: item.detail,
         referenceCount: item.references.length,
+        // The same split the domain makes: a hash that was recomputed and
+        // disagreed, versus a table that stores no hash to recompute.
         unverifiedReferenceCount: item.references.filter(
-          (reference) => !reference.verified,
+          (reference) => reference.hash !== null && !reference.verified,
+        ).length,
+        unhashedReferenceCount: item.references.filter(
+          (reference) => reference.hash === null,
         ).length,
       })
       item.references.forEach((reference, referenceOrdinal) => {
@@ -389,39 +533,101 @@ implements MulticamLongformGateRepository {
     const sessionIds = heads.map((head) => head.sessionId)
     const scenarios = await this.scenariosBySession(workspaceId, sessionIds)
 
-    const evidence: MulticamLongformCriterionEvidenceInput[] = [
-      await this.podcastCriterion(workspaceId, scenarios),
-      await this.teacherCriterion(workspaceId, scenarios),
-      await this.insufficientEvidenceCriterion(workspaceId, sessionIds),
-      await this.reactCriterion(workspaceId, sessionIds),
-      await this.directionCriterion(workspaceId, sessionIds),
-      await this.synthesisCriterion(workspaceId, projectId),
-      await this.colourMatchCriterion(workspaceId, projectId, sessionIds),
-      await this.colourCriticCriterion(
-        workspaceId,
-        projectId,
-        project.currentVersionId,
-      ),
-      await this.finalMediaCriterion(workspaceId, projectId),
+    const guard = (
+      criterion: MulticamLongformCriterion,
+      read: () => Promise<CriterionReading>,
+    ) => this.guarded(criterion, projectId, read)
+
+    const readings: CriterionReading[] = [
+      await guard('podcast-multicam-synchronised', () =>
+        this.podcastCriterion(workspaceId, scenarios)),
+      await guard('teacher-and-screen-synchronised', () =>
+        this.teacherCriterion(workspaceId, scenarios)),
+      await guard('insufficient-evidence-requires-manual', () =>
+        this.insufficientEvidenceCriterion(workspaceId, sessionIds)),
+      await guard('react-edited-with-piecewise-map', () =>
+        this.reactCriterion(workspaceId, sessionIds)),
+      await guard('active-speaker-and-demonstration-directed', () =>
+        this.directionCriterion(workspaceId, sessionIds)),
+      await guard('contextual-multi-range-synthesis', () =>
+        this.synthesisCriterion(workspaceId, projectId)),
+      await guard('colour-match-precedes-creative-lut', () =>
+        this.colourMatchCriterion(workspaceId, projectId, sessionIds)),
+      await guard('colour-critic-resolved', () =>
+        this.colourCriticCriterion(workspaceId, projectId, project.currentVersionId)),
+      await guard('final-mp4-inspectable', () =>
+        this.finalMediaCriterion(workspaceId, projectId)),
     ]
 
+    // The session the capture criteria were actually read against, not the
+    // string the caller typed. A caller who names a session this project does
+    // not have gets `null` here and a record that says so; echoing the input
+    // back made the gate label a session it never found.
+    const found = new Set(sessionIds)
+    const resolvedSessionId = sessionId
+      ? (found.has(sessionId) ? sessionId : null)
+      : readings.find((reading) => reading.sessionId !== null)?.sessionId ?? null
+
     return Object.freeze({
-      resolvedSessionId: sessionId,
+      resolvedSessionId,
       projectVersionId: project.currentVersion?.id ?? null,
       projectVersionHash: project.currentVersion?.baseHash ?? null,
-      evidence: Object.freeze(evidence),
+      evidence: Object.freeze(readings.map((reading) => reading.evidence)),
     })
   }
 
   /**
-   * Which capture scenario each session was evaluated against.
+   * No single reader may take the gate down.
+   *
+   * Every criterion goes through here, so a `PERSISTENCE_CONFLICT` raised
+   * anywhere inside one — including by a read that sits outside that reader's
+   * own try/catch — reproves that criterion as `evidence-unverified` and leaves
+   * the other nine visible. That is what the module header promises; before
+   * this, one tampered `renderable_plan_snapshots` row threw out of
+   * `readEvidence` and no record was written at all.
+   */
+  private async guarded(
+    criterion: MulticamLongformCriterion,
+    projectId: string,
+    read: () => Promise<CriterionReading>,
+  ): Promise<CriterionReading> {
+    try {
+      return await read()
+    } catch (error) {
+      if (!isPersistenceConflict(error)) throw error
+      return {
+        sessionId: null,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-unverified',
+          `a row this criterion reads did not re-derive to its own hash: ${
+            error instanceof DomainError ? error.message : 'persistence conflict'
+          }`,
+          [ref('project', projectId, null, false)],
+        ),
+      }
+    }
+  }
+
+  /**
+   * Which capture scenario each session was evaluated against, and against
+   * which protocol.
    *
    * The scenario is not a column on the session: it belongs to the protocol,
    * and a session's scenario is therefore whatever protocol was evaluated over
    * it. Reading it any other way would be guessing from track roles.
+   *
+   * The protocol travels with the session because one session may hold
+   * evaluations against protocols of different scenarios — the unique key is
+   * [workspace, session, sessionVersion, protocol, protocolVersion] — so
+   * "which evaluation established this scenario" is not "the newest evaluation
+   * of this session". Criteria 1 and 2 were both satisfied by whichever
+   * evaluation happened to be newest, which meant one row answered two
+   * conditions ADR-135 asks to see independently.
    */
   private async scenariosBySession(workspaceId: string, sessionIds: readonly string[]) {
-    if (sessionIds.length === 0) return new Map<string, string[]>()
+    const bySession = new Map<string, ScenarioBinding[]>()
+    if (sessionIds.length === 0) return bySession
     const evaluations = await this.client.v2CaptureProtocolEvaluation.findMany({
       where: { workspaceId, sessionId: { in: [...sessionIds] } },
       orderBy: { evaluatedAt: 'desc' },
@@ -437,53 +643,79 @@ implements MulticamLongformGateRepository {
         protocol.scenario,
       ]),
     )
-    const bySession = new Map<string, string[]>()
     for (const evaluation of evaluations) {
       const scenario = scenarioOf.get(
         `${evaluation.protocolId}:${evaluation.protocolVersion}`,
       )
       if (!scenario) continue
-      const key = `${scenario}`
-      const list = bySession.get(key) ?? []
-      if (!list.includes(evaluation.sessionId)) list.push(evaluation.sessionId)
-      bySession.set(key, list)
+      const list = bySession.get(scenario) ?? []
+      if (!list.some((entry) => entry.sessionId === evaluation.sessionId)) {
+        list.push({
+          sessionId: evaluation.sessionId,
+          protocolId: evaluation.protocolId,
+          protocolVersion: evaluation.protocolVersion,
+        })
+      }
+      bySession.set(scenario, list)
     }
     return bySession
   }
 
-  private async verifiedEvaluation(workspaceId: string, sessionId: string) {
+  /**
+   * The evaluation whose hash the owning repository re-derived on read.
+   *
+   * `binding` names the protocol whose scenario the criterion is about; without
+   * it the newest evaluation of any protocol answers, which is right only for
+   * "does any ceiling block the automatic edit".
+   */
+  private async verifiedEvaluation(
+    workspaceId: string,
+    sessionId: string,
+    binding: ScenarioBinding | null,
+  ) {
     const evaluations = await this.protocols.listEvaluations({
       workspaceId,
       sessionId,
-      limit: 5,
+      limit: 25,
     })
-    return evaluations[0] ?? null
+    if (!binding) return evaluations[0] ?? null
+    return (
+      evaluations.find(
+        (item) =>
+          item.protocolId === binding.protocolId &&
+          item.protocolVersion === binding.protocolVersion,
+      ) ?? null
+    )
   }
 
   /** Criteria 1 and 2 differ only in the scenario and the last two checks. */
   private async synchronisedCriterion(
     workspaceId: string,
-    sessionId: string | undefined,
+    binding: ScenarioBinding | undefined,
     criterion: 'podcast-multicam-synchronised' | 'teacher-and-screen-synchronised',
     scenario: string,
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const protocolCheck: MulticamLongformCheckCode =
       criterion === 'podcast-multicam-synchronised'
         ? 'podcast-protocol-evaluated'
         : 'teacher-protocol-evaluated'
-    if (!sessionId) {
+    if (!binding) {
       return {
-        criterion,
-        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-          check(
-            code,
-            false,
-            'evidence-missing',
-            `no capture session in this project was evaluated against a ${scenario} protocol`,
-            [],
-          )),
+        sessionId: null,
+        evidence: {
+          criterion,
+          checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+            check(
+              code,
+              false,
+              'evidence-missing',
+              `no capture session in this project was evaluated against a ${scenario} protocol`,
+              [],
+            )),
+        },
       }
     }
+    const sessionId = binding.sessionId
     let session: Readonly<CaptureSession> | null = null
     let diagnostic = null
     let coverages: readonly { trackId: string; bounds: { start: bigint; end: bigint }; coverageHash: string }[] = []
@@ -491,18 +723,21 @@ implements MulticamLongformGateRepository {
     let evaluation = null
     try {
       session = await this.sessions.readHead({ workspaceId, sessionId })
-      evaluation = await this.verifiedEvaluation(workspaceId, sessionId)
+      evaluation = await this.verifiedEvaluation(workspaceId, sessionId, binding)
       diagnostic = await this.diagnostics.readHead({ workspaceId, sessionId })
       coverages = await this.sessions.listCoverage({ workspaceId, sessionId })
       clockMaps = await this.sessions.listClockMaps({ workspaceId, sessionId })
     } catch (error) {
       if (!isPersistenceConflict(error)) throw error
-      return criterionFailed(
-        criterion,
-        'evidence-unverified',
-        `a stored row of session ${sessionId} did not re-derive to its own hash`,
-        [ref('capture-session', sessionId, null, false)],
-      )
+      return {
+        sessionId,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-unverified',
+          `a stored row of session ${sessionId} did not re-derive to its own hash`,
+          [ref('capture-session', sessionId, null, false)],
+        ),
+      }
     }
     const sessionRef = ref(
       'capture-session',
@@ -529,7 +764,7 @@ implements MulticamLongformGateRepository {
         'evidence-missing',
         evaluation
           ? `session ${sessionId} evaluated against ${evaluation.protocolId} v${evaluation.protocolVersion} (${scenario}), ceiling ${evaluation.ceiling}`
-          : `session ${sessionId} has no capture protocol evaluation`,
+          : `session ${sessionId} has no evaluation against a ${scenario} protocol`,
         [sessionRef, evaluationRef],
       ),
       check(
@@ -549,12 +784,16 @@ implements MulticamLongformGateRepository {
     const coverageRefs = coverages
       .slice(0, 4)
       .map((coverage) => ref('track-coverage', coverage.trackId, coverage.coverageHash, true))
+    // The reason is read off the same expression that decided the failure.
+    // "Only one coverage row was derived" and "two rows exist and neither was
+    // measured" are different jobs for the operator, and reporting both as
+    // `evidence-not-measured` sent them to the wrong one.
     const coverageCheck = check(
       'coverage-derived',
       coverages.length >= 2 && measuredCoverage.length >= 2,
-      coverages.length === 0 ? 'evidence-missing' : 'evidence-not-measured',
-      coverages.length === 0
-        ? `session ${sessionId} has no derived track coverage`
+      coverages.length < 2 ? 'evidence-missing' : 'evidence-not-measured',
+      coverages.length < 2
+        ? `session ${sessionId} derived ${coverages.length} track coverages; two are needed to compare`
         : `${coverages.length} coverage rows, ${measuredCoverage.length} of ${diagnostic?.tracks.length ?? 0} diagnostic tracks carry a measured coverageBps`,
       coverageRefs.length > 0 ? coverageRefs : [sessionRef],
     )
@@ -575,7 +814,9 @@ implements MulticamLongformGateRepository {
         check(
           'clock-map-persisted',
           clockMaps.length >= 1 && clockMaps.every((map) => map.pieces.length >= 1),
-          'evidence-missing',
+          // A map that exists and carries no piece is not a missing map: four
+          // rows were read to say so.
+          clockMaps.length === 0 ? 'evidence-missing' : 'requirement-unmet',
           clockMaps.length === 0
             ? `session ${sessionId} has no persisted clock map`
             : `${clockMaps.length} clock maps persisted, ${clockMaps.reduce((total, map) => total + map.pieces.length, 0)} pieces`,
@@ -584,7 +825,7 @@ implements MulticamLongformGateRepository {
             : [sessionRef],
         ),
       )
-      return { criterion, checks }
+      return { sessionId, evidence: { criterion, checks } }
     }
 
     const spans = coverages.map((coverage) => ({
@@ -604,10 +845,13 @@ implements MulticamLongformGateRepository {
       ),
       coverageCheck,
     )
-    return { criterion, checks }
+    return { sessionId, evidence: { criterion, checks } }
   }
 
-  private async podcastCriterion(workspaceId: string, scenarios: Map<string, string[]>) {
+  private async podcastCriterion(
+    workspaceId: string,
+    scenarios: Map<string, ScenarioBinding[]>,
+  ) {
     return this.synchronisedCriterion(
       workspaceId,
       scenarios.get('podcast')?.[0],
@@ -616,7 +860,10 @@ implements MulticamLongformGateRepository {
     )
   }
 
-  private async teacherCriterion(workspaceId: string, scenarios: Map<string, string[]>) {
+  private async teacherCriterion(
+    workspaceId: string,
+    scenarios: Map<string, ScenarioBinding[]>,
+  ) {
     return this.synchronisedCriterion(
       workspaceId,
       scenarios.get('teacher-and-screen')?.[0],
@@ -628,7 +875,7 @@ implements MulticamLongformGateRepository {
   private async insufficientEvidenceCriterion(
     workspaceId: string,
     sessionIds: readonly string[],
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'insufficient-evidence-requires-manual' as const
     for (const sessionId of sessionIds) {
       let records
@@ -636,36 +883,50 @@ implements MulticamLongformGateRepository {
         records = await this.sessions.listSyncEvidence({ workspaceId, sessionId })
       } catch (error) {
         if (!isPersistenceConflict(error)) throw error
-        return criterionFailed(
-          criterion,
-          'evidence-unverified',
-          `sync evidence of session ${sessionId} did not re-derive to its own hash`,
-          [ref('capture-session', sessionId, null, false)],
-        )
+        return {
+          sessionId,
+          evidence: criterionFailed(
+            criterion,
+            'evidence-unverified',
+            `sync evidence of session ${sessionId} did not re-derive to its own hash`,
+            [ref('capture-session', sessionId, null, false)],
+          ),
+        }
       }
       const insufficient = records.find(
         (item) => item.outcome === 'insufficient-evidence' && item.clockMap === null,
       )
       if (!insufficient) continue
+      // The evidence row DOES store a hash, and `listSyncEvidence` above
+      // recomputed it — a mismatch is the PERSISTENCE_CONFLICT this method just
+      // caught. Citing the row hash-less understated evidence the reader had
+      // already verified, and made a passing check impossible to store.
+      const evidenceRow = await this.client.v2CaptureSyncEvidence.findFirst({
+        where: { workspaceId, sessionId, trackId: insufficient.trackId },
+        select: { evidenceHash: true },
+      })
       const evidenceRef = ref(
         'sync-evidence',
         `${sessionId}:${insufficient.trackId}`,
-        null,
-        false,
+        evidenceRow?.evidenceHash ?? null,
+        true,
       )
       let diagnostic = null
       let evaluation = null
       try {
         diagnostic = await this.diagnostics.readHead({ workspaceId, sessionId })
-        evaluation = await this.verifiedEvaluation(workspaceId, sessionId)
+        evaluation = await this.verifiedEvaluation(workspaceId, sessionId, null)
       } catch (error) {
         if (!isPersistenceConflict(error)) throw error
-        return criterionFailed(
-          criterion,
-          'evidence-unverified',
-          `a stored row of session ${sessionId} did not re-derive to its own hash`,
-          [evidenceRef],
-        )
+        return {
+          sessionId,
+          evidence: criterionFailed(
+            criterion,
+            'evidence-unverified',
+            `a stored row of session ${sessionId} did not re-derive to its own hash`,
+            [evidenceRef],
+          ),
+        }
       }
       const diagnosticRef = diagnostic
         ? ref('sync-diagnostic', `${sessionId}:${diagnostic.version}`, diagnostic.diagnosticHash, true)
@@ -681,61 +942,79 @@ implements MulticamLongformGateRepository {
       const demanded = diagnostic
         ? diagnostic.recommendedActions.filter((action) => MANUAL_ACTIONS.has(action))
         : []
+      // `canAutoEdit` is the domain's authority on this question and blocks on
+      // six independent grounds. Re-deriving one of them from the evaluation
+      // row agreed with it only by coincidence: a diagnostic it refuses for
+      // confidence or contradictory anchors was reported here as not blocked.
+      const autoEdit = diagnostic ? canAutoEdit(diagnostic) : null
       return {
-        criterion,
-        checks: [
-          check(
-            'sync-evidence-insufficient',
-            true,
-            null,
-            `track ${insufficient.trackId} of session ${sessionId} is insufficient-evidence with no clock map, manualRequired=${insufficient.manualRequired}`,
-            [evidenceRef],
-          ),
-          check(
-            'diagnostic-requires-manual',
-            Boolean(diagnostic?.manualRequired) && demanded.length >= 1,
-            diagnostic ? 'requirement-unmet' : 'evidence-missing',
-            diagnostic
-              ? `diagnostic v${diagnostic.version} manualRequired=${diagnostic.manualRequired}, actions [${diagnostic.recommendedActions.join(', ')}]`
-              : `session ${sessionId} has no sync diagnostic to demand a manual anchor`,
-            [diagnosticRef],
-          ),
-          check(
-            'protocol-ceiling-blocks-auto-edit',
-            Boolean(
-              evaluation &&
-              BLOCKING_CEILINGS.has(evaluation.ceiling) &&
-              evaluation.blocksAutoEdit,
+        sessionId,
+        evidence: {
+          criterion,
+          checks: [
+            check(
+              'sync-evidence-insufficient',
+              insufficient.outcome === 'insufficient-evidence' &&
+                insufficient.clockMap === null,
+              'requirement-unmet',
+              `track ${insufficient.trackId} of session ${sessionId} is ${insufficient.outcome} with no clock map, manualRequired=${insufficient.manualRequired}`,
+              [evidenceRef],
             ),
-            evaluation ? 'requirement-unmet' : 'evidence-missing',
-            evaluation
-              ? `protocol ${evaluation.protocolId} v${evaluation.protocolVersion} ceiling ${evaluation.ceiling}, blocksAutoEdit=${evaluation.blocksAutoEdit}`
-              : `session ${sessionId} has no protocol evaluation to place a ceiling`,
-            [evaluationRef],
-          ),
-        ],
+            check(
+              'diagnostic-requires-manual',
+              Boolean(diagnostic?.manualRequired) && demanded.length >= 1,
+              diagnostic ? 'requirement-unmet' : 'evidence-missing',
+              diagnostic
+                ? `diagnostic v${diagnostic.version} manualRequired=${diagnostic.manualRequired}, actions [${diagnostic.recommendedActions.join(', ')}]`
+                : `session ${sessionId} has no sync diagnostic to demand a manual anchor`,
+              [diagnosticRef],
+            ),
+            check(
+              'protocol-ceiling-blocks-auto-edit',
+              Boolean(
+                evaluation &&
+                BLOCKING_CEILINGS.has(evaluation.ceiling) &&
+                evaluation.blocksAutoEdit &&
+                autoEdit &&
+                !autoEdit.allowed,
+              ),
+              evaluation && diagnostic ? 'requirement-unmet' : 'evidence-missing',
+              evaluation
+                ? `protocol ${evaluation.protocolId} v${evaluation.protocolVersion} ceiling ${evaluation.ceiling}, blocksAutoEdit=${evaluation.blocksAutoEdit}; canAutoEdit ${
+                  autoEdit
+                    ? `allowed=${autoEdit.allowed} blocked by [${autoEdit.blockedBy.join('; ')}]`
+                    : 'has no diagnostic to judge'
+                }`
+                : `session ${sessionId} has no protocol evaluation to place a ceiling`,
+              [evaluationRef],
+            ),
+          ],
+        },
       }
     }
     return {
-      criterion,
-      checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-        check(
-          code,
-          false,
-          'evidence-missing',
-          'no capture session in this project recorded an insufficient-evidence outcome',
-          [],
-        )),
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+          check(
+            code,
+            false,
+            'evidence-missing',
+            'no capture session in this project recorded an insufficient-evidence outcome',
+            [],
+          )),
+      },
     }
   }
 
   private async reactCriterion(
     workspaceId: string,
     sessionIds: readonly string[],
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'react-edited-with-piecewise-map' as const
     if (sessionIds.length === 0) {
-      return { criterion, checks: [] }
+      return { sessionId: null, evidence: { criterion, checks: [] } }
     }
     const head = await this.client.v2PlaybackMapHead.findFirst({
       where: { workspaceId, sessionId: { in: [...sessionIds] } },
@@ -743,9 +1022,12 @@ implements MulticamLongformGateRepository {
     })
     if (!head) {
       return {
-        criterion,
-        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-          check(code, false, 'evidence-missing', 'no react playback map exists for this project', [])),
+        sessionId: null,
+        evidence: {
+          criterion,
+          checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+            check(code, false, 'evidence-missing', 'no react playback map exists for this project', [])),
+        },
       }
     }
     const headRef = ref('playback-map', head.mapId, head.mapHash, false)
@@ -760,28 +1042,38 @@ implements MulticamLongformGateRepository {
       session = await this.sessions.readHead({ workspaceId, sessionId: head.sessionId })
     } catch (error) {
       if (!isPersistenceConflict(error)) throw error
-      return criterionFailed(
-        criterion,
-        'evidence-unverified',
-        `playback map ${head.mapId} did not re-derive to its stored hash`,
-        [headRef],
-      )
+      return {
+        sessionId: head.sessionId,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-unverified',
+          `playback map ${head.mapId} did not re-derive to its stored hash`,
+          [headRef],
+        ),
+      }
     }
     if (!map) {
-      return criterionFailed(
-        criterion,
-        'evidence-missing',
-        `playback map head ${head.mapId} names a version that no longer exists`,
-        [headRef],
-      )
+      return {
+        sessionId: head.sessionId,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-missing',
+          `playback map head ${head.mapId} names a version that no longer exists`,
+          [headRef],
+        ),
+      }
     }
     const mapRef = ref('playback-map', map.mapId, map.mapHash, true)
     const interrupted = map.pieces.filter((piece) => INTERRUPTED_MODES.has(piece.mode))
-    const snapshot = await this.snapshots.readLatestForSource({
+    // The snapshot read re-derives the stored plan and raises
+    // PERSISTENCE_CONFLICT when it does not recompute. It used to sit outside
+    // every try/catch, so one edited `renderable_plan_snapshots` row threw out
+    // of readEvidence and took all ten criteria down with it.
+    const snapshot = await this.snapshotForSource(
       workspaceId,
-      origin: RENDERABLE_PLAN_ORIGINS[0],
-      sourceId: map.mapId,
-    })
+      REACT_PLAYBACK_ORIGIN,
+      map.mapId,
+    )
     const reactionSeconds = session
       ? seconds(map.reactionMedia.durationTicks, session.clock.timebase.secondsPerTick)
       : null
@@ -789,54 +1081,91 @@ implements MulticamLongformGateRepository {
       map.referenceMedia.durationTicks,
       map.referenceMedia.timebase.secondsPerTick,
     )
+    const plan = snapshot.plan
     return {
-      criterion,
-      checks: [
-        check(
-          'playback-map-persisted',
-          map.status === 'resolved',
-          'requirement-unmet',
-          `playback map ${map.mapId} v${map.version} status ${map.status}, ${map.pieces.length} pieces, ${map.uncovered.length} uncovered stretches`,
-          [mapRef],
-        ),
-        check(
-          'interrupted-piece-present',
-          interrupted.length >= 1,
-          'requirement-unmet',
-          interrupted.length >= 1
-            ? `${interrupted.length} interrupted pieces: ${[...new Set(interrupted.map((piece) => piece.mode))].join(', ')}`
-            : `every piece of map ${map.mapId} is ${[...new Set(map.pieces.map((piece) => piece.mode))].join(', ')}`,
-          [mapRef, ...interrupted.slice(0, 3).map((piece) => ref('playback-piece', `${map.mapId}:${piece.pieceId}`, null, false))],
-        ),
-        check(
-          'reaction-duration-differs',
-          reactionSeconds !== null &&
-            Math.abs(reactionSeconds - referenceSeconds) > DURATION_TOLERANCE_SECONDS,
-          reactionSeconds === null ? 'evidence-not-measured' : 'requirement-unmet',
-          reactionSeconds === null
-            ? `session ${head.sessionId} has no clock policy, so the reaction duration is not measured`
-            : `reaction ${reactionSeconds.toFixed(3)}s vs reference ${referenceSeconds.toFixed(3)}s`,
-          [mapRef, ref('capture-session', head.sessionId, session?.sessionHash ?? null, true)],
-        ),
-        check(
-          'map-compiled-into-plan',
-          Boolean(snapshot && snapshot.sourceHash === map.mapHash && snapshot.clipCount >= 1),
-          snapshot ? 'evidence-stale' : 'evidence-missing',
-          snapshot
-            ? `snapshot ${snapshot.planId} compiled ${snapshot.clipCount} clips from source hash ${snapshot.sourceHash.slice(0, 12)} (map ${map.mapHash.slice(0, 12)})`
-            : `playback map ${map.mapId} was never compiled into a renderable plan`,
-          snapshot
-            ? [mapRef, ref('renderable-plan-snapshot', snapshot.planId, snapshot.planHash, true)]
-            : [mapRef],
-        ),
-      ],
+      sessionId: head.sessionId,
+      evidence: {
+        criterion,
+        checks: [
+          check(
+            'playback-map-persisted',
+            map.status === 'resolved',
+            'requirement-unmet',
+            `playback map ${map.mapId} v${map.version} status ${map.status}, ${map.pieces.length} pieces, ${map.uncovered.length} uncovered stretches`,
+            [mapRef],
+          ),
+          check(
+            'interrupted-piece-present',
+            interrupted.length >= 1,
+            'requirement-unmet',
+            interrupted.length >= 1
+              ? `${interrupted.length} interrupted pieces: ${[...new Set(interrupted.map((piece) => piece.mode))].join(', ')}`
+              : `every piece of map ${map.mapId} is ${[...new Set(map.pieces.map((piece) => piece.mode))].join(', ')}`,
+            // The pieces have no hash of their own — the map's hash covers them
+            // — so they are cited hash-less and counted as unhashed, not as
+            // evidence that failed to verify.
+            [mapRef, ...interrupted.slice(0, 3).map((piece) => ref('playback-piece', `${map.mapId}:${piece.pieceId}`, null, false))],
+          ),
+          check(
+            'reaction-duration-differs',
+            reactionSeconds !== null &&
+              Math.abs(reactionSeconds - referenceSeconds) > DURATION_TOLERANCE_SECONDS,
+            reactionSeconds === null ? 'evidence-not-measured' : 'requirement-unmet',
+            reactionSeconds === null
+              ? `session ${head.sessionId} has no clock policy, so the reaction duration is not measured`
+              : `reaction ${reactionSeconds.toFixed(3)}s vs reference ${referenceSeconds.toFixed(3)}s`,
+            [mapRef, ref('capture-session', head.sessionId, session?.sessionHash ?? null, true)],
+          ),
+          check(
+            'map-compiled-into-plan',
+            Boolean(plan && plan.sourceHash === map.mapHash && plan.clipCount >= 1),
+            snapshot.unverified
+              ? 'evidence-unverified'
+              : plan ? 'evidence-stale' : 'evidence-missing',
+            snapshot.unverified
+              ? `the newest renderable plan compiled from map ${map.mapId} did not re-derive to its stored hash`
+              : plan
+                ? `snapshot ${plan.planId} compiled ${plan.clipCount} clips from source hash ${plan.sourceHash.slice(0, 12)} (map ${map.mapHash.slice(0, 12)})`
+                : `playback map ${map.mapId} was never compiled into a renderable plan`,
+            plan
+              ? [mapRef, ref('renderable-plan-snapshot', plan.planId, plan.planHash, true)]
+              : [mapRef],
+          ),
+        ],
+      },
+    }
+  }
+
+  /**
+   * The newest plan compiled from one source, or the fact that it did not
+   * re-derive.
+   *
+   * `readLatestForSource` hydrates the stored plan and raises
+   * PERSISTENCE_CONFLICT when the plan hash does not recompute. Criteria 4 and
+   * 6 both need that to be an answer rather than an exception.
+   */
+  private async snapshotForSource(
+    workspaceId: string,
+    origin: RenderablePlanOrigin,
+    sourceId: string,
+  ) {
+    try {
+      const plan = await this.snapshots.readLatestForSource({
+        workspaceId,
+        origin,
+        sourceId,
+      })
+      return { plan, unverified: false }
+    } catch (error) {
+      if (!isPersistenceConflict(error)) throw error
+      return { plan: null, unverified: true }
     }
   }
 
   private async directionCriterion(
     workspaceId: string,
     sessionIds: readonly string[],
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'active-speaker-and-demonstration-directed' as const
     for (const sessionId of sessionIds) {
       const head = await this.client.v2MulticamDirectionHead.findUnique({
@@ -849,12 +1178,15 @@ implements MulticamLongformGateRepository {
         stored = await this.directions.readHead({ workspaceId, sessionId })
       } catch (error) {
         if (!isPersistenceConflict(error)) throw error
-        return criterionFailed(
-          criterion,
-          'evidence-unverified',
-          `multicam direction of session ${sessionId} did not re-derive to its stored hash`,
-          [headRef],
-        )
+        return {
+          sessionId,
+          evidence: criterionFailed(
+            criterion,
+            'evidence-unverified',
+            `multicam direction of session ${sessionId} did not re-derive to its stored hash`,
+            [headRef],
+          ),
+        }
       }
       if (!stored) continue
       const direction = stored.direction
@@ -874,147 +1206,169 @@ implements MulticamLongformGateRepository {
         (shot): shot is NonNullable<typeof shot> => Boolean(shot),
       )
       return {
-        criterion,
-        checks: [
-          check(
-            'direction-persisted',
-            direction.shots.length >= 1,
-            'requirement-unmet',
-            `direction v${stored.version} of session ${sessionId}: ${direction.shots.length} shots, ${direction.uncovered.length} uncovered ranges, manualReviewRequired=${direction.manualReviewRequired}`,
-            [directionRef],
-          ),
-          check(
-            'active-speaker-rule-fired',
-            Boolean(speaker),
-            'requirement-unmet',
-            speaker
-              ? `shot ${speaker.shotId} cut on speech-prefers-active-speaker to track ${speaker.chosen.trackId}`
-              : `no shot in direction v${stored.version} was cut by speech-prefers-active-speaker; rules used: ${[...new Set(direction.shots.map((shot) => shot.rule))].join(', ')}`,
-            speaker
-              ? [directionRef, ref('shot-decision', `${sessionId}:${speaker.shotId}`, speaker.decisionHash, true)]
-              : [directionRef],
-          ),
-          check(
-            'demonstration-rule-fired',
-            Boolean(demonstration),
-            'requirement-unmet',
-            demonstration
-              ? `shot ${demonstration.shotId} cut on demonstration-prefers-screen to track ${demonstration.chosen.trackId}`
-              : `no shot in direction v${stored.version} was cut by demonstration-prefers-screen`,
-            demonstration
-              ? [directionRef, ref('shot-decision', `${sessionId}:${demonstration.shotId}`, demonstration.decisionHash, true)]
-              : [directionRef],
-          ),
-          check(
-            'decisions-carry-justification',
-            justified.length === 2 &&
-              justified.every((shot) =>
-                shot.reason.trim().length >= 8 && shot.evidenceRefs.length >= 1),
-            justified.length === 2 ? 'requirement-unmet' : 'evidence-missing',
-            justified.length === 2
-              ? justified
-                .map((shot) => `${shot.shotId}: "${shot.reason.slice(0, 80)}" (${shot.evidenceRefs.length} refs)`)
-                .join(' | ')
-              : `only ${justified.length} of the two required rules produced a shot to justify`,
-            justified.length > 0
-              ? justified.map((shot) => ref('shot-decision', `${sessionId}:${shot.shotId}`, shot.decisionHash, true))
-              : [directionRef],
-          ),
-        ],
+        sessionId,
+        evidence: {
+          criterion,
+          checks: [
+            check(
+              'direction-persisted',
+              direction.shots.length >= 1,
+              'requirement-unmet',
+              `direction v${stored.version} of session ${sessionId}: ${direction.shots.length} shots, ${direction.uncovered.length} uncovered ranges, manualReviewRequired=${direction.manualReviewRequired}`,
+              [directionRef],
+            ),
+            check(
+              'active-speaker-rule-fired',
+              Boolean(speaker),
+              'requirement-unmet',
+              speaker
+                ? `shot ${speaker.shotId} cut on speech-prefers-active-speaker to track ${speaker.chosen.trackId}`
+                : `no shot in direction v${stored.version} was cut by speech-prefers-active-speaker; rules used: ${[...new Set(direction.shots.map((shot) => shot.rule))].join(', ')}`,
+              speaker
+                ? [directionRef, ref('shot-decision', `${sessionId}:${speaker.shotId}`, speaker.decisionHash, true)]
+                : [directionRef],
+            ),
+            check(
+              'demonstration-rule-fired',
+              Boolean(demonstration),
+              'requirement-unmet',
+              demonstration
+                ? `shot ${demonstration.shotId} cut on demonstration-prefers-screen to track ${demonstration.chosen.trackId}`
+                : `no shot in direction v${stored.version} was cut by demonstration-prefers-screen`,
+              demonstration
+                ? [directionRef, ref('shot-decision', `${sessionId}:${demonstration.shotId}`, demonstration.decisionHash, true)]
+                : [directionRef],
+            ),
+            check(
+              'decisions-carry-justification',
+              justified.length === 2 &&
+                justified.every((shot) =>
+                  shot.reason.trim().length >= 8 && shot.evidenceRefs.length >= 1),
+              justified.length === 2 ? 'requirement-unmet' : 'evidence-missing',
+              justified.length === 2
+                ? justified
+                  .map((shot) => `${shot.shotId}: "${shot.reason.slice(0, 80)}" (${shot.evidenceRefs.length} refs)`)
+                  .join(' | ')
+                : `only ${justified.length} of the two required rules produced a shot to justify`,
+              justified.length > 0
+                ? justified.map((shot) => ref('shot-decision', `${sessionId}:${shot.shotId}`, shot.decisionHash, true))
+                : [directionRef],
+            ),
+          ],
+        },
       }
     }
     return {
-      criterion,
-      checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-        check(code, false, 'evidence-missing', 'no multicam direction exists for this project', [])),
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+          check(code, false, 'evidence-missing', 'no multicam direction exists for this project', [])),
+      },
     }
   }
 
   private async synthesisCriterion(
     workspaceId: string,
     projectId: string,
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'contextual-multi-range-synthesis' as const
     let stored
     try {
       stored = await this.syntheses.list({ workspaceId, projectId, limit: 20 })
     } catch (error) {
       if (!isPersistenceConflict(error)) throw error
-      return criterionFailed(
-        criterion,
-        'evidence-unverified',
-        `a stored editorial synthesis of project ${projectId} did not re-derive to its own hash`,
-        [ref('project', projectId, null, false)],
-      )
+      return {
+        sessionId: null,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-unverified',
+          `a stored editorial synthesis of project ${projectId} did not re-derive to its own hash`,
+          [ref('project', projectId, null, false)],
+        ),
+      }
     }
     const chosen =
       stored.find((item) => item.synthesis.targetDurationMs === SYNTHESIS_TARGET_MS) ??
       stored[0]
     if (!chosen) {
       return {
-        criterion,
-        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-          check(code, false, 'evidence-missing', 'no editorial synthesis exists for this project', [])),
+        sessionId: null,
+        evidence: {
+          criterion,
+          checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+            check(code, false, 'evidence-missing', 'no editorial synthesis exists for this project', [])),
+        },
       }
     }
     const synthesis = chosen.synthesis
     const synthesisRef = ref('editorial-synthesis', synthesis.id, synthesis.synthesisHash, true)
     const drift = Math.abs(synthesis.synthesizedDurationMs - synthesis.targetDurationMs)
-    const snapshot = await this.snapshots.readLatestForSource({
+    // Guarded for the same reason criterion 4's read is: a renderable plan row
+    // edited underneath the product is this criterion's answer, not an
+    // exception that deletes the report of the other nine.
+    const snapshot = await this.snapshotForSource(
       workspaceId,
-      origin: RENDERABLE_PLAN_ORIGINS[1],
-      sourceId: synthesis.id,
-    })
+      MULTI_RANGE_SYNTHESIS_ORIGIN,
+      synthesis.id,
+    )
+    const plan = snapshot.plan
+    const planRefs = plan
+      ? [synthesisRef, ref('renderable-plan-snapshot', plan.planId, plan.planHash, true)]
+      : [synthesisRef]
     const proof = synthesis.contextProof
     const proofSize =
       proof.claimsIncluded.length + proof.qualifiersIncluded.length
     return {
-      criterion,
-      checks: [
-        check(
-          'synthesis-persisted',
-          synthesis.ranges.length >= 1,
-          'requirement-unmet',
-          `synthesis ${synthesis.id}: ${synthesis.ranges.length} ranges, ${synthesis.joins.length} joins, ${synthesis.droppedMs}ms dropped from ${synthesis.sourceDurationMs}ms`,
-          [synthesisRef],
-        ),
-        check(
-          'target-duration-is-120s',
-          synthesis.targetDurationMs === SYNTHESIS_TARGET_MS,
-          'requirement-unmet',
-          `targetDurationMs=${synthesis.targetDurationMs} (ADR-135 asks for ${SYNTHESIS_TARGET_MS})`,
-          [synthesisRef],
-        ),
-        check(
-          'duration-within-tolerance',
-          drift <= synthesis.toleranceMs,
-          'requirement-unmet',
-          `synthesised ${synthesis.synthesizedDurationMs}ms, ${drift}ms from target, tolerance ${synthesis.toleranceMs}ms`,
-          [synthesisRef],
-        ),
-        check(
-          'multiple-ranges-preserved',
-          synthesis.ranges.length >= 2 &&
-            (synthesis.chronologyPreserved || synthesis.reorderReason !== null),
-          'requirement-unmet',
-          `${synthesis.ranges.length} ranges, chronologyPreserved=${synthesis.chronologyPreserved}, reorderReason=${synthesis.reorderReason ?? 'none'}`,
-          snapshot
-            ? [synthesisRef, ref('renderable-plan-snapshot', snapshot.planId, snapshot.planHash, true)]
-            : [synthesisRef],
-        ),
-        check(
-          'context-proof-recorded',
-          proofSize >= 1 &&
-            Boolean(snapshot && snapshot.sourceHash === synthesis.synthesisHash),
-          snapshot ? 'requirement-unmet' : 'evidence-missing',
-          snapshot
-            ? `context proof records ${proof.claimsIncluded.length} claims and ${proof.qualifiersIncluded.length} qualifiers; plan ${snapshot.planId} compiled ${snapshot.clipCount} clips from hash ${snapshot.sourceHash.slice(0, 12)}`
-            : `context proof records ${proofSize} entries but the synthesis was never compiled into a renderable plan`,
-          snapshot
-            ? [synthesisRef, ref('renderable-plan-snapshot', snapshot.planId, snapshot.planHash, true)]
-            : [synthesisRef],
-        ),
-      ],
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: [
+          check(
+            'synthesis-persisted',
+            synthesis.ranges.length >= 1,
+            'requirement-unmet',
+            `synthesis ${synthesis.id}: ${synthesis.ranges.length} ranges, ${synthesis.joins.length} joins, ${synthesis.droppedMs}ms dropped from ${synthesis.sourceDurationMs}ms`,
+            [synthesisRef],
+          ),
+          check(
+            'target-duration-is-120s',
+            synthesis.targetDurationMs === SYNTHESIS_TARGET_MS,
+            'requirement-unmet',
+            `targetDurationMs=${synthesis.targetDurationMs} (ADR-135 asks for ${SYNTHESIS_TARGET_MS})`,
+            [synthesisRef],
+          ),
+          check(
+            'duration-within-tolerance',
+            drift <= synthesis.toleranceMs,
+            'requirement-unmet',
+            `synthesised ${synthesis.synthesizedDurationMs}ms, ${drift}ms from target, tolerance ${synthesis.toleranceMs}ms`,
+            [synthesisRef],
+          ),
+          check(
+            'multiple-ranges-preserved',
+            synthesis.ranges.length >= 2 &&
+              (synthesis.chronologyPreserved || synthesis.reorderReason !== null),
+            'requirement-unmet',
+            `${synthesis.ranges.length} ranges, chronologyPreserved=${synthesis.chronologyPreserved}, reorderReason=${synthesis.reorderReason ?? 'none'}`,
+            planRefs,
+          ),
+          check(
+            'context-proof-recorded',
+            proofSize >= 1 &&
+              Boolean(plan && plan.sourceHash === synthesis.synthesisHash),
+            snapshot.unverified
+              ? 'evidence-unverified'
+              : plan ? 'requirement-unmet' : 'evidence-missing',
+            snapshot.unverified
+              ? `the newest renderable plan compiled from synthesis ${synthesis.id} did not re-derive to its stored hash`
+              : plan
+                ? `context proof records ${proof.claimsIncluded.length} claims and ${proof.qualifiersIncluded.length} qualifiers; plan ${plan.planId} compiled ${plan.clipCount} clips from hash ${plan.sourceHash.slice(0, 12)}`
+                : `context proof records ${proofSize} entries but the synthesis was never compiled into a renderable plan`,
+            planRefs,
+          ),
+        ],
+      },
     }
   }
 
@@ -1022,7 +1376,7 @@ implements MulticamLongformGateRepository {
     workspaceId: string,
     projectId: string,
     sessionIds: readonly string[],
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'colour-match-precedes-creative-lut' as const
     for (const sessionId of sessionIds) {
       const head = await this.client.v2MulticamMatchPlanHead.findFirst({
@@ -1035,12 +1389,15 @@ implements MulticamLongformGateRepository {
         stored = await this.matchPlans.readHead({ workspaceId, projectId, sessionId })
       } catch (error) {
         if (!isPersistenceConflict(error)) throw error
-        return criterionFailed(
-          criterion,
-          'evidence-unverified',
-          `match plan ${head.planId} did not re-derive to its stored hash`,
-          [headRef],
-        )
+        return {
+          sessionId,
+          evidence: criterionFailed(
+            criterion,
+            'evidence-unverified',
+            `match plan ${head.planId} did not re-derive to its stored hash`,
+            [headRef],
+          ),
+        }
       }
       if (!stored) continue
       const plan = stored.plan
@@ -1054,39 +1411,48 @@ implements MulticamLongformGateRepository {
         transforms[0]?.cameraId ?? plan.referenceCameraId,
       )
       return {
-        criterion,
-        checks: [
-          check(
-            'match-plan-persisted',
-            plan.pipelineStage === 'match',
-            'requirement-unmet',
-            `match plan ${plan.planId} v${stored.version}: stage ${plan.pipelineStage}, reference camera ${plan.referenceCameraId}, confidence ${plan.confidence}, humanReviewRequired=${plan.humanReviewRequired}`,
-            [planRef],
-          ),
-          check(
-            'transforms-are-match-stage',
-            allMatchStage,
-            transforms.length === 0 ? 'evidence-missing' : 'requirement-unmet',
-            transforms.length === 0
-              ? `match plan ${plan.planId} carries no camera transform`
-              : `${transforms.length} camera transforms, kinds [${[...new Set(transforms.map((transform) => transform.transform.kind))].join(', ')}]`,
-            [planRef, ...transforms.slice(0, 3).map((transform) =>
-              ref('match-transform', `${plan.planId}:${transform.cameraId}`, null, false))],
-          ),
-          check(
-            'match-precedes-creative-lut',
-            resolved.ordered,
-            resolved.reason,
-            resolved.detail,
-            resolved.reference ? [planRef, resolved.reference] : [planRef],
-          ),
-        ],
+        sessionId,
+        evidence: {
+          criterion,
+          checks: [
+            check(
+              'match-plan-persisted',
+              plan.pipelineStage === 'match',
+              'requirement-unmet',
+              `match plan ${plan.planId} v${stored.version}: stage ${plan.pipelineStage}, reference camera ${plan.referenceCameraId}, confidence ${plan.confidence}, humanReviewRequired=${plan.humanReviewRequired}`,
+              [planRef],
+            ),
+            check(
+              'transforms-are-match-stage',
+              allMatchStage,
+              transforms.length === 0 ? 'evidence-missing' : 'requirement-unmet',
+              transforms.length === 0
+                ? `match plan ${plan.planId} carries no camera transform`
+                : `${transforms.length} camera transforms, kinds [${[...new Set(transforms.map((transform) => transform.transform.kind))].join(', ')}]`,
+              // A transform has no hash of its own: the plan's hash covers it.
+              // Cited hash-less and counted as unhashed, which is a different
+              // number from "the hash disagreed".
+              [planRef, ...transforms.slice(0, 3).map((transform) =>
+                ref('match-transform', `${plan.planId}:${transform.cameraId}`, null, false))],
+            ),
+            check(
+              'match-precedes-creative-lut',
+              resolved.ordered,
+              resolved.reason,
+              resolved.detail,
+              resolved.reference ? [planRef, resolved.reference] : [planRef],
+            ),
+          ],
+        },
       }
     }
     return {
-      criterion,
-      checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-        check(code, false, 'evidence-missing', 'no multicam match plan exists for this project', [])),
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+          check(code, false, 'evidence-missing', 'no multicam match plan exists for this project', [])),
+      },
     }
   }
 
@@ -1167,10 +1533,10 @@ implements MulticamLongformGateRepository {
     workspaceId: string,
     projectId: string,
     projectVersionId: string | null,
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'colour-critic-resolved' as const
     if (!projectVersionId) {
-      return { criterion, checks: [] }
+      return { sessionId: null, evidence: { criterion, checks: [] } }
     }
     let reports
     try {
@@ -1182,63 +1548,72 @@ implements MulticamLongformGateRepository {
       })
     } catch (error) {
       if (!isPersistenceConflict(error)) throw error
-      return criterionFailed(
-        criterion,
-        'evidence-unverified',
-        `a colour critic report of version ${projectVersionId} did not re-derive to its stored hash`,
-        [ref('project-version', projectVersionId, null, false)],
-      )
+      return {
+        sessionId: null,
+        evidence: criterionFailed(
+          criterion,
+          'evidence-unverified',
+          `a colour critic report of version ${projectVersionId} did not re-derive to its stored hash`,
+          [ref('project-version', projectVersionId, null, false)],
+        ),
+      }
     }
     const report = reports[0]
     if (!report) {
       return {
-        criterion,
-        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-          check(
-            code,
-            false,
-            'evidence-missing',
-            `project version ${projectVersionId} has no colour critic report`,
-            [],
-          )),
+        sessionId: null,
+        evidence: {
+          criterion,
+          checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+            check(
+              code,
+              false,
+              'evidence-missing',
+              `project version ${projectVersionId} has no colour critic report`,
+              [],
+            )),
+        },
       }
     }
     const reportRef = ref('colour-critic-report', report.reportId, report.reportHash, true)
     const hard = report.issues.filter((issue) => issue.severity === 'hard')
     return {
-      criterion,
-      checks: [
-        check(
-          'critic-report-persisted',
-          report.dimensions.length >= 1,
-          'requirement-unmet',
-          `report ${report.reportId} evaluated ${report.dimensions.length} dimensions over subject ${report.subject.kind}, confidence ${report.confidence} (${report.confidenceBand})`,
-          [reportRef],
-        ),
-        check(
-          'verdict-resolved',
-          RESOLVED_CRITIC_ACTIONS.has(report.action),
-          'requirement-unmet',
-          `newest verdict for version ${projectVersionId}: ${report.action} caused by ${report.cause}`,
-          [reportRef],
-        ),
-        check(
-          'no-open-hard-issue',
-          hard.length === 0,
-          'requirement-unmet',
-          hard.length === 0
-            ? `${report.issues.length} issues, none hard`
-            : `${hard.length} hard issues remain: ${hard.slice(0, 3).map((issue) => `${issue.dimension}/${issue.code}`).join(', ')}`,
-          [reportRef],
-        ),
-      ],
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: [
+          check(
+            'critic-report-persisted',
+            report.dimensions.length >= 1,
+            'requirement-unmet',
+            `report ${report.reportId} evaluated ${report.dimensions.length} dimensions over subject ${report.subject.kind}, confidence ${report.confidence} (${report.confidenceBand})`,
+            [reportRef],
+          ),
+          check(
+            'verdict-resolved',
+            RESOLVED_CRITIC_ACTIONS.has(report.action),
+            'requirement-unmet',
+            `newest verdict for version ${projectVersionId}: ${report.action} caused by ${report.cause}`,
+            [reportRef],
+          ),
+          check(
+            'no-open-hard-issue',
+            hard.length === 0,
+            'requirement-unmet',
+            hard.length === 0
+              ? `${report.issues.length} issues, none hard`
+              : `${hard.length} hard issues remain: ${hard.slice(0, 3).map((issue) => `${issue.dimension}/${issue.code}`).join(', ')}`,
+            [reportRef],
+          ),
+        ],
+      },
     }
   }
 
   private async finalMediaCriterion(
     workspaceId: string,
     projectId: string,
-  ): Promise<MulticamLongformCriterionEvidenceInput> {
+  ): Promise<CriterionReading> {
     const criterion = 'final-mp4-inspectable' as const
     const exports = await this.client.v2ProjectFinalExportOperation.findMany({
       where: { workspaceId, projectId },
@@ -1266,15 +1641,18 @@ implements MulticamLongformGateRepository {
       )
     if (!promoted?.attempt) {
       return {
-        criterion,
-        checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
-          check(
-            code,
-            false,
-            'evidence-missing',
-            `project ${projectId} has no promoted final export attempt`,
-            [],
-          )),
+        sessionId: null,
+        evidence: {
+          criterion,
+          checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) =>
+            check(
+              code,
+              false,
+              'evidence-missing',
+              `project ${projectId} has no promoted final export attempt`,
+              [],
+            )),
+        },
       }
     }
     const { item, attempt } = promoted
@@ -1306,50 +1684,59 @@ implements MulticamLongformGateRepository {
       ? Math.round((probe.duration ?? 0) * (probe.fps ?? 0))
       : null
     return {
-      criterion,
-      checks: [
-        check(
-          'final-export-promoted',
-          true,
-          null,
-          `operation ${item.operationId} succeeded; attempt ${attempt.attempt} promoted ${attempt.outputByteSize} bytes, sha256 ${String(attempt.outputSha256).slice(0, 12)}`,
-          [exportRef, artifactRef],
-        ),
-        check(
-          'output-codec-recorded',
-          item.outputContainer === 'mp4' &&
-            item.outputCodec.length > 0 &&
-            item.outputAudioCodec.length > 0,
-          'requirement-unmet',
-          `container ${item.outputContainer}, video ${item.outputCodec}, audio ${item.outputAudioCodec}, ${item.outputWidth}x${item.outputHeight}@${item.outputFps}`,
-          [exportRef],
-        ),
-        check(
-          'output-probe-measured',
-          probeMeasured && manifestOk,
-          manifest ? (manifestOk ? 'evidence-not-measured' : 'evidence-unverified') : 'evidence-missing',
-          manifest
-            ? manifestOk
-              ? `manifest ${manifest.id} probe ${probe?.width}x${probe?.height}@${probe?.fps} for ${probe?.duration}s (${frames ?? 'unmeasured'} frames), ${probe?.mediaType}/${probe?.container}`
-              : `manifest ${manifest.id} did not re-derive to its stored manifestHash`
-            : `export ${item.operationId} names manifest ${item.outputManifestId}, which is absent`,
-          [manifestRef],
-        ),
-        check(
-          'artifact-hash-matches-attempt',
-          Boolean(
-            artifact &&
-            artifact.status === 'available' &&
-            artifact.sha256 === attempt.outputSha256 &&
-            artifact.byteSize === attempt.outputByteSize,
+      sessionId: null,
+      evidence: {
+        criterion,
+        checks: [
+          check(
+            'final-export-promoted',
+            item.operation.status === 'succeeded' && attempt.status === 'promoted',
+            'requirement-unmet',
+            `operation ${item.operationId} ${item.operation.status}; attempt ${attempt.attempt} ${attempt.status} ${attempt.outputByteSize} bytes, sha256 ${String(attempt.outputSha256).slice(0, 12)}`,
+            [exportRef, artifactRef],
           ),
-          artifact ? 'requirement-unmet' : 'evidence-missing',
-          artifact
-            ? `artifact ${artifact.id} status ${artifact.status}, sha256 ${artifact.sha256.slice(0, 12)} vs attempt ${String(attempt.outputSha256).slice(0, 12)}, ${artifact.byteSize} vs ${attempt.outputByteSize} bytes`
-            : `export ${item.operationId} names artifact ${item.outputArtifactId}, which is absent`,
-          [artifactRef, manifestRef],
-        ),
-      ],
+          check(
+            'output-codec-recorded',
+            item.outputContainer === 'mp4' &&
+              item.outputCodec.length > 0 &&
+              item.outputAudioCodec.length > 0,
+            'requirement-unmet',
+            `container ${item.outputContainer}, video ${item.outputCodec}, audio ${item.outputAudioCodec}, ${item.outputWidth}x${item.outputHeight}@${item.outputFps}`,
+            [exportRef],
+          ),
+          check(
+            'output-probe-measured',
+            probeMeasured && manifestOk,
+            manifest ? (manifestOk ? 'evidence-not-measured' : 'evidence-unverified') : 'evidence-missing',
+            manifest
+              ? manifestOk
+                ? `manifest ${manifest.id} probe ${probe?.width}x${probe?.height}@${probe?.fps} for ${probe?.duration}s (${frames ?? 'unmeasured'} frames), ${probe?.mediaType}/${probe?.container}`
+                : `manifest ${manifest.id} did not re-derive to its stored manifestHash`
+              : `export ${item.operationId} names manifest ${item.outputManifestId}, which is absent`,
+            [manifestRef],
+          ),
+          // The manifest is NOT cited here. This check compares the artifact
+          // row against the attempt that promoted it; the manifest is
+          // `output-probe-measured`'s subject, and citing it here made a
+          // tampered manifest produce a passing check beside a hashed
+          // reference that did not verify — which the domain refuses by
+          // throwing, taking the whole evaluation down with it.
+          check(
+            'artifact-hash-matches-attempt',
+            Boolean(
+              artifact &&
+              artifact.status === 'available' &&
+              artifact.sha256 === attempt.outputSha256 &&
+              artifact.byteSize === attempt.outputByteSize,
+            ),
+            artifact ? 'requirement-unmet' : 'evidence-missing',
+            artifact
+              ? `artifact ${artifact.id} status ${artifact.status}, sha256 ${artifact.sha256.slice(0, 12)} vs attempt ${String(attempt.outputSha256).slice(0, 12)}, ${artifact.byteSize} vs ${attempt.outputByteSize} bytes`
+              : `export ${item.operationId} names artifact ${item.outputArtifactId}, which is absent`,
+            [artifactRef],
+          ),
+        ],
+      },
     }
   }
 
