@@ -211,6 +211,17 @@ function buildMapPieces(input: {
     provenance: 'original-capture',
   })
   const confidence: ClockConfidence = record.outcome === 'auto-apply' ? 'high' : 'medium'
+  // The bound the elected signal actually measured, not zero.
+  //
+  // Zero says "this mapping is exact to the tick", which is a claim no
+  // correlation can support and which the cascade had already refuted in the
+  // same record: the elected assessment carries the largest residual its
+  // anchors showed. Drift is still not fitted (F4.006 has no runtime caller and
+  // the drift-fit table no writer), so this is the residual of the offset and
+  // not of a rate — but a measured bound of one frame beats a declared bound of
+  // none.
+  const elected = record.assessments.find((assessment) => assessment.signalId === record.selectedSignalId)
+  const residualBoundTicks = elected?.residualSessionTicks ?? BigInt(0)
   const evidenceRefs = record.assessments
     .filter((assessment) => assessment.signalId === record.selectedSignalId)
     .map((assessment) => assessment.signalId)
@@ -225,7 +236,7 @@ function buildMapPieces(input: {
       sourceCoverage: part.coverage,
       driftRate: rational(record.clockMap!.rate.num, record.clockMap!.rate.den),
       offsetTicks: record.clockMap!.offsetTicks,
-      residualBoundTicks: BigInt(0),
+      residualBoundTicks,
       confidence,
       anchorIds: anchorIds.filter((id) => id.length > 0),
       evidenceRefs: anchorIds.filter((id) => id.length > 0),

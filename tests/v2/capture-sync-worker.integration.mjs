@@ -479,6 +479,17 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
       // A correlator that returns 1.0 has stopped measuring and started
       // asserting; the curve this uses approaches 0.99 and never reaches it.
       assert.ok(record.assessments[0].reportedConfidence < 1)
+      // The piece carries the residual the elected signal measured, not the
+      // hardcoded zero it used to. Zero is a claim of exactness that no
+      // correlation can support, and the cascade had already measured the
+      // truth in the same record.
+      // Plus the one tick that integer rounding always costs
+      // (SESSION_CLOCK_ROUNDING_BOUND_TICKS): a bound that ignored it would
+      // claim an accuracy the representation cannot deliver.
+      assert.equal(
+        piece.residualBoundTicks,
+        record.assessments[0].residualSessionTicks + BigInt(1),
+      )
       assert.equal(runs.state.settled.status, 'succeeded')
       assert.equal(
         media.state.resolved,
