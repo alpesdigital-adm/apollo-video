@@ -684,6 +684,15 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Answers a stretch the detector left unresolved because several stories fit it equally well; a person decides which one happened, because an agent picking one would manufacture the measurement the aggregate refused to invent.',
     },
+    // F4.016. Bounded and unconfirmed, unlike every other Wave 20 command: this
+    // one writes an audit record and nothing else. It changes no media, moves no
+    // aggregate, and cannot approve anything a person would otherwise judge —
+    // the approval is derived from rows the caller cannot touch. An agent that
+    // runs it twice gets the same record back.
+    'apollo.projects.multicam-longform-gate.evaluate': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Persists one immutable fail-closed phase-gate record derived only from server-read PostgreSQL rows and a module-graph scan; it accepts no evidence, changes no media or aggregate, and starts no provider or render work.',
+    },
   })
 }
 

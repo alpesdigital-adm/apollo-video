@@ -2646,6 +2646,29 @@
       "idempotency": "natural",
       "responseMediaType": "application/json"
     },
+    "apollo.multicam-longform-gate.criteria.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-criteria/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/multicam-longform-gate/criteria"
+      },
+      "toolName": "apollo.multicam-longform-gate.criteria.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.operations.cancel": {
       "version": "10.0.0",
       "exposure": "public",
@@ -5883,6 +5906,207 @@
         "path": "/v1/projects/{projectId}/montage-alternatives/{runId}"
       },
       "toolName": "apollo.projects.montage-alternatives.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.artifacts.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-artifact-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.artifacts.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "type",
+          "description": "Keep only the artifacts of one evidence resource kind. How many the filter removed travels with the answer.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "project",
+              "project-version",
+              "capture-session",
+              "capture-protocol",
+              "capture-protocol-evaluation",
+              "sync-diagnostic",
+              "sync-evidence",
+              "track-coverage",
+              "clock-map",
+              "playback-map",
+              "playback-piece",
+              "multicam-direction",
+              "shot-decision",
+              "editorial-synthesis",
+              "match-plan",
+              "match-transform",
+              "colour-plan",
+              "colour-critic-report",
+              "renderable-plan-snapshot",
+              "final-export",
+              "media-artifact",
+              "media-manifest",
+              "module-graph-audit"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "description": "Maximum artifacts to return. What the limit left out is reported beside them.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.evaluate": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/evaluate-multicam-longform-gate-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-evaluated/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate/evaluations"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.evaluate",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.latest.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.latest.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate/evaluations"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "queryParameters": [
+        {
+          "name": "limit",
+          "description": "Maximum evaluations to return, newest first.",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        }
+      ],
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.outstanding.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-outstanding/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate/outstanding"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.outstanding.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.multicam-longform-gate.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/multicam-longform-gate-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}"
+      },
+      "toolName": "apollo.projects.multicam-longform-gate.read",
       "supportsDryRun": false,
       "costClass": "free",
       "confirmation": "none",
@@ -56391,6 +56615,17 @@
         }
       }
     },
+    "apollo://schemas/evaluate-multicam-longform-gate-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        }
+      }
+    },
     "apollo://schemas/evaluate-retrieval-scale-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -80861,6 +81096,2167 @@
             },
             "isHead": {
               "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-artifact-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gateId",
+            "evaluatedAt",
+            "approved",
+            "artifacts",
+            "unverifiedCount",
+            "unhashedCount",
+            "filteredOut",
+            "omittedArtifacts"
+          ],
+          "properties": {
+            "gateId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "evaluatedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "approved": {
+              "type": "boolean"
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "id",
+                  "hash",
+                  "verified",
+                  "citedBy"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "workspace",
+                      "project",
+                      "project-version",
+                      "capture-session",
+                      "capture-protocol",
+                      "capture-protocol-evaluation",
+                      "sync-diagnostic",
+                      "sync-evidence",
+                      "track-coverage",
+                      "clock-map",
+                      "playback-map",
+                      "playback-piece",
+                      "multicam-direction",
+                      "shot-decision",
+                      "editorial-synthesis",
+                      "match-plan",
+                      "match-transform",
+                      "colour-plan",
+                      "colour-critic-report",
+                      "renderable-plan-snapshot",
+                      "final-export",
+                      "media-artifact",
+                      "media-manifest",
+                      "module-graph-audit"
+                    ]
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 200
+                  },
+                  "hash": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  },
+                  "citedBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "criterion",
+                        "check",
+                        "passed"
+                      ],
+                      "properties": {
+                        "criterion": {
+                          "type": "string",
+                          "enum": [
+                            "podcast-multicam-synchronised",
+                            "teacher-and-screen-synchronised",
+                            "insufficient-evidence-requires-manual",
+                            "react-edited-with-piecewise-map",
+                            "active-speaker-and-demonstration-directed",
+                            "contextual-multi-range-synthesis",
+                            "colour-match-precedes-creative-lut",
+                            "colour-critic-resolved",
+                            "final-mp4-inspectable",
+                            "no-legacy-runtime-dependency"
+                          ]
+                        },
+                        "check": {
+                          "type": "string",
+                          "enum": [
+                            "podcast-protocol-evaluated",
+                            "diagnostic-synchronised",
+                            "participant-tracks-distinct",
+                            "coverage-derived",
+                            "clock-map-persisted",
+                            "teacher-protocol-evaluated",
+                            "track-durations-unequal",
+                            "sync-evidence-insufficient",
+                            "diagnostic-requires-manual",
+                            "protocol-ceiling-blocks-auto-edit",
+                            "playback-map-persisted",
+                            "interrupted-piece-present",
+                            "reaction-duration-differs",
+                            "map-compiled-into-plan",
+                            "direction-persisted",
+                            "active-speaker-rule-fired",
+                            "demonstration-rule-fired",
+                            "decisions-carry-justification",
+                            "synthesis-persisted",
+                            "target-duration-is-120s",
+                            "duration-within-tolerance",
+                            "multiple-ranges-preserved",
+                            "context-proof-recorded",
+                            "match-plan-persisted",
+                            "transforms-are-match-stage",
+                            "match-precedes-creative-lut",
+                            "critic-report-persisted",
+                            "verdict-resolved",
+                            "no-open-hard-issue",
+                            "final-export-promoted",
+                            "output-codec-recorded",
+                            "output-probe-measured",
+                            "artifact-hash-matches-attempt",
+                            "module-graph-scanned",
+                            "no-legacy-runtime-import",
+                            "no-compatibility-persistence"
+                          ]
+                        },
+                        "passed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "unverifiedCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unhashedCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "filteredOut": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "omittedArtifacts": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-criteria/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gate",
+            "total",
+            "criteria"
+          ],
+          "properties": {
+            "gate": {
+              "const": "multicam-longform/v1"
+            },
+            "total": {
+              "const": 10
+            },
+            "criteria": {
+              "type": "array",
+              "minItems": 10,
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "criterion",
+                  "statement",
+                  "checks"
+                ],
+                "properties": {
+                  "criterion": {
+                    "type": "string",
+                    "enum": [
+                      "podcast-multicam-synchronised",
+                      "teacher-and-screen-synchronised",
+                      "insufficient-evidence-requires-manual",
+                      "react-edited-with-piecewise-map",
+                      "active-speaker-and-demonstration-directed",
+                      "contextual-multi-range-synthesis",
+                      "colour-match-precedes-creative-lut",
+                      "colour-critic-resolved",
+                      "final-mp4-inspectable",
+                      "no-legacy-runtime-dependency"
+                    ]
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "checks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "podcast-protocol-evaluated",
+                        "diagnostic-synchronised",
+                        "participant-tracks-distinct",
+                        "coverage-derived",
+                        "clock-map-persisted",
+                        "teacher-protocol-evaluated",
+                        "track-durations-unequal",
+                        "sync-evidence-insufficient",
+                        "diagnostic-requires-manual",
+                        "protocol-ceiling-blocks-auto-edit",
+                        "playback-map-persisted",
+                        "interrupted-piece-present",
+                        "reaction-duration-differs",
+                        "map-compiled-into-plan",
+                        "direction-persisted",
+                        "active-speaker-rule-fired",
+                        "demonstration-rule-fired",
+                        "decisions-carry-justification",
+                        "synthesis-persisted",
+                        "target-duration-is-120s",
+                        "duration-within-tolerance",
+                        "multiple-ranges-preserved",
+                        "context-proof-recorded",
+                        "match-plan-persisted",
+                        "transforms-are-match-stage",
+                        "match-precedes-creative-lut",
+                        "critic-report-persisted",
+                        "verdict-resolved",
+                        "no-open-hard-issue",
+                        "final-export-promoted",
+                        "output-codec-recorded",
+                        "output-probe-measured",
+                        "artifact-hash-matches-attempt",
+                        "module-graph-scanned",
+                        "no-legacy-runtime-import",
+                        "no-compatibility-persistence"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-evaluated/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gate",
+            "replayed"
+          ],
+          "properties": {
+            "gate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sessionId",
+                "projectVersionId",
+                "projectVersionHash",
+                "report",
+                "reportFingerprint",
+                "createdBy",
+                "createdAt",
+                "recordHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "multicam-longform-gate/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectVersionId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectVersionHash": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "report": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "gate",
+                    "workspaceId",
+                    "projectId",
+                    "sessionId",
+                    "approved",
+                    "satisfied",
+                    "evaluated",
+                    "total",
+                    "failed",
+                    "blocking",
+                    "serverEvidenceOnly",
+                    "criteria",
+                    "evaluatedAt",
+                    "fingerprint"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "multicam-longform-gate-report/v1"
+                    },
+                    "gate": {
+                      "const": "multicam-longform/v1"
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sessionId": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "satisfied": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "evaluated": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "total": {
+                      "const": 10
+                    },
+                    "failed": {
+                      "type": "array",
+                      "maxItems": 10,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "podcast-multicam-synchronised",
+                          "teacher-and-screen-synchronised",
+                          "insufficient-evidence-requires-manual",
+                          "react-edited-with-piecewise-map",
+                          "active-speaker-and-demonstration-directed",
+                          "contextual-multi-range-synthesis",
+                          "colour-match-precedes-creative-lut",
+                          "colour-critic-resolved",
+                          "final-mp4-inspectable",
+                          "no-legacy-runtime-dependency"
+                        ]
+                      }
+                    },
+                    "blocking": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "criterion",
+                          "check",
+                          "reason",
+                          "detail"
+                        ],
+                        "properties": {
+                          "criterion": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-multicam-synchronised",
+                              "teacher-and-screen-synchronised",
+                              "insufficient-evidence-requires-manual",
+                              "react-edited-with-piecewise-map",
+                              "active-speaker-and-demonstration-directed",
+                              "contextual-multi-range-synthesis",
+                              "colour-match-precedes-creative-lut",
+                              "colour-critic-resolved",
+                              "final-mp4-inspectable",
+                              "no-legacy-runtime-dependency"
+                            ]
+                          },
+                          "check": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-protocol-evaluated",
+                              "diagnostic-synchronised",
+                              "participant-tracks-distinct",
+                              "coverage-derived",
+                              "clock-map-persisted",
+                              "teacher-protocol-evaluated",
+                              "track-durations-unequal",
+                              "sync-evidence-insufficient",
+                              "diagnostic-requires-manual",
+                              "protocol-ceiling-blocks-auto-edit",
+                              "playback-map-persisted",
+                              "interrupted-piece-present",
+                              "reaction-duration-differs",
+                              "map-compiled-into-plan",
+                              "direction-persisted",
+                              "active-speaker-rule-fired",
+                              "demonstration-rule-fired",
+                              "decisions-carry-justification",
+                              "synthesis-persisted",
+                              "target-duration-is-120s",
+                              "duration-within-tolerance",
+                              "multiple-ranges-preserved",
+                              "context-proof-recorded",
+                              "match-plan-persisted",
+                              "transforms-are-match-stage",
+                              "match-precedes-creative-lut",
+                              "critic-report-persisted",
+                              "verdict-resolved",
+                              "no-open-hard-issue",
+                              "final-export-promoted",
+                              "output-codec-recorded",
+                              "output-probe-measured",
+                              "artifact-hash-matches-attempt",
+                              "module-graph-scanned",
+                              "no-legacy-runtime-import",
+                              "no-compatibility-persistence"
+                            ]
+                          },
+                          "reason": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "evidence-missing",
+                                  "evidence-unverified",
+                                  "evidence-not-measured",
+                                  "requirement-unmet",
+                                  "evidence-stale"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "detail": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          }
+                        }
+                      }
+                    },
+                    "serverEvidenceOnly": {
+                      "const": true
+                    },
+                    "criteria": {
+                      "type": "array",
+                      "minItems": 10,
+                      "maxItems": 10,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "criterion",
+                          "source",
+                          "automatic",
+                          "passed",
+                          "checkCount",
+                          "failedCheckCount",
+                          "missingCheckCount",
+                          "unverifiedReferenceCount",
+                          "unhashedReferenceCount",
+                          "checks"
+                        ],
+                        "properties": {
+                          "criterion": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-multicam-synchronised",
+                              "teacher-and-screen-synchronised",
+                              "insufficient-evidence-requires-manual",
+                              "react-edited-with-piecewise-map",
+                              "active-speaker-and-demonstration-directed",
+                              "contextual-multi-range-synthesis",
+                              "colour-match-precedes-creative-lut",
+                              "colour-critic-resolved",
+                              "final-mp4-inspectable",
+                              "no-legacy-runtime-dependency"
+                            ]
+                          },
+                          "source": {
+                            "const": "server"
+                          },
+                          "automatic": {
+                            "const": true
+                          },
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "checkCount": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          },
+                          "failedCheckCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8
+                          },
+                          "missingCheckCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8
+                          },
+                          "unverifiedReferenceCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "unhashedReferenceCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "checks": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "code",
+                                "passed",
+                                "failureReason",
+                                "detail",
+                                "references"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "podcast-protocol-evaluated",
+                                    "diagnostic-synchronised",
+                                    "participant-tracks-distinct",
+                                    "coverage-derived",
+                                    "clock-map-persisted",
+                                    "teacher-protocol-evaluated",
+                                    "track-durations-unequal",
+                                    "sync-evidence-insufficient",
+                                    "diagnostic-requires-manual",
+                                    "protocol-ceiling-blocks-auto-edit",
+                                    "playback-map-persisted",
+                                    "interrupted-piece-present",
+                                    "reaction-duration-differs",
+                                    "map-compiled-into-plan",
+                                    "direction-persisted",
+                                    "active-speaker-rule-fired",
+                                    "demonstration-rule-fired",
+                                    "decisions-carry-justification",
+                                    "synthesis-persisted",
+                                    "target-duration-is-120s",
+                                    "duration-within-tolerance",
+                                    "multiple-ranges-preserved",
+                                    "context-proof-recorded",
+                                    "match-plan-persisted",
+                                    "transforms-are-match-stage",
+                                    "match-precedes-creative-lut",
+                                    "critic-report-persisted",
+                                    "verdict-resolved",
+                                    "no-open-hard-issue",
+                                    "final-export-promoted",
+                                    "output-codec-recorded",
+                                    "output-probe-measured",
+                                    "artifact-hash-matches-attempt",
+                                    "module-graph-scanned",
+                                    "no-legacy-runtime-import",
+                                    "no-compatibility-persistence"
+                                  ]
+                                },
+                                "passed": {
+                                  "type": "boolean"
+                                },
+                                "failureReason": {
+                                  "oneOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "evidence-missing",
+                                        "evidence-unverified",
+                                        "evidence-not-measured",
+                                        "requirement-unmet",
+                                        "evidence-stale"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "references": {
+                                  "type": "array",
+                                  "maxItems": 16,
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "id",
+                                      "hash",
+                                      "verified"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "workspace",
+                                          "project",
+                                          "project-version",
+                                          "capture-session",
+                                          "capture-protocol",
+                                          "capture-protocol-evaluation",
+                                          "sync-diagnostic",
+                                          "sync-evidence",
+                                          "track-coverage",
+                                          "clock-map",
+                                          "playback-map",
+                                          "playback-piece",
+                                          "multicam-direction",
+                                          "shot-decision",
+                                          "editorial-synthesis",
+                                          "match-plan",
+                                          "match-transform",
+                                          "colour-plan",
+                                          "colour-critic-report",
+                                          "renderable-plan-snapshot",
+                                          "final-export",
+                                          "media-artifact",
+                                          "media-manifest",
+                                          "module-graph-audit"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 200
+                                      },
+                                      "hash": {
+                                        "oneOf": [
+                                          {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "verified": {
+                                        "type": "boolean"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "evaluatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "reportFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "recordHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gates"
+          ],
+          "properties": {
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "schemaVersion",
+                  "id",
+                  "workspaceId",
+                  "projectId",
+                  "sessionId",
+                  "projectVersionId",
+                  "projectVersionHash",
+                  "report",
+                  "reportFingerprint",
+                  "createdBy",
+                  "createdAt",
+                  "recordHash"
+                ],
+                "properties": {
+                  "schemaVersion": {
+                    "const": "multicam-longform-gate/v1"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sessionId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "projectVersionId": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "projectVersionHash": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "report": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schemaVersion",
+                      "gate",
+                      "workspaceId",
+                      "projectId",
+                      "sessionId",
+                      "approved",
+                      "satisfied",
+                      "evaluated",
+                      "total",
+                      "failed",
+                      "blocking",
+                      "serverEvidenceOnly",
+                      "criteria",
+                      "evaluatedAt",
+                      "fingerprint"
+                    ],
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "multicam-longform-gate-report/v1"
+                      },
+                      "gate": {
+                        "const": "multicam-longform/v1"
+                      },
+                      "workspaceId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "projectId": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      },
+                      "sessionId": {
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 200
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "approved": {
+                        "type": "boolean"
+                      },
+                      "satisfied": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10
+                      },
+                      "evaluated": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10
+                      },
+                      "total": {
+                        "const": 10
+                      },
+                      "failed": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "podcast-multicam-synchronised",
+                            "teacher-and-screen-synchronised",
+                            "insufficient-evidence-requires-manual",
+                            "react-edited-with-piecewise-map",
+                            "active-speaker-and-demonstration-directed",
+                            "contextual-multi-range-synthesis",
+                            "colour-match-precedes-creative-lut",
+                            "colour-critic-resolved",
+                            "final-mp4-inspectable",
+                            "no-legacy-runtime-dependency"
+                          ]
+                        }
+                      },
+                      "blocking": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "criterion",
+                            "check",
+                            "reason",
+                            "detail"
+                          ],
+                          "properties": {
+                            "criterion": {
+                              "type": "string",
+                              "enum": [
+                                "podcast-multicam-synchronised",
+                                "teacher-and-screen-synchronised",
+                                "insufficient-evidence-requires-manual",
+                                "react-edited-with-piecewise-map",
+                                "active-speaker-and-demonstration-directed",
+                                "contextual-multi-range-synthesis",
+                                "colour-match-precedes-creative-lut",
+                                "colour-critic-resolved",
+                                "final-mp4-inspectable",
+                                "no-legacy-runtime-dependency"
+                              ]
+                            },
+                            "check": {
+                              "type": "string",
+                              "enum": [
+                                "podcast-protocol-evaluated",
+                                "diagnostic-synchronised",
+                                "participant-tracks-distinct",
+                                "coverage-derived",
+                                "clock-map-persisted",
+                                "teacher-protocol-evaluated",
+                                "track-durations-unequal",
+                                "sync-evidence-insufficient",
+                                "diagnostic-requires-manual",
+                                "protocol-ceiling-blocks-auto-edit",
+                                "playback-map-persisted",
+                                "interrupted-piece-present",
+                                "reaction-duration-differs",
+                                "map-compiled-into-plan",
+                                "direction-persisted",
+                                "active-speaker-rule-fired",
+                                "demonstration-rule-fired",
+                                "decisions-carry-justification",
+                                "synthesis-persisted",
+                                "target-duration-is-120s",
+                                "duration-within-tolerance",
+                                "multiple-ranges-preserved",
+                                "context-proof-recorded",
+                                "match-plan-persisted",
+                                "transforms-are-match-stage",
+                                "match-precedes-creative-lut",
+                                "critic-report-persisted",
+                                "verdict-resolved",
+                                "no-open-hard-issue",
+                                "final-export-promoted",
+                                "output-codec-recorded",
+                                "output-probe-measured",
+                                "artifact-hash-matches-attempt",
+                                "module-graph-scanned",
+                                "no-legacy-runtime-import",
+                                "no-compatibility-persistence"
+                              ]
+                            },
+                            "reason": {
+                              "oneOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "evidence-missing",
+                                    "evidence-unverified",
+                                    "evidence-not-measured",
+                                    "requirement-unmet",
+                                    "evidence-stale"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "detail": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          }
+                        }
+                      },
+                      "serverEvidenceOnly": {
+                        "const": true
+                      },
+                      "criteria": {
+                        "type": "array",
+                        "minItems": 10,
+                        "maxItems": 10,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "criterion",
+                            "source",
+                            "automatic",
+                            "passed",
+                            "checkCount",
+                            "failedCheckCount",
+                            "missingCheckCount",
+                            "unverifiedReferenceCount",
+                            "unhashedReferenceCount",
+                            "checks"
+                          ],
+                          "properties": {
+                            "criterion": {
+                              "type": "string",
+                              "enum": [
+                                "podcast-multicam-synchronised",
+                                "teacher-and-screen-synchronised",
+                                "insufficient-evidence-requires-manual",
+                                "react-edited-with-piecewise-map",
+                                "active-speaker-and-demonstration-directed",
+                                "contextual-multi-range-synthesis",
+                                "colour-match-precedes-creative-lut",
+                                "colour-critic-resolved",
+                                "final-mp4-inspectable",
+                                "no-legacy-runtime-dependency"
+                              ]
+                            },
+                            "source": {
+                              "const": "server"
+                            },
+                            "automatic": {
+                              "const": true
+                            },
+                            "passed": {
+                              "type": "boolean"
+                            },
+                            "checkCount": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 8
+                            },
+                            "failedCheckCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8
+                            },
+                            "missingCheckCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8
+                            },
+                            "unverifiedReferenceCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "unhashedReferenceCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "checks": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 8,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "code",
+                                  "passed",
+                                  "failureReason",
+                                  "detail",
+                                  "references"
+                                ],
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "enum": [
+                                      "podcast-protocol-evaluated",
+                                      "diagnostic-synchronised",
+                                      "participant-tracks-distinct",
+                                      "coverage-derived",
+                                      "clock-map-persisted",
+                                      "teacher-protocol-evaluated",
+                                      "track-durations-unequal",
+                                      "sync-evidence-insufficient",
+                                      "diagnostic-requires-manual",
+                                      "protocol-ceiling-blocks-auto-edit",
+                                      "playback-map-persisted",
+                                      "interrupted-piece-present",
+                                      "reaction-duration-differs",
+                                      "map-compiled-into-plan",
+                                      "direction-persisted",
+                                      "active-speaker-rule-fired",
+                                      "demonstration-rule-fired",
+                                      "decisions-carry-justification",
+                                      "synthesis-persisted",
+                                      "target-duration-is-120s",
+                                      "duration-within-tolerance",
+                                      "multiple-ranges-preserved",
+                                      "context-proof-recorded",
+                                      "match-plan-persisted",
+                                      "transforms-are-match-stage",
+                                      "match-precedes-creative-lut",
+                                      "critic-report-persisted",
+                                      "verdict-resolved",
+                                      "no-open-hard-issue",
+                                      "final-export-promoted",
+                                      "output-codec-recorded",
+                                      "output-probe-measured",
+                                      "artifact-hash-matches-attempt",
+                                      "module-graph-scanned",
+                                      "no-legacy-runtime-import",
+                                      "no-compatibility-persistence"
+                                    ]
+                                  },
+                                  "passed": {
+                                    "type": "boolean"
+                                  },
+                                  "failureReason": {
+                                    "oneOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "evidence-missing",
+                                          "evidence-unverified",
+                                          "evidence-not-measured",
+                                          "requirement-unmet",
+                                          "evidence-stale"
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "detail": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 512
+                                  },
+                                  "references": {
+                                    "type": "array",
+                                    "maxItems": 16,
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "type",
+                                        "id",
+                                        "hash",
+                                        "verified"
+                                      ],
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "enum": [
+                                            "workspace",
+                                            "project",
+                                            "project-version",
+                                            "capture-session",
+                                            "capture-protocol",
+                                            "capture-protocol-evaluation",
+                                            "sync-diagnostic",
+                                            "sync-evidence",
+                                            "track-coverage",
+                                            "clock-map",
+                                            "playback-map",
+                                            "playback-piece",
+                                            "multicam-direction",
+                                            "shot-decision",
+                                            "editorial-synthesis",
+                                            "match-plan",
+                                            "match-transform",
+                                            "colour-plan",
+                                            "colour-critic-report",
+                                            "renderable-plan-snapshot",
+                                            "final-export",
+                                            "media-artifact",
+                                            "media-manifest",
+                                            "module-graph-audit"
+                                          ]
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 3,
+                                          "maxLength": 200
+                                        },
+                                        "hash": {
+                                          "oneOf": [
+                                            {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "verified": {
+                                          "type": "boolean"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "evaluatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "fingerprint": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    }
+                  },
+                  "reportFingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "createdBy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "api-client"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "recordHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-outstanding/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gateId",
+            "evaluatedAt",
+            "gate",
+            "approved",
+            "satisfied",
+            "total",
+            "outstanding"
+          ],
+          "properties": {
+            "gateId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "evaluatedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "gate": {
+              "const": "multicam-longform/v1"
+            },
+            "approved": {
+              "type": "boolean"
+            },
+            "satisfied": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "total": {
+              "const": 10
+            },
+            "outstanding": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "criterion",
+                  "statement",
+                  "neverEvaluated",
+                  "missingCheckCount",
+                  "failedCheckCount",
+                  "unverifiedReferenceCount",
+                  "unhashedReferenceCount",
+                  "blocking"
+                ],
+                "properties": {
+                  "criterion": {
+                    "type": "string",
+                    "enum": [
+                      "podcast-multicam-synchronised",
+                      "teacher-and-screen-synchronised",
+                      "insufficient-evidence-requires-manual",
+                      "react-edited-with-piecewise-map",
+                      "active-speaker-and-demonstration-directed",
+                      "contextual-multi-range-synthesis",
+                      "colour-match-precedes-creative-lut",
+                      "colour-critic-resolved",
+                      "final-mp4-inspectable",
+                      "no-legacy-runtime-dependency"
+                    ]
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "neverEvaluated": {
+                    "type": "boolean"
+                  },
+                  "missingCheckCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8
+                  },
+                  "failedCheckCount": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  "unverifiedReferenceCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unhashedReferenceCount": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "blocking": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "check",
+                        "reason",
+                        "detail"
+                      ],
+                      "properties": {
+                        "check": {
+                          "type": "string",
+                          "enum": [
+                            "podcast-protocol-evaluated",
+                            "diagnostic-synchronised",
+                            "participant-tracks-distinct",
+                            "coverage-derived",
+                            "clock-map-persisted",
+                            "teacher-protocol-evaluated",
+                            "track-durations-unequal",
+                            "sync-evidence-insufficient",
+                            "diagnostic-requires-manual",
+                            "protocol-ceiling-blocks-auto-edit",
+                            "playback-map-persisted",
+                            "interrupted-piece-present",
+                            "reaction-duration-differs",
+                            "map-compiled-into-plan",
+                            "direction-persisted",
+                            "active-speaker-rule-fired",
+                            "demonstration-rule-fired",
+                            "decisions-carry-justification",
+                            "synthesis-persisted",
+                            "target-duration-is-120s",
+                            "duration-within-tolerance",
+                            "multiple-ranges-preserved",
+                            "context-proof-recorded",
+                            "match-plan-persisted",
+                            "transforms-are-match-stage",
+                            "match-precedes-creative-lut",
+                            "critic-report-persisted",
+                            "verdict-resolved",
+                            "no-open-hard-issue",
+                            "final-export-promoted",
+                            "output-codec-recorded",
+                            "output-probe-measured",
+                            "artifact-hash-matches-attempt",
+                            "module-graph-scanned",
+                            "no-legacy-runtime-import",
+                            "no-compatibility-persistence"
+                          ]
+                        },
+                        "reason": {
+                          "oneOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "evidence-missing",
+                                "evidence-unverified",
+                                "evidence-not-measured",
+                                "requirement-unmet",
+                                "evidence-stale"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detail": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/multicam-longform-gate-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gate"
+          ],
+          "properties": {
+            "gate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schemaVersion",
+                "id",
+                "workspaceId",
+                "projectId",
+                "sessionId",
+                "projectVersionId",
+                "projectVersionHash",
+                "report",
+                "reportFingerprint",
+                "createdBy",
+                "createdAt",
+                "recordHash"
+              ],
+              "properties": {
+                "schemaVersion": {
+                  "const": "multicam-longform-gate/v1"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "sessionId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectVersionId": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectVersionHash": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "report": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "gate",
+                    "workspaceId",
+                    "projectId",
+                    "sessionId",
+                    "approved",
+                    "satisfied",
+                    "evaluated",
+                    "total",
+                    "failed",
+                    "blocking",
+                    "serverEvidenceOnly",
+                    "criteria",
+                    "evaluatedAt",
+                    "fingerprint"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": "multicam-longform-gate-report/v1"
+                    },
+                    "gate": {
+                      "const": "multicam-longform/v1"
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    },
+                    "sessionId": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "satisfied": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "evaluated": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "total": {
+                      "const": 10
+                    },
+                    "failed": {
+                      "type": "array",
+                      "maxItems": 10,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "podcast-multicam-synchronised",
+                          "teacher-and-screen-synchronised",
+                          "insufficient-evidence-requires-manual",
+                          "react-edited-with-piecewise-map",
+                          "active-speaker-and-demonstration-directed",
+                          "contextual-multi-range-synthesis",
+                          "colour-match-precedes-creative-lut",
+                          "colour-critic-resolved",
+                          "final-mp4-inspectable",
+                          "no-legacy-runtime-dependency"
+                        ]
+                      }
+                    },
+                    "blocking": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "criterion",
+                          "check",
+                          "reason",
+                          "detail"
+                        ],
+                        "properties": {
+                          "criterion": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-multicam-synchronised",
+                              "teacher-and-screen-synchronised",
+                              "insufficient-evidence-requires-manual",
+                              "react-edited-with-piecewise-map",
+                              "active-speaker-and-demonstration-directed",
+                              "contextual-multi-range-synthesis",
+                              "colour-match-precedes-creative-lut",
+                              "colour-critic-resolved",
+                              "final-mp4-inspectable",
+                              "no-legacy-runtime-dependency"
+                            ]
+                          },
+                          "check": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-protocol-evaluated",
+                              "diagnostic-synchronised",
+                              "participant-tracks-distinct",
+                              "coverage-derived",
+                              "clock-map-persisted",
+                              "teacher-protocol-evaluated",
+                              "track-durations-unequal",
+                              "sync-evidence-insufficient",
+                              "diagnostic-requires-manual",
+                              "protocol-ceiling-blocks-auto-edit",
+                              "playback-map-persisted",
+                              "interrupted-piece-present",
+                              "reaction-duration-differs",
+                              "map-compiled-into-plan",
+                              "direction-persisted",
+                              "active-speaker-rule-fired",
+                              "demonstration-rule-fired",
+                              "decisions-carry-justification",
+                              "synthesis-persisted",
+                              "target-duration-is-120s",
+                              "duration-within-tolerance",
+                              "multiple-ranges-preserved",
+                              "context-proof-recorded",
+                              "match-plan-persisted",
+                              "transforms-are-match-stage",
+                              "match-precedes-creative-lut",
+                              "critic-report-persisted",
+                              "verdict-resolved",
+                              "no-open-hard-issue",
+                              "final-export-promoted",
+                              "output-codec-recorded",
+                              "output-probe-measured",
+                              "artifact-hash-matches-attempt",
+                              "module-graph-scanned",
+                              "no-legacy-runtime-import",
+                              "no-compatibility-persistence"
+                            ]
+                          },
+                          "reason": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "evidence-missing",
+                                  "evidence-unverified",
+                                  "evidence-not-measured",
+                                  "requirement-unmet",
+                                  "evidence-stale"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "detail": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          }
+                        }
+                      }
+                    },
+                    "serverEvidenceOnly": {
+                      "const": true
+                    },
+                    "criteria": {
+                      "type": "array",
+                      "minItems": 10,
+                      "maxItems": 10,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "criterion",
+                          "source",
+                          "automatic",
+                          "passed",
+                          "checkCount",
+                          "failedCheckCount",
+                          "missingCheckCount",
+                          "unverifiedReferenceCount",
+                          "unhashedReferenceCount",
+                          "checks"
+                        ],
+                        "properties": {
+                          "criterion": {
+                            "type": "string",
+                            "enum": [
+                              "podcast-multicam-synchronised",
+                              "teacher-and-screen-synchronised",
+                              "insufficient-evidence-requires-manual",
+                              "react-edited-with-piecewise-map",
+                              "active-speaker-and-demonstration-directed",
+                              "contextual-multi-range-synthesis",
+                              "colour-match-precedes-creative-lut",
+                              "colour-critic-resolved",
+                              "final-mp4-inspectable",
+                              "no-legacy-runtime-dependency"
+                            ]
+                          },
+                          "source": {
+                            "const": "server"
+                          },
+                          "automatic": {
+                            "const": true
+                          },
+                          "passed": {
+                            "type": "boolean"
+                          },
+                          "checkCount": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          },
+                          "failedCheckCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8
+                          },
+                          "missingCheckCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8
+                          },
+                          "unverifiedReferenceCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "unhashedReferenceCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "checks": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "code",
+                                "passed",
+                                "failureReason",
+                                "detail",
+                                "references"
+                              ],
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "podcast-protocol-evaluated",
+                                    "diagnostic-synchronised",
+                                    "participant-tracks-distinct",
+                                    "coverage-derived",
+                                    "clock-map-persisted",
+                                    "teacher-protocol-evaluated",
+                                    "track-durations-unequal",
+                                    "sync-evidence-insufficient",
+                                    "diagnostic-requires-manual",
+                                    "protocol-ceiling-blocks-auto-edit",
+                                    "playback-map-persisted",
+                                    "interrupted-piece-present",
+                                    "reaction-duration-differs",
+                                    "map-compiled-into-plan",
+                                    "direction-persisted",
+                                    "active-speaker-rule-fired",
+                                    "demonstration-rule-fired",
+                                    "decisions-carry-justification",
+                                    "synthesis-persisted",
+                                    "target-duration-is-120s",
+                                    "duration-within-tolerance",
+                                    "multiple-ranges-preserved",
+                                    "context-proof-recorded",
+                                    "match-plan-persisted",
+                                    "transforms-are-match-stage",
+                                    "match-precedes-creative-lut",
+                                    "critic-report-persisted",
+                                    "verdict-resolved",
+                                    "no-open-hard-issue",
+                                    "final-export-promoted",
+                                    "output-codec-recorded",
+                                    "output-probe-measured",
+                                    "artifact-hash-matches-attempt",
+                                    "module-graph-scanned",
+                                    "no-legacy-runtime-import",
+                                    "no-compatibility-persistence"
+                                  ]
+                                },
+                                "passed": {
+                                  "type": "boolean"
+                                },
+                                "failureReason": {
+                                  "oneOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "evidence-missing",
+                                        "evidence-unverified",
+                                        "evidence-not-measured",
+                                        "requirement-unmet",
+                                        "evidence-stale"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "detail": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "references": {
+                                  "type": "array",
+                                  "maxItems": 16,
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "type",
+                                      "id",
+                                      "hash",
+                                      "verified"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "workspace",
+                                          "project",
+                                          "project-version",
+                                          "capture-session",
+                                          "capture-protocol",
+                                          "capture-protocol-evaluation",
+                                          "sync-diagnostic",
+                                          "sync-evidence",
+                                          "track-coverage",
+                                          "clock-map",
+                                          "playback-map",
+                                          "playback-piece",
+                                          "multicam-direction",
+                                          "shot-decision",
+                                          "editorial-synthesis",
+                                          "match-plan",
+                                          "match-transform",
+                                          "colour-plan",
+                                          "colour-critic-report",
+                                          "renderable-plan-snapshot",
+                                          "final-export",
+                                          "media-artifact",
+                                          "media-manifest",
+                                          "module-graph-audit"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 3,
+                                        "maxLength": 200
+                                      },
+                                      "hash": {
+                                        "oneOf": [
+                                          {
+                                            "type": "string",
+                                            "pattern": "^[a-f0-9]{64}$"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "verified": {
+                                        "type": "boolean"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "evaluatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "reportFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "createdBy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "id"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api-client"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 128
+                    }
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "recordHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
             }
           }
         },

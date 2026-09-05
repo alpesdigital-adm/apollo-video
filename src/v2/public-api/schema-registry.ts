@@ -72,8 +72,17 @@ import {
   PLAYBACK_MODES,
   PLAYBACK_UNCOVERED_REASONS,
 } from '../domain/playback-map.ts'
+import {
+  MULTICAM_LONGFORM_CRITERIA,
+  MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES,
+  MULTICAM_LONGFORM_FAILURE_REASONS,
+  MULTICAM_LONGFORM_GATE_ID,
+  MULTICAM_LONGFORM_GATE_REPORT_SCHEMA_VERSION,
+  MULTICAM_LONGFORM_GATE_SCHEMA_VERSION,
+} from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
+import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
 
@@ -15989,6 +15998,237 @@ const strandedPlanSchema = {
   ],
 }
 
+// ---------------------------------------------------------------------------
+// Wave 20 — F4.016 multicamera and long-form phase gate
+//
+// Every enum below is spread from the domain constant that owns it: the ten
+// criteria, the check codes those criteria are made of, the five failure
+// reasons and the closed set of row kinds a check may have read. A gate whose
+// published vocabulary drifted from the evaluator's would describe a criterion
+// that no longer exists, which is the exact shape of the failure this gate was
+// built to catch.
+// ---------------------------------------------------------------------------
+
+/**
+ * An evidence reference id.
+ *
+ * Wider than `idSchema` because the server builds these itself out of composite
+ * derivation refs (`<sessionId>:playback:<trackId>:v<n>`, a scan named by its
+ * instant), and the domain bounds them at 200 characters. Published at the same
+ * bound so the contract cannot refuse a reference the evaluator produced.
+ */
+const gateEvidenceIdSchema = { type: 'string', minLength: 3, maxLength: 200 }
+const gateSessionIdSchema = { oneOf: [gateEvidenceIdSchema, { type: 'null' }] }
+const gateCriterionSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CRITERIA] }
+const gateCheckCodeSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CHECK_CODES] }
+const gateFailureReasonSchema = {
+  oneOf: [
+    { type: 'string', enum: [...MULTICAM_LONGFORM_FAILURE_REASONS] },
+    { type: 'null' },
+  ],
+}
+const gateDetailSchema = { type: 'string', minLength: 1, maxLength: 512 }
+const gateCriterionCountSchema = {
+  type: 'integer', minimum: 0, maximum: MULTICAM_LONGFORM_CRITERIA.length,
+}
+
+const gateEvidenceReferenceSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'hash', 'verified'],
+  properties: {
+    type: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] },
+    id: gateEvidenceIdSchema,
+    // Three states, not two: a digest that verified, a digest that did not, and
+    // `null` for a table that stores no hash of its own. Publishing the third
+    // as `false` would report "I could not check" as "I checked and it was
+    // wrong".
+    hash: { oneOf: [sha256Schema, { type: 'null' }] },
+    verified: { type: 'boolean' },
+  },
+}
+
+const gateCheckSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['code', 'passed', 'failureReason', 'detail', 'references'],
+  properties: {
+    code: gateCheckCodeSchema,
+    passed: { type: 'boolean' },
+    failureReason: gateFailureReasonSchema,
+    detail: gateDetailSchema,
+    references: { type: 'array', maxItems: 16, items: gateEvidenceReferenceSchema },
+  },
+}
+
+const gateCriterionResultSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'criterion', 'source', 'automatic', 'passed', 'checkCount', 'failedCheckCount',
+    'missingCheckCount', 'unverifiedReferenceCount', 'unhashedReferenceCount', 'checks',
+  ],
+  properties: {
+    criterion: gateCriterionSchema,
+    // Constants rather than free fields: no criterion of this gate is answered
+    // by a person or by anything but the server's own reading.
+    source: { const: 'server' },
+    automatic: { const: true },
+    passed: { type: 'boolean' },
+    checkCount: { type: 'integer', minimum: 1, maximum: 8 },
+    failedCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    missingCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    unverifiedReferenceCount: { type: 'integer', minimum: 0 },
+    unhashedReferenceCount: { type: 'integer', minimum: 0 },
+    checks: { type: 'array', minItems: 1, maxItems: 8, items: gateCheckSchema },
+  },
+}
+
+const gateReportSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'gate', 'workspaceId', 'projectId', 'sessionId', 'approved',
+    'satisfied', 'evaluated', 'total', 'failed', 'blocking', 'serverEvidenceOnly',
+    'criteria', 'evaluatedAt', 'fingerprint',
+  ],
+  properties: {
+    schemaVersion: { const: MULTICAM_LONGFORM_GATE_REPORT_SCHEMA_VERSION },
+    gate: { const: MULTICAM_LONGFORM_GATE_ID },
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sessionId: gateSessionIdSchema,
+    approved: { type: 'boolean' },
+    satisfied: gateCriterionCountSchema,
+    // Criteria the reader answered at all, whether they passed or refused. Not
+    // the same number as `satisfied`, and the difference is the whole point:
+    // nine of ten evaluated with one never run is not "90% approved".
+    evaluated: gateCriterionCountSchema,
+    total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+    failed: {
+      type: 'array',
+      maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+      uniqueItems: true,
+      items: gateCriterionSchema,
+    },
+    blocking: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['criterion', 'check', 'reason', 'detail'],
+        properties: {
+          criterion: gateCriterionSchema,
+          check: gateCheckCodeSchema,
+          reason: gateFailureReasonSchema,
+          detail: gateDetailSchema,
+        },
+      },
+    },
+    serverEvidenceOnly: { const: true },
+    // All ten, always, in catalogue order. A criterion that vanished when it
+    // had no rows is a criterion nobody notices is unmet.
+    criteria: {
+      type: 'array',
+      minItems: MULTICAM_LONGFORM_CRITERIA.length,
+      maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+      items: gateCriterionResultSchema,
+    },
+    evaluatedAt: dateTimeSchema,
+    fingerprint: sha256Schema,
+  },
+}
+
+const gateRecordSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaVersion', 'id', 'workspaceId', 'projectId', 'sessionId', 'projectVersionId',
+    'projectVersionHash', 'report', 'reportFingerprint', 'createdBy', 'createdAt', 'recordHash',
+  ],
+  properties: {
+    schemaVersion: { const: MULTICAM_LONGFORM_GATE_SCHEMA_VERSION },
+    id: idSchema,
+    workspaceId: idSchema,
+    projectId: idSchema,
+    sessionId: gateSessionIdSchema,
+    // Null when the project has no current version: the evaluation still
+    // happened and still says what it read, rather than refusing to record.
+    projectVersionId: { oneOf: [gateEvidenceIdSchema, { type: 'null' }] },
+    projectVersionHash: { oneOf: [sha256Schema, { type: 'null' }] },
+    report: gateReportSchema,
+    reportFingerprint: sha256Schema,
+    createdBy: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'id'],
+      properties: { type: { const: 'api-client' }, id: idSchema },
+    },
+    createdAt: dateTimeSchema,
+    recordHash: sha256Schema,
+  },
+}
+
+const gateOutstandingSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'criterion', 'statement', 'neverEvaluated', 'missingCheckCount', 'failedCheckCount',
+    'unverifiedReferenceCount', 'unhashedReferenceCount', 'blocking',
+  ],
+  properties: {
+    criterion: gateCriterionSchema,
+    statement: { type: 'string', minLength: 1, maxLength: 512 },
+    neverEvaluated: { type: 'boolean' },
+    missingCheckCount: { type: 'integer', minimum: 0, maximum: 8 },
+    failedCheckCount: { type: 'integer', minimum: 1, maximum: 8 },
+    unverifiedReferenceCount: { type: 'integer', minimum: 0 },
+    unhashedReferenceCount: { type: 'integer', minimum: 0 },
+    blocking: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['check', 'reason', 'detail'],
+        properties: {
+          check: gateCheckCodeSchema,
+          reason: gateFailureReasonSchema,
+          detail: gateDetailSchema,
+        },
+      },
+    },
+  },
+}
+
+const gateArtifactSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['type', 'id', 'hash', 'verified', 'citedBy'],
+  properties: {
+    type: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] },
+    id: gateEvidenceIdSchema,
+    hash: { oneOf: [sha256Schema, { type: 'null' }] },
+    verified: { type: 'boolean' },
+    // Which criteria and checks read this row. A reader who opens an artifact
+    // needs to know what it was being asked to prove.
+    citedBy: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['criterion', 'check', 'passed'],
+        properties: {
+          criterion: gateCriterionSchema,
+          check: gateCheckCodeSchema,
+          passed: { type: 'boolean' },
+        },
+      },
+    },
+  },
+}
+
 export const PUBLIC_SCHEMAS = defineSchemaRegistry([
   defineSchema('subtitle-style-registry', 1, 'Content-addressed subtitle style registry', subtitleStyleRegistrySchemaV1),
   defineSchema('subtitle-style-registry', 2, 'Content-addressed subtitle style registry carrying casing, grouping, shadow and placement tokens', subtitleStyleRegistrySchema),
@@ -26996,6 +27236,142 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         pieces: { type: 'array', items: playbackPieceSchema },
         filteredOut: { type: 'integer', minimum: 0 },
         omittedPieces: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — F4.016 multicamera and long-form phase gate
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'evaluate-multicam-longform-gate-request',
+    1,
+    'Run the multicamera and long-form phase gate over one project',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // Nothing is required, and nothing else is accepted. The project is in
+      // the path; `sessionId` narrows the capture-side criteria to one session.
+      // There is no field here for a measurement, a criterion result, an
+      // evidence ref or an approval, because the evaluation reads every one of
+      // those from PostgreSQL and the module graph.
+      properties: { sessionId: gateEvidenceIdSchema },
+    },
+  ),
+  defineSchema(
+    'multicam-longform-gate-evaluated',
+    1,
+    'The immutable phase-gate record one evaluation produced',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate', 'replayed'],
+      properties: { gate: gateRecordSchema, replayed: { type: 'boolean' } },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-read',
+    1,
+    'One phase-gate evaluation, with all ten criteria and what each one read',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate'],
+      properties: { gate: gateRecordSchema },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-list',
+    1,
+    'The phase-gate history of one project, newest evaluation first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gates'],
+      properties: { gates: { type: 'array', items: gateRecordSchema } },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-criteria',
+    1,
+    'What the multicamera and long-form phase gate checks, before any evaluation',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gate', 'total', 'criteria'],
+      properties: {
+        gate: { const: MULTICAM_LONGFORM_GATE_ID },
+        total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+        criteria: {
+          type: 'array',
+          minItems: MULTICAM_LONGFORM_CRITERIA.length,
+          maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['criterion', 'statement', 'checks'],
+            properties: {
+              criterion: gateCriterionSchema,
+              statement: { type: 'string', minLength: 1, maxLength: 512 },
+              checks: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 8,
+                uniqueItems: true,
+                items: gateCheckCodeSchema,
+              },
+            },
+          },
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-outstanding',
+    1,
+    'What the newest phase-gate evaluation is still missing, first thing first',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['gateId', 'evaluatedAt', 'gate', 'approved', 'satisfied', 'total', 'outstanding'],
+      properties: {
+        gateId: idSchema,
+        evaluatedAt: dateTimeSchema,
+        gate: { const: MULTICAM_LONGFORM_GATE_ID },
+        approved: { type: 'boolean' },
+        satisfied: gateCriterionCountSchema,
+        total: { const: MULTICAM_LONGFORM_CRITERIA.length },
+        // Criteria nobody has answered come before criteria that answered and
+        // refused: the first is work to start, the second is work to fix.
+        outstanding: {
+          type: 'array',
+          maxItems: MULTICAM_LONGFORM_CRITERIA.length,
+          items: gateOutstandingSchema,
+        },
+      },
+    }),
+  ),
+  defineSchema(
+    'multicam-longform-gate-artifact-list',
+    1,
+    'The artifacts one phase-gate evaluation read, with the checks that cited each',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'gateId', 'evaluatedAt', 'approved', 'artifacts', 'unverifiedCount',
+        'unhashedCount', 'filteredOut', 'omittedArtifacts',
+      ],
+      properties: {
+        gateId: idSchema,
+        evaluatedAt: dateTimeSchema,
+        approved: { type: 'boolean' },
+        artifacts: { type: 'array', items: gateArtifactSchema },
+        unverifiedCount: { type: 'integer', minimum: 0 },
+        unhashedCount: { type: 'integer', minimum: 0 },
+        // What the type filter and the limit removed. A narrowed list that
+        // reads as complete is an argument the gate looked at less than it did.
+        filteredOut: { type: 'integer', minimum: 0 },
+        omittedArtifacts: { type: 'integer', minimum: 0 },
       },
     }),
   ),
