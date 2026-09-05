@@ -3,10 +3,7 @@ import {
   captureSessionDerivationRef,
   createCaptureSession,
 } from '../../src/v2/domain/capture-session.ts'
-import {
-  DEFAULT_COLOR_CRITIC_POLICY,
-  evaluateColorCritic,
-} from '../../src/v2/domain/color-critic-report.ts'
+import { evaluateColorCritic } from '../../src/v2/domain/color-critic-report.ts'
 import { createCameraColorMeasurement } from '../../src/v2/domain/color-measurement.ts'
 import { createMulticamEvidenceSet } from '../../src/v2/domain/multicam-evidence.ts'
 import { directMulticam } from '../../src/v2/domain/multicam-direction.ts'
@@ -452,7 +449,6 @@ export function buildCriticReport({ workspaceId, projectId, projectVersionId, re
     after: stage('after', 'artifact-output', sha('e')),
     ...(matchPlan ? { matchPlan } : {}),
     creativeIntent: { declared: false },
-    policy: DEFAULT_COLOR_CRITIC_POLICY,
     evaluatedAt: at(100),
   })
 }

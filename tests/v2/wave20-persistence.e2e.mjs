@@ -708,3 +708,597 @@ test(
     )
   },
 )
+
+test(
+  'E2E-FR-150/151/152/153 the Wave 20 repositories hand back the aggregate that was stored',
+  { skip: RUN ? false : 'set APOLLO_WAVE20_PERSISTENCE_E2E=1 with a migrated V2_DATABASE_URL' },
+  async (t) => {
+    const { stringifyWithTicks } = await import('../../src/v2/infrastructure/prisma/bigint-json.ts')
+    const { calculateMulticamDirectionHash } = await import('../../src/v2/domain/multicam-direction.ts')
+    const { calculateMulticamMatchPlanHash } = await import('../../src/v2/domain/multicam-match-plan.ts')
+    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { PrismaWorkspaceRepository } = await import(
+      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+    )
+    const { PrismaMulticamDirectionRepository } = await import(
+      '../../src/v2/infrastructure/prisma/multicam-direction-repository.ts'
+    )
+    const {
+      PrismaCameraColorMeasurementRepository,
+      PrismaMulticamMatchPlanRepository,
+    } = await import('../../src/v2/infrastructure/prisma/multicam-match-plan-repository.ts')
+    const { PrismaColorCriticReportRepository } = await import(
+      '../../src/v2/infrastructure/prisma/color-critic-report-repository.ts'
+    )
+    const { PrismaPlaybackMapRepository } = await import(
+      '../../src/v2/infrastructure/prisma/playback-map-repository.ts'
+    )
+    const {
+      anchorPlaybackMap,
+      buildCriticReport,
+      buildDirectionWorld,
+      buildMatchWorld,
+      buildPlaybackWorld,
+    } = await import('./wave20-fixtures.mjs')
+
+    const client = new PrismaClient()
+    const A = 'w20r-workspace-a'
+    const B = 'w20r-workspace-b'
+    // The same session id in both workspaces on purpose: an isolation check
+    // whose two rows could not have collided anyway proves only that two
+    // different keys are different.
+    const SESSION = 'w20r-session'
+    const REACT = 'w20r-react'
+    const REACTION_TRACK = 'track-reaction'
+    const project = (workspace) => (workspace === A ? 'w20r-project-a' : 'w20r-project-b')
+    const version = (workspace) => (workspace === A ? 'w20r-version-a' : 'w20r-version-b')
+    const at = (second) => new Date(Date.parse('2029-05-02T09:00:00.000Z') + second * 1_000)
+    const digest = (character) => character.repeat(64)
+
+    const clean = async () => {
+      for (const table of [
+        client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
+        client.v2ColorCriticDimensionResult, client.v2ColorCriticReport,
+        client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
+        client.v2PlaybackMapHead, client.v2PlaybackMap,
+        client.v2MatchPlanIssue, client.v2MatchNonComparableRange, client.v2MatchRangeOverride,
+        client.v2CameraMatchTransform, client.v2MatchPlanMeasurement,
+        client.v2MulticamMatchPlanHead, client.v2MulticamMatchPlan,
+        client.v2ColorMeasurementComponent, client.v2ColorMeasurementDimension,
+        client.v2CameraColorMeasurement,
+        client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
+        client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
+        client.v2MulticamDirectionHead, client.v2MulticamDirection,
+        client.v2MulticamObservation, client.v2MulticamEvidenceSet,
+        client.v2CaptureSessionHead,
+      ]) {
+        await table.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      }
+      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      await client.v2Project.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      await client.v2Workspace.deleteMany({ where: { id: { in: [A, B] } } })
+    }
+
+    t.after(async () => {
+      // Reported rather than rethrown: a cleanup failure that masks the real
+      // assertion turns one clear defect into two confusing ones.
+      try {
+        await clean()
+      } catch (error) {
+        console.error('cleanup failed:', error?.message ?? error)
+      } finally {
+        await client.$disconnect()
+      }
+    })
+
+    await clean()
+
+    const workspaces = new PrismaWorkspaceRepository(client)
+    for (const id of [A, B]) {
+      await workspaces.create(createWorkspace({
+        id, slug: id, name: 'Wave 20 round trip', status: 'active', createdAt: at(0).toISOString(),
+      }))
+      await client.v2Project.create({
+        data: {
+          id: project(id),
+          workspaceId: id,
+          name: 'Wave 20 round trip',
+          status: 'reviewing-proxy',
+          objective: 'discovery',
+          format: '16:9',
+          locale: 'pt-BR',
+          createdByType: 'api-client',
+          createdById: 'w20r-client',
+          createdAt: at(0),
+          updatedAt: at(0),
+        },
+      })
+      for (const kind of ['brief', 'edit-plan', 'policies']) {
+        await client.v2ProjectSnapshot.create({
+          data: {
+            id: `${version(id)}-${kind}`,
+            workspaceId: id,
+            projectId: project(id),
+            kind,
+            schemaVersion: 1,
+            contentJson: JSON.stringify({ kind }),
+            contentHash: digest('1'),
+            createdAt: at(0),
+          },
+        })
+      }
+      await client.v2ProjectVersion.create({
+        data: {
+          id: version(id),
+          workspaceId: id,
+          projectId: project(id),
+          sequence: 1,
+          briefSnapshotId: `${version(id)}-brief`,
+          editPlanSnapshotId: `${version(id)}-edit-plan`,
+          policiesSnapshotId: `${version(id)}-policies`,
+          baseHash: digest('2'),
+          createdBy: 'w20r-client',
+          createdAt: at(0),
+        },
+      })
+      for (const sessionId of [SESSION, REACT]) {
+        await client.v2CaptureSessionHead.create({
+          data: {
+            id: `${id}:${sessionId}`,
+            workspaceId: id,
+            projectId: project(id),
+            sessionId,
+            version: 1,
+            sessionHash: digest('3'),
+            status: 'synced',
+            createdAt: at(0),
+            updatedAt: at(0),
+          },
+        })
+      }
+    }
+
+    /** Byte-identity, not "looks the same": the canonical bytes and the shape. */
+    const identical = (stored, built, what) => {
+      assert.equal(stringifyWithTicks(stored), stringifyWithTicks(built), `${what} did not survive the round trip`)
+      assert.deepEqual(stored, built, `${what} came back structurally different`)
+    }
+    const refusedOnRead = async (read, what) => {
+      await assert.rejects(read, (error) => {
+        assert.equal(error.code, 'PERSISTENCE_CONFLICT', `${what}: ${error.code} — ${error.message}`)
+        return true
+      }, `${what} was believed after being edited underneath`)
+    }
+
+    // -----------------------------------------------------------------
+    // F4.012 — multicam evidence and direction
+    // -----------------------------------------------------------------
+
+    const directions = new PrismaMulticamDirectionRepository(client)
+    const worldA = buildDirectionWorld({ workspaceId: A, sessionId: SESSION, projectId: project(A) })
+    const worldB = buildDirectionWorld({ workspaceId: B, sessionId: SESSION, projectId: project(B) })
+
+    // The fixture is the unhealthy one: the cameras stop before the directed
+    // range does, so this is not the happy path a naive mapping also survives.
+    assert.ok(worldA.direction.uncovered.length >= 1, 'the direction fixture must carry an uncovered stretch')
+    assert.ok(worldA.direction.manualReviewRequired, 'the direction fixture must need a person')
+    assert.ok(
+      worldA.direction.shots.some((shot) => shot.chosen.activeSpeaker !== null),
+      'the direction fixture must cite speaker evidence on at least one shot',
+    )
+    assert.ok(
+      worldA.direction.shots.some((shot) => shot.chosen.activeSpeaker === null),
+      'and must have one shot decided with none, so both evidence shapes are stored',
+    )
+
+    const firstEvidence = await directions.persistEvidenceSet({
+      set: worldA.evidence, createdAt: at(1).toISOString(),
+    })
+    assert.equal(firstEvidence.replayed, false)
+    const replayedEvidence = await directions.persistEvidenceSet({
+      set: worldA.evidence, createdAt: at(2).toISOString(),
+    })
+    assert.equal(replayedEvidence.replayed, true, 'the same evidence written twice is one set')
+    identical(
+      await directions.readEvidenceSet({ workspaceId: A, evidenceHash: worldA.evidence.evidenceHash }),
+      worldA.evidence,
+      'the evidence set',
+    )
+    assert.equal(
+      await directions.readEvidenceSet({ workspaceId: B, evidenceHash: worldA.evidence.evidenceHash }),
+      null,
+      'workspace B could read workspace A evidence by its hash',
+    )
+
+    const storedDirection = await directions.appendVersion({
+      direction: worldA.direction, base: null, occurredAt: at(3).toISOString(),
+    })
+    assert.equal(storedDirection.replayed, false)
+    assert.equal(storedDirection.stored.version, 1)
+    identical(storedDirection.stored.direction, worldA.direction, 'direction version 1')
+
+    const replayedDirection = await directions.appendVersion({
+      direction: worldA.direction, base: null, occurredAt: at(4).toISOString(),
+    })
+    assert.equal(replayedDirection.replayed, true, 'the same direction written twice is one version')
+
+    // A second version of the same direction: the same decisions, generated a
+    // second later, so the body and the hash differ while nothing else does.
+    // It has to be a different body: the chain is unique on (workspace, hash),
+    // so re-offering version 1's bytes as version 2 is refused by the index
+    // before the head fence is ever consulted.
+    const laterBody = (() => {
+      const { directionHash, ...body } = worldA.direction
+      const moved = { ...body, generatedAt: new Date(Date.parse(body.generatedAt) + 1_000).toISOString() }
+      return Object.freeze({ ...moved, directionHash: calculateMulticamDirectionHash(moved) })
+    })()
+    assert.notEqual(laterBody.directionHash, worldA.direction.directionHash)
+
+    // The fence is the pair, not the number. A writer that names the right
+    // version and the wrong hash was looking at a document that no longer
+    // exists, and a version-only fence would have let it through.
+    await assert.rejects(
+      () => directions.appendVersion({
+        direction: laterBody,
+        base: { version: 1, directionHash: digest('9') },
+        occurredAt: at(5).toISOString(),
+      }),
+      (error) => {
+        assert.equal(error.code, 'PERSISTENCE_CONFLICT')
+        assert.equal(error.details.currentVersion, 1, 'the loser is told which version is current')
+        assert.equal(error.details.currentHash, worldA.direction.directionHash, 'and which hash')
+        return true
+      },
+      'a stale base hash advanced the direction head',
+    )
+    assert.equal(
+      await directions.readVersion({ workspaceId: A, sessionId: SESSION, version: 2 }),
+      null,
+      'the refused append left a version 2 behind',
+    )
+    const advanced = await directions.appendVersion({
+      direction: laterBody,
+      base: { version: 1, directionHash: worldA.direction.directionHash },
+      occurredAt: at(6).toISOString(),
+    })
+    assert.equal(advanced.stored.version, 2)
+    assert.equal(advanced.stored.previousVersionHash, worldA.direction.directionHash)
+    identical(
+      (await directions.readHead({ workspaceId: A, sessionId: SESSION })).direction,
+      laterBody,
+      'the direction head',
+    )
+    identical(
+      (await directions.readVersion({ workspaceId: A, sessionId: SESSION, version: 1 })).direction,
+      worldA.direction,
+      'direction version 1 after version 2 arrived',
+    )
+
+    // Workspace B stores its own direction for a session with the same id.
+    await directions.persistEvidenceSet({ set: worldB.evidence, createdAt: at(7).toISOString() })
+    await directions.appendVersion({ direction: worldB.direction, base: null, occurredAt: at(7).toISOString() })
+    const headB = await directions.readHead({ workspaceId: B, sessionId: SESSION })
+    assert.equal(headB.version, 1, 'workspace B saw the chain next door instead of its own')
+    identical(headB.direction, worldB.direction, 'the workspace B direction')
+    assert.notEqual(worldB.direction.directionHash, worldA.direction.directionHash)
+    const dependentsA = await directions.findDependents({
+      workspaceId: A, diagnosticHash: worldA.direction.diagnosticHash,
+    })
+    assert.equal(dependentsA.length, 2, 'both versions name the diagnostic they were computed from')
+    assert.deepEqual(dependentsA.map((entry) => entry.isHead).sort(), [false, true])
+
+    // A shot whose confidence and band were edited *together* satisfies every
+    // CHECK on the row — the band really is the confidence read through the
+    // floors — and is still refused, because the hash covers both.
+    const tamperedShot = await client.v2MulticamShotDecision.findFirstOrThrow({
+      where: { workspaceId: A, sessionId: SESSION, directionId: { endsWith: 'md1' } },
+      orderBy: { ordinal: 'asc' },
+    })
+    await client.$executeRawUnsafe(
+      'UPDATE "multicam_shot_decisions" SET "confidence" = 0.95, "confidenceBand" = \'high\' WHERE "id" = $1',
+      tamperedShot.id,
+    )
+    await refusedOnRead(
+      () => directions.readVersion({ workspaceId: A, sessionId: SESSION, version: 1 }),
+      'a shot whose confidence was raised in the database',
+    )
+    await client.$executeRawUnsafe(
+      'UPDATE "multicam_shot_decisions" SET "confidence" = $2, "confidenceBand" = $3 WHERE "id" = $1',
+      tamperedShot.id, tamperedShot.confidence, tamperedShot.confidenceBand,
+    )
+    identical(
+      (await directions.readVersion({ workspaceId: A, sessionId: SESSION, version: 1 })).direction,
+      worldA.direction,
+      'direction version 1 once the edit was undone',
+    )
+
+    // -----------------------------------------------------------------
+    // F4.013 — colour measurements and match plans
+    // -----------------------------------------------------------------
+
+    const measurements = new PrismaCameraColorMeasurementRepository(client)
+    const plans = new PrismaMulticamMatchPlanRepository(client)
+    const matchA = buildMatchWorld({ workspaceId: A, projectId: project(A), sessionId: SESSION })
+    const matchB = buildMatchWorld({ workspaceId: B, projectId: project(B), sessionId: SESSION })
+
+    assert.ok(matchA.plan.humanReviewRequired, 'the match fixture must be the clamped one')
+    assert.ok(matchA.plan.issues.some((issue) => issue.humanReviewRequired))
+
+    const firstMeasurement = await measurements.persist({
+      workspaceId: A, measurement: matchA.measurements[0], createdAt: at(10).toISOString(),
+    })
+    assert.equal(firstMeasurement.replayed, false)
+    assert.equal(
+      (await measurements.persist({
+        workspaceId: A, measurement: matchA.measurements[0], createdAt: at(11).toISOString(),
+      })).replayed,
+      true,
+      'the same measurement written twice is one measurement',
+    )
+    identical(
+      await measurements.read({ workspaceId: A, measurementId: matchA.measurements[0].measurementId }),
+      matchA.measurements[0],
+      'the camera colour measurement',
+    )
+    // `skin` is not-applicable in the fixture: it comes back with a reason and
+    // no `value` key at all, which is a different object from one carrying
+    // `value: undefined` — the reason the round trip is checked byte-wise.
+    const storedMeasurement = await measurements.read({
+      workspaceId: A, measurementId: matchA.measurements[0].measurementId,
+    })
+    assert.equal(storedMeasurement.dimensions.skin.status, 'not-applicable')
+    assert.equal(Object.hasOwn(storedMeasurement.dimensions.skin, 'value'), false)
+    assert.equal(
+      await measurements.read({ workspaceId: B, measurementId: matchA.measurements[0].measurementId }),
+      null,
+      'workspace B could read a workspace A measurement',
+    )
+
+    const storedPlan = await plans.appendVersion({
+      plan: matchA.plan, base: null, occurredAt: at(12).toISOString(),
+    })
+    assert.equal(storedPlan.stored.version, 1)
+    identical(storedPlan.stored.plan, matchA.plan, 'match plan version 1')
+    assert.equal(
+      (await plans.appendVersion({ plan: matchA.plan, base: null, occurredAt: at(13).toISOString() })).replayed,
+      true,
+      'the same plan written twice is one version',
+    )
+
+    // The next version has to be a different body: the chain is unique on
+    // (workspace, planHash), so re-offering version 1's bytes as version 2 is
+    // refused by the index before the head fence is ever consulted.
+    const laterPlan = (() => {
+      const { planHash, ...planBody } = matchA.plan
+      const moved = { ...planBody, createdAt: new Date(Date.parse(planBody.createdAt) + 1_000).toISOString() }
+      return Object.freeze({ ...moved, planHash: calculateMulticamMatchPlanHash(moved) })
+    })()
+    assert.notEqual(laterPlan.planHash, matchA.plan.planHash)
+
+    await assert.rejects(
+      () => plans.appendVersion({
+        plan: laterPlan,
+        base: { version: 1, planHash: digest('9') },
+        occurredAt: at(14).toISOString(),
+      }),
+      (error) => {
+        assert.equal(error.code, 'PERSISTENCE_CONFLICT')
+        assert.equal(error.details.currentVersion, 1)
+        assert.equal(error.details.currentHash, matchA.plan.planHash)
+        return true
+      },
+      'a stale base hash advanced the match plan head',
+    )
+    const advancedPlan = await plans.appendVersion({
+      plan: laterPlan,
+      base: { version: 1, planHash: matchA.plan.planHash },
+      occurredAt: at(16).toISOString(),
+    })
+    assert.equal(advancedPlan.stored.version, 2)
+    identical(
+      (await plans.readVersion({
+        workspaceId: A, projectId: project(A), sessionId: SESSION, version: 1,
+      })).plan,
+      matchA.plan,
+      'match plan version 1 after version 2 arrived',
+    )
+
+    await plans.appendVersion({ plan: matchB.plan, base: null, occurredAt: at(15).toISOString() })
+    const planHeadB = await plans.readHead({ workspaceId: B, projectId: project(B), sessionId: SESSION })
+    identical(planHeadB.plan, matchB.plan, 'the workspace B match plan')
+    assert.equal(
+      await plans.readHead({ workspaceId: A, projectId: project(B), sessionId: SESSION }),
+      null,
+      'workspace A could read a workspace B plan by naming its project',
+    )
+    const planDependents = await plans.findDependents({
+      workspaceId: A, measurementId: matchA.measurements[1].measurementId,
+    })
+    assert.equal(planDependents.length, 2, 'both versions were built on that measurement')
+    assert.deepEqual(planDependents.map((entry) => entry.isHead).sort(), [false, true])
+
+    // A transform confidence edited in the database keeps every bound the
+    // CHECKs enforce and still fails the plan hash.
+    const tamperedTransform = await client.v2CameraMatchTransform.findFirstOrThrow({
+      where: { workspaceId: A },
+    })
+    await client.$executeRawUnsafe(
+      'UPDATE "camera_match_transforms" SET "confidence" = 0.5 WHERE "id" = $1',
+      tamperedTransform.id,
+    )
+    await refusedOnRead(
+      () => plans.readVersion({ workspaceId: A, projectId: project(A), sessionId: SESSION, version: 1 }),
+      'a match transform whose confidence was lowered in the database',
+    )
+    await client.$executeRawUnsafe(
+      'UPDATE "camera_match_transforms" SET "confidence" = $2 WHERE "id" = $1',
+      tamperedTransform.id, tamperedTransform.confidence,
+    )
+
+    // -----------------------------------------------------------------
+    // F4.014 — the colour critic
+    // -----------------------------------------------------------------
+
+    const reports = new PrismaColorCriticReportRepository(client)
+    const reportA = buildCriticReport({
+      workspaceId: A, projectId: project(A), projectVersionId: version(A),
+      reportId: 'w20r-report-a', matchPlan: matchA.plan,
+    })
+    const reportB = buildCriticReport({
+      workspaceId: B, projectId: project(B), projectVersionId: version(B),
+      reportId: 'w20r-report-b', matchPlan: matchB.plan,
+    })
+
+    assert.equal((await reports.persist({ report: reportA, createdAt: at(20).toISOString() })).replayed, false)
+    assert.equal(
+      (await reports.persist({ report: reportA, createdAt: at(21).toISOString() })).replayed,
+      true,
+      'the same bytes judged against the same thresholds are one report',
+    )
+    identical(await reports.read({ workspaceId: A, reportId: reportA.reportId }), reportA, 'the colour critic report')
+    identical(
+      await reports.readByHash({ workspaceId: A, reportHash: reportA.reportHash }),
+      reportA,
+      'the colour critic report read by hash',
+    )
+    assert.equal(
+      await reports.read({ workspaceId: B, reportId: reportA.reportId }),
+      null,
+      'workspace B could read a workspace A verdict',
+    )
+    await reports.persist({ report: reportB, createdAt: at(22).toISOString() })
+    const listed = await reports.listForProjectVersion({
+      workspaceId: A, projectId: project(A), projectVersionId: version(A),
+    })
+    assert.equal(listed.length, 1, 'the project version listing crossed a workspace')
+    const criticDependents = await reports.findDependentsOfMatchPlan({
+      workspaceId: A, matchPlanId: reportA.matchPlanId,
+    })
+    assert.equal(criticDependents.length, 1)
+    assert.equal(criticDependents[0].action, reportA.action)
+
+    // The confidence and its band move together, so the row stays legal — and
+    // the verdict is still refused.
+    await client.$executeRawUnsafe(
+      'UPDATE "color_critic_reports" SET "confidence" = 0.9, "confidenceBand" = \'high\' WHERE "workspaceId" = $1 AND "reportId" = $2',
+      A, reportA.reportId,
+    )
+    await refusedOnRead(
+      () => reports.read({ workspaceId: A, reportId: reportA.reportId }),
+      'a critic report whose confidence was edited in the database',
+    )
+    await client.$executeRawUnsafe(
+      'UPDATE "color_critic_reports" SET "confidence" = $3, "confidenceBand" = $4 WHERE "workspaceId" = $1 AND "reportId" = $2',
+      A, reportA.reportId, reportA.confidence, reportA.confidenceBand,
+    )
+    identical(await reports.read({ workspaceId: A, reportId: reportA.reportId }), reportA, 'the restored report')
+
+    // -----------------------------------------------------------------
+    // F4.015 — react playback maps
+    // -----------------------------------------------------------------
+
+    const maps = new PrismaPlaybackMapRepository(client)
+    const playbackA = buildPlaybackWorld({ workspaceId: A, sessionId: REACT, projectId: project(A) })
+    const playbackB = buildPlaybackWorld({ workspaceId: B, sessionId: REACT, projectId: project(B) })
+
+    assert.equal(playbackA.map.status, 'needs-input', 'the playback fixture must be the one a person has to finish')
+    assert.ok(playbackA.map.pieces.some((piece) => piece.mode === 'paused' && piece.rate === null))
+    assert.ok(playbackA.map.pieces.some((piece) => piece.mode === 'replay' && piece.direction === 'backward'))
+
+    const storedMap = await maps.appendVersion({ map: playbackA.map, occurredAt: at(30).toISOString() })
+    assert.equal(storedMap.replayed, false)
+    identical(
+      await maps.readHead({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK }),
+      playbackA.map,
+      'playback map version 1',
+    )
+    assert.equal(
+      (await maps.appendVersion({ map: playbackA.map, occurredAt: at(31).toISOString() })).replayed,
+      true,
+      'the same map written twice is one version',
+    )
+
+    const anchored = anchorPlaybackMap(playbackA.map, {
+      anchorId: 'w20r-anchor-1',
+      actorId: 'operator-7',
+      note: 'the player was off screen for this stretch',
+      createdAt: at(32).toISOString(),
+    })
+    assert.equal(anchored.version, 2)
+    assert.equal(anchored.previousVersionHash, playbackA.map.mapHash)
+    await assert.rejects(
+      () => maps.appendVersion({
+        map: anchored, expectedVersion: 1, expectedHash: digest('9'), occurredAt: at(33).toISOString(),
+      }),
+      (error) => {
+        assert.equal(error.code, 'PLAYBACK_MAP_VERSION_STALE')
+        assert.equal(error.details.currentVersion, 1)
+        assert.equal(error.details.currentHash, playbackA.map.mapHash)
+        return true
+      },
+      'a stale expected hash advanced the playback head',
+    )
+    await maps.appendVersion({ map: anchored, occurredAt: at(34).toISOString() })
+    identical(
+      await maps.readHead({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK }),
+      anchored,
+      'playback map version 2',
+    )
+    identical(
+      await maps.readVersion({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK, version: 1 }),
+      playbackA.map,
+      'playback map version 1 after the anchor',
+    )
+    // The manual anchor's actor was projected out of its evidence string and
+    // survives as the columns the CHECK reads.
+    const anchorRow = await client.v2PlaybackAnchor.findFirstOrThrow({
+      where: { workspaceId: A, anchorId: 'w20r-anchor-1' },
+    })
+    assert.equal(anchorRow.actorId, 'operator-7')
+    assert.equal(anchorRow.actorKind, 'human')
+    assert.equal(anchorRow.note, 'the player was off screen for this stretch')
+
+    await maps.appendVersion({ map: playbackB.map, occurredAt: at(35).toISOString() })
+    const mapHeadB = await maps.readHead({ workspaceId: B, sessionId: REACT, reactionTrackId: REACTION_TRACK })
+    assert.equal(mapHeadB.version, 1, 'workspace B saw the chain next door instead of its own')
+    const referenceDependents = await maps.findDependentsOfReference({
+      workspaceId: A,
+      referenceAssetId: playbackA.map.referenceMedia.assetId,
+      referenceSha256: playbackA.map.referenceMedia.sha256,
+    })
+    assert.equal(referenceDependents.length, 2, 'both versions depend on the same reference bytes')
+    assert.deepEqual(referenceDependents.map((entry) => entry.isHead).sort(), [false, true])
+
+    // A tick is 64-bit. The reaction runs forty seconds at 90 kHz and the
+    // driver hands the boundary back as a bigint, not a rounded double.
+    const pieceRow = await client.v2PlaybackPiece.findFirstOrThrow({
+      where: { workspaceId: A, mapId: { endsWith: 'pm1' } },
+      orderBy: { ordinal: 'desc' },
+    })
+    assert.equal(typeof pieceRow.reactionEndTicks, 'bigint')
+    assert.equal(pieceRow.reactionEndTicks, playbackA.map.reactionMedia.durationTicks)
+
+    // A piece confidence edited in the database keeps every CHECK and still
+    // fails its own hash, before the map hash is even reached.
+    await client.$executeRawUnsafe(
+      'UPDATE "playback_pieces" SET "confidence" = 0.5 WHERE "id" = $1',
+      pieceRow.id,
+    )
+    await refusedOnRead(
+      () => maps.readVersion({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK, version: 1 }),
+      'a playback piece whose confidence was edited in the database',
+    )
+    await client.$executeRawUnsafe(
+      'UPDATE "playback_pieces" SET "confidence" = $2 WHERE "id" = $1',
+      pieceRow.id, pieceRow.confidence,
+    )
+
+    console.log(
+      `wave20 round trip: direction shots=${worldA.direction.shots.length} uncovered=${worldA.direction.uncovered.length}, ` +
+        `measurement dimensions=${Object.keys(matchA.measurements[0].dimensions).length}, ` +
+        `plan issues=${matchA.plan.issues.length}, critic dimensions=${reportA.dimensions.length}, ` +
+        `playback pieces v1=${playbackA.map.pieces.length} v2=${anchored.pieces.length}`,
+    )
+  },
+)

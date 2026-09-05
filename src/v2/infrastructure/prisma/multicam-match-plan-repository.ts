@@ -622,7 +622,10 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
             lineageJson: JSON.stringify(plan.lineage),
             dependsOnMeasurementIdsJson: JSON.stringify(plan.dependsOn.measurementIds),
             planHash: plan.planHash,
-            createdAt: at,
+            // The plan's own instant, not the instant of the write: createdAt
+            // is inside the hashed body, so storing when the row was inserted
+            // made every plan fail its own integrity check on the way back.
+            createdAt: new Date(plan.createdAt),
           },
         })
 
