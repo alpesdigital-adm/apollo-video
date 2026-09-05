@@ -11,6 +11,7 @@ import type { SyncCeiling } from './capture-protocol.ts'
 import { colorCameraIdsForSession } from './camera-identity.ts'
 import {
   assertEvidenceDerivedFrom,
+  assertMulticamEvidenceSetIntegrity,
   evidenceBreakpoints,
   observationsOverlapping,
   overlapFraction,
@@ -18,6 +19,7 @@ import {
   type MulticamObservation,
 } from './multicam-evidence.ts'
 import {
+  assertPiecewiseClockMapIntegrity,
   isSessionRangeResolvable,
   resolveSessionTick,
   resolveSourceTick,
@@ -41,10 +43,11 @@ import {
   type TickInterval,
   type Timebase,
 } from './session-time.ts'
-import { canAutoEdit, DIAGNOSTIC_POLICY, type DiagnosticStatus, type SyncDiagnostic } from './sync-diagnostic.ts'
+import { assertSyncDiagnosticIntegrity, canAutoEdit, DIAGNOSTIC_POLICY, type DiagnosticStatus, type SyncDiagnostic } from './sync-diagnostic.ts'
 import {
   assertCoverageDerivedFrom,
   assertCoverageSelectable,
+  assertTrackCoverageIntegrity,
   type CoverageAvailability,
   type TrackCoverage,
 } from './track-coverage.ts'
@@ -539,6 +542,14 @@ function prepareContext(input: Omit<DeriveAngleCandidatesInput, 'window' | 'prev
   const format = input.format ?? { aspectRatio: '16:9' as const }
   assertDomain(OUTPUT_ASPECT_RATIOS.includes(format.aspectRatio), 'INVALID_ARGUMENT', `${format.aspectRatio} is not an output aspect ratio`)
 
+  // Every measurement is re-verified against its own hash before it is read,
+  // and again before its hash is copied into the direction as provenance
+  // (`diagnosticHash`, `evidenceHash` below). A caller-built aggregate whose
+  // body no longer matches its hash would otherwise seal a false provenance
+  // into an artifact `assertMulticamDirectionIntegrity` would then confirm:
+  // the direction's own hash proves the direction, never its inputs.
+  assertSyncDiagnosticIntegrity(input.diagnostic)
+  assertMulticamEvidenceSetIntegrity(input.evidence)
   // Every derivation must be the one for THIS session version and epoch. A
   // coverage from before the reference changed describes a different clock.
   assertDomain(
@@ -551,12 +562,14 @@ function prepareContext(input: Omit<DeriveAngleCandidatesInput, 'window' | 'prev
   assertEvidenceDerivedFrom(input.evidence, ref)
   const coverageByTrack = new Map<string, Readonly<TrackCoverage>>()
   for (const coverage of input.coverages) {
+    assertTrackCoverageIntegrity(coverage)
     assertCoverageDerivedFrom(coverage, ref)
     assertDomain(!coverageByTrack.has(coverage.trackId), 'INVALID_ARGUMENT', `two coverages describe track ${coverage.trackId}`)
     coverageByTrack.set(coverage.trackId, coverage)
   }
   const mapBySource = new Map<string, Readonly<PiecewiseClockMap>>()
   for (const map of input.clockMaps) {
+    assertPiecewiseClockMapIntegrity(map)
     assertDomain(
       map.sessionId === session.sessionId
         && map.derivedFrom.sessionVersion === session.version
@@ -1463,7 +1476,7 @@ function sealShot(ctx: DirectionContext, run: Run, ordinal: number): Readonly<{ 
 function dedupeWarnings(warnings: readonly Readonly<DirectionWarning>[]): readonly Readonly<DirectionWarning>[] {
   const seen = new Set<string>()
   return warnings.filter((warning) => {
-    const key = `${warning.code} ${warning.shotId ?? ''} ${warning.trackId ?? ''} ${warning.detail}`
+    const key = JSON.stringify([warning.code, warning.shotId, warning.trackId, warning.detail])
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -1882,11 +1895,13 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
   const ref = captureSessionDerivationRef(session)
   const coverageByTrack = new Map<string, Readonly<TrackCoverage>>()
   for (const coverage of input.coverages ?? []) {
+    assertTrackCoverageIntegrity(coverage)
     assertCoverageDerivedFrom(coverage, ref)
     coverageByTrack.set(coverage.trackId, coverage)
   }
   const mapBySource = new Map<string, Readonly<PiecewiseClockMap>>()
   for (const map of input.clockMaps) {
+    assertPiecewiseClockMapIntegrity(map)
     assertDomain(
       map.sessionId === session.sessionId && map.derivedFrom.sessionVersion === session.version && map.derivedFrom.referenceEpoch === session.referenceEpoch,
       'CAPTURE_SESSION_DERIVATION_STALE',

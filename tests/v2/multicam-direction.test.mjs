@@ -196,14 +196,14 @@ function mapFor(session, clock, trackId, offsetTicks, { refit = false } = {}) {
   })
 }
 
-function diagnosticFor(session, tracks, { ceiling = 'automatic', version = 1 } = {}) {
+function diagnosticFor(session, tracks, { ceiling = 'automatic', version = 1, sessionVersion = session.version } = {}) {
   return createSyncDiagnostic({
     workspaceId: WORKSPACE,
     sessionId: SESSION,
     referenceTrackId: session.referenceTrackId,
     version,
     previousVersionHash: null,
-    sessionVersion: session.version,
+    sessionVersion,
     referenceEpoch: session.referenceEpoch,
     tracks: tracks.map(({ trackId, offsetMs, coverageBps = 9_800, confidence = 0.9, residualMs = 8 }) => {
       const base = {
@@ -891,12 +891,57 @@ test('T-FR-150 a session that is not auto-editable only admits tracks that are s
 
 test('T-FR-150 derivations of another session version are refused before any candidate is derived', () => {
   const world = podcastWorld()
-  const older = { ...world.diagnostic, sessionVersion: world.session.version - 1 }
+  // Each stale input is a REAL derivation — built by its own constructor, its
+  // own hash intact — so what is refused is the version it names, not a broken
+  // hash. A `{ ...spread, field: other }` here would have been refused by the
+  // integrity check below and proved nothing about staleness.
+  const older = diagnosticFor(world.session, [
+    { trackId: 'track-camera-a', offsetMs: 500 },
+    { trackId: 'track-camera-b', offsetMs: 30_000, coverageBps: 9_000, residualMs: 12 },
+  ], { sessionVersion: world.session.version - 1 })
+  assert.equal(older.sessionVersion, world.session.version - 1)
   assert.throws(() => world.direct({ diagnostic: older }), (error) => error.code === 'CAPTURE_SESSION_DERIVATION_STALE')
-  const staleCoverage = { ...world.coverages[1], derivedFrom: { ...world.coverages[1].derivedFrom, referenceEpoch: 2 } }
+  const staleCoverage = createTrackCoverage({
+    workspaceId: WORKSPACE,
+    trackId: 'track-camera-a',
+    derivedFrom: { ...captureSessionDerivationRef(world.session), referenceEpoch: 2 },
+    timebase: TB,
+    claims: [{ partId: 'part-track-camera-a', ordinal: 0, timebase: TB, interval: createTickInterval(t(0), sec(600)), confidenceBps: 9_800, evidence: { kind: 'packet-scan', ref: 'probe-a' } }],
+  })
   assert.throws(() => world.direct({ coverages: [world.coverages[0], staleCoverage, world.coverages[2]] }), (error) => error.code === 'CAPTURE_SESSION_DERIVATION_STALE')
-  const staleEvidence = { ...world.evidence, sessionVersion: 1 }
+  // A genuine evidence set built over a session that has since gained a part.
+  const staleEvidence = podcastWorld({ cameraBGap: true }).evidence
+  assert.notEqual(staleEvidence.sessionVersion, world.session.version)
   assert.throws(() => world.direct({ evidence: staleEvidence }), (error) => error.code === 'CAPTURE_SESSION_DERIVATION_STALE')
+})
+
+test('T-FR-150 every measurement is re-verified against its own hash before the direction copies it', () => {
+  const world = podcastWorld()
+  // `directMulticam` stamps `diagnosticHash` and `evidenceHash` into the body it
+  // hashes. If it trusted them, a body edited under a stale hash would seal a
+  // false provenance that `assertMulticamDirectionIntegrity` then confirms.
+  const tamperedDiagnostic = { ...world.diagnostic, protocolCeiling: 'manual-anchors-required' }
+  assert.throws(
+    () => world.direct({ diagnostic: tamperedDiagnostic }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+    'a diagnostic whose body no longer matches its hash never reaches the direction',
+  )
+  const tamperedEvidence = { ...world.evidence, observations: world.evidence.observations.map((entry) => ({ ...entry, confidence: 0.2 })) }
+  assert.throws(() => world.direct({ evidence: tamperedEvidence }), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  const tamperedCoverage = { ...world.coverages[1], available: world.coverages[1].available.map((entry) => ({ ...entry, confidenceBps: 10_000 })) }
+  assert.throws(() => world.direct({ coverages: [world.coverages[0], tamperedCoverage, world.coverages[2]] }), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  const tamperedMap = { ...world.clockMaps[0], pieces: world.clockMaps[0].pieces.map((piece) => ({ ...piece, confidence: 'low' })) }
+  assert.throws(() => world.direct({ clockMaps: [tamperedMap, world.clockMaps[1]] }), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  // The compile step reads the same measurements and re-verifies them too.
+  const direction = world.direct()
+  assert.throws(
+    () => compileShotsToSourceRanges(direction, { session: world.session, clockMaps: [tamperedMap, world.clockMaps[1]], planFps: rational(30, 1) }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
+  assert.throws(
+    () => compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: [tamperedCoverage] }),
+    (error) => error.code === 'PERSISTENCE_CONFLICT',
+  )
 })
 
 // ---------------------------------------------------------------------------
