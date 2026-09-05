@@ -63,6 +63,13 @@ import type { ColorPipelineCompilationRepository } from '../application/ports/co
 import type { TreatmentPlanRepository } from '../application/ports/treatment-plan-repository.ts'
 import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
+import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
+import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
+import type {
+  CameraColorMeasurementRepository,
+  MulticamMatchPlanRepository,
+} from '../application/ports/multicam-match-plan-repository.ts'
+import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -234,6 +241,13 @@ import { PrismaColorPipelineCompilationRepository } from './prisma/color-pipelin
 import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repository.ts'
 import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
+import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { PrismaMulticamDirectionRepository } from './prisma/multicam-direction-repository.ts'
+import {
+  PrismaCameraColorMeasurementRepository,
+  PrismaMulticamMatchPlanRepository,
+} from './prisma/multicam-match-plan-repository.ts'
+import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2234,6 +2248,26 @@ export function createCaptureProtocolRepository(): CaptureProtocolRepository {
 
 export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
   return new PrismaSyncDiagnosticRepository(resolveV2Client())
+}
+
+export function createMulticamDirectionRepository(): MulticamDirectionRepository {
+  return new PrismaMulticamDirectionRepository(resolveV2Client())
+}
+
+export function createCameraColorMeasurementRepository(): CameraColorMeasurementRepository {
+  return new PrismaCameraColorMeasurementRepository(resolveV2Client())
+}
+
+export function createMulticamMatchPlanRepository(): MulticamMatchPlanRepository {
+  return new PrismaMulticamMatchPlanRepository(resolveV2Client())
+}
+
+export function createColorCriticReportRepository(): ColorCriticReportRepository {
+  return new PrismaColorCriticReportRepository(resolveV2Client())
+}
+
+export function createPlaybackMapRepository(): PlaybackMapRepository {
+  return new PrismaPlaybackMapRepository(resolveV2Client())
 }
 
 /**
