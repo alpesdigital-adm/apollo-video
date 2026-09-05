@@ -84,6 +84,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const { directMulticam } = await import('../../src/v2/domain/multicam-direction.ts')
   const { evaluateColorCritic } = await import('../../src/v2/domain/color-critic-report.ts')
   const { createTickInterval } = await import('../../src/v2/domain/session-time.ts')
+  const { createProductionBrief } = await import('../../src/v2/domain/production-brief.ts')
   const fixtures = await import('./wave20-fixtures.mjs')
 
   const client = new PrismaClient()
@@ -165,11 +166,19 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
         createdAt, updatedAt: createdAt,
       },
     })
+    // The brief snapshot carries a real production brief rather than a stub.
+    // The workspace read re-parses it and refuses a brief that is not the
+    // canonical output of the factory — which is correct, and which means a
+    // stub here would make the project version unreadable and take the pages'
+    // fence with it.
+    const contentFor = (kind) => (kind === 'brief'
+      ? { productionBrief: createProductionBrief({ ownerText: 'Wave 20 operator E2E' }) }
+      : { kind })
     for (const kind of ['brief', 'edit-plan', 'policies']) {
       await client.v2ProjectSnapshot.create({
         data: {
           id: `w20-ui-snapshot-${kind}-${suffix}`, workspaceId, projectId, kind,
-          schemaVersion: 1, contentJson: JSON.stringify({ kind }), contentHash: sha('1'),
+          schemaVersion: 1, contentJson: JSON.stringify(contentFor(kind)), contentHash: sha('1'),
           createdAt,
         },
       })
@@ -355,6 +364,14 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const session = encodeURIComponent(sessionId)
     const reactSession = encodeURIComponent(reactSessionId)
     const encodedReport = encodeURIComponent(reportId)
+
+    // The fence every command on these pages names comes from here. Asserted
+    // before the browser because a page that cannot read the project version
+    // cannot offer a command at all, and the symptom of that — a missing
+    // button — looks like a rendering bug rather than a refused read.
+    const workspace = await read(`/v1/projects/${project}/workspace`)
+    assert.equal(workspace.version?.id, projectVersionId)
+    assert.equal(workspace.version?.baseHash, sha('2'))
 
     const directionRead = await read(`/v1/projects/${project}/capture-sessions/${session}/direction`)
     assert.equal(directionRead.direction.manualReviewRequired, true)
