@@ -358,6 +358,71 @@ export interface DetectPlaybackObservationsInput {
   readonly correlationRate?: number
 }
 
+export interface ObservationsFromCorrelationsInput {
+  readonly correlations: readonly Readonly<AudioWindowCorrelation>[]
+  readonly sampleRate: number
+  readonly reactionTimebase: Readonly<Timebase>
+  readonly referenceTimebase: Readonly<Timebase>
+  readonly minimumPeak?: number
+}
+
+/**
+ * Turn correlations into observations. Pure, and separately testable on purpose.
+ *
+ * This is the whole judgement the detector makes, and while it lived inside the
+ * FFmpeg method it could only be reached by decoding two real files — which is
+ * how it shipped emitting a rejected correlation's peak-over-runner-up ratio as
+ * the confidence of a window it had refused. The admission rule and the honesty
+ * rule now sit in one function that synthetic correlations can exercise.
+ *
+ * The detector still decides no mode. It says where the window matched, or that
+ * it did not, and how much either answer is worth.
+ */
+export function observationsFromCorrelations(
+  input: ObservationsFromCorrelationsInput,
+): readonly Readonly<PlaybackObservation>[] {
+  const sampleTimebase = timebaseFromRate(input.sampleRate)
+  const admission = DEFAULT_SYNC_EVIDENCE_THRESHOLDS.minimumPeakRatioForAdmission
+  const minimumPeak = input.minimumPeak ?? PLAYBACK_FINGERPRINT_DEFAULTS.minimumPeak
+  return Object.freeze(input.correlations.map((correlation) => {
+    const reactionTick = convertTick({
+      tick: BigInt(correlation.startSample),
+      from: sampleTimebase,
+      to: input.reactionTimebase,
+    })
+    // Below the energy floor, below the correlation floor, or below the
+    // admission ratio, the window gets no reference tick at all. Reporting the
+    // best guess with a low confidence would put a number where there is no
+    // measurement, and the domain would have to reconstruct the absence from the
+    // confidence.
+    const locked = correlation.lagSamples !== null &&
+      correlation.peak >= minimumPeak &&
+      correlation.peakRatio >= admission
+    return Object.freeze({
+      reactionTick,
+      referenceTick: locked
+        ? convertTick({
+          tick: BigInt(correlation.lagSamples!),
+          from: sampleTimebase,
+          to: input.referenceTimebase,
+        })
+        : null,
+      // A window the detector refused reports confidence in its ABSENCE, not the
+      // peak-over-runner-up ratio of a match that was rejected. Emitting
+      // `correlation.confidence` unconditionally sent numbers up to 0.86 on
+      // windows whose peak never reached a seventh of the floor, and the domain
+      // stamped them onto `paused` pieces as the confidence of the pause. See
+      // `absenceConfidence`.
+      confidence: locked
+        ? correlation.confidence
+        : absenceConfidence(correlation.peak, minimumPeak),
+      method: 'audio-fingerprint' as const,
+      evidenceRef: `fingerprint:${reactionTick}`,
+      peakRatio: correlation.peakRatio,
+    })
+  }))
+}
+
 /**
  * The FFmpeg layer: two files in, one observation per window out.
  *
@@ -405,46 +470,13 @@ export class FfmpegPlaybackFingerprinter {
         correlationRate: input.correlationRate,
       })
 
-      const sampleTimebase = timebaseFromRate(sampleRate)
-      const admission = DEFAULT_SYNC_EVIDENCE_THRESHOLDS.minimumPeakRatioForAdmission
-      const minimumPeak = input.minimumPeak ?? PLAYBACK_FINGERPRINT_DEFAULTS.minimumPeak
-      return Object.freeze(correlations.map((correlation) => {
-        const reactionTick = convertTick({
-          tick: BigInt(correlation.startSample),
-          from: sampleTimebase,
-          to: input.reactionTimebase,
-        })
-        // Below the energy floor, below the correlation floor, or below the
-        // admission ratio, the window gets no reference tick at all. Reporting
-        // the best guess with a low confidence would put a number where there is
-        // no measurement, and the domain would have to reconstruct the absence
-        // from the confidence.
-        const locked = correlation.lagSamples !== null &&
-          correlation.peak >= minimumPeak &&
-          correlation.peakRatio >= admission
-        return Object.freeze({
-          reactionTick,
-          referenceTick: locked
-            ? convertTick({
-              tick: BigInt(correlation.lagSamples!),
-              from: sampleTimebase,
-              to: input.referenceTimebase,
-            })
-            : null,
-          // A window the detector refused reports confidence in its ABSENCE, not
-          // the peak-over-runner-up ratio of a match that was rejected. Emitting
-          // `correlation.confidence` unconditionally sent numbers up to 0.86 on
-          // windows whose peak never reached a seventh of the floor, and the
-          // domain stamped them onto `paused` pieces as the confidence of the
-          // pause. See `absenceConfidence`.
-          confidence: locked
-            ? correlation.confidence
-            : absenceConfidence(correlation.peak, minimumPeak),
-          method: 'audio-fingerprint' as const,
-          evidenceRef: `fingerprint:${reactionTick}`,
-          peakRatio: correlation.peakRatio,
-        })
-      }))
+      return observationsFromCorrelations({
+        correlations,
+        sampleRate,
+        reactionTimebase: input.reactionTimebase,
+        referenceTimebase: input.referenceTimebase,
+        minimumPeak: input.minimumPeak,
+      })
     } finally {
       if (owned) {
         await rm(scratch, { recursive: true, force: true }).catch((error: unknown) => {

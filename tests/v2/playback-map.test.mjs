@@ -27,6 +27,7 @@ import {
   absenceConfidence,
   confidenceFromPeakRatio,
   correlateAudioWindows,
+  observationsFromCorrelations,
 } from '../../src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts'
 
 /**
@@ -914,6 +915,26 @@ test('T-F4.015 a silent window gets no lag at all, not lag zero', () => {
     }
   }
 
+  // And one non-finite sample is enough, even when decimation drops it. The
+  // search runs at 2 kHz, so at 8 kHz only every fourth sample survives into the
+  // needle: an Infinity at index 1 leaves a perfectly finite needle and a window
+  // whose energy is not a number. Without the RMS finiteness gate the window
+  // comes back with a lag, measured from samples that are missing the value that
+  // made it unusable.
+  const poisoned = Float64Array.from(chirpSeconds(2, sampleRate))
+  poisoned[1] = Infinity
+  poisoned[sampleRate + 1] = NaN
+  for (const window of correlateAudioWindows({
+    reference,
+    candidate: poisoned,
+    sampleRate,
+    windowMs: 1_000,
+    hopMs: 500,
+    correlationRate: 2_000,
+  })) {
+    assert.equal(window.lagSamples, null, 'a window whose energy is not a number named an instant anyway')
+  }
+
   // A non-finite window or hop is bad input, not an empty measurement: `NaN <= 0`
   // is false, so it slipped past the guard and produced zero windows, which the
   // domain reads as "the reference was never playing".
@@ -1216,4 +1237,89 @@ test('T-F4.015 an observation peak ratio must be a finite measurement, like the 
       `peakRatio ${peakRatio} was admitted`,
     )
   }
+})
+
+test('T-F4.015 the detector never reports the sharpness of a correlation it refused', () => {
+  const correlation = (overrides) => ({
+    startSample: 0,
+    lagSamples: 32_000,
+    peak: 0.9,
+    secondPeak: 0.2,
+    peakRatio: 4.5,
+    confidence: confidenceFromPeakRatio(4.5),
+    rms: 0.3,
+    ...overrides,
+  })
+  const emit = (list) => observationsFromCorrelations({
+    correlations: list,
+    sampleRate: 16_000,
+    reactionTimebase: REACTION_TIMEBASE,
+    referenceTimebase: REFERENCE_TIMEBASE,
+    minimumPeak: 0.5,
+  })
+
+  // A window that locked: reference tick named, confidence from the ratio.
+  const [locked] = emit([correlation({})])
+  assert.equal(locked.referenceTick, seconds(2))
+  assert.equal(locked.confidence, confidenceFromPeakRatio(4.5))
+
+  // The case measured on real reactor noise: a peak an order of magnitude under
+  // the floor whose runner-up ratio is nonetheless high. The reference tick is
+  // refused, and so is the ratio's confidence — 0.862 used to travel with it and
+  // end up stamped on a `paused` piece.
+  const [refusedByPeak] = emit([correlation({ peak: 0.061, secondPeak: 0.0275, peakRatio: 2.22, confidence: 0.862 })])
+  assert.equal(refusedByPeak.referenceTick, null)
+  assert.notEqual(refusedByPeak.confidence, 0.862)
+  assert.equal(refusedByPeak.confidence, absenceConfidence(0.061, 0.5))
+  assert.ok(refusedByPeak.confidence > 0.85, 'a window a long way under the floor is confidently empty')
+
+  // Refused by the admission ratio instead: the correlation cleared the floor, so
+  // this is ambiguity and not evidence of a gap. It contributes nothing.
+  const [refusedByRatio] = emit([correlation({ peak: 0.9, secondPeak: 0.86, peakRatio: 1.05, confidence: 0.12 })])
+  assert.equal(refusedByRatio.referenceTick, null)
+  assert.equal(refusedByRatio.confidence, 0)
+
+  // Silence: no lag at all, and the strongest absence the detector can measure.
+  const [silent] = emit([correlation({ lagSamples: null, peak: 0, secondPeak: 0, peakRatio: 0, confidence: 0, rms: 0 })])
+  assert.equal(silent.referenceTick, null)
+  assert.equal(silent.confidence, MAXIMUM_ABSENCE_CONFIDENCE)
+
+  // Every observation carries a deterministic evidence ref and the ratio it was
+  // judged on, whether or not it locked.
+  for (const observation of emit([correlation({}), correlation({ startSample: 8_000, peak: 0.1 })])) {
+    assert.match(observation.evidenceRef, /^fingerprint:\d+$/)
+    assert.equal(observation.method, 'audio-fingerprint')
+    assert.ok(Number.isFinite(observation.peakRatio))
+  }
+})
+
+test('T-F4.015 two observers of one instant: the least sure sets the confidence of an absence', () => {
+  // Same reaction tick, two producers, different confidence in the absence. The
+  // aggregate must not be talked into the higher number: a negative claim is
+  // only as good as its weakest observer.
+  const windows = []
+  for (let tick = 0; tick < 6; tick += 0.5) windows.push(observation(tick, tick))
+  for (let tick = 6; tick < 10; tick += 0.5) {
+    windows.push(observation(tick, null, { confidence: 0.88, peakRatio: 0 }))
+    windows.push(observation(tick, null, {
+      confidence: tick === 7 ? 0.24 : 0.9,
+      peakRatio: 0,
+      evidenceRef: `player-visual:${tick}`,
+      method: 'player-visual',
+    }))
+  }
+  for (let tick = 10; tick < 14; tick += 0.5) windows.push(observation(tick, 6 + (tick - 10)))
+  const map = buildPlaybackMap({
+    mapId: 'playback-map-two-observers',
+    session: reactSession(),
+    reactionTrack: reactionTrack(),
+    referenceTrack: referenceTrack(),
+    referenceMedia: REFERENCE_MEDIA,
+    reactionMedia: { ...REACTION_MEDIA, durationTicks: seconds(14) },
+    observations: windows,
+    policy: POLICY,
+  })
+  const paused = map.pieces.find((piece) => piece.mode === 'paused')
+  assert.ok(paused)
+  assert.equal(paused.confidence, 0.24)
 })
