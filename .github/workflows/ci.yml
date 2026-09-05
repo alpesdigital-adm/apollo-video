@@ -231,6 +231,9 @@ jobs:
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 
+      - name: Run Wave 20 multicam direction render against ffprobe
+        run: npm run test:integration:multicam-direction-render
+
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
