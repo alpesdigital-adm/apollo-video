@@ -231,6 +231,9 @@ jobs:
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 
+      - name: Run Wave 20 react playback fingerprint fixture
+        run: npm run test:integration:playback-map-fingerprint
+
       - name: Run Wave 19 sync diagnostic persistence against PostgreSQL
         run: npm run test:e2e:sync-diagnostic-persistence
         env:

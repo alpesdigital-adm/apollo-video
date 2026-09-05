@@ -26,18 +26,8 @@ import {
   DEFAULT_COLOR_CRITIC_THRESHOLDS,
   evaluateColorCritic,
 } from '../../src/v2/domain/color-critic-report.ts'
+import { colorCameraIdForTrack } from '../../src/v2/domain/camera-identity.ts'
 import { createTickInterval } from '../../src/v2/domain/session-time.ts'
-
-/**
- * Mirror of `src/v2/domain/camera-identity.ts#colorCameraIdForTrack`, which
- * slice A of this wave creates: the ColorPlan camera key is the CaptureTrack
- * id sanitized to the ColorPlan TOKEN grammar. Kept here, and only here, until
- * the two branches merge; the domain under test never imports it.
- */
-function colorCameraIdForTrack(track) {
-  const sanitized = String(track.trackId).trim().toLowerCase().replace(/[^a-z0-9._/-]/g, '-')
-  return /^[a-z0-9]/.test(sanitized) ? sanitized.slice(0, 128) : `c-${sanitized}`.slice(0, 128)
-}
 
 const METADATA = Object.freeze({
   colorSpace: 'rec709',
@@ -386,8 +376,13 @@ test('T-FR-183 a camera that only needs exposure stays on apollo-match v1', () =
 })
 
 test('T-FR-183 the compiled layers are accepted by the real ColorPlan and resolve per camera', () => {
+  // The authority folds the separator too: ColorPlan's TOKEN grammar
+  // (color-and-export.ts:80) would accept a '/', but camera-identity.ts:36
+  // replaces every character outside [a-z0-9._-], so a track id that reads
+  // like a path becomes one flat key. This test asserted the '/' back when it
+  // carried a local mirror of that function; it now imports the real one.
   const cameraId = colorCameraIdForTrack({ trackId: 'Camera/B Main' })
-  assert.equal(cameraId, 'camera/b-main')
+  assert.equal(cameraId, 'camera-b-main')
   // The camera needs a white balance, so the transform is apollo-match v2 and
   // the compiled layer carries the gain parameters. That is the case the slice
   // exists for, and the case createColorPlan used to refuse outright.

@@ -121,6 +121,11 @@ export const DOMAIN_ERROR_CODES = [
   'COLOR_MEASUREMENT_INSUFFICIENT',
   'COLOR_REFERENCE_UNAVAILABLE',
   'COLOR_STAGE_VIOLATION',
+  // F4.015 — react playback maps. A map with an uncovered stretch is not a
+  // malformed request and not a missing record: it is a complete answer that
+  // says a person has to look. Compiling it anyway would approximate an edit.
+  'PLAYBACK_MAP_UNRESOLVED',
+  'PLAYBACK_MAP_VERSION_STALE',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',

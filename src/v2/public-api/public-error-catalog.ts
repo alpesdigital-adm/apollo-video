@@ -99,7 +99,16 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
     // The request was well formed, and correct when the caller computed it.
     // What changed is the session, so 409 with the current version is the
     // answer an operator can act on.
-    status: 409, category: 'conflict', codes: ['CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE'],
+    status: 409, category: 'conflict', codes: [
+      'CAPTURE_SESSION_VERSION_STALE', 'SYNC_DIAGNOSTIC_VERSION_STALE',
+      'PLAYBACK_MAP_VERSION_STALE',
+    ],
+  },
+  {
+    // The map exists and is current. What it says is that a stretch of the
+    // reaction has no answer yet, so there is nothing to compile — a refusal of
+    // evidence, like a tampered marker, not a malformed request.
+    status: 422, category: 'policy', codes: ['PLAYBACK_MAP_UNRESOLVED'],
   },
   {
     // Not a 404: the artifact exists. Not a stale version: the request is
