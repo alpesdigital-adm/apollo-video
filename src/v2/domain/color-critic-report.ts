@@ -12,7 +12,7 @@ import {
   assertMulticamMatchPlanIntegrity,
   type MulticamMatchPlan,
 } from './multicam-match-plan.ts'
-import { intervalIntersection, intervalsOverlap, type TickInterval } from './session-time.ts'
+import { createTickInterval, intervalIntersection, intervalsOverlap, type TickInterval } from './session-time.ts'
 
 /**
  * The colour critic (F4.014, FR-184).
@@ -21,10 +21,13 @@ import { intervalIntersection, intervalsOverlap, type TickInterval } from './ses
  *
  * - **Every dimension answers.** Twelve of them, each `measured`,
  *   `not-applicable` or `unavailable`. Silence is refused at construction.
- * - **Evidence-unavailable is a decision, not an approval.** A required
- *   dimension that could not be read localizes an `insufficient-evidence`
- *   issue and sends the report to a human. Skin with no skin-band evidence is
- *   `not-applicable` and is never counted as "fine".
+ * - **Evidence-unavailable is a decision, not an approval.** EVERY dimension
+ *   that could not be read localizes an `insufficient-evidence` issue and
+ *   sends the report to a human — `hard` when the dimension is required,
+ *   `warning` otherwise, but never nothing: "nobody could read it" may not
+ *   resolve to "no defect found". `not-applicable` (there was nothing to
+ *   read: no skin pixels, one camera, no declared brand colour) is the only
+ *   honest silence, and it is not an approval either — nothing was judged.
  * - **The action follows a cause table, never an aggregate score.**
  *   `COLOR_CRITIC_CAUSE_ACTIONS` is that table; the winning cause is written
  *   into the report so the reason survives to whoever reads it later.
@@ -145,6 +148,19 @@ export const COLOR_CRITIC_CAUSE_ACTIONS = Object.freeze({
 export const COLOR_CRITIC_CAUSE_PRECEDENCE = COLOR_CRITIC_CAUSES
 
 /**
+ * The dimensions that describe one camera against another. They are
+ * `not-applicable` with a single camera and required with two or more: an
+ * unreadable comparison on a multicamera subject is missing evidence, not an
+ * absent defect. The match plan already refuses the identical evidence gap
+ * with COLOR_RANGES_NOT_COMPARABLE; the critic must not wave it through.
+ */
+export const COLOR_CRITIC_BETWEEN_CAMERA_DIMENSIONS = Object.freeze([
+  'whiteBalanceMismatch',
+  'exposureMismatch',
+  'localizedMismatch',
+] as const satisfies readonly ColorCriticDimension[])
+
+/**
  * Dimensions a defect in which cannot be undone by a `match`-stage gain: a
  * clipped sample carries no value to restore, a crushed one the same, a skin
  * tone outside its band is not a scalar the match can push back, and an
@@ -251,6 +267,17 @@ export const DEFAULT_COLOR_CRITIC_POLICY = Object.freeze({
   proposedSaturationRange: Object.freeze([0.67, 1.5] as const),
   /** Below this share of the contrast it had before, the stage flattened the image. */
   contrastRegressionRatio: 0.7,
+  /**
+   * The largest cast a creative intent may declare as acceptable — twice the
+   * `hard` cast threshold. Without a ceiling, `castAllowedDelta` is the caller
+   * writing the verdict: declaring a big enough allowance turns any cast at
+   * all into `documented-intent`/`approve`, which CONTRACT §2 and §6 forbid.
+   * A look that needs more than this is a grade, and a human signs it off.
+   * The number is `maxProposedGain - 1`: a declared look may shift a channel
+   * ratio no further than the correction the match stage would be allowed to
+   * apply to undo it.
+   */
+  maxDeclaredCastAllowance: 0.25,
 })
 export type ColorCriticPolicy = typeof DEFAULT_COLOR_CRITIC_POLICY
 
@@ -335,6 +362,25 @@ export interface ColorCriticCreativeIntent {
   readonly brandColorsDeclared?: boolean
 }
 
+/**
+ * Which `before` measurement was read against which `after` measurement, for
+ * which camera. The cross-stage quantities (cast, saturation, regression) are
+ * all differences within one of these pairs, so publishing the pairing is what
+ * makes "the critic compared camera A with camera A" checkable from outside
+ * instead of trusted.
+ */
+export interface ColorCriticStagePair {
+  readonly cameraId: string
+  readonly beforeMeasurementId: string
+  readonly afterMeasurementId: string
+}
+
+/** The declared allowance and the ceiling that bound it, both auditable. */
+export interface ColorCriticIntentBounds {
+  readonly castAllowedDelta: number | null
+  readonly maxDeclaredCastAllowance: number
+}
+
 export interface ColorCriticProposedDelta {
   readonly cameraId: string
   readonly exposureEv: number | null
@@ -360,11 +406,13 @@ export interface ColorCriticReport {
   readonly matchPlanId: string | null
   readonly matchPlanHash: string | null
   readonly sections: readonly Readonly<ColorCriticSection>[]
+  readonly stagePairs: readonly Readonly<ColorCriticStagePair>[]
   readonly bytesEvaluated: readonly Readonly<ColorCriticBytes>[]
   readonly evaluators: readonly Readonly<ColorCriticEvaluator>[]
   readonly dimensions: readonly Readonly<ColorCriticDimensionResult>[]
   readonly issues: readonly Readonly<ColorCriticIssue>[]
   readonly creativeIntent: Readonly<ColorCriticCreativeIntent>
+  readonly intentBounds: Readonly<ColorCriticIntentBounds>
   readonly cause: ColorCriticCause
   readonly action: ColorCriticAction
   readonly boundedCorrection: Readonly<ColorCriticBoundedCorrection> | null
@@ -443,157 +491,291 @@ function normalizedSubject(value: Readonly<ColorCriticSubject>): Readonly<ColorC
     ...(value.sourceAssetId !== undefined ? { sourceAssetId: assertId(value.sourceAssetId, 'subject.sourceAssetId') } : {}),
     ...(value.cameraId !== undefined ? { cameraId: assertToken(value.cameraId, 'subject.cameraId') } : {}),
     ...(value.artifactId !== undefined ? { artifactId: assertId(value.artifactId, 'subject.artifactId') } : {}),
-    ...(value.range !== undefined ? { range: Object.freeze({ start: value.range.start, end: value.range.end }) } : {}),
+    // Built through the Wave 18 constructor, not copied: a subject range is
+    // the one interval a caller hands the critic, and a millisecond float
+    // would otherwise land in the canonically hashed body as a JS number
+    // while every other range in the report hashes as decimal tick text.
+    ...(value.range !== undefined ? { range: createTickInterval(value.range.start, value.range.end) } : {}),
   })
 }
+
+/**
+ * The declared creative intent, bounded.
+ *
+ * `castAllowedDelta` sets the pass/fail line for the `cast` dimension, so an
+ * unvalidated one is the caller writing the verdict: a large enough allowance
+ * turns any cast into `documented-intent`/`approve`, a negative one makes
+ * every cast `hard` unconditionally, and `Infinity` escapes the canonical
+ * hasher as a raw TypeError. It is a finite number inside the policy ceiling
+ * or it is INVALID_ARGUMENT.
+ */
+function normalizedCreativeIntent(
+  value: Readonly<ColorCriticCreativeIntent>,
+  policy: ColorCriticPolicy,
+): Readonly<ColorCriticCreativeIntent> {
+  assertDomain(
+    value !== null && typeof value === 'object' && typeof value.declared === 'boolean',
+    'INVALID_ARGUMENT',
+    'creativeIntent.declared must say whether an intent was declared at all',
+  )
+  if (value.castAllowedDelta !== undefined) {
+    assertDomain(
+      typeof value.castAllowedDelta === 'number' && Number.isFinite(value.castAllowedDelta) &&
+        value.castAllowedDelta >= 0 && value.castAllowedDelta <= policy.maxDeclaredCastAllowance,
+      'INVALID_ARGUMENT',
+      `creativeIntent.castAllowedDelta must be within [0, ${policy.maxDeclaredCastAllowance}]; a larger allowance would let the declaration decide the verdict`,
+      { received: value.castAllowedDelta, ceiling: policy.maxDeclaredCastAllowance },
+    )
+  }
+  assertDomain(
+    value.brandColorsDeclared === undefined || typeof value.brandColorsDeclared === 'boolean',
+    'INVALID_ARGUMENT',
+    'creativeIntent.brandColorsDeclared must be a boolean when present',
+  )
+  return Object.freeze({
+    declared: value.declared,
+    ...(value.castAllowedDelta !== undefined ? { castAllowedDelta: value.castAllowedDelta } : {}),
+    ...(value.lutId !== undefined ? { lutId: assertId(value.lutId, 'creativeIntent.lutId') } : {}),
+    ...(value.note !== undefined ? { note: value.note } : {}),
+    ...(value.brandColorsDeclared !== undefined ? { brandColorsDeclared: value.brandColorsDeclared } : {}),
+  })
+}
+
+/**
+ * The thresholds every issue in the report claims to have been judged against.
+ * A partial `values` object crashed `severityFor` with a raw TypeError, and a
+ * complete but arbitrary one silently redefined every pass/fail line and was
+ * then written into the hashed body as if it were the calibration.
+ */
+function normalizedThresholds(value: Readonly<ColorCriticThresholds>): Readonly<ColorCriticThresholds> {
+  assertDomain(
+    value !== null && typeof value === 'object' && typeof value.values === 'object' && value.values !== null,
+    'INVALID_ARGUMENT',
+    'thresholds must carry a calibrationVersion and a value for every dimension',
+  )
+  assertToken(value.calibrationVersion, 'thresholds.calibrationVersion')
+  for (const dimension of COLOR_CRITIC_DIMENSIONS) {
+    const band = value.values[dimension]
+    assertDomain(
+      band !== undefined && band !== null &&
+        typeof band.warn === 'number' && Number.isFinite(band.warn) &&
+        typeof band.hard === 'number' && Number.isFinite(band.hard),
+      'INVALID_ARGUMENT',
+      `thresholds.values.${dimension} must carry a finite warn and hard bound`,
+      { dimension },
+    )
+  }
+  return value
+}
+
+/**
+ * The critic's own rates, checked the same way the match policy's are: a
+ * gamma of zero would report every exposure difference as exactly 0 EV and a
+ * zero regression ratio would make a flattened image look untouched.
+ */
+function normalizedCriticPolicy(overrides: Partial<ColorCriticPolicy> | undefined): ColorCriticPolicy {
+  const policy = { ...DEFAULT_COLOR_CRITIC_POLICY, ...(overrides ?? {}) }
+  for (const field of [
+    'exposureGamma', 'maxProposedExposureEv', 'maxProposedGain',
+    'contrastRegressionRatio', 'maxDeclaredCastAllowance',
+  ] as const) {
+    const value = policy[field]
+    assertDomain(
+      typeof value === 'number' && Number.isFinite(value) && value > 0,
+      'INVALID_ARGUMENT',
+      `policy.${field} must be a finite number greater than zero`,
+      { field, received: value as unknown },
+    )
+  }
+  assertDomain(
+    typeof policy.skinTargetHueDegrees === 'number' && Number.isFinite(policy.skinTargetHueDegrees),
+    'INVALID_ARGUMENT',
+    'policy.skinTargetHueDegrees must be a finite angle',
+  )
+  assertDomain(
+    Array.isArray(policy.proposedSaturationRange) && policy.proposedSaturationRange.length === 2 &&
+      policy.proposedSaturationRange.every((bound) => typeof bound === 'number' && Number.isFinite(bound) && bound > 0) &&
+      policy.proposedSaturationRange[0]! < policy.proposedSaturationRange[1]!,
+    'INVALID_ARGUMENT',
+    'policy.proposedSaturationRange must be an ordered pair of positive multipliers',
+  )
+  return Object.freeze(policy)
+}
+
+type ReportRefusal = 'INVALID_ARGUMENT' | 'PERSISTENCE_CONFLICT'
 
 function normalizedDimension(
   value: Readonly<ColorCriticDimensionResult>,
   evaluatorIds: ReadonlySet<string>,
+  code: ReportRefusal = 'INVALID_ARGUMENT',
 ): Readonly<ColorCriticDimensionResult> {
   const field = `dimensions.${value.dimension}`
-  assertDomain(COLOR_CRITIC_STATUSES.includes(value.status), 'INVALID_ARGUMENT', `${field}.status is invalid`)
+  assertDomain(COLOR_CRITIC_STATUSES.includes(value.status), code, `${field}.status is invalid`)
   if (value.status === 'measured') {
     assertDomain(
       typeof value.value === 'number' && Number.isFinite(value.value),
-      'INVALID_ARGUMENT',
+      code,
       `${field} is measured and must carry a finite value`,
     )
     assertDomain(
       value.unit === COLOR_CRITIC_UNITS[value.dimension],
-      'INVALID_ARGUMENT',
+      code,
       `${field}.unit must be ${COLOR_CRITIC_UNITS[value.dimension]}`,
     )
     assertDomain(
       Array.isArray(value.evaluatorIds) && value.evaluatorIds.length > 0 &&
         value.evaluatorIds.every((id) => evaluatorIds.has(id)),
-      'INVALID_ARGUMENT',
+      code,
       `${field} must name evaluators the report lists`,
     )
     assertDomain(
       Array.isArray(value.evidenceRefs) && value.evidenceRefs.length > 0,
-      'INVALID_ARGUMENT',
+      code,
       `${field} must reference the evidence it read`,
     )
-    assertDomain(value.reason === undefined, 'INVALID_ARGUMENT', `${field} is measured and must not carry a reason`)
+    assertDomain(value.reason === undefined, code, `${field} is measured and must not carry a reason`)
     return Object.freeze({ ...value, evaluatorIds: Object.freeze([...value.evaluatorIds]), evidenceRefs: Object.freeze([...value.evidenceRefs]) })
   }
   assertDomain(
     value.value === undefined && value.unit === undefined && value.threshold === undefined &&
       value.evaluatorIds === undefined && value.evidenceRefs === undefined,
-    'INVALID_ARGUMENT',
+    code,
     `${field} is ${value.status} and must not look like a measurement`,
   )
   assertDomain(
     typeof value.reason === 'string' && value.reason.trim().length >= 10,
-    'INVALID_ARGUMENT',
+    code,
     `${field} is ${value.status} and must say why in words`,
   )
   return Object.freeze({ ...value })
 }
 
-function createColorCriticReport(content: Readonly<ColorCriticReportContent>): Readonly<ColorCriticReport> {
+/**
+ * The ADR-147 shape rules, in one place, run by the constructor AND by the
+ * integrity door. A stored report is not necessarily one this process built:
+ * it may have been written by an older build or edited and re-hashed, and
+ * "approved while carrying a blocking issue" must be refused on the way out
+ * as firmly as on the way in.
+ */
+function assertColorCriticReportInvariants(
+  content: Readonly<ColorCriticReportContent>,
+  code: ReportRefusal,
+): void {
   assertDomain(
     content.sections.length === COLOR_CRITIC_STAGES.length &&
       COLOR_CRITIC_STAGES.every((stage, index) => content.sections[index]!.stage === stage),
-    'INVALID_ARGUMENT',
+    code,
     'a colour critic report covers both stages, before and after the output transform, in that order',
   )
   const evaluatorIds = new Set(content.evaluators.map((evaluator) => evaluator.id))
   assertDomain(
     evaluatorIds.has(COLOR_CRITIC_EVALUATOR.id),
-    'INVALID_ARGUMENT',
+    code,
     'the critic must list itself among the evaluators that produced the verdict',
   )
   const answered = new Set(content.dimensions.map((dimension) => dimension.dimension))
   for (const dimension of COLOR_CRITIC_DIMENSIONS) {
-    assertDomain(answered.has(dimension), 'INVALID_ARGUMENT', `the report is silent about ${dimension}; every dimension must answer`)
+    assertDomain(answered.has(dimension), code, `the report is silent about ${dimension}; every dimension must answer`)
   }
   assertDomain(
     content.dimensions.length === COLOR_CRITIC_DIMENSIONS.length,
-    'INVALID_ARGUMENT',
+    code,
     'a dimension may be answered only once',
   )
-  const dimensions = Object.freeze(content.dimensions.map((dimension) => normalizedDimension(dimension, evaluatorIds)))
-  const issues = Object.freeze(content.issues.map((issue, index) => {
+  for (const dimension of content.dimensions) normalizedDimension(dimension, evaluatorIds, code)
+  for (const [index, issue] of content.issues.entries()) {
     const field = `issues[${index}]`
-    assertDomain(COLOR_CRITIC_SEVERITIES.includes(issue.severity), 'INVALID_ARGUMENT', `${field}.severity is invalid`)
-    assertDomain(COLOR_CRITIC_CLASSIFICATIONS.includes(issue.classification), 'INVALID_ARGUMENT', `${field}.classification is invalid`)
-    assertDomain(COLOR_CRITIC_CAUSES.includes(issue.cause), 'INVALID_ARGUMENT', `${field}.cause is invalid`)
+    assertDomain(COLOR_CRITIC_SEVERITIES.includes(issue.severity), code, `${field}.severity is invalid`)
+    assertDomain(COLOR_CRITIC_CLASSIFICATIONS.includes(issue.classification), code, `${field}.classification is invalid`)
+    assertDomain(COLOR_CRITIC_CAUSES.includes(issue.cause), code, `${field}.cause is invalid`)
     const evidenceless = issue.classification === 'insufficient-evidence'
     assertDomain(
       evidenceless === (issue.measured === null) && evidenceless === (issue.threshold === null),
-      'INVALID_ARGUMENT',
+      code,
       `${field} may omit its numbers only when it reports missing evidence`,
     )
     assertDomain(
       typeof issue.confidence === 'number' && issue.confidence >= 0 && issue.confidence <= 1,
-      'INVALID_ARGUMENT',
+      code,
       `${field}.confidence must be within [0, 1]`,
     )
-    return Object.freeze({
-      ...issue,
-      code: assertToken(issue.code, `${field}.code`),
-      evidenceRefs: Object.freeze([...issue.evidenceRefs]),
-      range: issue.range ? Object.freeze({ start: issue.range.start, end: issue.range.end }) : null,
-    })
-  }))
+  }
   assertDomain(
     COLOR_CRITIC_CAUSES.includes(content.cause) && COLOR_CRITIC_CAUSE_ACTIONS[content.cause] === content.action,
-    'INVALID_ARGUMENT',
+    code,
     'the action must be the one the cause table maps the cause to',
     { cause: content.cause, action: content.action },
   )
   // ADR-147: approval must be clean, a rejection must localize at least one
   // issue, and evidence-unavailable must point at what it could not read.
   assertDomain(
-    content.action !== 'approve' || issues.every((issue) => issue.severity !== 'hard'),
-    'INVALID_ARGUMENT',
+    content.action !== 'approve' || content.issues.every((issue) => issue.severity !== 'hard'),
+    code,
     'an approved report cannot carry a blocking issue',
   )
   assertDomain(
-    content.action !== 'reject' || issues.some((issue) => issue.severity === 'hard'),
-    'INVALID_ARGUMENT',
+    content.action !== 'reject' || content.issues.some((issue) => issue.severity === 'hard'),
+    code,
     'a rejection must localize at least one blocking issue',
   )
   assertDomain(
     content.cause !== 'evidence-unavailable' ||
-      issues.some((issue) => issue.classification === 'insufficient-evidence'),
-    'INVALID_ARGUMENT',
+      content.issues.some((issue) => issue.classification === 'insufficient-evidence'),
+    code,
     'an evidence-unavailable verdict must point at the dimension it could not evaluate',
+  )
+  // Nothing may be approved while a dimension went unread: an unavailable
+  // dimension always localizes an insufficient-evidence issue, so a clean
+  // approval and an unread dimension cannot both be true.
+  assertDomain(
+    content.action !== 'approve' ||
+      content.dimensions.every((dimension) => dimension.status !== 'unavailable'),
+    code,
+    'a report that could not read a dimension cannot approve; evidence-unavailable is a decision, not an approval',
   )
   if (content.boundedCorrection) {
     assertDomain(
       content.action === 'bounded-correction',
-      'INVALID_ARGUMENT',
+      code,
       'only a bounded-correction verdict carries a bounded correction',
     )
     assertDomain(
       Number.isSafeInteger(content.boundedCorrection.iteration) &&
         content.boundedCorrection.iteration >= 1 &&
         content.boundedCorrection.iteration <= COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
-      'INVALID_ARGUMENT',
+      code,
       `a bounded correction runs at most ${COLOR_CRITIC_MAX_CORRECTION_ITERATIONS} times`,
       { iteration: content.boundedCorrection.iteration },
     )
     assertDomain(
       content.boundedCorrection.proposedDeltas.length > 0,
-      'INVALID_ARGUMENT',
+      code,
       'a bounded correction must propose at least one delta',
     )
     assertDomain(
       content.confidence >= COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE,
-      'INVALID_ARGUMENT',
+      code,
       'a bounded correction requires high confidence',
       { confidence: content.confidence },
     )
   } else {
     assertDomain(
       content.action !== 'bounded-correction',
-      'INVALID_ARGUMENT',
+      code,
       'a bounded-correction verdict must carry the correction it proposes',
     )
   }
+}
+
+function createColorCriticReport(content: Readonly<ColorCriticReportContent>): Readonly<ColorCriticReport> {
+  const evaluatorIds = new Set(content.evaluators.map((evaluator) => evaluator.id))
+  const dimensions = Object.freeze(content.dimensions.map((dimension) => normalizedDimension(dimension, evaluatorIds)))
+  const issues = Object.freeze(content.issues.map((issue, index) => Object.freeze({
+    ...issue,
+    code: assertToken(issue.code, `issues[${index}].code`),
+    evidenceRefs: Object.freeze([...issue.evidenceRefs]),
+    range: issue.range ? createTickInterval(issue.range.start, issue.range.end) : null,
+  })))
   const body: ColorCriticReportContent = Object.freeze({
     schemaVersion: COLOR_CRITIC_REPORT_SCHEMA_VERSION,
     reportId: assertId(content.reportId, 'reportId'),
@@ -610,6 +792,11 @@ function createColorCriticReport(content: Readonly<ColorCriticReportContent>): R
       measurementIds: Object.freeze([...section.measurementIds]),
       measurements: Object.freeze(section.measurements.map((measurement) => assertCameraColorMeasurementIntegrity(measurement))),
     }))),
+    stagePairs: Object.freeze(content.stagePairs.map((pair) => Object.freeze({
+      cameraId: assertToken(pair.cameraId, 'stagePairs.cameraId'),
+      beforeMeasurementId: assertId(pair.beforeMeasurementId, 'stagePairs.beforeMeasurementId'),
+      afterMeasurementId: assertId(pair.afterMeasurementId, 'stagePairs.afterMeasurementId'),
+    }))),
     bytesEvaluated: Object.freeze(content.bytesEvaluated.map((bytes) => {
       assertDomain(HASH.test(bytes.sha256), 'INVALID_ARGUMENT', 'bytesEvaluated.sha256 must be a lowercase SHA-256')
       return Object.freeze({ artifactId: assertId(bytes.artifactId, 'bytesEvaluated.artifactId'), sha256: bytes.sha256 })
@@ -618,6 +805,10 @@ function createColorCriticReport(content: Readonly<ColorCriticReportContent>): R
     dimensions,
     issues,
     creativeIntent: Object.freeze({ ...content.creativeIntent }),
+    intentBounds: Object.freeze({
+      castAllowedDelta: content.intentBounds.castAllowedDelta,
+      maxDeclaredCastAllowance: content.intentBounds.maxDeclaredCastAllowance,
+    }),
     cause: content.cause,
     action: content.action,
     boundedCorrection: content.boundedCorrection
@@ -631,6 +822,7 @@ function createColorCriticReport(content: Readonly<ColorCriticReportContent>): R
     thresholds: content.thresholds,
     evaluatedAt: assertInstant(content.evaluatedAt, 'evaluatedAt'),
   })
+  assertColorCriticReportInvariants(body, 'INVALID_ARGUMENT')
   return Object.freeze({ ...body, reportHash: calculateColorCriticReportHash(body) })
 }
 
@@ -647,11 +839,7 @@ export function assertColorCriticReportIntegrity(report: Readonly<ColorCriticRep
     'PERSISTENCE_CONFLICT',
     'colour critic report hash does not match its stored content',
   )
-  assertDomain(
-    COLOR_CRITIC_CAUSE_ACTIONS[report.cause] === report.action,
-    'PERSISTENCE_CONFLICT',
-    'stored colour critic action does not follow its own cause table',
-  )
+  assertColorCriticReportInvariants(content, 'PERSISTENCE_CONFLICT')
   for (const section of report.sections) {
     for (const measurement of section.measurements) assertCameraColorMeasurementIntegrity(measurement)
   }
@@ -832,8 +1020,9 @@ export interface EvaluateColorCriticInput {
  * comes out of the cause table rather than out of an average.
  */
 export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<ColorCriticReport> {
-  const policy: ColorCriticPolicy = Object.freeze({ ...DEFAULT_COLOR_CRITIC_POLICY, ...(input.policy ?? {}) })
-  const thresholds = input.thresholds ?? DEFAULT_COLOR_CRITIC_THRESHOLDS
+  const policy = normalizedCriticPolicy(input.policy)
+  const thresholds = normalizedThresholds(input.thresholds ?? DEFAULT_COLOR_CRITIC_THRESHOLDS)
+  const creativeIntent = normalizedCreativeIntent(input.creativeIntent, policy)
   const bands = thresholds.values
   const version = thresholds.calibrationVersion
   assertDomain(
@@ -886,13 +1075,21 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
     evidenceRefs: Object.freeze([...evidenceRefs]),
   })
 
-  // A declared brand colour makes its dimension required: asking for a check
-  // nobody can run is answered by a human, never by silence.
+  // A declared brand colour makes its dimension required, and so does a second
+  // camera for the three between-camera dimensions: asking for a check nobody
+  // can run is answered by a human, never by silence.
   const required = new Set<string>([
     ...COLOR_CRITIC_REQUIRED_DIMENSIONS,
-    ...(input.creativeIntent.brandColorsDeclared === true ? ['brandColorDrift'] : []),
+    ...(creativeIntent.brandColorsDeclared === true ? ['brandColorDrift'] : []),
+    ...(cameraIds.length >= 2 ? COLOR_CRITIC_BETWEEN_CAMERA_DIMENSIONS : []),
   ])
 
+  /**
+   * An unread dimension always localizes an issue — `hard` when the dimension
+   * is required for a verdict, `warning` otherwise. Never nothing: silence
+   * here was how two cameras a full stop apart, measured on ranges that never
+   * overlap, came out `no-defect`/`approve`.
+   */
   const unavailableDimension = (
     dimension: ColorCriticDimension,
     stage: ColorCriticStageScope,
@@ -900,9 +1097,11 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
     confidence: number,
   ): DimensionDraft => ({
     result: { dimension, status: 'unavailable', stage, reason },
-    issues: required.has(dimension)
-      ? [issue(dimension, 'hard', 'insufficient-evidence', 'evidence-unavailable', stage, null, null, confidence, [])]
-      : [],
+    issues: [issue(
+      dimension,
+      required.has(dimension) ? 'hard' : 'warning',
+      'insufficient-evidence', 'evidence-unavailable', stage, null, null, confidence, [],
+    )],
   })
 
   const notApplicableDimension = (
@@ -985,8 +1184,8 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
       let worst = deltas[0]!
       for (const entry of deltas) if (entry.delta! > worst.delta!) worst = entry
       const value = worst.delta!
-      const declared = input.creativeIntent.declared === true && typeof input.creativeIntent.castAllowedDelta === 'number'
-      const allowance = declared ? input.creativeIntent.castAllowedDelta! : null
+      const declared = creativeIntent.declared === true && typeof creativeIntent.castAllowedDelta === 'number'
+      const allowance = declared ? creativeIntent.castAllowedDelta! : null
       const withinIntent = allowance !== null && value <= allowance
       const severity = withinIntent ? null : allowance !== null ? 'hard' : severityFor(value, bands.cast, 'above')
       const evidence = unique(pairs.flatMap((pair) => [evidenceOf(pair.before, 'whiteBalance'), evidenceOf(pair.after, 'whiteBalance')].filter((ref): ref is string => ref !== null)))
@@ -1228,7 +1427,7 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
   }
 
   // --- brand colour: no instrument, so never silently approved -------------
-  drafts.push(input.creativeIntent.brandColorsDeclared === true
+  drafts.push(creativeIntent.brandColorsDeclared === true
     ? unavailableDimension(
         'brandColorDrift', 'after-output-transform',
         'brand colours were declared but no brand-colour evaluator is deployed; the drift was not measured and is not assumed absent',
@@ -1347,8 +1546,10 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
   const hard = issues.filter((entry) => entry.severity === 'hard')
   // A dimension nobody could read is missing evidence, not a measured defect:
   // it must not be counted as one, or an unreadable `clipping` would reject a
-  // render whose highlights were never looked at.
-  const evidenceMissing = hard.filter((entry) => entry.classification === 'insufficient-evidence')
+  // render whose highlights were never looked at. It is counted whatever its
+  // severity, though — an unread dimension is why a human is asked, and the
+  // severity only says whether the verdict could have been reached without it.
+  const evidenceMissing = issues.filter((entry) => entry.classification === 'insufficient-evidence')
   const defects = hard.filter((entry) => entry.classification !== 'insufficient-evidence')
   const irreversibleDimensions = new Set<string>(COLOR_CRITIC_IRREVERSIBLE_DIMENSIONS)
   const correctableDimensions = new Set<string>(COLOR_CRITIC_CORRECTABLE_DIMENSIONS)
@@ -1358,24 +1559,25 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
     ? proposeBoundedDeltas(comparisons, pairs, correctable, policy)
     : { deltas: [] as ColorCriticProposedDelta[], outOfBounds: false }
 
-  let cause: ColorCriticCause
-  if (irreversible.length > 0) {
-    cause = 'irreversible-technical-defect'
-  } else if (evidenceMissing.length > 0) {
-    cause = 'evidence-unavailable'
-  } else if (correctable.length > 0) {
-    if (correctionsApplied + 1 > COLOR_CRITIC_MAX_CORRECTION_ITERATIONS) cause = 'correction-budget-exhausted'
-    else if (confidence < COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE) cause = 'correction-confidence-insufficient'
-    else if (proposed.outOfBounds) cause = 'correction-out-of-bounds'
-    else if (proposed.deltas.length === 0) cause = 'correction-not-derivable'
-    else cause = 'correctable-technical-defect'
-  } else if (issues.some((entry) => entry.severity === 'warning')) {
-    cause = 'advisory-warning'
-  } else if (drafts.some((draft) => draft.result.classification === 'documented-intent')) {
-    cause = 'documented-intent'
-  } else {
-    cause = 'no-defect'
+  // One predicate per cause, evaluated in COLOR_CRITIC_CAUSE_PRECEDENCE order:
+  // the constant IS the algorithm, so the documented precedence and the code
+  // cannot drift apart while the tests stay green. `no-defect` closes the
+  // ladder and is total.
+  const budgetSpent = correctionsApplied + 1 > COLOR_CRITIC_MAX_CORRECTION_ITERATIONS
+  const unsure = confidence < COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE
+  const causeApplies: Readonly<Record<ColorCriticCause, () => boolean>> = {
+    'irreversible-technical-defect': () => irreversible.length > 0,
+    'evidence-unavailable': () => evidenceMissing.length > 0,
+    'correction-budget-exhausted': () => correctable.length > 0 && budgetSpent,
+    'correction-confidence-insufficient': () => correctable.length > 0 && unsure,
+    'correction-out-of-bounds': () => correctable.length > 0 && proposed.outOfBounds,
+    'correction-not-derivable': () => correctable.length > 0 && proposed.deltas.length === 0,
+    'correctable-technical-defect': () => correctable.length > 0,
+    'advisory-warning': () => issues.some((entry) => entry.severity === 'warning'),
+    'documented-intent': () => drafts.some((draft) => draft.result.classification === 'documented-intent'),
+    'no-defect': () => true,
   }
+  const cause: ColorCriticCause = COLOR_CRITIC_CAUSE_PRECEDENCE.find((candidate) => causeApplies[candidate]())!
   const action = COLOR_CRITIC_CAUSE_ACTIONS[cause]
 
   // Which bytes were judged is read off the measurements, never declared by
@@ -1415,11 +1617,20 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
         measurements: after,
       },
     ],
+    stagePairs: pairs.map((pair) => ({
+      cameraId: pair.cameraId,
+      beforeMeasurementId: pair.before.measurementId,
+      afterMeasurementId: pair.after.measurementId,
+    })),
     bytesEvaluated,
     evaluators,
     dimensions: drafts.map((draft) => draft.result),
     issues,
-    creativeIntent: input.creativeIntent,
+    creativeIntent,
+    intentBounds: {
+      castAllowedDelta: creativeIntent.castAllowedDelta ?? null,
+      maxDeclaredCastAllowance: policy.maxDeclaredCastAllowance,
+    },
     cause,
     action,
     boundedCorrection: action === 'bounded-correction'
