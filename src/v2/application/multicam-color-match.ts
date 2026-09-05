@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto'
 
 import { colorCameraIdsForSession } from '../domain/camera-identity.ts'
-import type { CaptureSession, CaptureTrack, CaptureTrackPart } from '../domain/capture-session.ts'
-import type { ColorPlan, ColorTransform } from '../domain/color-and-export.ts'
+import {
+  CAPTURE_TRACK_ROLES,
+  type CaptureSession,
+  type CaptureTrack,
+  type CaptureTrackPart,
+  type CaptureTrackRole,
+} from '../domain/capture-session.ts'
+import { createColorPlan, type ColorPlan, type ColorTransform } from '../domain/color-and-export.ts'
 import type { CameraColorMeasurement } from '../domain/color-measurement.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import {
@@ -13,6 +19,7 @@ import {
   type EditPlanClipRef,
   type MatchActor,
   type MatchAdjustParameters,
+  type MatchPlanIssue,
   type MulticamMatchPlan,
   type MulticamMatchPolicy,
 } from '../domain/multicam-match-plan.ts'
@@ -72,15 +79,22 @@ import type { setProjectColorPlanService } from './project-color-plans.ts'
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const HASH = /^[a-f0-9]{64}$/
 
-/** Roles that carry a picture a camera match can be derived from. */
-export const MATCHABLE_TRACK_ROLES = Object.freeze([
-  'camera-main',
-  'camera-alt',
-  'phone',
-  'reaction',
-  'screen',
-  'reference-video',
-] as const)
+/**
+ * Roles that carry a picture a camera match can be derived from.
+ *
+ * Derived by filtering the domain's published roles rather than retyped beside
+ * them: a renamed or removed role then fails to compile here instead of quietly
+ * dropping a camera from the sweep, and a role added to the domain has to be
+ * classified on purpose.
+ */
+const NON_PICTURE_TRACK_ROLES: readonly CaptureTrackRole[] = Object.freeze([
+  'microphone',
+  'master-audio',
+  'scratch-audio',
+])
+export const MATCHABLE_TRACK_ROLES: readonly CaptureTrackRole[] = Object.freeze(
+  CAPTURE_TRACK_ROLES.filter((role) => !NON_PICTURE_TRACK_ROLES.includes(role)),
+)
 
 /**
  * How much of each part is decoded.
@@ -199,16 +213,23 @@ function mergeMatchLayers(input: {
   knownSegmentIds: ReadonlySet<string>
   /** Layer kinds whose match entry may be removed when the new work omits it. */
   replaceCameras: boolean
-}): Readonly<ColorPlan> {
+}): Readonly<{
+  plan: Readonly<ColorPlan>
+  prunedCameraIds: readonly string[]
+  prunedSegmentIds: readonly string[]
+}> {
+  const pruned: Record<'cameras' | 'segments', string[]> = { cameras: [], segments: [] }
   const merge = (
+    kind: 'cameras' | 'segments',
     existing: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>,
     incoming: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>,
     known: ReadonlySet<string>,
     replace: boolean,
   ): Readonly<Record<string, readonly Readonly<ColorTransform>[]>> => {
-    const keys = [...new Set([...Object.keys(existing), ...Object.keys(incoming)])].filter((key) => known.has(key)).sort()
+    const all = [...new Set([...Object.keys(existing), ...Object.keys(incoming)])].sort()
+    pruned[kind] = all.filter((key) => !known.has(key))
     const next: Record<string, readonly Readonly<ColorTransform>[]> = {}
-    for (const key of keys) {
+    for (const key of all.filter((key) => known.has(key))) {
       const base = existing[key] ?? []
       const added = incoming[key] ?? []
       const others = replace || added.length > 0
@@ -219,15 +240,20 @@ function mergeMatchLayers(input: {
     }
     return Object.freeze(next)
   }
-  return Object.freeze({
+  const plan = Object.freeze({
     schemaVersion: 'color-plan/v1' as const,
     metadata: input.current.metadata,
     outputMetadata: input.current.outputMetadata,
     global: input.current.global,
     ...(input.current.sourceMetadata ? { sourceMetadata: input.current.sourceMetadata } : {}),
     ...(input.current.sources ? { sources: input.current.sources } : {}),
-    cameras: merge(input.current.cameras ?? {}, input.cameras, input.knownCameraIds, input.replaceCameras),
-    segments: merge(input.current.segments ?? {}, input.segments, input.knownSegmentIds, false),
+    cameras: merge('cameras', input.current.cameras ?? {}, input.cameras, input.knownCameraIds, input.replaceCameras),
+    segments: merge('segments', input.current.segments ?? {}, input.segments, input.knownSegmentIds, false),
+  })
+  return Object.freeze({
+    plan,
+    prunedCameraIds: Object.freeze(pruned.cameras),
+    prunedSegmentIds: Object.freeze(pruned.segments),
   })
 }
 
@@ -239,8 +265,27 @@ export interface MulticamMatchColorPlanWrite {
   readonly replayed: boolean
   /** Cameras the plan corrected that the EditPlan does not cut to. */
   readonly omittedCameraIds: readonly string[]
+  /**
+   * Layer keys the write removed because the current EditPlan no longer names
+   * them. `assertPlanTargets` refuses a ColorPlan carrying a key outside the
+   * EditPlan, so the alternative to dropping them is refusing the whole write;
+   * they are reported here rather than deleted in silence, because a dropped
+   * key can take a transform of another kind with it.
+   */
+  readonly prunedCameraIds: readonly string[]
+  readonly prunedSegmentIds: readonly string[]
 }
 
+/**
+ * What a reference change made stale — **advisory, not an effect**.
+ *
+ * These ids are computed and returned; nothing here writes a staleness marker
+ * on the named plans or reports, and nothing deletes them. They are a report
+ * for the caller that changed the reference, and they stay one until the route
+ * that surfaces them lands: the durable answer is that a superseded plan
+ * already names its successor (`supersedes`), so a reader can always tell which
+ * verdict rests on a reference nobody chose any more.
+ */
 export interface MulticamMatchInvalidation {
   readonly matchPlanIds: readonly string[]
   readonly colorCriticReportIds: readonly string[]
@@ -261,12 +306,48 @@ interface MatchColorPlanDependencies {
 }
 
 /**
+ * The idempotency key of a ColorPlan write, derived from everything the
+ * command fingerprints.
+ *
+ * `setProjectColorPlanService` computes a `requestFingerprint` over the project
+ * fence, the plan hash, the reason and the actor, and refuses a key it has
+ * already seen with a different fingerprint
+ * (`project-color-plans.ts:118-134`). A key derived from the match plan alone
+ * would therefore be reused with a genuinely different payload on any retry
+ * that carries a refreshed fence, a new note, or a second person's name in the
+ * reason — a collision this service would have manufactured for itself. The key
+ * covers the same ground as the fingerprint, so two calls share a key exactly
+ * when they are the same call.
+ */
+function colorPlanIdempotencyKey(input: {
+  prefix: 'mcm' | 'mco'
+  planHash: string
+  baseVersionId: string
+  baseHash: string
+  reason: string
+  actorId: string
+}): string {
+  const digest = createHash('sha256')
+    .update([
+      'multicam-color-plan-write/v1',
+      input.prefix, input.planHash, input.baseVersionId, input.baseHash, input.reason, input.actorId,
+    ].join('|'))
+    .digest('hex')
+  return `${input.prefix}-${digest.slice(0, 32)}`
+}
+
+/**
  * Write the compiled layers through the ColorPlan command.
  *
  * The command's author is this service — a `system` actor with a name that says
  * which service — and the human who chose the reference is named in the reason
  * beside it, never instead of it. A caller note is appended, never substituted:
  * the audit trail records who moved the colour, not only who asked.
+ *
+ * A write whose merged plan is byte-identical to the project's current one is
+ * not sent at all. Minting a version whose ColorPlan hashes to the ColorPlan
+ * before it would record a change that did not happen, and it is what turns a
+ * legitimate retry — same evidence, refreshed fence — into a second version.
  */
 async function writeMatchLayers(
   dependencies: MatchColorPlanDependencies,
@@ -279,7 +360,8 @@ async function writeMatchLayers(
     segments: Readonly<Record<string, readonly Readonly<ColorTransform>[]>>
     omittedCameraIds: readonly string[]
     replaceCameras: boolean
-    idempotencyKey: string
+    idempotencyPrefix: 'mcm' | 'mco'
+    idempotencySalt: string
     reason: string
     note?: string
   },
@@ -300,7 +382,7 @@ async function writeMatchLayers(
       { projectId: input.projectId },
     )
   }
-  const plan = mergeMatchLayers({
+  const merged = mergeMatchLayers({
     current: current.colorPlan.plan,
     cameras: input.cameras,
     segments: input.segments,
@@ -308,15 +390,37 @@ async function writeMatchLayers(
     knownSegmentIds: new Set(context.targets.flatMap((target) => target.segmentId ? [target.segmentId] : [])),
     replaceCameras: input.replaceCameras,
   })
+  const reason = input.note ? `${input.reason}; ${input.note}` : input.reason
+  const actorId = dependencies.colorPlanActorId ?? 'apollo-multicam-color-match'
+  const canonical = createColorPlan(merged.plan)
+  if (canonical.planHash === current.colorPlan.plan.planHash) {
+    return Object.freeze({
+      colorPlanId: current.colorPlan.id,
+      colorPlanHash: current.colorPlan.plan.planHash,
+      compiledManifestHash: current.colorPlan.compiled.manifestHash,
+      resultVersionId: current.version.id,
+      replayed: true,
+      omittedCameraIds: Object.freeze([...input.omittedCameraIds]),
+      prunedCameraIds: merged.prunedCameraIds,
+      prunedSegmentIds: merged.prunedSegmentIds,
+    })
+  }
   const applied = await dependencies.setProjectColorPlan({
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     baseVersionId: input.baseVersionId,
     baseHash: input.baseHash,
-    plan,
-    reason: input.note ? `${input.reason}; ${input.note}` : input.reason,
-    idempotencyKey: input.idempotencyKey,
-    actor: { type: 'system', id: dependencies.colorPlanActorId ?? 'apollo-multicam-color-match' },
+    plan: merged.plan,
+    reason,
+    idempotencyKey: colorPlanIdempotencyKey({
+      prefix: input.idempotencyPrefix,
+      planHash: input.idempotencySalt,
+      baseVersionId: input.baseVersionId,
+      baseHash: input.baseHash,
+      reason,
+      actorId,
+    }),
+    actor: { type: 'system', id: actorId },
   })
   return Object.freeze({
     colorPlanId: applied.colorPlan.id,
@@ -325,6 +429,8 @@ async function writeMatchLayers(
     resultVersionId: applied.version.id,
     replayed: applied.replayed,
     omittedCameraIds: Object.freeze([...input.omittedCameraIds]),
+    prunedCameraIds: merged.prunedCameraIds,
+    prunedSegmentIds: merged.prunedSegmentIds,
   })
 }
 
@@ -434,7 +540,7 @@ export function deriveMulticamMatchPlanService(dependencies: {
       { referenceCameraId, cameras: [...new Set(cameraIdByTrack.values())].sort() },
     )
 
-    const measurements = await measureSessionCameras({
+    const swept = await measureSessionCameras({
       session,
       cameraIdByTrack,
       clipsByCamera,
@@ -445,6 +551,7 @@ export function deriveMulticamMatchPlanService(dependencies: {
       windowSeconds,
       maxRanges,
     })
+    const measurements = swept.measurements
 
     const head = await dependencies.plans.readHead({ workspaceId, projectId, sessionId })
     // A retry measures the same bytes and therefore produces the same
@@ -466,7 +573,8 @@ export function deriveMulticamMatchPlanService(dependencies: {
         cameras: layers.cameras, segments: layers.segments,
         omittedCameraIds: layers.omittedCameraIds,
         replaceCameras: true,
-        idempotencyKey: `mcm-${head.plan.planHash.slice(0, 32)}`,
+        idempotencyPrefix: 'mcm',
+        idempotencySalt: head.plan.planHash,
         reason: matchReason(head.plan, selector.selectedBy.id),
         ...(request.note ? { note: request.note } : {}),
       })
@@ -506,6 +614,7 @@ export function deriveMulticamMatchPlanService(dependencies: {
       // `media_color_probe` row, so it cites none rather than citing something
       // it did not read.
       lineage: { colorProbeIds: [] },
+      ...(swept.evidenceIssues.length > 0 ? { evidenceIssues: swept.evidenceIssues } : {}),
       ...(request.policy ? { policy: request.policy } : {}),
       ...(head ? { supersedes: head.plan } : {}),
       createdAt,
@@ -537,7 +646,8 @@ export function deriveMulticamMatchPlanService(dependencies: {
       cameras: layers.cameras, segments: layers.segments,
       omittedCameraIds: layers.omittedCameraIds,
       replaceCameras: true,
-      idempotencyKey: `mcm-${appended.stored.plan.planHash.slice(0, 32)}`,
+      idempotencyPrefix: 'mcm',
+      idempotencySalt: appended.stored.plan.planHash,
       reason: matchReason(appended.stored.plan, selector.selectedBy.id),
       ...(request.note ? { note: request.note } : {}),
     })
@@ -599,7 +709,10 @@ async function measureSessionCameras(input: {
   workspaceId: string
   windowSeconds: number
   maxRanges: number
-}): Promise<readonly Readonly<CameraColorMeasurement>[]> {
+}): Promise<Readonly<{
+  measurements: readonly Readonly<CameraColorMeasurement>[]
+  evidenceIssues: readonly Readonly<MatchPlanIssue>[]
+}>> {
   const roles = new Set<string>(MATCHABLE_TRACK_ROLES)
   const wanted = input.session.tracks.filter((track: Readonly<CaptureTrack>) => {
     if (!roles.has(track.role)) return false
@@ -617,9 +730,23 @@ async function measureSessionCameras(input: {
     },
   )
   const measurements: Readonly<CameraColorMeasurement>[] = []
+  const evidenceIssues: Readonly<MatchPlanIssue>[] = []
   for (const track of wanted) {
     const cameraId = input.cameraIdByTrack.get(track.trackId)!
-    const parts = [...track.parts].sort((left, right) => left.ordinal - right.ordinal).slice(0, input.maxRanges)
+    const ordered = [...track.parts].sort((left, right) => left.ordinal - right.ordinal)
+    const parts = ordered.slice(0, input.maxRanges)
+    if (ordered.length > parts.length) {
+      // A recorder restart splits one camera into many parts, and beyond the
+      // sweep's limit they are never decoded. The plan says so rather than
+      // reporting a confidence computed over a sample nobody was told was
+      // narrowed.
+      evidenceIssues.push(Object.freeze({
+        code: 'evidence-narrowed',
+        cameraId,
+        message: `only the first ${parts.length} of ${ordered.length} parts of camera ${cameraId} were measured; the rest were not decoded`,
+        humanReviewRequired: false,
+      }))
+    }
     for (const part of parts) {
       // Second zero of the file is the start of the part's coverage: a part's
       // `coverage` counts the ticks that FILE covers in its own timebase, so
@@ -657,7 +784,10 @@ async function measureSessionCameras(input: {
       }
     }
   }
-  return Object.freeze(measurements)
+  return Object.freeze({
+    measurements: Object.freeze(measurements),
+    evidenceIssues: Object.freeze(evidenceIssues),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -771,7 +901,10 @@ export function addMulticamMatchRangeOverrideService(dependencies: {
       cameras: {}, segments: layers.segments,
       omittedCameraIds: layers.omittedCameraIds,
       replaceCameras: false,
-      idempotencyKey: `mco-${createHash('sha256').update(`${stored.plan.planHash}|${request.override.overrideId}`).digest('hex').slice(0, 32)}`,
+      idempotencyPrefix: 'mco',
+      idempotencySalt: createHash('sha256')
+        .update(`${stored.plan.planHash}|${request.override.overrideId}`)
+        .digest('hex'),
       reason: `multicam match range override ${request.override.overrideId} on camera ${request.override.cameraId} by ${actor.kind} ${actor.id}`,
       note: request.override.reason,
     })

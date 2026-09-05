@@ -8,6 +8,13 @@ import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 import type { ColorMetadata, ColorTransform, resolveColorPlan } from '../../domain/color-and-export.ts'
 import { DomainError } from '../../domain/errors.ts'
+import {
+  MATCH_PARAMETER_BOUNDS,
+  MATCH_PROVIDER,
+  MATCH_PROVIDER_VERSIONS,
+  MATCH_WHITE_BALANCE_PARAMETERS,
+  type MatchProviderVersion,
+} from '../../domain/multicam-match-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 
@@ -118,22 +125,26 @@ function zscale(stage: Readonly<ColorTransform>) {
  * The stage order `technical > match > creative-lut > output` is untouched:
  * both versions return one link of the same chain, asserted four stages long by
  * `assertCompilation`/`assertResolvedExecution` above.
+ *
+ * Nothing below retypes the provider's vocabulary. The accepted parameter
+ * names, the three gain keys and every bound are spread from the domain
+ * constants that publish them (`multicam-match-plan.ts`), so a renamed key or a
+ * widened bound cannot mean one thing in the plan and another in the filter.
  */
-const MATCH_V1_PARAMETERS = Object.freeze(['mode', 'brightness', 'contrast', 'saturation'])
-const MATCH_V2_GAIN_PARAMETERS = Object.freeze(['red-gain', 'green-gain', 'blue-gain'])
-const MATCH_V2_PARAMETERS = Object.freeze([...MATCH_V1_PARAMETERS, ...MATCH_V2_GAIN_PARAMETERS])
-/** Mirrors `MATCH_PARAMETER_BOUNDS.gain`; a structural test keeps the two equal. */
-const MATCH_GAIN_BOUNDS = Object.freeze([0.5, 2] as const)
+const MATCH_V2_GAIN_PARAMETERS: readonly string[] = Object.freeze(
+  Object.values(MATCH_WHITE_BALANCE_PARAMETERS),
+)
+const MATCH_GAIN_BOUNDS = MATCH_PARAMETER_BOUNDS.gain
 
 function match(stage: Readonly<ColorTransform>) {
-  if (stage.implementation.provider !== 'apollo-match') {
-    throw new DomainError('INVALID_RENDER_INPUT', 'match requires apollo-match')
+  if (stage.implementation.provider !== MATCH_PROVIDER) {
+    throw new DomainError('INVALID_RENDER_INPUT', `match requires ${MATCH_PROVIDER}`)
   }
   const version = stage.implementation.version
-  if (version !== 'v1' && version !== 'v2') {
+  if (!Object.hasOwn(MATCH_PROVIDER_VERSIONS, version)) {
     throw new DomainError('INVALID_RENDER_INPUT', `match provider version ${version} is unsupported`)
   }
-  const allowed = version === 'v2' ? MATCH_V2_PARAMETERS : MATCH_V1_PARAMETERS
+  const allowed: readonly string[] = MATCH_PROVIDER_VERSIONS[version as MatchProviderVersion].parameters
   const parameters = stage.implementation.parameters
   if (Object.keys(parameters).some((key) => !allowed.includes(key))) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match has unsupported parameters')
@@ -150,15 +161,17 @@ function match(stage: Readonly<ColorTransform>) {
   const brightness = Number(parameters.brightness ?? 0)
   const contrast = Number(parameters.contrast ?? 1)
   const saturation = Number(parameters.saturation ?? 1)
+  const within = (value: number, bounds: readonly [number, number]) =>
+    Number.isFinite(value) && value >= bounds[0] && value <= bounds[1]
   if (
-    !Number.isFinite(brightness) || brightness < -1 || brightness > 1 ||
-    !Number.isFinite(contrast) || contrast < 0.1 || contrast > 3 ||
-    !Number.isFinite(saturation) || saturation < 0 || saturation > 3
+    !within(brightness, MATCH_PARAMETER_BOUNDS.brightness) ||
+    !within(contrast, MATCH_PARAMETER_BOUNDS.contrast) ||
+    !within(saturation, MATCH_PARAMETER_BOUNDS.saturation)
   ) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match parameters are outside safe bounds')
   }
   const eq = `eq=brightness=${brightness.toFixed(6)}:contrast=${contrast.toFixed(6)}:saturation=${saturation.toFixed(6)}`
-  if (version === 'v1') return eq
+  if (version === MATCH_PROVIDER_VERSIONS.v1.version) return eq
   // A v2 transform that names no gain is not a white balance; it is a v1
   // transform wearing a newer version token, and letting it through would make
   // two different parameter objects render identically under two hashes.

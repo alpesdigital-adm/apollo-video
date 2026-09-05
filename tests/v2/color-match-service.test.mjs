@@ -279,10 +279,28 @@ function fakeMeasurementRepository() {
 /**
  * A ColorPlan writer that behaves like the real command where the test cares:
  * it refuses a stale project fence, it runs the plan through `createColorPlan`
- * so an unacceptable layer fails here rather than in production, and it resolves
- * every EditPlan target so an unresolvable chain cannot pass unnoticed.
+ * so an unacceptable layer fails here rather than in production, it resolves
+ * every EditPlan target so an unresolvable chain cannot pass unnoticed, and —
+ * the behaviour whose absence hid a defect — it fingerprints every request and
+ * refuses an idempotency key reused with a different payload, in the same order
+ * the real command does (`project-color-plans.ts:118-141`): fingerprint, then
+ * replay, then the fence.
  */
+function requestFingerprintOf(request, canonicalPlan) {
+  return calculateCanonicalHash({
+    schemaVersion: 'set-project-color-plan-request/v1',
+    workspaceId: request.workspaceId,
+    projectId: request.projectId,
+    baseVersionId: request.baseVersionId,
+    baseHash: request.baseHash,
+    colorPlanHash: canonicalPlan.planHash,
+    reason: request.reason?.trim() ?? null,
+    actorIdentity: { kind: 'internal', actor: request.actor },
+  })
+}
+
 function fakeColorPlanWriter(options = {}) {
+  const targets = options.targets ?? TARGETS
   const state = {
     current: options.current ?? currentColorPlan(),
     versionId: 'version-1',
@@ -292,7 +310,7 @@ function fakeColorPlanWriter(options = {}) {
   }
   const readContext = async () => ({
     currentVersion: { id: state.versionId, baseHash: state.baseHash, sequence: 1, snapshotRefs: [] },
-    targets: TARGETS,
+    targets,
     trustedSourceMetadata: { 'artifact-a': METADATA, 'artifact-b': METADATA },
     currentDurationFrames: 240,
     proxyVariantId: '16:9',
@@ -307,15 +325,28 @@ function fakeColorPlanWriter(options = {}) {
     replayed: false,
   })
   const setProjectColorPlan = async (request) => {
+    if (typeof request.idempotencyKey !== 'string' || request.idempotencyKey.length < 8 || request.idempotencyKey.length > 128) {
+      const error = new Error('Idempotency-Key is invalid')
+      error.code = 'INVALID_ARGUMENT'
+      throw error
+    }
+    const canonical = createColorPlan(request.plan)
+    const fingerprint = requestFingerprintOf(request, canonical)
+    const replay = state.idempotency.get(request.idempotencyKey)
+    if (replay) {
+      if (replay.fingerprint !== fingerprint) {
+        const error = new Error('Idempotency key was used with another project ColorPlan')
+        error.code = 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+        throw error
+      }
+      return { ...replay.result, replayed: true }
+    }
     if (request.baseVersionId !== state.versionId || request.baseHash !== state.baseHash) {
       const error = new Error('Project ColorPlan base version is stale')
       error.code = 'VERSION_CONFLICT'
       throw error
     }
-    const replay = state.idempotency.get(request.idempotencyKey)
-    if (replay) return { ...replay, replayed: true }
-    const canonical = createColorPlan(request.plan)
-    for (const target of TARGETS) resolveColorPlan(canonical, target)
+    for (const target of targets) resolveColorPlan(canonical, target)
     state.writes.push({ plan: canonical, request })
     state.current = canonical
     state.versionId = `version-${state.writes.length + 1}`
@@ -328,7 +359,7 @@ function fakeColorPlanWriter(options = {}) {
       invalidations: [],
       replayed: false,
     }
-    state.idempotency.set(request.idempotencyKey, result)
+    state.idempotency.set(request.idempotencyKey, { fingerprint, result })
     return result
   }
   return { state, colorPlans: { readContext, readCurrent }, setProjectColorPlan }
@@ -372,7 +403,7 @@ function wire(options = {}) {
   const plans = fakePlans()
   const media = fakeMedia()
   const measurements = fakeMeasurementRepository()
-  const probe = fakeProbe(options.cameras ?? {
+  const probe = options.probe ?? fakeProbe(options.cameras ?? {
     'cam-a': { rOverG: 1, bOverG: 0.9, exposure: 0.5 },
     // Two thirds of the reference's blue: a real white-balance divergence.
     'cam-b': { rOverG: 1.1, bOverG: 0.6, exposure: 0.42 },
@@ -383,6 +414,8 @@ function wire(options = {}) {
     colorPlans: writer.colorPlans,
     setProjectColorPlan: writer.setProjectColorPlan,
     clock: () => new Date('2029-06-01T11:00:00.000Z'),
+    ...(options.windowSeconds !== undefined ? { windowSeconds: options.windowSeconds } : {}),
+    ...(options.maxRangesPerCamera !== undefined ? { maxRangesPerCamera: options.maxRangesPerCamera } : {}),
   })
   const override = addMulticamMatchRangeOverrideService({
     plans,
@@ -487,6 +520,173 @@ test('T-F4.013 a retry over the same bytes replays the stored plan and mints no 
   assert.equal(second.version, 1)
   assert.equal(plans.state.appends, 1, 'a retry must not append a version that differs only in its timestamp')
   assert.equal(writer.state.writes.length, 1, 'the ColorPlan idempotency key replays instead of writing again')
+})
+
+test('T-F4.013 a retry with a refreshed fence, a new note or a second person still writes nothing', async () => {
+  // Each of these is a legitimate retry the caller cannot avoid: the fence moved
+  // because the first attempt succeeded, the note is what the operator typed the
+  // second time, and the second person is whoever picked the work up. All three
+  // change the fingerprint the ColorPlan command computes, so a key derived from
+  // the match plan alone would collide with itself and fail the retry.
+  const second = () => actorFrom(
+    { delegatedUserId: 'user-2', delegatedIdentityId: 'identity-2', workspaceRole: 'director' },
+    'ui-session',
+  )
+  for (const [name, overrides] of [
+    ['refreshed fence', {}],
+    ['a new note', { note: 'retried after the upload stalled' }],
+    ['a second person', { actor: second() }],
+  ]) {
+    const { derive, plans, writer } = wire()
+    const first = await derive(deriveRequest())
+    const retry = await derive(deriveRequest({
+      projectBaseVersionId: writer.state.versionId,
+      projectBaseHash: writer.state.baseHash,
+      ...overrides,
+    }))
+    assert.equal(retry.replayed, true, name)
+    assert.equal(retry.plan.planHash, first.plan.planHash, name)
+    assert.equal(retry.colorPlan.replayed, true, name)
+    assert.equal(retry.colorPlan.colorPlanHash, first.colorPlan.colorPlanHash, name)
+    assert.equal(plans.state.appends, 1, name)
+    assert.equal(writer.state.writes.length, 1, `${name}: a retry that changes nothing must write nothing`)
+  }
+})
+
+test('T-F4.013 a ColorPlan key is never reused with a different payload', async () => {
+  const { derive, writer } = wire()
+  const first = await derive(deriveRequest())
+  // Somebody else moved the ColorPlan in between: the camera this plan corrects
+  // was reset to a bypass. The same match plan now compiles to a DIFFERENT
+  // ColorPlan against a DIFFERENT project fence, which is exactly the payload a
+  // key derived from the plan hash alone would reuse.
+  writer.state.current = createColorPlan({
+    ...writer.state.current,
+    cameras: {
+      ...writer.state.current.cameras,
+      'cam-b': [transform('match-cam-b', 'match', 'apollo-match', { mode: 'bypass' })],
+    },
+  })
+  const second = await derive(deriveRequest({
+    projectBaseVersionId: writer.state.versionId,
+    projectBaseHash: writer.state.baseHash,
+  }))
+  assert.equal(second.replayed, true, 'the match plan itself is unchanged, so no second version is minted')
+  assert.equal(second.colorPlan.replayed, false, 'the ColorPlan really had to be rewritten')
+  assert.equal(writer.state.writes.length, 2)
+  const keys = writer.state.writes.map((write) => write.request.idempotencyKey)
+  assert.equal(new Set(keys).size, 2, 'two different payloads must not share one idempotency key')
+  assert.ok(keys.every((key) => key.startsWith('mcm-') && key.length >= 8))
+  assert.equal(second.colorPlan.colorPlanHash, first.colorPlan.colorPlanHash,
+    'the rewritten plan restores exactly the layers the match plan compiles to')
+})
+
+test('T-F4.013 a match needs two cameras and says which the EditPlan cuts to when it has one', async () => {
+  const { derive, media } = wire({
+    targets: [Object.freeze({ sourceId: 'artifact-a', cameraId: 'cam-a', segmentId: 'clip-1' })],
+  })
+  await assert.rejects(
+    () => derive(deriveRequest()),
+    (error) => error.code === 'COLOR_RANGES_NOT_COMPARABLE' &&
+      error.details.referenceCameraId === 'cam-a' &&
+      error.details.editPlanCameras.join(',') === 'cam-a',
+  )
+  assert.equal(media.state.resolved, 0, 'nothing is decoded for a sweep that cannot compare anything')
+})
+
+test('T-F4.013 fresh evidence that disagrees with the head appends a version instead of replaying it', async () => {
+  // The bytes were re-measured and came back different — a re-ingest, a repaired
+  // file. The stored plan rests on evidence that no longer exists, so replaying
+  // it would write a correction nobody can reproduce.
+  let call = 0
+  const drifting = fakeProbe({
+    'cam-a': { rOverG: 1, bOverG: 0.9, exposure: 0.5 },
+    'cam-b': { rOverG: 1.1, bOverG: 0.6, exposure: 0.42 },
+  })
+  const probe = {
+    calls: drifting.calls,
+    async measureCameraColor(input) {
+      call += 1
+      const produced = await drifting.measureCameraColor(input)
+      // The second sweep reads the same cameras through a different exposure.
+      return call > 2
+        ? produced.map((entry) => measurement({
+            // A content-addressed instrument names different bytes differently.
+            measurementId: `${entry.measurementId}-remeasured`,
+            sourceAssetId: entry.sourceAssetId,
+            sourceSha256: entry.sourceSha256,
+            cameraId: entry.cameraId,
+            range: entry.range,
+            rOverG: entry.cameraId === 'cam-a' ? 1 : 1.1,
+            bOverG: entry.cameraId === 'cam-a' ? 0.9 : 0.55,
+            exposure: entry.cameraId === 'cam-a' ? 0.5 : 0.4,
+          }))
+        : produced
+    },
+  }
+  const { derive, plans, writer } = wire({ probe })
+  const first = await derive(deriveRequest())
+  const second = await derive(deriveRequest({
+    projectBaseVersionId: writer.state.versionId,
+    projectBaseHash: writer.state.baseHash,
+  }))
+  assert.equal(second.replayed, false, 'evidence that changed is a new derivation, not a replay')
+  assert.equal(second.version, 2)
+  assert.notEqual(second.plan.planHash, first.plan.planHash)
+  assert.equal(second.plan.supersedes, first.plan.planId)
+  assert.equal(plans.state.appends, 2)
+})
+
+test('T-F4.013 a camera measured on fewer parts than it has says so in the plan', async () => {
+  const many = session({
+    tracks: session().tracks.map((track, index) => index === 1
+      ? Object.freeze({
+          ...track,
+          parts: Object.freeze([1, 2, 3].map((ordinal) => Object.freeze({
+            ...track.parts[0],
+            partId: `part-b-${ordinal}`,
+            ordinal,
+          }))),
+        })
+      : track),
+  })
+  const { derive } = wire({ session: many, maxRangesPerCamera: 1 })
+  const result = await derive(deriveRequest())
+  const narrowed = result.plan.issues.find((issue) => issue.code === 'evidence-narrowed')
+  assert.ok(narrowed, `the plan says nothing about the parts it skipped: ${JSON.stringify(result.plan.issues)}`)
+  assert.equal(narrowed.cameraId, 'cam-b')
+  assert.match(narrowed.message, /only the first 1 of 3 parts/)
+})
+
+test('T-F4.013 the measured range names the stretch of file that was decoded, not the whole part', async () => {
+  // A part far longer than the window: production's normal case, and the only
+  // shape in which the window arithmetic does anything at all.
+  const TICKS = 48_000n
+  const longPart = session({
+    tracks: session().tracks.map((track) => Object.freeze({
+      ...track,
+      parts: Object.freeze(track.parts.map((part) => Object.freeze({
+        ...part,
+        coverage: createTickInterval(0n, TICKS * 100n),
+      }))),
+    })),
+  })
+  const { derive, probe } = wire({ session: longPart, windowSeconds: 5 })
+  const result = await derive(deriveRequest())
+  for (const call of probe.calls) {
+    assert.equal(call.ranges.length, 1)
+    assert.equal(call.ranges[0].sourceStartSeconds, 0)
+    assert.equal(call.ranges[0].sourceEndSeconds, 5,
+      'the probe must be asked for the window, never for the whole part')
+    // 5 s of a 100 s part is 5 % of the part's session ticks.
+    assert.equal(call.ranges[0].sessionRange.start, 0n)
+    assert.equal(call.ranges[0].sessionRange.end, TICKS * 5n)
+  }
+  assert.equal(result.plan.measurements.length, 2)
+  for (const entry of result.plan.measurements) {
+    assert.equal(entry.range.end - entry.range.start, TICKS * 5n,
+      'a measurement that claims 100 s of session time from 5 s of decoded frames weights every pair wrong')
+  }
 })
 
 test('T-F4.013 changing the reference camera supersedes and names only the dependents', async () => {
