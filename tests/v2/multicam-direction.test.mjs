@@ -15,6 +15,7 @@ import {
   colorCameraIdsForSession,
 } from '../../src/v2/domain/camera-identity.ts'
 import { DOMAIN_ERROR_CODES } from '../../src/v2/domain/errors.ts'
+import { PUBLIC_ERROR_CATALOG } from '../../src/v2/public-api/public-error-catalog.ts'
 import {
   assertMulticamEvidenceSetIntegrity,
   createMulticamEvidenceSet,
@@ -1024,4 +1025,67 @@ test('T-FR-150 camera identity folds a track id into the ColorPlan token grammar
   assert.equal(ids.size, session.tracks.length)
   const collide = { sessionId: SESSION, tracks: [{ trackId: 'cam/a' }, { trackId: 'cam-a' }] }
   assert.throws(() => colorCameraIdsForSession(collide), (error) => error.code === 'CAMERA_IDENTITY_COLLISION' && error.details.trackIds.length === 2)
+})
+
+// ---------------------------------------------------------------------------
+// Source frames belong to the source's cadence, not the plan's.
+// ---------------------------------------------------------------------------
+
+test('T-FR-150 source frames are counted at the track\'s own frame rate while the audio bed stays at plan fps', () => {
+  const world = podcastWorld()
+  const direction = world.direct()
+  // Camera A shot 60 fps; camera B and the recorder were never probed.
+  const compiled = compileShotsToSourceRanges(direction, {
+    session: world.session,
+    clockMaps: world.clockMaps,
+    planFps: rational(30, 1),
+    coverages: world.coverages,
+    sourceFrameRates: [{ trackId: 'track-camera-a', frameRate: rational(60, 1) }],
+  })
+  const [first, second] = compiled.clips
+  assert.equal(first.trackId, 'track-camera-a')
+  // Session [1 s, 120 s) is camera A source [0.5 s, 119.5 s): frame 30 at 60 fps,
+  // where the plan-fps reading would have trimmed at frame 15 — half a minute of
+  // material earlier by the end of a long shot.
+  assert.equal(first.sourceInFrame, 30)
+  assert.equal(first.sourceOutFrame, 7_170)
+  assert.deepEqual(first.sourceFrameRate, rational(60, 1))
+  // The timeline is the plan's, so the same 119 seconds are 3 570 output frames.
+  assert.equal(first.timelineOutFrame - first.timelineInFrame, 119 * 30)
+  // The renderer divides audio frames by the plan fps, so the bed does not move.
+  assert.equal(first.audioSourceInFrame, 30)
+  assert.equal(first.audioSourceOutFrame - first.audioSourceInFrame, 119 * 30)
+  // A track nobody probed falls back to the plan fps, and says so on the clip.
+  assert.deepEqual(second.sourceFrameRate, rational(30, 1))
+  assert.equal(second.sourceInFrame, 2_700)
+  const cameraA = compiled.sources.find((source) => source.sourceAssetId === 'asset-cam-a')
+  assert.deepEqual(cameraA.frameRate, rational(60, 1))
+  assert.equal(cameraA.durationFrames, 600 * 60)
+  assert.equal(compiled.durationFrames, (560 - 1) * 30, 'the timeline length is unchanged by the source cadence')
+  // The same direction compiled at two source cadences is two different files.
+  const assumed = compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: world.coverages })
+  assert.notEqual(compiled.compilationHash, assumed.compilationHash)
+  assert.throws(
+    () => compileShotsToSourceRanges(direction, {
+      session: world.session,
+      clockMaps: world.clockMaps,
+      planFps: rational(30, 1),
+      sourceFrameRates: [{ trackId: 'track-camera-a', frameRate: rational(60, 1) }, { trackId: 'track-camera-a', frameRate: rational(50, 1) }],
+    }),
+    (error) => error.code === 'INVALID_ARGUMENT',
+    'two rates for one track is a contradiction, not a last-one-wins',
+  )
+  console.log(`source-cadence camA in=${first.sourceInFrame} out=${first.sourceOutFrame} timeline=${first.timelineOutFrame - first.timelineInFrame} camB in=${second.sourceInFrame}`)
+})
+
+test('T-FR-150 both direction refusals are domain error codes the public envelope can carry', () => {
+  for (const code of ['DIRECTION_RANGE_UNRESOLVABLE', 'CAMERA_IDENTITY_COLLISION']) {
+    assert.ok(DOMAIN_ERROR_CODES.includes(code), `${code} is a domain error code`)
+    // The catalog refuses to build unless every code is classified exactly
+    // once, so importing it at all is the proof; the assertions name what a
+    // caller will see.
+    assert.equal(PUBLIC_ERROR_CATALOG[code].status, 422)
+    assert.equal(PUBLIC_ERROR_CATALOG[code].category, 'policy')
+    assert.equal(PUBLIC_ERROR_CATALOG[code].retryable, false)
+  }
 })
