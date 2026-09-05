@@ -779,10 +779,11 @@ CREATE TABLE "color_critic_reports" (
     -- normalizedSubject (color-critic-report.ts): each subject kind names the
     -- thing it is about, and a range subject names its camera too.
     CONSTRAINT "color_critic_reports_subject_check"
-        CHECK (("subjectKind" = 'source' AND "subjectSourceAssetId" IS NOT NULL) OR
+        CHECK ("subjectKind" IN ('source', 'camera', 'range', 'output') AND
+              (("subjectKind" = 'source' AND "subjectSourceAssetId" IS NOT NULL) OR
               ("subjectKind" = 'camera' AND "subjectCameraId" IS NOT NULL) OR
               ("subjectKind" = 'range' AND "subjectCameraId" IS NOT NULL AND "subjectRangeStartTicks" IS NOT NULL) OR
-              ("subjectKind" = 'output' AND "subjectArtifactId" IS NOT NULL)),
+              ("subjectKind" = 'output' AND "subjectArtifactId" IS NOT NULL))),
     CONSTRAINT "color_critic_reports_subject_range_check"
         CHECK (("subjectRangeStartTicks" IS NULL) = ("subjectRangeEndTicks" IS NULL)
               AND ("subjectRangeStartTicks" IS NULL OR "subjectRangeStartTicks" < "subjectRangeEndTicks")

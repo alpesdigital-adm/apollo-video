@@ -335,6 +335,31 @@ export interface AngleScoreComponents {
   readonly total: number
 }
 
+/**
+ * The named parts of a score, in the order they are read.
+ *
+ * A list beside the interface rather than instead of it: persistence stores one
+ * row per component and needs the closed set of names as data, and the
+ * conditional type below makes the compiler refuse the list the moment
+ * `AngleScoreComponents` grows a part this does not mention.
+ */
+export const ANGLE_SCORE_COMPONENT_NAMES = Object.freeze([
+  'baseline',
+  'speaker',
+  'demonstration',
+  'reaction',
+  'quality',
+  'continuity',
+  'redundancyPenalty',
+  'protectedBonus',
+  'formatPenalty',
+] as const)
+export type AngleScoreComponentName = (typeof ANGLE_SCORE_COMPONENT_NAMES)[number]
+
+type UnnamedScoreComponent = Exclude<keyof Omit<AngleScoreComponents, 'total'>, AngleScoreComponentName>
+const _everyScoreComponentIsNamed: UnnamedScoreComponent extends never ? true : never = true
+void _everyScoreComponentIsNamed
+
 /** A labelled human choice. Carried as an attestation, never as a measurement. */
 export interface ProtectedSelection {
   readonly selectionId: string
@@ -1435,7 +1460,13 @@ function alternativesOf(decisions: readonly WindowDecision[], chosenTrackId: str
     .map(({ eligible: _eligible, ...alternative }) => Object.freeze(alternative)))
 }
 
-const SHOT_EVIDENCE_REF_CAP = 32
+/**
+ * Exported so persistence can encode the same cap instead of retyping 32:
+ * `multicam_shot_decisions_evidence_check` refuses a row whose truncation
+ * count is non-zero while its citation never reached the cap, and a CHECK
+ * written from memory is the Wave 19 defect this avoids.
+ */
+export const SHOT_EVIDENCE_REF_CAP = 32
 
 /**
  * What a shot cites, and what the citation had to drop.
