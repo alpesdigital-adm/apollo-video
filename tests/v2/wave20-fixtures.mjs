@@ -1,27 +1,34 @@
-import {
+// The domain arrives through `await import`, never a static `import … from
+// '….ts'`. tsx — which runs every database-backed suite in this repository —
+// resolves a static specifier before it transforms the target, so an `.mjs`
+// file that names a `.ts` export statically dies at link time with "does not
+// provide an export named …" no matter how correct the export is. The Wave 19
+// precedent (sync-diagnostic-persistence.e2e.mjs) reaches the domain the same
+// way, and both loaders — plain `node` and `tsx` — link this shape.
+const {
   addCaptureSessionTrack,
   captureSessionDerivationRef,
   createCaptureSession,
-} from '../../src/v2/domain/capture-session.ts'
-import { evaluateColorCritic } from '../../src/v2/domain/color-critic-report.ts'
-import { createCameraColorMeasurement } from '../../src/v2/domain/color-measurement.ts'
-import { createMulticamEvidenceSet } from '../../src/v2/domain/multicam-evidence.ts'
-import { directMulticam } from '../../src/v2/domain/multicam-direction.ts'
-import { deriveMulticamMatchPlan } from '../../src/v2/domain/multicam-match-plan.ts'
-import { createPiecewiseClockMap } from '../../src/v2/domain/piecewise-clock-map.ts'
-import {
+} = await import('../../src/v2/domain/capture-session.ts')
+const { evaluateColorCritic } = await import('../../src/v2/domain/color-critic-report.ts')
+const { createCameraColorMeasurement } = await import('../../src/v2/domain/color-measurement.ts')
+const { createMulticamEvidenceSet } = await import('../../src/v2/domain/multicam-evidence.ts')
+const { directMulticam } = await import('../../src/v2/domain/multicam-direction.ts')
+const { deriveMulticamMatchPlan } = await import('../../src/v2/domain/multicam-match-plan.ts')
+const { createPiecewiseClockMap } = await import('../../src/v2/domain/piecewise-clock-map.ts')
+const {
   applyPlaybackAnchor,
   buildPlaybackMap,
   createPlaybackPolicy,
-} from '../../src/v2/domain/playback-map.ts'
-import {
+} = await import('../../src/v2/domain/playback-map.ts')
+const {
   createSessionClock,
   createSourceClock,
   createSourceToSessionMapping,
-} from '../../src/v2/domain/session-clock.ts'
-import { createTickInterval, rational, timebaseFromRate } from '../../src/v2/domain/session-time.ts'
-import { createSyncDiagnostic, deriveTrackStatus } from '../../src/v2/domain/sync-diagnostic.ts'
-import { createTrackCoverage } from '../../src/v2/domain/track-coverage.ts'
+} = await import('../../src/v2/domain/session-clock.ts')
+const { createTickInterval, rational, timebaseFromRate } = await import('../../src/v2/domain/session-time.ts')
+const { createSyncDiagnostic, deriveTrackStatus } = await import('../../src/v2/domain/sync-diagnostic.ts')
+const { createTrackCoverage } = await import('../../src/v2/domain/track-coverage.ts')
 
 /**
  * The Wave 20 aggregates the persistence suites store, built by the domain.
