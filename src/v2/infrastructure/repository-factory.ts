@@ -220,8 +220,16 @@ import {
   readSyntheticCriticBlockEvidenceService,
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
+import { evaluateColorCriticService } from '../application/color-critic.ts'
+import {
+  addMulticamMatchRangeOverrideService,
+  deriveMulticamMatchPlanService,
+} from '../application/multicam-color-match.ts'
+import { setProjectColorPlanService } from '../application/project-color-plans.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluator.ts'
+import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
 import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
 import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
@@ -2004,6 +2012,12 @@ export function createProjectProxyRenderWorker(
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+    // F4.014. The colour verdict is taken on the bytes this worker just wrote
+    // and lands on the review it is about to persist. Assembled here because it
+    // needs the three things a worker has no business knowing: where FFmpeg is,
+    // where scratch space lives, and which storage driver this deployment uses.
+    colorCritic: createColorCriticService(environment, clock),
+    colorCriticSessionId: createProjectCaptureSessionLocator(),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -2326,4 +2340,94 @@ export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.e
  */
 export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
   return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
+}
+
+/**
+ * The colour critic, assembled (F4.014).
+ *
+ * The evaluator writes its "before" intermediates under the artifact root's
+ * scratch space and promotes its evidence crops through the same verified
+ * storage every other derived artifact goes through — object storage, never a
+ * database column, because a crop is media.
+ */
+export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = process.env) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
+  return new FfmpegColorCriticEvaluator({
+    workRoot: join(resolve(artifactRoot), '.color-critic-work'),
+    storage: createVerifiedMediaStorage(environment),
+    ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+  })
+}
+
+export function createColorCriticService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return evaluateColorCriticService({
+    evaluator: createColorCriticEvaluator(environment),
+    reports: createColorCriticReportRepository(),
+    matchPlans: createMulticamMatchPlanRepository(),
+    clock,
+  })
+}
+
+/**
+ * Which capture session a project's colour verdict should read its reference
+ * camera from: the most recent head of that project. Returned as a locator
+ * rather than an id on the request, so nothing a caller sends can point the
+ * critic at another session's match plan.
+ */
+export function createProjectCaptureSessionLocator() {
+  const sessions = createCaptureSessionRepository()
+  return async (context: { workspaceId: string; projectId: string }): Promise<string | null> => {
+    const heads = await sessions.listHeads({ workspaceId: context.workspaceId, projectId: context.projectId, limit: 1 })
+    return heads[0]?.sessionId ?? null
+  }
+}
+
+/**
+ * The multicam colour match, assembled (F4.013).
+ *
+ * The reference camera is a human decision the service checks for itself; every
+ * number in the plan is measured here by a real instrument, and the resulting
+ * layers are written into the project's ColorPlan through the same command a
+ * person's edit would use.
+ */
+export function createDeriveMulticamMatchPlanService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return deriveMulticamMatchPlanService({
+    sessions: createCaptureSessionRepository(),
+    media: createCaptureMediaResolver(environment),
+    probe: new FfmpegColorMeasurement(
+      environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {},
+    ),
+    measurements: createCameraColorMeasurementRepository(),
+    plans: createMulticamMatchPlanRepository(),
+    criticReports: createColorCriticReportRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+export function createAddMulticamMatchRangeOverrideService(clock: () => Date = () => new Date()) {
+  return addMulticamMatchRangeOverrideService({
+    plans: createMulticamMatchPlanRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+function createSetProjectColorPlanService(clock: () => Date) {
+  return setProjectColorPlanService({
+    repository: createProjectColorPlanRepository(),
+    luts: createWorkspaceLutRepository(),
+    createId: (kind) => `${kind}-${randomUUID()}`,
+    createEventId: randomUUID,
+    clock,
+  })
 }

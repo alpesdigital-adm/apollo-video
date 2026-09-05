@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { calculateCanonicalHash } from '../domain/canonical-hash.ts'
 import {
   COLOR_CRITIC_CORRECTABLE_DIMENSIONS,
   COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
@@ -126,6 +127,85 @@ export function colorCriticProxyIssues(input: {
       ...issue.evidenceRefs,
     ]),
   })))
+}
+
+/**
+ * Turn what the proxy worker already holds into what the critic needs.
+ *
+ * The worker knows the clips, the materialized source paths and the resolved
+ * pipeline of every target; the critic wants those three joined. Doing the join
+ * here rather than in the worker keeps the rule visible: a clip is judged
+ * against the pipeline the render actually applied to it, found by the same key
+ * the renderer used (`ffmpeg-editorial-proxy-renderer.ts:505-512`), not by a
+ * pipeline chosen for it afterwards.
+ *
+ * A clip with no `cameraId` is dropped, not defaulted. Attributing an unlabelled
+ * shot to some camera would put one camera's frames in another camera's verdict.
+ */
+export function colorCriticRenderInputs(input: {
+  clips: readonly Readonly<{
+    id: string
+    sourceArtifactId: string
+    cameraId?: string
+    sourceInFrame: number
+    sourceOutFrame: number
+    timelineInFrame: number
+    timelineOutFrame: number
+  }>[]
+  sources: readonly Readonly<{ artifactId: string; path: string; sha256: string; mediaType: string }>[]
+  /** Compiled ColorPlan targets, when the render was driven by a ColorPlan. */
+  compiledTargets?: readonly Readonly<ColorCriticSourceRef['pipeline']>[]
+  /** The per-source trusted compilation pipeline, when it was not. */
+  compilationPipelines?: ReadonlyMap<string, Readonly<ColorCriticSourceRef['pipeline']>>
+}): Readonly<{
+  clips: readonly Readonly<ColorCriticSubjectClip>[]
+  sources: readonly Readonly<ColorCriticSourceRef>[]
+}> {
+  const targetsByKey = new Map(
+    (input.compiledTargets ?? []).map((target) => [canonicalTargetKey(target.target), target]),
+  )
+  const pathByArtifact = new Map(
+    input.sources.filter((source) => source.mediaType === 'video').map((source) => [source.artifactId, source]),
+  )
+  const clips: ColorCriticSubjectClip[] = []
+  const sources = new Map<string, ColorCriticSourceRef>()
+  for (const clip of input.clips) {
+    if (!clip.cameraId) continue
+    const asset = pathByArtifact.get(clip.sourceArtifactId)
+    if (!asset) continue
+    const pipeline = targetsByKey.get(canonicalTargetKey({
+      sourceId: clip.sourceArtifactId.trim().toLowerCase(),
+      cameraId: clip.cameraId.trim().toLowerCase(),
+      segmentId: clip.id.trim().toLowerCase(),
+    })) ?? input.compilationPipelines?.get(clip.sourceArtifactId)
+    if (!pipeline) continue
+    clips.push(Object.freeze({
+      clipId: clip.id,
+      cameraId: clip.cameraId,
+      sourceArtifactId: clip.sourceArtifactId,
+      sourceInFrame: clip.sourceInFrame,
+      sourceOutFrame: clip.sourceOutFrame,
+      timelineInFrame: clip.timelineInFrame,
+      timelineOutFrame: clip.timelineOutFrame,
+    }))
+    if (!sources.has(clip.sourceArtifactId)) {
+      sources.set(clip.sourceArtifactId, Object.freeze({
+        artifactId: asset.artifactId,
+        path: asset.path,
+        sha256: asset.sha256,
+        pipeline,
+      }))
+    }
+  }
+  return Object.freeze({ clips: Object.freeze(clips), sources: Object.freeze([...sources.values()]) })
+}
+
+function canonicalTargetKey(target: Readonly<{ sourceId?: string; cameraId?: string; segmentId?: string }>): string {
+  return calculateCanonicalHash({
+    ...(target.sourceId ? { sourceId: target.sourceId } : {}),
+    ...(target.cameraId ? { cameraId: target.cameraId } : {}),
+    ...(target.segmentId ? { segmentId: target.segmentId } : {}),
+  })
 }
 
 export interface EvaluateColorCriticRequest {

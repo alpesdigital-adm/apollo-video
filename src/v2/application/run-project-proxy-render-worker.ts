@@ -25,7 +25,12 @@ import type { ProjectLutRenderMaterializer } from './ports/project-lut-render-ma
 import type { ProjectColorPlanRepository } from './ports/project-color-plan-repository.ts'
 import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
-import { evaluateRenderedProxy } from './render-workflow.ts'
+import {
+  colorCriticRenderInputs,
+  type EvaluateColorCriticRequest,
+  type EvaluateColorCriticResult,
+} from './color-critic.ts'
+import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow.ts'
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
@@ -61,6 +66,18 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
   telemetry?: OperationTelemetrySink
+  /**
+   * F4.014. When a deployment has the colour critic wired, the rendered proxy
+   * is judged before its review is written and the verdict lands as issues on
+   * that review: `reject` blocks the final export, `human-review` and
+   * `bounded-correction` hold it in `warning-ack-required` until a person
+   * acknowledges them. Optional, because a deployment without an evaluator has
+   * no colour verdict to report — but see `colourVerdictUnavailable` below for
+   * what happens when it is wired and cannot run.
+   */
+  colorCritic?: (request: EvaluateColorCriticRequest) => Promise<Readonly<EvaluateColorCriticResult>>
+  /** The capture session whose match plan named the reference camera, if any. */
+  colorCriticSessionId?: (context: { workspaceId: string; projectId: string }) => Promise<string | null>
   catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
@@ -289,6 +306,64 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         : await render()
       await enter('verifying')
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
+      // ---- F4.014. The colour verdict, taken on the bytes that were rendered ----
+      // Before promotion, because the critic reads the file the renderer wrote
+      // and the artifact id it will be promoted under is already known. The
+      // verdict becomes issues on the review below; it is never applied to the
+      // frames, so a rejected render is a blocked render, not a silently
+      // corrected one.
+      const colorCriticIssues: ProxyQualityIssue[] = []
+      if (dependencies.colorCritic) {
+        const criticInputs = colorCriticRenderInputs({
+          clips,
+          sources: source.renderSources.map((asset, index) => ({
+            artifactId: asset.artifactId,
+            path: materializedSources[index]!.path,
+            sha256: asset.sha256,
+            mediaType: asset.mediaType,
+          })),
+          ...(colorPlan ? { compiledTargets: colorPlan.compiled.targets } : {}),
+          compilationPipelines: new Map(
+            [...colorPipelines.entries()].map(([artifactId, compilation]) => [artifactId, compilation.pipeline]),
+          ),
+        })
+        if (criticInputs.clips.length > 0) {
+          try {
+            const sessionId = dependencies.colorCriticSessionId
+              ? await dependencies.colorCriticSessionId({ workspaceId: operation.workspaceId, projectId: context.projectId })
+              : null
+            const verdict = await dependencies.colorCritic({
+              workspaceId: operation.workspaceId,
+              projectId: context.projectId,
+              projectVersionId: context.projectVersionId,
+              deliveredArtifactId: context.outputArtifactId,
+              deliveredPath: rendered.outputPath,
+              deliveredSha256: rendered.sha256,
+              operationId: operation.id,
+              fps: source.editPlan.fps,
+              clips: criticInputs.clips,
+              sources: criticInputs.sources,
+              lutPaths: materializedLut.lutPaths,
+              ...(sessionId ? { sessionId } : {}),
+              signal: abortController.signal,
+            })
+            colorCriticIssues.push(...verdict.proxyIssues)
+          } catch (error) {
+            // ADR-147: evidence nobody could read is a decision, not an
+            // approval. A critic that was wired and could not run leaves the
+            // proxy waiting for a person rather than passing it through — and
+            // it does not fail the render, because a rendered file that nobody
+            // judged is still a rendered file.
+            colorCriticIssues.push(Object.freeze({
+              code: 'COLOR_CRITIC_UNAVAILABLE',
+              severity: 'warning',
+              category: 'technical',
+              message: `The colour critic could not evaluate this render (${error instanceof DomainError ? error.code : 'unknown'}); its colour was not judged.`,
+              correctable: false,
+            }))
+          }
+        }
+      }
       await enter('persisting')
       const stored = await dependencies.storage.promoteDerived({ workspaceId: operation.workspaceId, sourcePath: rendered.outputPath, sha256: rendered.sha256, extension: 'mp4', prefix: 'editorial-proxies' })
       const toolDigest = createHash('sha256')
@@ -364,7 +439,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
               subtitleSafeRegion: source.editPlan.composition.subtitleSafeRegion,
             }
           : {}),
-        criticIssues: source.criticIssues,
+        criticIssues: [...(source.criticIssues ?? []), ...colorCriticIssues],
         // The critic runs on the rendered proxy, after the geometry above was materialized, and
         // every issue it produces is bound to the exact plans that produced these frames.
         formatCritic: {
