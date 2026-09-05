@@ -809,7 +809,9 @@ test('T-F4.015 correlateAudioWindows finds each window of the candidate in the r
     correlationRate: 2_000,
   })
 
-  assert.equal(windows.length, Math.ceil(candidate.length / (sampleRate / 2)))
+  // Whole windows only: a partial tail window would be a shorter needle whose
+  // peak is not comparable with the rest.
+  assert.equal(windows.length, Math.floor((candidate.length - sampleRate) / (sampleRate / 2)) + 1)
   const errors = []
   for (const [index, window] of windows.entries()) {
     if (window.lagSamples === null) continue

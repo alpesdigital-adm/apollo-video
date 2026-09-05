@@ -1093,17 +1093,44 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
   assertDomain(ticks.length > 0, 'INVALID_ARGUMENT', 'a playback map cannot be built without observations')
 
   const verdicts = ticks.map((tick) => judgeWindow(tick, grouped.get(tick.toString())!, input.policy))
-  const runs = groupIntoRuns(verdicts, input.policy)
+  const allRuns = groupIntoRuns(verdicts, input.policy)
 
   // Boundaries are the first window of each run, with the first run pulled back
   // to zero and the last extended to the end of the recording. The detector's
   // resolution is its hop, and pretending to a finer boundary than the hop would
   // be reporting precision nobody measured.
-  const bounds: Readonly<TickInterval>[] = runs.map((run, index) => {
-    const start = index === 0 ? BigInt(0) : run.windows[0]!.tick
-    const end = index === runs.length - 1 ? duration : runs[index + 1]!.windows[0]!.tick
-    return createTickInterval(start, end)
-  })
+  const spans = allRuns.map((run, index) => ({
+    run,
+    start: index === 0 ? BigInt(0) : run.windows[0]!.tick,
+    end: index === allRuns.length - 1 ? duration : allRuns[index + 1]!.windows[0]!.tick,
+  }))
+
+  // A run of *absent* windows shorter than one window is the detector's own
+  // boundary, not a pause. Where one piece ends and the next begins, exactly one
+  // window straddles the seam and matches neither side well enough to lock — so
+  // the gap is evidence that one window covered two things, not evidence that
+  // the reference stopped. A *conflict* run is never absorbed this way: two
+  // plausible references is positive evidence of disagreement, and smoothing it
+  // away is precisely the invention this aggregate refuses.
+  const kept: { run: Run; start: bigint; end: bigint }[] = []
+  let carriedStart: bigint | null = null
+  for (const span of spans) {
+    const artefact = span.run.kind === 'absent' && span.end - span.start < input.policy.windowTicks
+    if (artefact) {
+      carriedStart = carriedStart ?? span.start
+      continue
+    }
+    kept.push({ run: span.run, start: carriedStart ?? span.start, end: span.end })
+    carriedStart = null
+  }
+  if (kept.length === 0) {
+    for (const span of spans) kept.push({ ...span })
+  } else if (carriedStart !== null) {
+    kept[kept.length - 1] = { ...kept[kept.length - 1]!, end: duration }
+  }
+
+  const runs = kept.map((entry) => entry.run)
+  const bounds: Readonly<TickInterval>[] = kept.map((entry) => createTickInterval(entry.start, entry.end))
 
   const lockedRuns = runs
     .map((run, index) => ({ run, index }))

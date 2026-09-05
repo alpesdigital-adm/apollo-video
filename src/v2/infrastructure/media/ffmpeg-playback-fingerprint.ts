@@ -62,6 +62,21 @@ export const PLAYBACK_FINGERPRINT_DEFAULTS = Object.freeze({
    */
   energyFloor: 0.01,
   /**
+   * Normalised correlation below which a window is not the reference, whatever
+   * its runner-up looked like.
+   *
+   * The peak-over-runner-up test cannot see this on its own: a window of pure
+   * room noise still has a best offset and a second-best one, and their ratio is
+   * routinely well above the admission floor. Measured on the F4.015 fixture
+   * (N=119 windows, one run): windows over reference audio peak between 0.699
+   * and 1.000, while windows over the reactor's own noise peak between 0.055 and
+   * 0.485 — with ratios up to 8.5. Only the two windows that *straddle* a
+   * boundary land in between (0.637, 0.674), and those are half reference by
+   * construction. Half the window's energy explained by the reference is the
+   * line this draws.
+   */
+  minimumPeak: 0.5,
+  /**
    * The rate the search actually runs at. 2 kHz gives a lag resolution of half a
    * millisecond, which is sixty times finer than a frame at 30 fps and a
    * thousand times finer than the hop.
@@ -210,9 +225,11 @@ export function correlateAudioWindows(
   const stride = Math.max(1, Math.floor(smallWindow / 8))
 
   const results: Readonly<AudioWindowCorrelation>[] = []
-  for (let start = 0; start < candidate.length; start += hopSamples) {
-    const rms = windowEnergy(candidate, start, Math.min(windowSamples, candidate.length - start)) /
-      Math.sqrt(Math.max(1, Math.min(windowSamples, candidate.length - start)))
+  // Whole windows only. A partial window at the tail would be measured against a
+  // shorter needle and produce a peak that is not comparable with the others,
+  // and downstream it would open a piece of its own out of an artefact.
+  for (let start = 0; start + windowSamples <= candidate.length; start += hopSamples) {
+    const rms = windowEnergy(candidate, start, windowSamples) / Math.sqrt(windowSamples)
     const smallStart = Math.floor(start / factor)
     const available = smallReference.length - smallWindow
     if (rms < energyFloor || available < 0 || smallStart + smallWindow > smallCandidate.length) {
@@ -293,6 +310,7 @@ export interface DetectPlaybackObservationsInput {
   readonly windowMs?: number
   readonly hopMs?: number
   readonly energyFloor?: number
+  readonly minimumPeak?: number
   readonly correlationRate?: number
 }
 
@@ -345,17 +363,21 @@ export class FfmpegPlaybackFingerprinter {
 
       const sampleTimebase = timebaseFromRate(sampleRate)
       const admission = DEFAULT_SYNC_EVIDENCE_THRESHOLDS.minimumPeakRatioForAdmission
+      const minimumPeak = input.minimumPeak ?? PLAYBACK_FINGERPRINT_DEFAULTS.minimumPeak
       return Object.freeze(correlations.map((correlation) => {
         const reactionTick = convertTick({
           tick: BigInt(correlation.startSample),
           from: sampleTimebase,
           to: input.reactionTimebase,
         })
-        // Below the floor or below the admission ratio, the window gets no
-        // reference tick at all. Reporting the best guess with a low confidence
-        // would put a number where there is no measurement, and the domain would
-        // have to reconstruct the absence from the confidence.
-        const locked = correlation.lagSamples !== null && correlation.peakRatio >= admission
+        // Below the energy floor, below the correlation floor, or below the
+        // admission ratio, the window gets no reference tick at all. Reporting
+        // the best guess with a low confidence would put a number where there is
+        // no measurement, and the domain would have to reconstruct the absence
+        // from the confidence.
+        const locked = correlation.lagSamples !== null &&
+          correlation.peak >= minimumPeak &&
+          correlation.peakRatio >= admission
         return Object.freeze({
           reactionTick,
           referenceTick: locked
