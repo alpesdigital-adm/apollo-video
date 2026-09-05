@@ -6,8 +6,11 @@ import {
   COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
   evaluateColorCritic,
   type ColorCriticCreativeIntent,
+  type ColorCriticDimension,
+  type ColorCriticIssue,
   type ColorCriticPolicy,
   type ColorCriticReport,
+  type ColorCriticSeverity,
   type ColorCriticSubject,
 } from '../domain/color-critic-report.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
@@ -469,6 +472,131 @@ export function evaluateColorCriticService(dependencies: {
       proxyIssues: colorCriticProxyIssues({ report: persisted.report, fps: request.fps, evidence: measured.evidence }),
       correctionsApplied,
       correctionBudgetExhausted: correctionsApplied >= COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+const COLOR_CRITIC_LISTING_MAX = 100
+
+/**
+ * The verdicts recorded about one project version, newest evaluation first.
+ *
+ * A list rather than "the latest": a project version can have been judged
+ * several times — a rejection, a bounded correction, the re-judgement after it —
+ * and the sequence is what shows whether the loop closed or ran out of budget.
+ */
+export function listColorCriticReportsService(dependencies: {
+  reports: Pick<ColorCriticReportRepository, 'listForProjectVersion'>
+}) {
+  return async function list(input: Readonly<{
+    workspaceId: string
+    projectId: string
+    projectVersionId: string
+    limit?: number
+  }>): Promise<Readonly<{
+    reports: readonly Readonly<ColorCriticReport>[]
+    correctionsApplied: number
+    correctionBudgetExhausted: boolean
+  }>> {
+    const limit = input.limit ?? 25
+    assertDomain(
+      Number.isSafeInteger(limit) && limit >= 1 && limit <= COLOR_CRITIC_LISTING_MAX,
+      'INVALID_ARGUMENT',
+      `limit must be between 1 and ${COLOR_CRITIC_LISTING_MAX}`,
+    )
+    const reports = await dependencies.reports.listForProjectVersion({
+      workspaceId: id(input.workspaceId, 'workspaceId'),
+      projectId: id(input.projectId, 'projectId'),
+      projectVersionId: id(input.projectVersionId, 'projectVersionId'),
+      limit,
+    })
+    // Counted here the same way `evaluate` counts it, off the same rows: how
+    // many bounded corrections a version has already had is what decides
+    // whether another one is allowed, and a reader deciding what to do next
+    // needs the same number the evaluator will use.
+    const correctionsApplied = reports.filter((report) => report.action === 'bounded-correction').length
+    return Object.freeze({
+      reports,
+      correctionsApplied,
+      correctionBudgetExhausted: correctionsApplied >= COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
+    })
+  }
+}
+
+export function readColorCriticReportService(dependencies: {
+  reports: Pick<ColorCriticReportRepository, 'read'>
+}) {
+  return async function read(input: Readonly<{
+    workspaceId: string
+    reportId: string
+  }>): Promise<Readonly<ColorCriticReport>> {
+    const report = await dependencies.reports.read({
+      workspaceId: id(input.workspaceId, 'workspaceId'),
+      reportId: id(input.reportId, 'reportId'),
+    })
+    if (!report) {
+      throw new DomainError(
+        'COLOR_CRITIC_REPORT_NOT_FOUND',
+        `Colour critic report ${input.reportId} was not found`,
+      )
+    }
+    return report
+  }
+}
+
+export interface ColorCriticIssueListing {
+  readonly reportId: string
+  readonly projectId: string
+  readonly projectVersionId: string
+  readonly action: ColorCriticReport['action']
+  readonly cause: ColorCriticReport['cause']
+  readonly referenceCameraId: string | null
+  readonly matchPlanId: string | null
+  readonly evaluatedAt: string
+  readonly reportHash: string
+  readonly issues: readonly Readonly<ColorCriticIssue>[]
+  /** Issues the filter excluded, so a narrowed list never reads as a clean one. */
+  readonly filteredOut: number
+}
+
+/**
+ * The issues of one verdict, each with the evidence it was reached over.
+ *
+ * The filters narrow what is shown and the count of what they removed travels
+ * with the answer: a reader who asked for hard issues and got none has to be
+ * able to tell that from a report with no issues at all.
+ */
+export function listColorCriticIssuesService(dependencies: {
+  reports: Pick<ColorCriticReportRepository, 'read'>
+}) {
+  const read = readColorCriticReportService(dependencies)
+  return async function list(input: Readonly<{
+    workspaceId: string
+    reportId: string
+    severity?: ColorCriticSeverity
+    dimension?: ColorCriticDimension
+  }>): Promise<Readonly<ColorCriticIssueListing>> {
+    const report = await read(input)
+    const issues = report.issues.filter((issue) => (
+      (input.severity === undefined || issue.severity === input.severity)
+      && (input.dimension === undefined || issue.dimension === input.dimension)
+    ))
+    return Object.freeze({
+      reportId: report.reportId,
+      projectId: report.projectId,
+      projectVersionId: report.projectVersionId,
+      action: report.action,
+      cause: report.cause,
+      referenceCameraId: report.referenceCameraId,
+      matchPlanId: report.matchPlanId,
+      evaluatedAt: report.evaluatedAt,
+      reportHash: report.reportHash,
+      issues: Object.freeze(issues),
+      filteredOut: report.issues.length - issues.length,
     })
   }
 }

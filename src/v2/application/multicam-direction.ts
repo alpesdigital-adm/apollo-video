@@ -14,11 +14,14 @@ import {
   DEFAULT_DIRECTION_POLICY,
   OUTPUT_ASPECT_RATIOS,
   VIDEO_ANGLE_ROLES,
+  type AngleCandidate,
   type DirectionPolicy,
+  type DirectionRule,
   type MulticamDirection,
   type MulticamShotCompilation,
   type OutputAspectRatio,
   type ProtectedSelection,
+  type ShotDecision,
 } from '../domain/multicam-direction.ts'
 import {
   createMulticamEvidenceSet,
@@ -1326,6 +1329,213 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
       directionVersion: persisted.version,
       compilation,
       evidenceReplayed: evidence.replayed,
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+/**
+ * How one link of the direction chain is named on the wire.
+ *
+ * The same shape `diagnosticVersionId` uses (`sync-diagnostic-contract.ts:85`),
+ * for the same reason: a caller that fences on a derivation names the pair, and
+ * a bare number would not say which chain it belongs to.
+ */
+export function directionVersionRef(sessionId: string, version: number): string {
+  return `${sessionId}:direction:v${version}`
+}
+
+export interface MulticamDirectionRead {
+  readonly direction: Readonly<MulticamDirection>
+  readonly version: number
+  readonly previousVersionHash: string | null
+  readonly versionRef: string
+  /** False when an older link was read: what it says is history, not the cut. */
+  readonly isHead: boolean
+}
+
+export type MulticamDirectionReader = Pick<MulticamDirectionRepository, 'readHead' | 'readVersion'>
+
+export interface MulticamDirectionReadRequest {
+  readonly workspaceId: string
+  readonly sessionId: string
+  /** Omitted reads the head. Naming a version reads exactly that link. */
+  readonly version?: number
+}
+
+/**
+ * The head is read even when an older version was asked for.
+ *
+ * Two reads rather than one because `isHead` is the difference between "this is
+ * the cut" and "this is what the cut used to be", and a reader looking at a
+ * superseded direction with no way to tell would quote a rejected angle as the
+ * current one. The extra read is a primary-key lookup; the ambiguity it removes
+ * is the whole reason the chain is immutable.
+ */
+async function readDirection(
+  directions: MulticamDirectionReader,
+  input: Readonly<MulticamDirectionReadRequest>,
+): Promise<Readonly<MulticamDirectionRead>> {
+  const head = await directions.readHead({ workspaceId: input.workspaceId, sessionId: input.sessionId })
+  if (!head) {
+    throw new DomainError(
+      'MULTICAM_DIRECTION_NOT_FOUND',
+      `Capture session ${input.sessionId} has not been directed across its cameras`,
+    )
+  }
+  if (input.version !== undefined) {
+    assertDomain(
+      Number.isSafeInteger(input.version) && input.version >= 1,
+      'INVALID_ARGUMENT',
+      'version must be a positive integer link of the direction chain',
+    )
+  }
+  const stored = input.version === undefined || input.version === head.version
+    ? head
+    : await directions.readVersion({
+      workspaceId: input.workspaceId,
+      sessionId: input.sessionId,
+      version: input.version,
+    })
+  if (!stored) {
+    throw new DomainError(
+      'MULTICAM_DIRECTION_NOT_FOUND',
+      `Capture session ${input.sessionId} has no direction version ${input.version}`,
+      { currentVersion: head.version, currentHash: head.direction.directionHash },
+    )
+  }
+  return Object.freeze({
+    direction: stored.direction,
+    version: stored.version,
+    previousVersionHash: stored.previousVersionHash,
+    versionRef: directionVersionRef(input.sessionId, stored.version),
+    isHead: stored.version === head.version,
+  })
+}
+
+export function readMulticamDirectionService(dependencies: { directions: MulticamDirectionReader }) {
+  return async function read(
+    input: Readonly<MulticamDirectionReadRequest>,
+  ): Promise<Readonly<MulticamDirectionRead>> {
+    return readDirection(dependencies.directions, input)
+  }
+}
+
+const DIRECTION_LISTING_MAX = 200
+
+function assertListingWindow(input: Readonly<{ startTicks?: bigint; endTicks?: bigint; limit?: number }>): number {
+  const limit = input.limit ?? 25
+  assertDomain(
+    Number.isSafeInteger(limit) && limit >= 1 && limit <= DIRECTION_LISTING_MAX,
+    'INVALID_ARGUMENT',
+    `limit must be between 1 and ${DIRECTION_LISTING_MAX}`,
+  )
+  assertDomain(
+    input.startTicks === undefined || input.endTicks === undefined || input.startTicks < input.endTicks,
+    'INVALID_ARGUMENT',
+    'startTicks must be before endTicks',
+  )
+  return limit
+}
+
+/** Half-open overlap, the comparison every range in this domain is read with. */
+function overlapsWindow(
+  range: Readonly<TickInterval>,
+  window: Readonly<{ startTicks?: bigint; endTicks?: bigint }>,
+): boolean {
+  return (window.startTicks === undefined || range.end > window.startTicks)
+    && (window.endTicks === undefined || range.start < window.endTicks)
+}
+
+export interface MulticamAngleCandidateWindow {
+  readonly shotId: string
+  readonly ordinal: number
+  readonly sessionRange: Readonly<TickInterval>
+  readonly rule: DirectionRule
+  readonly chosenCandidateId: string
+  /**
+   * Every track evaluated over this shot, chosen and rejected alike, each with
+   * its own eligibility and rejection reasons (ADR-118).
+   */
+  readonly candidates: readonly Readonly<AngleCandidate>[]
+}
+
+export interface MulticamAngleCandidateListing extends MulticamDirectionRead {
+  readonly windows: readonly Readonly<MulticamAngleCandidateWindow>[]
+  /** Shots inside the asked-for range that the limit left out. */
+  readonly omittedWindows: number
+}
+
+/**
+ * What was on offer at each instant of a range, and why the rest lost.
+ *
+ * Read out of the stored direction rather than re-derived: re-running the
+ * scorer to answer "why was camera B rejected?" would answer about today's
+ * evidence, not about the evidence the cut was made from.
+ */
+export function listMulticamAngleCandidatesService(dependencies: { directions: MulticamDirectionReader }) {
+  return async function list(input: Readonly<MulticamDirectionReadRequest & {
+    startTicks?: bigint
+    endTicks?: bigint
+    /** Keep only the candidacies of one track, in every window it was offered. */
+    trackId?: string
+    limit?: number
+  }>): Promise<Readonly<MulticamAngleCandidateListing>> {
+    const limit = assertListingWindow(input)
+    const read = await readDirection(dependencies.directions, input)
+    const matching = read.direction.shots
+      .filter((shot) => overlapsWindow(shot.sessionRange, input))
+      .map((shot) => Object.freeze({
+        shotId: shot.shotId,
+        ordinal: shot.ordinal,
+        sessionRange: shot.sessionRange,
+        rule: shot.rule,
+        chosenCandidateId: shot.chosen.candidateId,
+        candidates: Object.freeze(input.trackId === undefined
+          ? [...shot.evaluated]
+          : shot.evaluated.filter((candidate) => candidate.trackId === input.trackId)),
+      }))
+      // A track filter that leaves a window with nothing to say drops the
+      // window: an empty candidate list would read as "this track was evaluated
+      // here and lost", which is a different fact from "it was never offered".
+      .filter((window) => window.candidates.length > 0)
+    return Object.freeze({
+      ...read,
+      windows: Object.freeze(matching.slice(0, limit)),
+      omittedWindows: Math.max(0, matching.length - limit),
+    })
+  }
+}
+
+export interface MulticamShotDecisionListing extends MulticamDirectionRead {
+  readonly shots: readonly Readonly<ShotDecision>[]
+  readonly omittedShots: number
+}
+
+/**
+ * The decisions themselves: rule, justification, alternatives, evidence.
+ *
+ * Separate from the candidate listing because they answer different questions
+ * and carry very different weight — a shot decision is a sentence and a handful
+ * of losers, while the candidacies behind it are every measurement the scorer
+ * read.
+ */
+export function listMulticamShotDecisionsService(dependencies: { directions: MulticamDirectionReader }) {
+  return async function list(input: Readonly<MulticamDirectionReadRequest & {
+    startTicks?: bigint
+    endTicks?: bigint
+    limit?: number
+  }>): Promise<Readonly<MulticamShotDecisionListing>> {
+    const limit = assertListingWindow(input)
+    const read = await readDirection(dependencies.directions, input)
+    const matching = read.direction.shots.filter((shot) => overlapsWindow(shot.sessionRange, input))
+    return Object.freeze({
+      ...read,
+      shots: Object.freeze(matching.slice(0, limit)),
+      omittedShots: Math.max(0, matching.length - limit),
     })
   }
 }

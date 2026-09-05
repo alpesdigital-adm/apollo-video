@@ -916,3 +916,79 @@ export function addMulticamMatchRangeOverrideService(dependencies: {
     })
   }
 }
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
+/**
+ * How one link of the match-plan chain is named on the wire.
+ *
+ * `MulticamMatchPlan` carries no version of its own, so a caller fencing an
+ * override has to name the pair; this is the half that says which chain and
+ * which link, and `planHash` is the half a reused number cannot forge.
+ */
+export function matchPlanVersionRef(sessionId: string, version: number): string {
+  return `${sessionId}:match:v${version}`
+}
+
+export interface MulticamMatchPlanRead {
+  readonly plan: Readonly<MulticamMatchPlan>
+  readonly version: number
+  readonly previousVersionHash: string | null
+  readonly versionRef: string
+  /** False when an older link was read: those transforms are no longer applied. */
+  readonly isHead: boolean
+}
+
+export type MulticamMatchPlanReader = Pick<MulticamMatchPlanRepository, 'readHead' | 'readVersion'>
+
+/**
+ * Read one link of a session's match plan.
+ *
+ * The head is read even when an older version was asked for, so the answer can
+ * say whether what it carries is the correction in force or the correction that
+ * used to be — the difference between a delta an operator can act on and one
+ * that would undo somebody's amendment.
+ */
+export function readMulticamMatchPlanService(dependencies: { plans: MulticamMatchPlanReader }) {
+  return async function read(input: Readonly<{
+    workspaceId: string
+    projectId: string
+    sessionId: string
+    version?: number
+  }>): Promise<Readonly<MulticamMatchPlanRead>> {
+    const scope = { workspaceId: input.workspaceId, projectId: input.projectId, sessionId: input.sessionId }
+    const head = await dependencies.plans.readHead(scope)
+    if (!head) {
+      throw new DomainError(
+        'MULTICAM_MATCH_PLAN_NOT_FOUND',
+        `No multicam match plan has been derived for session ${input.sessionId}`,
+      )
+    }
+    if (input.version !== undefined) {
+      assertDomain(
+        Number.isSafeInteger(input.version) && input.version >= 1,
+        'INVALID_ARGUMENT',
+        'version must be a positive integer link of the match plan chain',
+      )
+    }
+    const stored = input.version === undefined || input.version === head.version
+      ? head
+      : await dependencies.plans.readVersion({ ...scope, version: input.version })
+    if (!stored) {
+      throw new DomainError(
+        'MULTICAM_MATCH_PLAN_NOT_FOUND',
+        `Session ${input.sessionId} has no match plan version ${input.version}`,
+        { currentVersion: head.version, currentHash: head.plan.planHash },
+      )
+    }
+    return Object.freeze({
+      plan: stored.plan,
+      version: stored.version,
+      previousVersionHash: stored.previousVersionHash,
+      versionRef: matchPlanVersionRef(input.sessionId, stored.version),
+      isHead: stored.version === head.version,
+    })
+  }
+}
