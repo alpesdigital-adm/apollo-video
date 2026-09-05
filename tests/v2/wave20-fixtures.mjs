@@ -663,8 +663,13 @@ export function buildDirectableMulticamWorld({ workspaceId, sessionId, projectId
     lineage: lineage('create-session', 'command-create'),
     createdAt: at(0),
   })
+  // Every link of the chain is kept, not only the head: a repository that
+  // appends versions refuses to start at version 6, so a suite that stores this
+  // session has to walk it the way the operator built it.
+  const versions = [session]
   for (const [index, entry] of [cameraA, cameraB, screen, micA, micB].entries()) {
     session = addCaptureSessionTrack(session, { track: entry, lineage: lineage('add-track', `command-add-${index}`) })
+    versions.push(session)
   }
 
   const clock = createSessionClock({
@@ -712,7 +717,7 @@ export function buildDirectableMulticamWorld({ workspaceId, sessionId, projectId
     generatedAt: at(120),
   })
 
-  return { session, clock, coverages, clockMaps, diagnostic }
+  return { session, versions, clock, coverages, clockMaps, diagnostic }
 }
 
 export const fixtureInstant = at

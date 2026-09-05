@@ -65,6 +65,7 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
 import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
+import type { MulticamDirectionCommandRepository } from '../application/ports/multicam-direction-command-repository.ts'
 import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
 import type {
   CameraColorMeasurementRepository,
@@ -244,6 +245,7 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
 import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
 import { PrismaMulticamDirectionRepository } from './prisma/multicam-direction-repository.ts'
 import {
   PrismaCameraColorMeasurementRepository,
@@ -2254,6 +2256,10 @@ export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
 
 export function createMulticamDirectionRepository(): MulticamDirectionRepository {
   return new PrismaMulticamDirectionRepository(resolveV2Client())
+}
+
+export function createMulticamDirectionCommandRepository(): MulticamDirectionCommandRepository {
+  return new PrismaMulticamDirectionCommandRepository(resolveV2Client())
 }
 
 export function createCameraColorMeasurementRepository(): CameraColorMeasurementRepository {

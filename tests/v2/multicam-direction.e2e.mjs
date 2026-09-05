@@ -307,3 +307,319 @@ test(
     console.log(`multicam direction e2e versions=${(await repository.listVersions({ workspaceId, sessionId })).length} superseded=${dependents[0].version} head=${current[0].version}`)
   },
 )
+
+test(
+  'E2E-FR-150 the direction command writes a version, a plan and a Command that the database agrees with',
+  { skip: RUN ? false : 'set APOLLO_MULTICAM_DIRECTION_E2E=1 with a migrated V2_DATABASE_URL' },
+  async (t) => {
+    const { randomUUID } = await import('node:crypto')
+    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
+    const { PrismaCaptureSessionRepository } = await import('../../src/v2/infrastructure/prisma/capture-session-repository.ts')
+    const { PrismaSyncDiagnosticRepository } = await import('../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts')
+    const { PrismaCaptureProtocolRepository } = await import('../../src/v2/infrastructure/prisma/capture-protocol-repository.ts')
+    const { PrismaMulticamDirectionRepository } = await import('../../src/v2/infrastructure/prisma/multicam-direction-repository.ts')
+    const { PrismaMulticamDirectionCommandRepository } = await import('../../src/v2/infrastructure/prisma/multicam-direction-command-repository.ts')
+    const { deriveMulticamEvidenceService, directMulticamSessionService } = await import('../../src/v2/application/multicam-direction.ts')
+    const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+    const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+    const { createDesiredAction, createDesiredActionReference } = await import('../../src/v2/domain/desired-action.ts')
+    const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
+    const { buildDirectableMulticamWorld, fixtureSeconds } = await import('./wave20-fixtures.mjs')
+
+    const client = new PrismaClient()
+    const workspaceId = 'md-journey-workspace'
+    const projectId = 'md-journey-project'
+    const sessionId = 'md-journey-session'
+    const versionId = 'md-journey-version-1'
+    const clientId = 'md-journey-client'
+    const at = (second) => new Date(Date.parse('2029-07-01T09:00:00.000Z') + second * 1_000)
+
+    // A project version names the Command that produced it and a Command names
+    // the version it was based on, so neither table can be emptied while the
+    // other still points at it. The two references are cleared first; this is
+    // the order a fresh reader gets wrong, which is why it is written down.
+    const clean = async () => {
+      await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
+      await client.v2ProjectVersion.updateMany({ where: { workspaceId }, data: { commandId: null } })
+      for (const table of [
+        client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
+        client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
+        client.v2MulticamDirectionHead, client.v2MulticamDirection,
+        client.v2MulticamObservation, client.v2MulticamEvidenceSet,
+        client.v2SyncDiagnosticHead, client.v2SyncDiagnostic,
+        client.v2CaptureClockMap, client.v2CaptureTrackCoverage,
+        client.v2CaptureSessionClock, client.v2CaptureSyncEvidence,
+        client.v2CaptureSessionVersion, client.v2CaptureSessionHead,
+        client.v2CommandArtifactInvalidation, client.v2PublicEventOutbox,
+        client.v2EditCommand, client.v2ProjectVersion,
+        client.v2ProjectMediaAsset, client.v2ProjectSnapshot,
+        client.v2MediaArtifactManifest, client.v2MediaArtifact,
+        client.v2Project,
+      ]) {
+        await table.deleteMany({ where: { workspaceId } })
+      }
+      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    }
+    t.after(async () => {
+      try {
+        await clean()
+      } catch (error) {
+        console.error('journey cleanup failed:', error?.message ?? error)
+      } finally {
+        await client.$disconnect()
+      }
+    })
+    await clean()
+
+    const world = buildDirectableMulticamWorld({ workspaceId, sessionId, projectId, endSecond: 60 })
+
+    await new PrismaWorkspaceRepository(client).create(createWorkspace({
+      id: workspaceId, slug: workspaceId, name: 'Multicam journey', status: 'active', createdAt: at(0).toISOString(),
+    }))
+    await client.v2Project.create({
+      data: {
+        id: projectId, workspaceId, name: 'Multicam journey', status: 'reviewing-proxy',
+        objective: 'warming', format: '16:9', locale: 'pt-BR',
+        createdByType: 'api-client', createdById: clientId, createdAt: at(0), updatedAt: at(0),
+      },
+    })
+    // Every recording the direction may cut has to be a linked, available
+    // project asset with a probed cadence, or `hydrateSource` refuses the render
+    // that follows (`project-proxy-render-repository.ts:111-141`).
+    for (const track of world.session.tracks) {
+      const artifactId = track.sourceAssetId
+      const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
+      await client.v2MediaArtifact.create({
+        data: {
+          id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.mp4`,
+          sha256: 'b'.repeat(64), byteSize: BigInt(4096), mediaType, container: 'mp4',
+          status: 'available', createdAt: at(0),
+        },
+      })
+      await client.v2MediaArtifactManifest.create({
+        data: {
+          id: `manifest-${artifactId}`, workspaceId, artifactId, schemaVersion: 'media-artifact-manifest/v1',
+          manifestHash: 'c'.repeat(64), recipeId: 'capture-ingest', recipeVersion: '1.0.0',
+          parametersHash: 'd'.repeat(64),
+          manifestJson: JSON.stringify({
+            artifact: { artifactKey: `artifacts/${artifactId}.mp4` },
+            probe: { duration: 60, fps: 30, rFrameRate: '30/1' },
+          }),
+          createdAt: at(0),
+        },
+      })
+      await client.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(), workspaceId, projectId, artifactId,
+          role: artifactId === 'asset-cam-a' ? 'source-master' : 'selected-insert',
+          originalFileName: `${artifactId}.mp4`, createdAt: at(0),
+        },
+      })
+    }
+
+    const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'warming' }))
+    const baseClips = [{
+      id: 'clip-base-0001', sourceArtifactId: 'asset-cam-a',
+      sourceInFrame: 0, sourceOutFrame: 900, timelineInFrame: 0, timelineOutFrame: 900, rate: 1,
+    }]
+    const basePlan = {
+      schemaVersion: 2, state: 'compiled', id: `edit-plan-${versionId}`, projectVersionId: versionId,
+      storyPlanId: 'story-journey', treatmentPlanId: 'treatment-journey', directorRunId: 'director-run-journey',
+      fps: 30, durationFrames: 900,
+      sources: [{ id: 'asset-cam-a', artifactId: 'asset-cam-a', kind: 'video', durationSeconds: 60 }],
+      videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: baseClips }],
+      overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], transitions: [],
+      markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
+      lineageRefs: ['asset-cam-a'],
+      editorial: { commandType: 'source-ingest', exclusions: [], retainedSourceRanges: [] },
+      retimedTranscript: { sourceTranscriptId: 'transcript-journey', words: [] },
+      movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
+      subtitlePolicy: { faceProtection: true, anchor: 'bottom', maxCharactersPerBlock: 42 },
+      composition: {
+        layout: 'landscape-inset', background: 'blurred-source', foregroundScale: 1, verticalPosition: 0.5,
+        faceSafeFallback: [0.14, 0.08, 0.72, 0.56], subtitleSafeRegion: [0.08, 0.7, 0.84, 0.24],
+      },
+      director: { plannerVersion: 'journey-planner/v1', decisions: [], assumptions: [] },
+      desiredActionRef,
+      audioTimelineHash: createEditorialAudioTimelineHash({ fps: 30, clips: baseClips }),
+      createdAt: at(0).toISOString(),
+    }
+    for (const [kind, content] of [['brief', { kind: 'brief' }], ['policies', { kind: 'policies' }]]) {
+      await client.v2ProjectSnapshot.create({
+        data: {
+          id: `md-journey-snapshot-${kind}`, workspaceId, projectId, kind, schemaVersion: 1,
+          contentJson: stableSerialize(content), contentHash: calculateVersionHash(content), createdAt: at(0),
+        },
+      })
+    }
+    await client.v2ProjectSnapshot.create({
+      data: {
+        id: 'md-journey-snapshot-edit-plan', workspaceId, projectId, kind: 'edit-plan', schemaVersion: 2,
+        contentJson: stableSerialize(basePlan), contentHash: calculateVersionHash(basePlan), createdAt: at(0),
+      },
+    })
+    const baseHash = calculateVersionHash({ projectId, sequence: 1, editPlanHash: calculateVersionHash(basePlan) })
+    await client.v2ProjectVersion.create({
+      data: {
+        id: versionId, workspaceId, projectId, sequence: 1,
+        briefSnapshotId: 'md-journey-snapshot-brief',
+        editPlanSnapshotId: 'md-journey-snapshot-edit-plan',
+        policiesSnapshotId: 'md-journey-snapshot-policies',
+        baseHash, createdBy: clientId, createdAt: at(0),
+      },
+    })
+    await client.v2Project.update({ where: { id: projectId }, data: { currentVersionId: versionId } })
+
+    // The session and its derivations, through the repositories Wave 18/19 own.
+    const sessions = new PrismaCaptureSessionRepository(client)
+    for (const version of world.versions) {
+      await sessions.appendVersion({
+        session: version,
+        ...(version.version > 1 ? { expectedVersion: version.version - 1 } : {}),
+        occurredAt: at(1).toISOString(),
+      })
+    }
+    await sessions.persistClock({ workspaceId, clock: world.clock, createdAt: at(1).toISOString() })
+    for (const map of world.clockMaps) await sessions.persistClockMap({ map, createdAt: at(1).toISOString() })
+    for (const coverage of world.coverages) {
+      await sessions.persistCoverage({ coverage, sessionId, createdAt: at(1).toISOString() })
+    }
+    const diagnostics = new PrismaSyncDiagnosticRepository(client)
+    await diagnostics.appendVersion({ diagnostic: world.diagnostic, occurredAt: at(2).toISOString() })
+
+    const directions = new PrismaMulticamDirectionRepository(client)
+    const commands = new PrismaMulticamDirectionCommandRepository(client)
+    const released = []
+    const deriveEvidence = deriveMulticamEvidenceService({
+      sessions,
+      directions,
+      diarization: {
+        async listLatestRunsForArtifacts({ sourceArtifactIds }) {
+          return [
+            {
+              runId: 'md-journey-diarization-a', sourceArtifactId: 'asset-mic-a', provider: 'fixture',
+              producedAt: at(3).toISOString(),
+              segments: [{ segmentId: 'seg-1', ordinal: 0, speakerKey: 'cluster-a', startMs: 1000, endMs: 25000 }],
+            },
+            {
+              runId: 'md-journey-diarization-b', sourceArtifactId: 'asset-mic-b', provider: 'fixture',
+              producedAt: at(3).toISOString(),
+              segments: [{ segmentId: 'seg-2', ordinal: 0, speakerKey: 'cluster-b', startMs: 25000, endMs: 50000 }],
+            },
+          ].filter((run) => sourceArtifactIds.includes(run.sourceArtifactId))
+        },
+      },
+      visual: {
+        async measure({ windows }) {
+          return windows.map((window) => ({
+            ...window,
+            sampledFrameCount: 30,
+            activityBps: window.trackId === 'track-screen' ? 3100 : null,
+            sharpnessBps: null,
+            stabilityBps: 9000,
+            exposureBps: 8500,
+            method: 'fixture/signalstats',
+            evidenceRef: `media-artifact:${window.sourceArtifactId}:${window.sourceStartMs}-${window.sourceEndMs}`,
+          }))
+        },
+      },
+      media: {
+        async resolve({ part }) {
+          return {
+            path: `C:/materialized/${part.sourceAssetId}.mp4`,
+            release: async () => { released.push(part.sourceAssetId) },
+          }
+        },
+      },
+      clock: () => at(4),
+      evidenceWindowMs: 30000,
+    })
+    let issued = 0
+    const execute = directMulticamSessionService({
+      sessions,
+      diagnostics,
+      protocols: new PrismaCaptureProtocolRepository(client),
+      directions,
+      commands,
+      deriveEvidence,
+      clock: () => at(10),
+      createId: (prefix) => `${prefix}-md-journey-${(issued += 1)}`,
+      createEventId: () => randomUUID(),
+    })
+    const identity = {
+      clientId, credentialId: 'md-journey-credential', workspaceId, environment: 'sandbox',
+      delegatedUserId: 'md-journey-member', delegatedIdentityId: 'md-journey-identity', workspaceRole: 'administrator',
+    }
+    const actor = {
+      ...identity, scopes: new Set(['projects:write']), authenticationKind: 'ui-session',
+      clientAccessStatus: 'active', workspaceAccessStatus: 'active',
+      clientKillSwitchEngaged: false, workspaceKillSwitchEngaged: false,
+      auditContext: createExternalAuditContext(identity),
+    }
+    const request = {
+      workspaceId, projectId, sessionId, baseVersionId: versionId, baseHash,
+      format: { aspectRatio: '16:9' },
+      range: { sessionStartTicks: fixtureSeconds(1).toString(), sessionEndTicks: fixtureSeconds(55).toString() },
+      actor, idempotency: { clientId, key: 'md-journey-idem-1' },
+    }
+
+    const result = await execute(request)
+    assert.equal(result.replayed, false)
+    assert.equal(result.version.sequence, 2)
+    assert.ok(result.editPlan.sources.length >= 2, 'the stored plan really is multi-source')
+    assert.ok(released.length > 0, 'every materialized recording was handed back')
+
+    // The database agrees with what came back.
+    const project = await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })
+    assert.equal(project.currentVersionId, result.version.id, 'the project advanced to the new version')
+    const storedVersion = await client.v2ProjectVersion.findUniqueOrThrow({
+      where: { id: result.version.id }, include: { editPlanSnapshot: true },
+    })
+    const storedPlan = JSON.parse(storedVersion.editPlanSnapshot.contentJson)
+    assert.equal(
+      storedVersion.editPlanSnapshot.contentHash,
+      calculateVersionHash(storedPlan),
+      'the snapshot hash covers the bytes stored',
+    )
+    assert.equal(storedPlan.director.plannerVersion, 'multicam-direction-planner/2026-09-v1')
+    assert.ok(storedPlan.director.decisions.some((decision) => decision.category === 'angle'))
+    const storedClips = storedPlan.videoTracks[0].clips
+    assert.equal(storedClips.length, result.direction.shots.length)
+    assert.ok(new Set(storedClips.map((clip) => clip.sourceArtifactId)).size >= 2)
+    // The union `hydrateSource` will build, against the links the project has.
+    const referenced = [...new Set(storedClips.flatMap((clip) => [
+      clip.sourceArtifactId,
+      clip.audioSourceArtifactId ?? clip.sourceArtifactId,
+    ]))]
+    const linked = await client.v2ProjectMediaAsset.findMany({
+      where: { workspaceId, projectId, artifactId: { in: referenced } },
+      include: { artifact: true },
+    })
+    assert.equal(linked.length, referenced.length, 'every referenced recording is a linked project asset')
+    assert.ok(linked.every((asset) => asset.artifact.status === 'available'))
+
+    const storedCommand = await client.v2EditCommand.findUniqueOrThrow({ where: { id: result.command.id } })
+    assert.equal(storedCommand.type, 'direct-multicam-session')
+    assert.equal(JSON.parse(storedCommand.payloadJson).directionHash, result.direction.directionHash)
+    const storedDirection = await directions.readHead({ workspaceId, sessionId })
+    assert.equal(storedDirection.direction.directionHash, result.direction.directionHash)
+    const events = await client.v2PublicEventOutbox.findMany({ where: { workspaceId } })
+    assert.equal(events.length, 1)
+    assert.equal(JSON.parse(events[0].dataJson).sessionId, sessionId)
+
+    // A retry of the same request returns the same version and writes nothing.
+    const replay = await execute(request)
+    assert.equal(replay.replayed, true)
+    assert.equal(replay.version.id, result.version.id)
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2, 'no third version appeared')
+    assert.equal(await client.v2EditCommand.count({ where: { workspaceId } }), 1)
+
+    // And the fence: the old base is stale now that the project moved.
+    await assert.rejects(
+      () => execute({ ...request, idempotency: { clientId, key: 'md-journey-idem-2' } }),
+      (error) => error.code === 'VERSION_CONFLICT' && error.details.currentVersionId === result.version.id,
+    )
+    console.log(`multicam journey version=${result.version.sequence} clips=${storedClips.length} sources=${storedPlan.sources.length} decisions=${storedPlan.director.decisions.length} events=${events.length}`)
+  },
+)
