@@ -411,11 +411,9 @@ interface SourceWindowResolver {
 }
 
 interface DirectionContext extends SourceWindowResolver {
-  readonly session: Readonly<CaptureSession>
   readonly resolved: Readonly<ResolvedDirectionPolicy>
   readonly format: Readonly<{ aspectRatio: OutputAspectRatio }>
   readonly coverageByTrack: ReadonlyMap<string, Readonly<TrackCoverage>>
-  readonly mapBySource: ReadonlyMap<string, Readonly<PiecewiseClockMap>>
   readonly diagnostic: Readonly<SyncDiagnostic>
   readonly ceiling: SyncCeiling | null
   readonly sessionAutoEdit: Readonly<{ allowed: boolean; blockedBy: readonly string[] }>
@@ -1406,6 +1404,10 @@ function shotEvidenceRefs(ctx: DirectionContext, chosen: Readonly<AngleCandidate
     if (typeof entry === 'number') continue
     for (const ref of entry.evidenceRefs) refs.add(ref)
   }
+  // Thirty-two is not a round number chosen here: `createDecisionConfidence`
+  // (`decision-confidence.ts:41-43`) refuses a decision with more than 32
+  // evidence refs, and every ref must match its REF grammar (`:29`). A shot that
+  // cited more would be unpersistable as a Director decision.
   return Object.freeze([...refs].sort().slice(0, 32))
 }
 
