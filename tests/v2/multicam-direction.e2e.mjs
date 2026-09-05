@@ -625,3 +625,271 @@ test(
     console.log(`multicam journey version=${result.version.sequence} clips=${storedClips.length} sources=${storedPlan.sources.length} decisions=${storedPlan.director.decisions.length} events=${events.length}`)
   },
 )
+
+test(
+  'E2E-FR-150 the direction reads persisted diarization through the real adapter, and refuses a row edited underneath it',
+  { skip: RUN ? false : 'set APOLLO_MULTICAM_DIRECTION_E2E=1 with a migrated V2_DATABASE_URL' },
+  async (t) => {
+    // The adapter the slice's speech evidence comes from was executed by
+    // nothing: both the unit suite and the journey below substituted a
+    // hand-written double, so neither the query nor the hash verification had
+    // ever run. This is that adapter, against real rows.
+    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { PrismaWorkspaceRepository } = await import('../../src/v2/infrastructure/prisma/workspace-repository.ts')
+    const { PrismaMulticamDiarizationSource } = await import('../../src/v2/infrastructure/prisma/multicam-diarization-source.ts')
+    const { createSpeakerDiarizationRun } = await import('../../src/v2/domain/speaker-diarization.ts')
+    const { stableSerialize } = await import('../../src/v2/application/version-hash.ts')
+    const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
+
+    const client = new PrismaClient()
+    const workspaceId = 'md-diar-workspace'
+    const projectId = 'md-diar-project'
+    const clientId = 'md-diar-client'
+    const artifactId = 'md-diar-artifact'
+    const at = (second) => new Date(Date.parse('2029-08-01T09:00:00.000Z') + second * 1_000)
+    const sha = (seed) => seed.repeat(64).slice(0, 64)
+
+    const clean = async () => {
+      for (const table of [
+        client.v2SpeakerDiarizationSegment, client.v2SpeakerDiarizationRun,
+        client.v2LongFormIndexWorkflow, client.v2PublicOperation,
+        client.v2MediaTranscript, client.v2MediaArtifactManifest, client.v2MediaArtifact,
+        client.v2Project, client.v2ApiClient,
+      ]) {
+        await table.deleteMany({ where: { workspaceId } })
+      }
+      await client.v2Workspace.deleteMany({ where: { id: workspaceId } })
+    }
+    t.after(async () => {
+      try {
+        await clean()
+      } catch (error) {
+        console.error('diarization cleanup failed:', error?.message ?? error)
+      } finally {
+        await client.$disconnect()
+      }
+    })
+    await clean()
+
+    await new PrismaWorkspaceRepository(client).create(createWorkspace({
+      id: workspaceId, slug: workspaceId, name: 'Multicam diarization', status: 'active', createdAt: at(0).toISOString(),
+    }))
+    await client.v2ApiClient.create({
+      data: {
+        id: clientId, workspaceId, name: 'Multicam diarization client',
+        allowedEnvironmentsJson: JSON.stringify(['sandbox']), scopeGrantsJson: JSON.stringify([]),
+        createdBy: 'md-diar-operator', createdAt: at(0), updatedAt: at(0),
+      },
+    })
+    await client.v2Project.create({
+      data: {
+        id: projectId, workspaceId, name: 'Multicam diarization', status: 'reviewing-proxy',
+        objective: 'discovery', format: '16:9', locale: 'pt-BR',
+        createdByType: 'api-client', createdById: clientId, createdAt: at(0), updatedAt: at(0),
+      },
+    })
+    await client.v2MediaArtifact.create({
+      data: {
+        id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.wav`,
+        sha256: sha('a'), byteSize: BigInt(8192), mediaType: 'audio', container: 'wav',
+        status: 'available', createdAt: at(0),
+      },
+    })
+    await client.v2MediaArtifactManifest.create({
+      data: {
+        id: 'md-diar-manifest', workspaceId, artifactId, schemaVersion: 'media-artifact-manifest/v1',
+        manifestHash: sha('b'), recipeId: 'capture-ingest', recipeVersion: '1.0.0', parametersHash: sha('c'),
+        manifestJson: JSON.stringify({ probe: { duration: 60 } }), createdAt: at(0),
+      },
+    })
+    await client.v2MediaTranscript.create({
+      data: {
+        id: 'md-diar-transcript', workspaceId, projectId, sourceArtifactId: artifactId,
+        sourceManifestId: 'md-diar-manifest', schemaVersion: 'media-transcript/v1', language: 'pt-BR',
+        provider: 'openai', model: 'whisper-1', providerVersion: 'v1',
+        transcriptHash: sha('d'), transcriptJson: JSON.stringify({ words: [] }), createdAt: at(0),
+      },
+    })
+    await client.v2PublicOperation.create({
+      data: {
+        id: 'md-diar-operation', workspaceId, projectId, clientId, type: 'long-form-index',
+        status: 'succeeded', phase: 'completed', targetType: 'media-artifact', targetId: artifactId,
+        // `public_operations_progress_check` ties status, phase and progress
+        // together: a long-form index that succeeded has all six stages done.
+        progressUnit: 'stage', progressTotal: 6, progressCompleted: 6,
+        // `public_operations_state_check` completes the picture: a succeeded
+        // operation started, finished, carries a result and can no longer be
+        // cancelled or retried.
+        attempt: 1, startedAt: at(0), completedAt: at(1),
+        resultJson: JSON.stringify({ workflowId: 'md-diar-workflow' }),
+        cancelable: false, retryable: false,
+        idempotencyKey: 'md-diar-operation-key', requestFingerprint: sha('e'),
+        createdAt: at(0), updatedAt: at(0),
+      },
+    })
+    await client.v2LongFormIndexWorkflow.create({
+      data: {
+        id: 'md-diar-workflow', workspaceId, projectId, operationId: 'md-diar-operation',
+        sourceArtifactId: artifactId, sourceArtifactSha256: sha('a'),
+        sourceManifestId: 'md-diar-manifest', sourceManifestHash: sha('b'),
+        sourceTranscriptId: 'md-diar-transcript',
+        durationMs: 60_000, schemaVersion: 'long-form-index-workflow/v1',
+        policyVersion: 'long-form-index-workflow-policy/v1',
+        // The budget and state CHECKs on this table are strict about their own
+        // vocabulary: USD, five stages at most, and a workflow that is always
+        // resumable and never carries duplicate segments.
+        status: 'succeeded', budgetCurrency: 'USD', maximumCostMinorUnits: 10_000,
+        maximumElapsedMs: 600_000, maximumConcurrency: 2, completedStageCount: 5,
+        searchableStageCount: 5, resultCount: 1, costMinorUnits: 10, elapsedMs: 1_000,
+        duplicateSegments: false, resumable: true,
+        workflowJson: JSON.stringify({ id: 'md-diar-workflow' }), runHash: sha('f'),
+        requestFingerprint: sha('e'), idempotencyKey: 'md-diar-workflow-key',
+        createdByClientId: clientId, createdAt: at(0), updatedAt: at(0),
+      },
+    })
+
+    // Two runs of the same file, the second newer: the adapter must return the
+    // newest and treat the older as the superseded opinion it is.
+    const makeRun = (id, createdAtSecond, segments) => createSpeakerDiarizationRun({
+      id,
+      workspaceId,
+      projectId,
+      workflowId: 'md-diar-workflow',
+      sourceArtifactId: artifactId,
+      sourceArtifactSha256: sha('a'),
+      sourceManifestId: 'md-diar-manifest',
+      sourceManifestHash: sha('b'),
+      sourceTranscriptId: 'md-diar-transcript',
+      sourceTranscriptHash: sha('d'),
+      durationMs: 60_000,
+      providerInput: {
+        sha256: sha('9'),
+        byteSize: 8192,
+        durationMs: 60_000,
+        preparation: { toolId: 'ffmpeg', toolVersion: 'static', configurationHash: sha('8') },
+      },
+      provider: { id: 'openai', model: 'gpt-4o-transcribe-diarize', version: 'v1' },
+      segments,
+      usageSeconds: 60,
+      costMinorUnits: 10,
+      elapsedMs: 1_000,
+      requestFingerprint: sha('e'),
+      idempotencyKey: `md-diar-workflow:diarization:${id}`,
+      createdByClientId: clientId,
+      createdAt: at(createdAtSecond).toISOString(),
+    })
+    const store = async (run) => {
+      await client.v2SpeakerDiarizationRun.create({
+        data: {
+          id: run.id, workspaceId, projectId, workflowId: 'md-diar-workflow',
+          sourceArtifactId: artifactId, sourceArtifactSha256: run.sourceArtifactSha256,
+          sourceManifestId: run.sourceManifestId, sourceManifestHash: run.sourceManifestHash,
+          sourceTranscriptId: run.sourceTranscriptId, sourceTranscriptHash: run.sourceTranscriptHash,
+          durationMs: run.durationMs,
+          providerInputJson: stableSerialize(run.providerInput),
+          providerInputHash: calculateCanonicalHash(run.providerInput),
+          schemaVersion: run.schemaVersion, policyVersion: run.policyVersion,
+          providerId: run.provider.id, providerModel: run.provider.model, providerVersion: run.provider.version,
+          speakerCount: run.speakerCount, segmentCount: run.segmentCount,
+          usageSeconds: run.usageSeconds, costMinorUnits: run.costMinorUnits, elapsedMs: run.elapsedMs,
+          identityResolved: run.identityResolved, physicalMaterialized: run.physicalMaterialized,
+          requestFingerprint: run.requestFingerprint, idempotencyKey: run.idempotencyKey,
+          createdByClientId: clientId, createdAt: new Date(run.createdAt),
+          runJson: stableSerialize(run), runHash: run.runHash,
+        },
+      })
+      // Written separately rather than nested: `workspaceId` and `projectId`
+      // are half of the segment's composite foreign key back to its run, so a
+      // nested create refuses to be told them.
+      await client.v2SpeakerDiarizationSegment.createMany({
+        data: run.segments.map((segment) => ({
+          id: segment.id, workspaceId, projectId, runId: run.id, ordinal: segment.ordinal,
+          providerSegmentId: segment.providerSegmentId, providerLabel: segment.providerLabel,
+          speakerKey: segment.speakerKey, startMs: segment.startMs, endMs: segment.endMs,
+          text: segment.text, textHash: segment.textHash,
+          segmentJson: stableSerialize(segment), segmentHash: segment.segmentHash,
+        })),
+      })
+    }
+    const superseded = makeRun('md-diar-run-old', 10, [
+      { providerSegmentId: 'old-1', providerLabel: 'A', startMs: 0, endMs: 30_000, text: 'Uma leitura antiga.' },
+    ])
+    const current = makeRun('md-diar-run-new', 20, [
+      { providerSegmentId: 'new-1', providerLabel: 'A', startMs: 1_000, endMs: 25_000, text: 'Primeira fala.' },
+      { providerSegmentId: 'new-2', providerLabel: 'B', startMs: 25_000, endMs: 50_000, text: 'Resposta do convidado.' },
+    ])
+    await store(superseded)
+    await store(current)
+
+    const source = new PrismaMulticamDiarizationSource(client)
+    const read = await source.listLatestRunsForArtifacts({
+      workspaceId, projectId, sourceArtifactIds: [artifactId, 'md-diar-absent'],
+    })
+    assert.equal(read.length, 1, 'one run per artifact, and the absent artifact contributes nothing')
+    assert.equal(read[0].runId, current.id, 'the newest opinion about the file, not the superseded one')
+    assert.equal(read[0].provider, 'openai/gpt-4o-transcribe-diarize')
+    assert.equal(read[0].producedAt, current.createdAt)
+    assert.deepEqual(
+      read[0].segments.map((segment) => [segment.ordinal, segment.speakerKey, segment.startMs, segment.endMs]),
+      current.segments.map((segment) => [segment.ordinal, segment.speakerKey, segment.startMs, segment.endMs]),
+      'the milliseconds stay relative to the file, and the cluster key stays a cluster key',
+    )
+    assert.equal(new Set(read[0].segments.map((segment) => segment.speakerKey)).size, 2, 'two voices, still anonymous')
+
+    // ---------------------------------------------------------------------
+    // A row edited underneath is refused, not returned
+    // ---------------------------------------------------------------------
+    const segmentRow = await client.v2SpeakerDiarizationSegment.findFirstOrThrow({
+      where: { workspaceId, runId: current.id, ordinal: 0 },
+    })
+    await client.v2SpeakerDiarizationSegment.update({
+      where: { id: segmentRow.id },
+      // A perfectly well-formed row: still inside the file, still before its
+      // own end. Only the segment hash knows it moved — and this projection
+      // used to read `startMs` straight off the column, so the direction would
+      // have cited a speech instant nobody measured.
+      data: { startMs: segmentRow.startMs + 500 },
+    })
+    await assert.rejects(
+      () => source.listLatestRunsForArtifacts({ workspaceId, projectId, sourceArtifactIds: [artifactId] }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /does not match its verified body/.test(error.message),
+      'a segment moved under the aggregate is refused on read',
+    )
+    await client.v2SpeakerDiarizationSegment.update({
+      where: { id: segmentRow.id },
+      data: { startMs: segmentRow.startMs },
+    })
+    const restored = await source.listLatestRunsForArtifacts({ workspaceId, projectId, sourceArtifactIds: [artifactId] })
+    assert.equal(restored[0].segments[0].startMs, current.segments[0].startMs, 'and accepted again once it is back')
+
+    // The same for the run body itself: a `runJson` that no longer reproduces
+    // its stored `runHash`.
+    const tamperedBody = JSON.parse(stableSerialize(current))
+    tamperedBody.durationMs = current.durationMs + 1
+    await client.v2SpeakerDiarizationRun.update({
+      where: { id: current.id },
+      data: { runJson: JSON.stringify(tamperedBody) },
+    })
+    await assert.rejects(
+      () => source.listLatestRunsForArtifacts({ workspaceId, projectId, sourceArtifactIds: [artifactId] }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+      'a run body edited under its own hash is refused',
+    )
+    await client.v2SpeakerDiarizationRun.update({
+      where: { id: current.id },
+      data: { runJson: stableSerialize(current) },
+    })
+
+    // Workspace scoping is the query's, not the caller's memory.
+    assert.equal(
+      (await source.listLatestRunsForArtifacts({ workspaceId: 'md-diar-other', projectId, sourceArtifactIds: [artifactId] })).length,
+      0,
+    )
+    assert.equal(
+      (await source.listLatestRunsForArtifacts({ workspaceId, projectId, sourceArtifactIds: [] })).length,
+      0,
+      'an empty artifact list is an empty answer, not a table scan',
+    )
+    console.log(`diarization source runs=${read.length} segments=${read[0].segments.length} speakers=${new Set(read[0].segments.map((segment) => segment.speakerKey)).size} superseded=${superseded.id}`)
+  },
+)
