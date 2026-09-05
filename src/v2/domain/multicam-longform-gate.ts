@@ -423,7 +423,16 @@ function normalizeCriterion(input: MulticamLongformCriterionEvidenceInput) {
     passed: failedChecks.length === 0,
     checkCount: checks.length,
     failedCheckCount: failedChecks.length,
-    missingCheckCount: required.filter((code) => !supplied.has(code)).length,
+    // Read off the results, not off the input map, so a stored criterion
+    // re-derives to the same numbers. A check "nobody answered" is one that
+    // came back missing having read nothing; a check that read a row and
+    // found the evidence absent did run, and says so with a reference.
+    missingCheckCount: checks.filter(
+      (check) =>
+        !check.passed &&
+        check.failureReason === 'evidence-missing' &&
+        check.references.length === 0,
+    ).length,
     unverifiedReferenceCount: checks.reduce(
       (total, check) =>
         total +
@@ -494,8 +503,14 @@ export function evaluateMulticamLongformGate(input: {
   const criteria = MULTICAM_LONGFORM_CRITERIA.map(
     (criterion) => byCriterion.get(criterion) ?? absentCriterion(criterion),
   )
-  const evaluated = MULTICAM_LONGFORM_CRITERIA.filter((criterion) =>
-    byCriterion.has(criterion)).length
+  // "Evaluated" has to be re-derivable from the criteria alone, or a stored
+  // report could not be re-hashed on read — the first draft counted the input
+  // map and every round trip came back with a different number. A criterion
+  // the reader never answered is exactly one whose every check came back
+  // missing, so the count is read off the criteria instead.
+  const evaluated = criteria.filter(
+    (item) => item.missingCheckCount < item.checkCount,
+  ).length
   const satisfied = criteria.filter((item) => item.passed).length
   const failed = criteria
     .filter((item) => !item.passed)

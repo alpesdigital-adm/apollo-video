@@ -107,9 +107,17 @@ function classify(
 
 /**
  * Markers that live in a module's text rather than in a specifier: the retired
- * narrative engine and the retired project columns were reachable by name, not
- * only by import, and a graph walk that only looked at `from '...'` would call
- * a file clean while it read `scenesJson` out of a legacy row.
+ * narrative engine was reachable by name and not only by import, and a graph
+ * walk that only read `from '...'` would call a file clean while it called
+ * `analyzeContent()`.
+ *
+ * `editPlanJson` is deliberately not a marker, and the first run of this
+ * scanner is why. It names a retired `Project` column, but Wave 18 also gave
+ * `editorial_syntheses` a column of that name, so matching the identifier
+ * flagged `apply-editorial-cut-command.ts` and `editorial-synthesis-repository.ts`
+ * — both entirely V2. A marker that fires on the new model is worse than no
+ * marker: it teaches the reader to ignore the criterion. `scenesJson` has no
+ * V2 namesake and stays.
  */
 const TEXT_MARKERS: readonly Readonly<{
   marker: LegacyRuntimeAuditViolation['marker']
@@ -123,8 +131,8 @@ const TEXT_MARKERS: readonly Readonly<{
   },
   {
     marker: 'dual-write-compatibility',
-    pattern: /\bscenesJson\b|\beditPlanJson\b(?!\s*:\s*String)/,
-    label: 'retired project columns',
+    pattern: /\bscenesJson\b/,
+    label: 'retired scenesJson column',
   },
 ])
 
