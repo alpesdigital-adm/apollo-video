@@ -65,6 +65,7 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
 import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
+import type { MulticamDiarizationSource, MulticamVisualEvidenceProvider } from '../application/ports/multicam-evidence-sources.ts'
 import type { MulticamDirectionCommandRepository } from '../application/ports/multicam-direction-command-repository.ts'
 import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
 import type {
@@ -245,6 +246,8 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
 import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { FfmpegMulticamVisualEvidenceProvider } from './analysis/ffmpeg-multicam-visual-evidence-provider.ts'
+import { PrismaMulticamDiarizationSource } from './prisma/multicam-diarization-source.ts'
 import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
 import { PrismaMulticamDirectionRepository } from './prisma/multicam-direction-repository.ts'
 import {
@@ -2260,6 +2263,28 @@ export function createMulticamDirectionRepository(): MulticamDirectionRepository
 
 export function createMulticamDirectionCommandRepository(): MulticamDirectionCommandRepository {
   return new PrismaMulticamDirectionCommandRepository(resolveV2Client())
+}
+
+export function createMulticamDiarizationSource(): MulticamDiarizationSource {
+  return new PrismaMulticamDiarizationSource(resolveV2Client())
+}
+
+/**
+ * The FFmpeg pass that measures screen activity and technical quality.
+ *
+ * It takes paths rather than artifact keys: the caller materializes the media
+ * through `createCaptureMediaResolver()` and releases it in `finally`, which is
+ * where the release discipline belongs (CONTRACT §2) and what keeps this class
+ * testable without an artifact store.
+ */
+export function createMulticamVisualEvidenceProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): MulticamVisualEvidenceProvider {
+  const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_VISUAL_TIMEOUT_MS)
+  return new FfmpegMulticamVisualEvidenceProvider({
+    ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
+    ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  })
 }
 
 export function createCameraColorMeasurementRepository(): CameraColorMeasurementRepository {
