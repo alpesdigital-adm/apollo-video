@@ -262,6 +262,11 @@ export function runCaptureSyncWorker(dependencies: {
     }
 
     const { run, leaseToken } = claim
+    // Declared before the failure path so a run that fails halfway still
+    // reports the coverage it had already derived and written: those rows are
+    // real, and saying zero would make the failure look total when it was not.
+    let coverageDerived = 0
+    let coverageRefused = 0
     const failWith = async (reason: string) => {
       await dependencies.runs.settle({
         workspaceId: run.workspaceId,
@@ -272,7 +277,7 @@ export function runCaptureSyncWorker(dependencies: {
       })
       return Object.freeze({
         claimed: true, runId: run.id, settled: true, resolved: 0, review: 0, insufficient: 0,
-        coverageDerived: 0, coverageRefused: 0,
+        coverageDerived, coverageRefused,
       })
     }
 
@@ -339,8 +344,6 @@ export function runCaptureSyncWorker(dependencies: {
     let resolved = 0
     let review = 0
     let insufficient = 0
-    let coverageDerived = 0
-    let coverageRefused = 0
 
     // Coverage first, and for every track including the reference: the
     // diagnostic reads it per track (`application/sync-diagnostic.ts:358-361`)
@@ -390,14 +393,28 @@ export function runCaptureSyncWorker(dependencies: {
         })
       }
 
-      const signals = await dependencies.signals.observe({
-        session,
-        track,
-        referenceTrack,
-        sessionTimebase,
-        sessionFrameRate,
-        sessionBounds,
-      })
+      // A signal source that throws is not a track with no evidence. A codec
+      // that will not open, a materializer that cannot reach storage — those
+      // are wrong with the run, and counting them as `insufficient-evidence`
+      // would file "we listened and heard nothing" over "we never listened".
+      // Settled failed rather than left to the lease: an exception escaping
+      // here would leave the run claimed until the lease expired, be reclaimed,
+      // and fail the same way until the attempts ran out.
+      let signals: readonly Readonly<SyncSignalObservation>[]
+      try {
+        signals = await dependencies.signals.observe({
+          session,
+          track,
+          referenceTrack,
+          sessionTimebase,
+          sessionFrameRate,
+          sessionBounds,
+        })
+      } catch (error) {
+        return failWith(
+          `the sync signal source failed on track ${track.trackId}: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
       const record = evaluateSyncEvidence({
         sessionId: session.sessionId,
         trackId: track.trackId,
