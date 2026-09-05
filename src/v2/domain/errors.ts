@@ -144,6 +144,11 @@ export const DOMAIN_ERROR_CODES = [
   'PLAYBACK_REACTION_TRACK_AMBIGUOUS',
   'PLAYBACK_TRACK_NOT_SINGLE_PART',
   'PLAYBACK_EVIDENCE_INSUFFICIENT',
+  // F4.016 — the multicamera/long-form phase gate. "Nobody has run it" is not
+  // "it failed": a project with no evaluation has to be distinguishable from a
+  // project whose evaluation said no, or a UI would show a red gate for work
+  // that was never attempted.
+  'MULTICAM_LONGFORM_GATE_NOT_FOUND',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',
