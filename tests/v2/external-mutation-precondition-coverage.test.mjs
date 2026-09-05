@@ -53,6 +53,30 @@ const coverage = Object.freeze({
     mode: 'base-version-bound-action',
     evidence: 'Wave19 requires the exact diagnostic version id and its hash and enforces the fence inside the append, refusing an edit computed against a diagnostic that has since moved; automatic anchors can neither be removed nor shadowed by a manual one',
   },
+  'apollo.projects.capture-sessions.direction.run': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 requires the project version id and its base hash, refuses the run when the project has moved and carries the current pair in the refusal; every score, eligibility, measurement and review verdict is derived from the stored session, its coverages, its clock maps, its diagnostic and its evidence, and a request field that names one is refused by name as DIRECTION_CALLER_SUPPLIED_DERIVATION',
+  },
+  'apollo.projects.capture-sessions.direction.protected-selections.direct': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 fences on the same project version pair and additionally closes the protected selection to four fields, so a caller cannot smuggle attestedBy into a human override: the note is theirs and the identity is the authenticated actor, concatenated rather than one replacing the other',
+  },
+  'apollo.projects.capture-sessions.color-match.derive': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 requires the capture session version id and hash the reference camera was chosen against and refuses a stale one with the current pair, and separately requires the project version pair the ColorPlan layers must land on; the only colour input is which camera is the reference, and every delta and confidence is measured from decoded frames',
+  },
+  'apollo.projects.capture-sessions.color-match.overrides.add': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 requires the match plan version id as <sessionId>:match:v<n> plus the plan hash, parsed so a fence from another chain is refused rather than matching on the number, and refuses an amendment whose pair is no longer the head with the current version and hash in the failure',
+  },
+  'apollo.projects.capture-sessions.playback-map.build': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 requires the capture session version id and hash the build was requested against and refuses a session that has moved, because a rebuild against different tracks would fingerprint different recordings and call the result the same map',
+  },
+  'apollo.projects.capture-sessions.playback-map.anchors.add': {
+    mode: 'base-version-bound-action',
+    evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and enforces the fence inside the append; an anchor is refused unless its instant falls inside a stretch the detector left uncovered, so answering an absence can never become overruling a measurement',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'idempotent-create',
     evidence: 'Wave18 persists one immutable content-addressed cut; a replayed key converges on the identical synthesis hash and a different body under the same id is refused',
@@ -735,7 +759,7 @@ test('the current public surface has no unguarded state replacement', () => {
     'state-machine-action': 16,
     'single-flight-action': 4,
     'revision-bound-action': 16,
-    'base-version-bound-action': 23,
+    'base-version-bound-action': 29,
     'production-batch-revision-action': 2,
     'script-alignment-revision-action': 1,
     'take-library-revision-action': 1,
