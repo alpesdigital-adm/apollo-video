@@ -343,7 +343,8 @@ function wire(options = {}) {
     media,
     ...(options.perception ? { perception: options.perception } : {}),
     clock: () => new Date('2029-04-01T09:05:00.000Z'),
-    evidenceWindowMs: 60_000,
+    evidenceWindowMs: options.evidenceWindowMs ?? 60_000,
+    ...(options.maxVisualWindowsPerPart ? { maxVisualWindowsPerPart: options.maxVisualWindowsPerPart } : {}),
   })
   const execute = directMulticamSessionService({
     sessions,
@@ -918,4 +919,39 @@ test('T-F4.012 persisted perception becomes reaction evidence, and a project wit
   const none = await without.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
   assert.equal(none.set.observations.filter((observation) => observation.kind === 'reaction').length, 0)
   assert.notEqual(seen.set.evidenceHash, none.set.evidenceHash)
+})
+
+test('T-F4.012 the sweep says what its ceiling and its short tail did not measure', async () => {
+  // Two windows per 300 s part, then the ceiling. The direction reads an
+  // unmeasured stretch as "nobody measured", and a sweep that truncated
+  // silently would leave nothing anywhere saying a policy rather than the
+  // footage caused it — in the one function whose result field is documented
+  // "reported, never silently dropped".
+  const wired = wire({ evidenceWindowMs: 60_000, maxVisualWindowsPerPart: 2 })
+  const evidence = await wired.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  const ceilings = evidence.skipped.filter((entry) => entry.reason.includes('the sweep stopped at its ceiling'))
+  assert.equal(ceilings.length, 3, 'one report per video part that was cut short')
+  assert.ok(ceilings.every((entry) => /180000 ms of this part were not measured/.test(entry.reason)))
+  assert.deepEqual(
+    ceilings.map((entry) => entry.source).sort(),
+    ['track-camera-a:part-track-camera-a', 'track-camera-b:part-track-camera-b', 'track-screen:part-track-screen'],
+    'and it names the part, so an operator knows which recording is only partly read',
+  )
+  assert.equal(wired.visual.seen.length, 6, 'the ceiling really did stop the sweep at two windows per part')
+
+  // A part whose tail is shorter than a measurable window says so too, rather
+  // than ending the loop with nothing written down.
+  const tail = wire({ evidenceWindowMs: 100_000 })
+  const withTail = await tail.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  assert.equal(
+    withTail.skipped.filter((entry) => entry.reason.includes('shorter than one measurable window')).length,
+    0,
+    'a part that divides evenly has no tail to report',
+  )
+  const uneven = wire({ evidenceWindowMs: 99_950 })
+  const withUneven = await uneven.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  const tails = withUneven.skipped.filter((entry) => entry.reason.includes('shorter than one measurable window'))
+  assert.equal(tails.length, 3, 'a 300 s part swept in 99.95 s windows leaves 150 ms nobody can measure')
+  assert.ok(tails.every((entry) => /the last 150 ms/.test(entry.reason)))
+  console.log(`sweep ceilings=${ceilings.length} windows=${wired.visual.seen.length} tails=${tails.length}`)
 })
