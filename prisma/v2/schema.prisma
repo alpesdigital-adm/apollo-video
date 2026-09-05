@@ -261,6 +261,10 @@ model V2Workspace {
   playbackAnchors                        V2PlaybackAnchor[]
   playbackUncoveredRanges                V2PlaybackUncoveredRange[]
   renderablePlanSnapshots                V2RenderablePlanSnapshot[]
+  multicamLongformGates                  V2MulticamLongformGate[]
+  multicamLongformGateCriteria           V2MulticamLongformGateCriterion[]
+  multicamLongformGateChecks             V2MulticamLongformGateCheck[]
+  multicamLongformGateEvidence           V2MulticamLongformGateEvidence[]
   transformationProviders                V2TransformationProviderDefinition[]
   transformationProviderCapabilities     V2TransformationProviderCapability[]
   transformationProviderHealth           V2TransformationProviderHealth[]
@@ -310,6 +314,7 @@ model V2ApiClient {
   proxyReviewDecisions                  V2ProxyReviewDecision[]
   qualityIterations                     V2QualityIteration[]
   mvpCoreGates                          V2MvpCoreGate[]
+  multicamLongformGates                 V2MulticamLongformGate[]
   speechCatalogRuns                     V2SpeechSegmentCatalogRun[]
   editorialBeatSets                     V2EditorialBeatSet[]
   editorialBeatAdjustments              V2EditorialBeatAdjustment[]
@@ -766,6 +771,7 @@ model V2Project {
   multicamMatchPlans                     V2MulticamMatchPlan[]
   multicamMatchPlanHeads                 V2MulticamMatchPlanHead[]
   colorCriticReports                     V2ColorCriticReport[]
+  multicamLongformGates                  V2MulticamLongformGate[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, createdAt(sort: Desc)])
@@ -10008,4 +10014,143 @@ model V2RenderablePlanSnapshot {
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, origin, sourceId, createdAt(sort: Desc)])
   @@map("renderable_plan_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// F4.016 / ADR-135 — the multicamera and long-form phase gate.
+//
+// One immutable, content-addressed record per evaluation, plus one row per
+// criterion, per check and per evidence reference it read. ADR-135 requires
+// every condition to be "independently visible": a report stored only as JSON
+// is visible to whoever parses the JSON, so the criteria and their checks are
+// rows a query can filter and a constraint can refuse.
+//
+// The evidence rows are deliberately polymorphic and carry no foreign key to
+// the twenty-four tables they can name. Two reasons, both about audit: a
+// composite FK would either cascade the record away when the row it observed
+// is deleted (erasing the reason the gate said yes) or restrict that deletion
+// forever (making an audit record own the lifecycle of a capture session).
+// The stored hash is what makes a later reader able to tell whether the
+// evidence still exists and still says the same thing.
+//
+// Likewise `sessionId` is a plain column: a gate that blocks session deletion
+// or vanishes with it is not a record of what was true when it ran.
+// ---------------------------------------------------------------------------
+
+model V2MulticamLongformGate {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  sessionId               String?  @db.VarChar(128)
+  projectVersionId        String?  @db.VarChar(128)
+  projectVersionHash      String?  @db.Char(64)
+  schemaVersion           String   @db.VarChar(64)
+  gate                    String   @db.VarChar(64)
+  approved                Boolean
+  satisfied               Int
+  evaluated               Int
+  total                   Int
+  blockingCount           Int      @default(0)
+  reportJson              String   @db.Text
+  reportFingerprint       String   @db.Char(64)
+  recordHash              String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  requestFingerprint      String   @db.Char(64)
+  createdByType           String   @db.VarChar(32)
+  createdById             String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  evaluatedAt             DateTime @db.Timestamptz(3)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient                        @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  criteria  V2MulticamLongformGateCriterion[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectId, idempotencyKey], map: "multicam_longform_gates_project_idempotency_key")
+  @@unique([workspaceId, recordHash])
+  @@index([workspaceId, projectId, evaluatedAt(sort: Desc)])
+  @@index([workspaceId, approved, evaluatedAt(sort: Desc)])
+  @@index([workspaceId, sessionId])
+  @@index([workspaceId, actorContextHash, createdAt(sort: Desc)])
+  @@map("multicam_longform_gates")
+}
+
+model V2MulticamLongformGateCriterion {
+  id                       String  @id @db.VarChar(200)
+  workspaceId              String  @db.VarChar(128)
+  gateId                   String  @db.VarChar(128)
+  criterion                String  @db.VarChar(64)
+  ordinal                  Int
+  passed                   Boolean
+  checkCount               Int
+  failedCheckCount         Int
+  missingCheckCount        Int
+  unverifiedReferenceCount Int     @default(0)
+
+  workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  gate      V2MulticamLongformGate       @relation(fields: [gateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  checks    V2MulticamLongformGateCheck[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, gateId, criterion], map: "multicam_longform_gate_criteria_gate_criterion_key")
+  @@unique([workspaceId, gateId, ordinal], map: "multicam_longform_gate_criteria_gate_ordinal_key")
+  @@index([workspaceId, criterion, passed])
+  @@map("multicam_longform_gate_criteria")
+}
+
+model V2MulticamLongformGateCheck {
+  id                       String  @id @db.VarChar(240)
+  workspaceId              String  @db.VarChar(128)
+  criterionRowId           String  @db.VarChar(200)
+  gateId                   String  @db.VarChar(128)
+  criterion                String  @db.VarChar(64)
+  checkCode                String  @db.VarChar(64)
+  ordinal                  Int
+  passed                   Boolean
+  failureReason            String? @db.VarChar(32)
+  detail                   String  @db.VarChar(512)
+  referenceCount           Int
+  unverifiedReferenceCount Int     @default(0)
+
+  workspace       V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  criterionRecord V2MulticamLongformGateCriterion  @relation(fields: [criterionRowId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  evidence        V2MulticamLongformGateEvidence[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, gateId, criterion, checkCode], map: "multicam_longform_gate_checks_gate_check_key")
+  @@unique([workspaceId, criterionRowId, ordinal], map: "multicam_longform_gate_checks_criterion_ordinal_key")
+  @@index([workspaceId, checkCode, passed])
+  @@index([workspaceId, failureReason])
+  @@map("multicam_longform_gate_checks")
+}
+
+model V2MulticamLongformGateEvidence {
+  id           String  @id @db.VarChar(300)
+  workspaceId  String  @db.VarChar(128)
+  checkRowId   String  @db.VarChar(240)
+  gateId       String  @db.VarChar(128)
+  criterion    String  @db.VarChar(64)
+  checkCode    String  @db.VarChar(64)
+  ordinal      Int
+  resourceType String  @db.VarChar(32)
+  resourceId   String  @db.VarChar(240)
+  resourceHash String? @db.Char(64)
+  verified     Boolean
+
+  workspace   V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  checkRecord V2MulticamLongformGateCheck @relation(fields: [checkRowId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, checkRowId, ordinal], map: "multicam_longform_gate_evidence_check_ordinal_key")
+  @@index([workspaceId, resourceType, resourceId])
+  @@index([workspaceId, gateId, criterion])
+  @@map("multicam_longform_gate_evidence")
 }
