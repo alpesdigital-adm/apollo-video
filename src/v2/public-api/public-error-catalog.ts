@@ -171,6 +171,11 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'ASSET_NOT_USABLE', 'ASSET_RIGHTS_BLOCKED', 'EDITORIAL_ACCEPTANCE_FAILED',
       'CAPTURE_COVERAGE_NOT_AVAILABLE', 'CAPTURE_COVERAGE_UNVERIFIED',
       'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED', 'CAPTURE_SESSION_DERIVATION_STALE',
+      // Colour match and critic refusals: the measurements arrived intact and
+      // say something the system will not build a correction on.
+      'COLOR_SOURCES_INCOMPARABLE', 'COLOR_HDR_SDR_UNSUPPORTED',
+      'COLOR_RANGES_NOT_COMPARABLE', 'COLOR_MEASUREMENT_INSUFFICIENT',
+      'COLOR_REFERENCE_UNAVAILABLE', 'COLOR_STAGE_VIOLATION',
     ],
   },
   {
