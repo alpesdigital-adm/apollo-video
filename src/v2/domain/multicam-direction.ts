@@ -1872,7 +1872,12 @@ export interface CompiledShotSource {
   readonly trackId: string
   readonly partId: string
   readonly cameraId: string
-  readonly kind: 'video' | 'audio'
+  /**
+   * Every way this file is used, sorted. One asset can be both an angle and the
+   * audio bed (a reactor's camera in a react session); a single `kind` recorded
+   * whichever use the last shot happened to have and threw the other away.
+   */
+  readonly kinds: readonly ('audio' | 'video')[]
   readonly frameRate: Rational
   readonly durationFrames: number
 }
@@ -1932,9 +1937,21 @@ function toFrames(tick: bigint, from: Readonly<Timebase>, frames: Readonly<Timeb
  * once, and counted from the part's first tick because `trim=start_frame`
  * counts frames of the file (`ffmpeg-editorial-proxy-renderer.ts:752`).
  * The audio bed is cut in plan-fps frames — the renderer divides audio frames
- * by the plan fps (`:737-738`) — and its span is set equal to the video span
- * because the renderer refuses any other (`:578`). The timeline is the running
- * sum of source spans, so it is contiguous by construction.
+ * by the plan fps (`:737-738`) — and its span is set equal to the video span,
+ * which the renderer requires (`:578`) and this function asserts on every clip
+ * before returning it. The timeline is the running sum of video frame spans,
+ * so it is contiguous by construction and equal to the span the renderer will
+ * actually produce.
+ *
+ * A track whose media cadence differs from `planFps` is REFUSED. The renderer
+ * indexes every clip's audio at the plan's fps (`:737-738`) while trimming the
+ * video by source frame index (`:752`), and then demands the two spans be equal
+ * (`:578`): the two can only both be true when the source cadence is the plan's.
+ * Emitting such a clip would either desynchronize the audio by the ratio of the
+ * rates or be rejected at render time as `INVALID_RENDER_INPUT`, so it is
+ * rejected here, where the operator can still act on it. Widening `:578` to
+ * compare the audio span against the TIMELINE span is the renderer-side fix;
+ * until then `sourceFrameRates` exists to detect the mismatch, not to survive it.
  */
 export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection>, input: CompileShotsInput): Readonly<MulticamShotCompilation> {
   assertMulticamDirectionIntegrity(direction)
@@ -1989,7 +2006,23 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     return { rate, timebase: rationalEquals(rate, input.planFps) ? planFrames : frameTimebase(rate) }
   }
   const clips: Array<Readonly<CompiledShotClip>> = []
-  const sources = new Map<string, Readonly<CompiledShotSource>>()
+  const sources = new Map<string, { record: Omit<CompiledShotSource, 'kinds'>; kinds: Set<'audio' | 'video'> }>()
+  const useSource = (record: Omit<CompiledShotSource, 'kinds'>, kind: 'audio' | 'video') => {
+    const known = sources.get(record.sourceAssetId)
+    if (!known) {
+      sources.set(record.sourceAssetId, { record, kinds: new Set([kind]) })
+      return
+    }
+    assertDomain(
+      known.record.partId === record.partId
+        && known.record.trackId === record.trackId
+        && known.record.durationFrames === record.durationFrames
+        && rationalEquals(known.record.frameRate, record.frameRate),
+      'INVALID_ARGUMENT',
+      `asset ${record.sourceAssetId} is described twice with different measurements`,
+    )
+    known.kinds.add(kind)
+  }
   let timeline = 0
 
   const resolveOrRefuse = (shot: Readonly<ShotDecision>, trackId: string, role: 'video' | 'audio') => {
@@ -2020,31 +2053,38 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     const video = resolveOrRefuse(shot, shot.chosen.trackId, 'video')
     const part = video.resolution.part
     const source = framesFor(video.track.trackId)
+    if (!rationalEquals(source.rate, input.planFps)) {
+      throw new DomainError(
+        'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
+        `shot ${shot.shotId} cuts ${video.track.trackId}, whose media runs at ${serializeRational(source.rate)} fps while the plan runs at ${serializeRational(input.planFps)} fps; the renderer indexes clip audio at the plan's fps and then requires the audio and video spans to be equal (ffmpeg-editorial-proxy-renderer.ts:578, :737-738), which the two cadences cannot both satisfy`,
+        {
+          shotId: shot.shotId,
+          trackId: video.track.trackId,
+          sourceFrameRate: serializeRational(source.rate),
+          planFps: serializeRational(input.planFps),
+        },
+      )
+    }
     const sourceInFrame = toFrames(video.resolution.sourceRange.start - part.coverage.start, part.timebase, source.timebase)
     const sourceOutFrame = toFrames(video.resolution.sourceRange.end - part.coverage.start, part.timebase, source.timebase)
     if (sourceOutFrame <= sourceInFrame) {
       throw unresolvable(`shot ${shot.shotId} is shorter than one frame at ${serializeRational(source.rate)} fps`, { shotId: shot.shotId, trackId: shot.chosen.trackId, cause: 'shorter-than-frame' })
     }
-    // The timeline runs at the plan's fps, so its span is measured there — a
-    // 60 fps source contributes half as many timeline frames as source frames,
-    // and using the source span would stretch the cut. It is measured on the
-    // SOURCE duration rather than the session range because that is the
-    // material the renderer will resample; a drifting clock makes the two
-    // differ, and the plan must claim the length that will actually exist.
-    const timelineSpan = toFrames(intervalDuration(video.resolution.sourceRange), part.timebase, planFrames)
-    if (timelineSpan <= 0) {
-      throw unresolvable(`shot ${shot.shotId} is shorter than one frame at ${serializeRational(input.planFps)} fps`, { shotId: shot.shotId, trackId: shot.chosen.trackId, cause: 'shorter-than-frame' })
-    }
+    // The timeline span IS the video frame span. Rounding the two ends and
+    // rounding the duration are not the same number — half-to-even on a range
+    // straddling a frame boundary differs by one — and the renderer produces
+    // exactly `sourceOutFrame - sourceInFrame` frames from `trim=start_frame`,
+    // so claiming anything else would make the plan disagree with the file.
+    const timelineSpan = sourceOutFrame - sourceInFrame
     const cameraId = cameraIds.get(video.track.trackId)!
-    sources.set(part.sourceAssetId, Object.freeze({
+    useSource({
       sourceAssetId: part.sourceAssetId,
       trackId: video.track.trackId,
       partId: part.partId,
       cameraId,
-      kind: 'video' as const,
       frameRate: source.rate,
       durationFrames: toFrames(intervalDuration(part.coverage), part.timebase, source.timebase),
-    }))
+    }, 'video')
     let audio: Pick<CompiledShotClip, 'audioSourceAssetId' | 'audioSourceInFrame' | 'audioSourceOutFrame'> = {}
     if (shot.audioTrackId !== null) {
       const bed = resolveOrRefuse(shot, shot.audioTrackId, 'audio')
@@ -2055,17 +2095,22 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
         audioSourceInFrame,
         audioSourceOutFrame: audioSourceInFrame + timelineSpan,
       }
-      if (!sources.has(audioPart.sourceAssetId)) {
-        sources.set(audioPart.sourceAssetId, Object.freeze({
-          sourceAssetId: audioPart.sourceAssetId,
-          trackId: bed.track.trackId,
-          partId: audioPart.partId,
-          cameraId: cameraIds.get(bed.track.trackId)!,
-          kind: 'audio' as const,
-          frameRate: input.planFps,
-          durationFrames: toFrames(intervalDuration(audioPart.coverage), audioPart.timebase, planFrames),
-        }))
-      }
+      // The renderer refuses any clip whose audio span differs from its video
+      // span (`:578`). Asserted rather than assumed, so a later change to either
+      // number cannot drift the two apart silently.
+      assertDomain(
+        audio.audioSourceOutFrame! - audio.audioSourceInFrame! === sourceOutFrame - sourceInFrame,
+        'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
+        `shot ${shot.shotId} would bind ${audio.audioSourceOutFrame! - audio.audioSourceInFrame!} audio frames to ${sourceOutFrame - sourceInFrame} video frames, which the renderer refuses`,
+      )
+      useSource({
+        sourceAssetId: audioPart.sourceAssetId,
+        trackId: bed.track.trackId,
+        partId: audioPart.partId,
+        cameraId: cameraIds.get(bed.track.trackId)!,
+        frameRate: input.planFps,
+        durationFrames: toFrames(intervalDuration(audioPart.coverage), audioPart.timebase, planFrames),
+      }, 'audio')
     }
     clips.push(Object.freeze({
       shotId: shot.shotId,
@@ -2095,7 +2140,9 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     planFps: input.planFps,
     durationFrames: timeline,
     clips: Object.freeze(clips),
-    sources: Object.freeze([...sources.values()].sort((left, right) => left.sourceAssetId.localeCompare(right.sourceAssetId))),
+    sources: Object.freeze([...sources.values()]
+      .map((entry) => Object.freeze({ ...entry.record, kinds: Object.freeze([...entry.kinds].sort()) }))
+      .sort((left, right) => left.sourceAssetId.localeCompare(right.sourceAssetId))),
   }
   return Object.freeze({
     ...body,

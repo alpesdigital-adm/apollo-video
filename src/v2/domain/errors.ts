@@ -106,6 +106,7 @@ export const DOMAIN_ERROR_CODES = [
   // tracks fold to one colour key (rename a track), which would apply one
   // camera's correction to another camera's frames.
   'DIRECTION_RANGE_UNRESOLVABLE',
+  'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
   'CAMERA_IDENTITY_COLLISION',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',

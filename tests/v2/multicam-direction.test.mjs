@@ -388,10 +388,10 @@ test('T-FR-150 golden 1: a podcast follows the active speaker across two cameras
     assert.equal(clip.timelineOutFrame - clip.timelineInFrame, clip.sourceOutFrame - clip.sourceInFrame)
   })
   assert.equal(compiled.durationFrames, (560 - 1) * 30)
-  assert.deepEqual(compiled.sources.map((source) => [source.sourceAssetId, source.kind, source.durationFrames]), [
-    ['asset-cam-a', 'video', 18_000],
-    ['asset-cam-b', 'video', 16_200],
-    ['asset-master', 'audio', 18_000],
+  assert.deepEqual(compiled.sources.map((source) => [source.sourceAssetId, source.kinds, source.durationFrames]), [
+    ['asset-cam-a', ['video'], 18_000],
+    ['asset-cam-b', ['video'], 16_200],
+    ['asset-master', ['audio'], 18_000],
   ])
   console.log(`golden-1 podcast shots=${compiled.clips.length} durationFrames=${compiled.durationFrames} directionHash=${direction.directionHash.slice(0, 12)}`)
 })
@@ -607,7 +607,15 @@ test('T-FR-150 golden 3: a reaction earns a cutaway of at least the minimum and 
   assert.equal(compiled.clips[0].audioSourceAssetId, 'asset-reaction')
   assert.equal(compiled.clips[0].audioSourceInFrame, 150)
   assert.equal(compiled.clips[0].audioSourceOutFrame, 150 + 1_800)
-  console.log(`golden-3 react shots=${compiled.clips.length} durationFrames=${compiled.durationFrames}`)
+  // One file is both an angle and the audio bed here. It is listed once, with
+  // BOTH its uses — recording only the last use a shot made of it threw the
+  // other away, and the integration builds `DirectedEditPlan.sources[]` from
+  // this list without re-deriving it.
+  assert.deepEqual(compiled.sources.map((source) => [source.sourceAssetId, source.kinds]), [
+    ['asset-reaction', ['audio', 'video']],
+    ['asset-reference', ['video']],
+  ])
+  console.log(`golden-3 react shots=${compiled.clips.length} durationFrames=${compiled.durationFrames} reactionKinds=${compiled.sources[0].kinds.join('+')}`)
 })
 
 // ---------------------------------------------------------------------------
@@ -1173,40 +1181,64 @@ test('T-FR-150 camera identity folds a track id into the ColorPlan token grammar
 // Source frames belong to the source's cadence, not the plan's.
 // ---------------------------------------------------------------------------
 
-test('T-FR-150 source frames are counted at the track\'s own frame rate while the audio bed stays at plan fps', () => {
+test('T-FR-150 source frames are counted at the track\'s own frame rate, and a cadence the renderer cannot cut is refused', () => {
   const world = podcastWorld()
   const direction = world.direct()
-  // Camera A shot 60 fps; camera B and the recorder were never probed.
+  // Everything was shot at 60 fps and the plan runs at 60 fps: source frames are
+  // counted through the part's own timebase (90 kHz ticks), not assumed.
   const compiled = compileShotsToSourceRanges(direction, {
     session: world.session,
     clockMaps: world.clockMaps,
-    planFps: rational(30, 1),
+    planFps: rational(60, 1),
     coverages: world.coverages,
-    sourceFrameRates: [{ trackId: 'track-camera-a', frameRate: rational(60, 1) }],
+    sourceFrameRates: ['track-camera-a', 'track-camera-b', 'track-master-audio'].map((trackId) => ({ trackId, frameRate: rational(60, 1) })),
   })
   const [first, second] = compiled.clips
   assert.equal(first.trackId, 'track-camera-a')
   // Session [1 s, 120 s) is camera A source [0.5 s, 119.5 s): frame 30 at 60 fps,
-  // where the plan-fps reading would have trimmed at frame 15 — half a minute of
+  // where a 30 fps reading would have trimmed at frame 15 — half a minute of
   // material earlier by the end of a long shot.
   assert.equal(first.sourceInFrame, 30)
   assert.equal(first.sourceOutFrame, 7_170)
   assert.deepEqual(first.sourceFrameRate, rational(60, 1))
-  // The timeline is the plan's, so the same 119 seconds are 3 570 output frames.
-  assert.equal(first.timelineOutFrame - first.timelineInFrame, 119 * 30)
-  // The renderer divides audio frames by the plan fps, so the bed does not move.
-  assert.equal(first.audioSourceInFrame, 30)
-  assert.equal(first.audioSourceOutFrame - first.audioSourceInFrame, 119 * 30)
-  // A track nobody probed falls back to the plan fps, and says so on the clip.
-  assert.deepEqual(second.sourceFrameRate, rational(30, 1))
-  assert.equal(second.sourceInFrame, 2_700)
+  assert.equal(first.timelineOutFrame - first.timelineInFrame, 119 * 60)
+  assert.equal(first.audioSourceInFrame, 60)
+  assert.equal(first.audioSourceOutFrame - first.audioSourceInFrame, first.sourceOutFrame - first.sourceInFrame)
+  assert.equal(second.sourceInFrame, 5_400)
   const cameraA = compiled.sources.find((source) => source.sourceAssetId === 'asset-cam-a')
   assert.deepEqual(cameraA.frameRate, rational(60, 1))
   assert.equal(cameraA.durationFrames, 600 * 60)
-  assert.equal(compiled.durationFrames, (560 - 1) * 30, 'the timeline length is unchanged by the source cadence')
-  // The same direction compiled at two source cadences is two different files.
-  const assumed = compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: world.coverages })
-  assert.notEqual(compiled.compilationHash, assumed.compilationHash)
+  assert.equal(compiled.durationFrames, (560 - 1) * 60)
+  // The same direction compiled at two plan cadences is two different files.
+  const atThirty = compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: world.coverages })
+  assert.notEqual(compiled.compilationHash, atThirty.compilationHash)
+  assert.equal(atThirty.durationFrames, (560 - 1) * 30)
+
+  // A track whose media cadence differs from the plan's is refused HERE, where
+  // an operator can act on it. The renderer trims video by source frame index
+  // (`:752`) and audio by plan-fps index (`:737-738`), then demands the two
+  // spans be equal (`:578`) — only true when the two cadences agree. Emitting
+  // the clip would either desynchronize the audio by the ratio of the rates or
+  // die at render time as INVALID_RENDER_INPUT.
+  assert.throws(
+    () => compileShotsToSourceRanges(direction, {
+      session: world.session,
+      clockMaps: world.clockMaps,
+      planFps: rational(30, 1),
+      coverages: world.coverages,
+      sourceFrameRates: [{ trackId: 'track-camera-a', frameRate: rational(60, 1) }],
+    }),
+    (error) => error.code === 'DIRECTION_SOURCE_CADENCE_UNSUPPORTED'
+      && error.details.trackId === 'track-camera-a'
+      && error.details.sourceFrameRate === '60/1'
+      && error.details.planFps === '30/1',
+    'a 60 fps source under a 30 fps plan is refused, not silently desynchronized',
+  )
+  // Every clip that IS emitted satisfies the renderer's own predicate.
+  for (const clip of [...compiled.clips, ...atThirty.clips]) {
+    assert.equal(clip.audioSourceOutFrame - clip.audioSourceInFrame, clip.sourceOutFrame - clip.sourceInFrame)
+    assert.equal(clip.timelineOutFrame - clip.timelineInFrame, clip.sourceOutFrame - clip.sourceInFrame)
+  }
   assert.throws(
     () => compileShotsToSourceRanges(direction, {
       session: world.session,
@@ -1220,8 +1252,8 @@ test('T-FR-150 source frames are counted at the track\'s own frame rate while th
   console.log(`source-cadence camA in=${first.sourceInFrame} out=${first.sourceOutFrame} timeline=${first.timelineOutFrame - first.timelineInFrame} camB in=${second.sourceInFrame}`)
 })
 
-test('T-FR-150 both direction refusals are domain error codes the public envelope can carry', () => {
-  for (const code of ['DIRECTION_RANGE_UNRESOLVABLE', 'CAMERA_IDENTITY_COLLISION']) {
+test('T-FR-150 every direction refusal is a domain error code the public envelope can carry', () => {
+  for (const code of ['DIRECTION_RANGE_UNRESOLVABLE', 'DIRECTION_SOURCE_CADENCE_UNSUPPORTED', 'CAMERA_IDENTITY_COLLISION']) {
     assert.ok(DOMAIN_ERROR_CODES.includes(code), `${code} is a domain error code`)
     // The catalog refuses to build unless every code is classified exactly
     // once, so importing it at all is the proof; the assertions name what a
