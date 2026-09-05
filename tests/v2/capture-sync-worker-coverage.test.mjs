@@ -179,8 +179,13 @@ test('T-F4.012 the seconds a card change lost stay lost', () => {
 })
 
 test('T-F4.012 a part nobody probed is refused for auto-edit', () => {
-  // The phase-6 gate test: deleting the coverage call in the worker, or
-  // promoting declared-metadata above the floor, makes this fail.
+  // What this case actually gates: the policy keeps an unprobed part below
+  // AUTO_EDIT_MINIMUM_CONFIDENCE_BPS by construction, so promoting
+  // `declared-metadata` above the floor makes it fail. It does NOT gate the
+  // worker — this file never imports `runCaptureSyncWorker`, and deleting the
+  // worker's coverage call leaves it 6/6 green. The phase-6 gate for that is
+  // `capture-sync-worker.test.mjs` 'T-F4.012 the worker derives and persists
+  // coverage for every track', which dies with `0 !== 2`.
   const session = sessionWith(
     track('track-camera-main', [part()]),
     track('track-phone', [part({

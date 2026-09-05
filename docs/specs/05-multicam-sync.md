@@ -434,6 +434,32 @@ alguma.
 um processo pausado não pode ser avisado de que foi pausado. O token de fencing
 cresce estritamente por sessão e só o mais alto pode liquidar.
 
+**O lease tem que ser maior que a medição.** Uma correlação de áudio é uma
+chamada síncrona: medido nesta máquina com os argumentos que o adaptador usa
+(2 kHz, janelas de 2 s, busca exaustiva), um par (parte candidata × parte de
+referência) custa 160 ms (N=3, sd 12 ms) para 40 s de material, 9,1 s (N=3,
+sd 1,6 s) para 300 s e 71 s (N=1, 345 MB de RSS) no teto de análise de 1800 s do
+próprio adaptador. Com o lease de 60 s que o worker trazia, qualquer sessão além
+de cerca de um minuto de áudio era retomada no meio da medição e falhava de vez
+depois de três tentativas. O lease padrão é de cinco minutos, o `SyncSignalSource`
+recebe um `heartbeat` que o adaptador aguarda entre decodificações e entre pares
+— nenhum temporizador serviria, porque a busca não devolve o event loop — e a
+fábrica lê `APOLLO_V2_CAPTURE_SYNC_LEASE_MS ?? APOLLO_V2_WORKER_LEASE_MS`.
+
+**Uma peça do mapa é um trecho de ticks de origem que uma lei descreve, não um
+arquivo.** Dois arquivos que se encostam exatamente e concordam no deslocamento
+são UMA peça: rotular essa junção como `file-split` — causa descontínua — fazia
+`createPiecewiseClockMap` recusar a divisão de 4 GB mais comum que existe, e a
+`DomainError` escapava do worker deixando a run reivindicada e nunca liquidada.
+Duas partes que medem deslocamentos diferentes viram duas peças, abertas por
+`residual-exceeded`, cada uma com o deslocamento que a sua própria parte mediu.
+
+**Arquivo ausente é fato da sessão, não falha da run.** Um artefato que sumiu ou
+cujos bytes não são mais os que a parte declara degrada AQUELA trilha para
+`insufficient-evidence` e a passagem continua; um codec que não abre continua
+falhando a run inteira. Uma câmera sem cartão copiado não pode bloquear a
+sincronização das outras cinco.
+
 ### 27.3 O que continua aberto
 
 - §9 correlação de áudio: **entregue na Wave 20**. O adaptador decodifica as
@@ -453,8 +479,11 @@ O que a Wave 20 deixou aberto, medido e não estimado:
 - **Drift não é ajustado.** `fitClockDrift` e a tabela `capture_drift_fits`
   continuam sem escritor: não existe função de hash canônico para um
   `ClockDriftFit`, e o repositório teria que inventar a serialização e a tabela
-  filha de âncoras. O worker segue passando `residualBoundTicks: 0` e o
-  diagnóstico segue relatando `driftPpm: null` — que é "não medido", não zero.
+  filha de âncoras. O que a peça do mapa carrega hoje é o resíduo que o sinal
+  eleito mediu para AQUELA peça, mais o tique de arredondamento que
+  `createSourceToSessionMapping` sempre soma — um limite do deslocamento, não de
+  uma taxa. O diagnóstico segue relatando `driftPpm: null`, que é "não medido",
+  não zero.
 - **Marcador confirmado não é prova admissível.** A cascata exige evidência de
   ambiguidade de todo método que localiza por busca, e `MarkerDetection` guarda
   só os ids das observações: o pico e o segundo pico que a fusão mediu não

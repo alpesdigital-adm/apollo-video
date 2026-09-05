@@ -320,11 +320,19 @@ test(
     assert.equal(requested.replayed, false)
     assert.equal(requested.run.status, 'queued')
 
-    /** The driver, exactly as CI and an operator run it. */
+    /**
+     * The driver, through the npm SCRIPT and not the file.
+     *
+     * Spawning the file directly is how two Wave 19 suites shipped with a
+     * broken script definition nobody noticed: the suite passed, the registered
+     * command was never executed, and CI ran the same file the suite did. Here
+     * `npm run worker:v2:capture-sync -- --once` is the only thing invoked, so
+     * a typo in package.json fails this test.
+     */
     const runDriverOnce = () => new Promise((resolve, reject) => {
       const child = spawn(
-        process.execPath,
-        ['node_modules/tsx/dist/cli.mjs', 'scripts/run-v2-capture-sync-worker.mjs', '--once'],
+        process.platform === 'win32' ? 'npm.cmd' : 'npm',
+        ['run', '--silent', 'worker:v2:capture-sync', '--', '--once'],
         {
           cwd: REPOSITORY_ROOT,
           env: {
@@ -333,6 +341,7 @@ test(
             APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
           },
           stdio: ['ignore', 'pipe', 'pipe'],
+          shell: process.platform === 'win32',
         },
       )
       let stdout = ''

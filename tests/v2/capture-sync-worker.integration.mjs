@@ -20,6 +20,7 @@ import {
   timebaseFromRate,
 } from '../../src/v2/domain/session-time.ts'
 import { FfmpegAudioSyncSignalSource } from '../../src/v2/infrastructure/media/ffmpeg-audio-sync-signal-source.ts'
+import { confidenceFromPeakRatio } from '../../src/v2/infrastructure/media/ffmpeg-playback-fingerprint.ts'
 
 const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
@@ -77,6 +78,15 @@ const PROJECTED_LAGS = Object.freeze([0.52, 1.52, 1.5203, 3.04])
  */
 const LAG_TOLERANCE_FRAMES = 1
 
+/** Where the slap-back sits, and how loud. Measured values in the fixture's own doc. */
+const ECHO_SECONDS = 5
+/** Nearly as loud as the direct sound: peakRatio 1.05 against a 1.2 floor. */
+const ECHO_GAIN = 0.95
+/** Loud enough to be admitted but not to be trusted: peakRatio 1.40, under the 1.5 auto-apply floor. */
+const WEAK_ECHO_GAIN = 0.7
+/** Room tones at five times the reference: normalised peak 0.35 against a 0.5 floor. */
+const BABBLE_AMPLITUDE = 5
+
 const frames = (seconds) => BigInt(Math.round(seconds * FPS))
 const at = (second) => new Date(Date.parse('2029-04-01T09:00:00.000Z') + second * 1000).toISOString()
 const digest = (character) => character.repeat(64)
@@ -123,6 +133,69 @@ function buildLaggedSamples(reference, lagSeconds, seed) {
   const shift = Math.round(lagSeconds * SAMPLE_RATE)
   for (let sample = 0; sample < samples.length; sample += 1) {
     samples[sample] = (reference[sample + shift] ?? 0) + 0.08 * noise()
+  }
+  return samples
+}
+
+/**
+ * The same event heard twice: a room with a hard slap-back.
+ *
+ * The audio genuinely IS the reference, and every window locks onto it — but a
+ * copy of the same material five seconds further on is nearly as strong, so the
+ * search cannot say which of the two it found. `peakRatio` measured at 1.05
+ * against an admission floor of 1.2, with every window's peak comfortably above
+ * the 0.5 peak floor: this is the fixture the RATIO gate exists for, and with
+ * that gate deleted all fifteen windows agree on one offset and the worker
+ * publishes a confident map of a recording it could not identify.
+ *
+ * Five seconds and not two, because the correlator guards one window's width
+ * either side of its winner before it will call anything a rival
+ * (`ffmpeg-playback-fingerprint.ts:519`): an echo inside the guard band is the
+ * same match seen from one sample over, not a competitor.
+ */
+function buildEchoedSamples(reference, lagSeconds, gain, seed) {
+  const samples = new Float64Array(CANDIDATE_SECONDS * SAMPLE_RATE)
+  const noise = lcg(seed)
+  const shift = Math.round(lagSeconds * SAMPLE_RATE)
+  const echo = Math.round(ECHO_SECONDS * SAMPLE_RATE)
+  for (let sample = 0; sample < samples.length; sample += 1) {
+    samples[sample] = (reference[sample + shift] ?? 0) +
+      gain * (reference[sample + shift + echo] ?? 0) +
+      0.02 * noise()
+  }
+  return samples
+}
+
+/**
+ * The same event under a room the microphone could not hear past.
+ *
+ * Twelve tones inside the band the correlation actually sees, loud enough that
+ * the reference is a third of what the window contains. The offset is still
+ * measurable — every window locks on the right instant and the ratio stays near
+ * 2.2, well above the admission floor — but the normalised peak measures 0.32 to
+ * 0.37 against a floor of 0.5. This is the fixture the PEAK gate exists for,
+ * and it is a different failure from the echo: there the search could not say
+ * WHICH match it found, here it can, and what it found is mostly not the
+ * reference.
+ *
+ * The tones are inside 500-1000 Hz on purpose. Wideband hiss is removed by the
+ * resampler on the way down to 2 kHz, so a fixture built from it measures the
+ * lowpass rather than the gate — the first attempt at this used white noise at
+ * six times the signal and still peaked at 0.73.
+ */
+function buildBabbleSamples(reference, lagSeconds, seed) {
+  const samples = new Float64Array(CANDIDATE_SECONDS * SAMPLE_RATE)
+  const random = lcg(seed)
+  const shift = Math.round(lagSeconds * SAMPLE_RATE)
+  const voices = []
+  for (let voice = 0; voice < 12; voice += 1) voices.push(500 + random() * 600)
+  for (let sample = 0; sample < samples.length; sample += 1) {
+    const t = sample / SAMPLE_RATE
+    let babble = 0
+    for (let voice = 0; voice < voices.length; voice += 1) {
+      babble += Math.sin(2 * Math.PI * voices[voice] * t + voice)
+    }
+    samples[sample] = (reference[sample + shift] ?? 0) + (BABBLE_AMPLITUDE / voices.length) * babble
   }
   return samples
 }
@@ -405,6 +478,30 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
     }))
   }
 
+  /** Encode one generated candidate and hand back its path. */
+  async function encodeCandidate(name, samples) {
+    const pcm = join(workRoot, `${name}.pcm`)
+    await writeFile(pcm, toPcm(samples))
+    return encodeWithAudio({
+      durationSeconds: CANDIDATE_SECONDS,
+      pcmPath: pcm,
+      outputPath: join(workRoot, `${name}.mp4`),
+    })
+  }
+
+  const echoedPath = await encodeCandidate(
+    'echoed',
+    buildEchoedSamples(reference, PROJECTED_LAGS[1], ECHO_GAIN, 20_260_910),
+  )
+  const weakEchoPath = await encodeCandidate(
+    'weak-echo',
+    buildEchoedSamples(reference, PROJECTED_LAGS[1], WEAK_ECHO_GAIN, 20_260_912),
+  )
+  const babblePath = await encodeCandidate(
+    'babble',
+    buildBabbleSamples(reference, PROJECTED_LAGS[1], 20_260_916),
+  )
+
   const shuffledPcm = join(workRoot, 'shuffled.pcm')
   await writeFile(shuffledPcm, toPcm(buildShuffledSamples(reference, 20_260_906)))
   const shuffledPath = await encodeWithAudio({
@@ -479,6 +576,20 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
       // A correlator that returns 1.0 has stopped measuring and started
       // asserting; the curve this uses approaches 0.99 and never reaches it.
       assert.ok(record.assessments[0].reportedConfidence < 1)
+      // And the relation, not just the bound: the reported confidence is the
+      // curve evaluated at the separation the same record reports. A bound
+      // alone could not tell a measurement from a constant — hardcoding 0.95,
+      // comfortably over the 0.8 auto-apply floor, left every suite green.
+      // The tolerance is the record's own rounding of `peakRatio` to four
+      // decimals (`sync-evidence.ts:492`), which moves the curve by ~2e-7 here.
+      assert.ok(
+        Math.abs(
+          record.assessments[0].reportedConfidence -
+            confidenceFromPeakRatio(record.assessments[0].peakRatio),
+        ) < 1e-5,
+        `confidence ${record.assessments[0].reportedConfidence} does not follow from ` +
+        `peak ratio ${record.assessments[0].peakRatio}`,
+      )
       // The piece carries the residual the elected signal measured, not the
       // hardcoded zero it used to. Zero is a claim of exactness that no
       // correlation can support, and the cascade had already measured the
@@ -589,6 +700,61 @@ test('T-F4.012 capture sync worker over generated audio', async (t) => {
     console.log(
       `T-F4.012 shuffled audio: outcome=${sessions.evidence[0].outcome} ` +
       `signals=${sessions.evidence[0].assessments.length} maps=${sessions.maps.length}`,
+    )
+  })
+
+  await t.test('a room with a slap-back is refused by the peak-ratio floor', async () => {
+    // The audio really is the reference and every window locks onto it, but a
+    // copy of the same material five seconds on is nearly as strong: the search
+    // cannot say which of the two it found. Without the ratio gate the fifteen
+    // windows all agree on one offset and the worker publishes a confident map
+    // of a recording it could not identify — which is why deleting
+    // `entry.peakRatio >= admission` has to make this case fail.
+    const { sessions, runs, result } = await runOver(echoedPath)
+
+    assert.equal(sessions.evidence[0].outcome, 'insufficient-evidence')
+    assert.equal(sessions.evidence[0].assessments.length, 0, 'no window was admitted, so nothing was assessed')
+    assert.equal(sessions.maps.length, 0)
+    assert.equal(result.insufficient, 1)
+    assert.equal(runs.state.settled.status, 'succeeded')
+  })
+
+  await t.test('a room louder than the reference is refused by the peak floor', async () => {
+    // The other gate, and a different failure: here the search CAN say which
+    // match it found — the ratio stays above 2 — and what it found is mostly
+    // not the reference. Measured peaks 0.32 to 0.37 against a floor of 0.5.
+    // Deleting `entry.peak >= this.minimumPeak` has to make this case fail.
+    const { sessions, result } = await runOver(babblePath)
+
+    assert.equal(sessions.evidence[0].outcome, 'insufficient-evidence')
+    assert.equal(sessions.evidence[0].assessments.length, 0)
+    assert.equal(sessions.maps.length, 0)
+    assert.equal(result.insufficient, 1)
+  })
+
+  await t.test('a weaker separation reports a strictly lower confidence', async () => {
+    // The same lag, the same everything, one echo at 0.7 instead of 0.95. It is
+    // admitted — it is a real measurement — but the confidence has to fall with
+    // the separation, and the fall has to carry it under the auto-apply floor.
+    const clean = await runOver(laggedPaths.get(PROJECTED_LAGS[1]))
+    const weak = await runOver(weakEchoPath)
+
+    const cleanAssessment = clean.sessions.evidence[0].assessments[0]
+    const weakAssessment = weak.sessions.evidence[0].assessments[0]
+    assert.equal(weak.sessions.evidence[0].outcome !== 'insufficient-evidence', true)
+    assert.ok(
+      weakAssessment.peakRatio < cleanAssessment.peakRatio,
+      `weak ${weakAssessment.peakRatio} against clean ${cleanAssessment.peakRatio}`,
+    )
+    assert.ok(
+      weakAssessment.reportedConfidence < cleanAssessment.reportedConfidence,
+      `weak ${weakAssessment.reportedConfidence} against clean ${cleanAssessment.reportedConfidence}`,
+    )
+    assert.equal(weak.sessions.evidence[0].outcome, 'review', 'a ratio under 1.5 is not trusted unreviewed')
+    console.log(
+      `T-F4.012 separation: clean peakRatio=${cleanAssessment.peakRatio} conf=${cleanAssessment.reportedConfidence.toFixed(4)} ` +
+      `outcome=${clean.sessions.evidence[0].outcome} | echoed peakRatio=${weakAssessment.peakRatio} ` +
+      `conf=${weakAssessment.reportedConfidence.toFixed(4)} outcome=${weak.sessions.evidence[0].outcome}`,
     )
   })
 
