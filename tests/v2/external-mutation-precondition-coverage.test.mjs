@@ -63,19 +63,19 @@ const coverage = Object.freeze({
   },
   'apollo.projects.capture-sessions.color-match.derive': {
     mode: 'fenced-natural-idempotent-action',
-    evidence: 'Wave20 requires the capture session version id and hash the reference camera was chosen against and refuses a stale one with the current pair, and separately requires the project version pair the ColorPlan layers must land on; the only colour input is which camera is the reference, and every delta and confidence is measured from decoded frames',
+    evidence: 'Wave20 requires the capture session version id and hash the reference camera was chosen against and refuses a stale one with the current pair, and separately requires the project version pair the ColorPlan layers must land on; the only colour input is which camera is the reference, and every delta and confidence is measured from decoded frames. No caller key: a re-derivation that measures the same bytes under the same head replays instead of minting a second version, which is why this declares natural rather than required',
   },
   'apollo.projects.capture-sessions.color-match.overrides.add': {
     mode: 'fenced-natural-idempotent-action',
-    evidence: 'Wave20 requires the match plan version id as <sessionId>:match:v<n> plus the plan hash, parsed so a fence from another chain is refused rather than matching on the number, and refuses an amendment whose pair is no longer the head with the current version and hash in the failure',
+    evidence: 'Wave20 requires the match plan version id as <sessionId>:match:v<n> plus the plan hash, parsed so a fence from another chain is refused rather than matching on the number, and refuses an amendment whose pair is no longer the head with the current version and hash in the failure. No caller key: an override id the plan already carries returns the stored plan without a second write',
   },
   'apollo.projects.capture-sessions.playback-map.build': {
     mode: 'fenced-natural-idempotent-action',
-    evidence: 'Wave20 requires the capture session version id and hash the build was requested against and refuses a session that has moved, because a rebuild against different tracks would fingerprint different recordings and call the result the same map',
+    evidence: 'Wave20 requires the capture session version id and hash the build was requested against and refuses a session that has moved, because a rebuild against different tracks would fingerprint different recordings and call the result the same map. No caller key: a rebuild producing the identical derivation fingerprint returns the stored map rather than growing the chain',
   },
   'apollo.projects.capture-sessions.playback-map.anchors.add': {
     mode: 'fenced-natural-idempotent-action',
-    evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and enforces the fence inside the append; an anchor is refused unless its instant falls inside a stretch the detector left uncovered, so answering an absence can never become overruling a measurement',
+    evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and enforces the fence inside the append; an anchor is refused unless its instant falls inside a stretch the detector left uncovered, so answering an absence can never become overruling a measurement. No caller key: the append is the fence, and a repeat under a spent pair is refused with the current one rather than duplicated',
   },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'idempotent-create',

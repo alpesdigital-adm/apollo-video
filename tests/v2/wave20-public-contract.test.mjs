@@ -14,7 +14,14 @@ import {
   DIRECTION_WARNINGS,
   OUTPUT_ASPECT_RATIOS,
 } from '../../src/v2/domain/multicam-direction.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
 import { PLAYBACK_MODES } from '../../src/v2/domain/playback-map.ts'
+import {
+  COLOR_CRITIC_BUDGET_WINDOW,
+  listColorCriticIssuesService,
+  listColorCriticReportsService,
+  readColorCriticReportService,
+} from '../../src/v2/application/color-critic.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../../src/v2/application/multicam-direction.ts'
 import { FOUNDATION_AGENT_TOOL_SAFETY } from '../../src/v2/public-api/agent-tool-safety.ts'
 import {
@@ -29,8 +36,13 @@ import {
   parseDeriveMatchPlanBody,
   parseMatchRangeOverrideBody,
 } from '../../src/v2/public-api/multicam-color-contract.ts'
-import { parsePlaybackAnchorBody } from '../../src/v2/public-api/react-playback-map-contract.ts'
+import {
+  parseBuildPlaybackMapBody,
+  parsePlaybackAnchorBody,
+} from '../../src/v2/public-api/react-playback-map-contract.ts'
 import { derivationVersion } from '../../src/v2/public-api/capture-derivation-contract.ts'
+import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
+import { PUBLIC_SCHEMA_EXAMPLES } from '../../src/v2/public-api/schema-examples.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 /**
@@ -548,4 +560,263 @@ test('no NEW capability advertises an Idempotency-Key nothing reads', () => {
   for (const id of IDEMPOTENCY_HEADER_DEBT) {
     assert.ok(!WAVE20_IDS.includes(id), `${id} is Wave 20 and must not be on the debt list`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// The published request schema and the runtime parser, pinned to each other
+// ---------------------------------------------------------------------------
+
+const WAVE20_PARSERS = Object.freeze({
+  'apollo.projects.capture-sessions.direction.run': parseDirectMulticamSessionBody,
+  'apollo.projects.capture-sessions.direction.protected-selections.direct': parseProtectMulticamSelectionBody,
+  'apollo.projects.capture-sessions.color-match.derive': parseDeriveMatchPlanBody,
+  'apollo.projects.capture-sessions.color-match.overrides.add': parseMatchRangeOverrideBody,
+  'apollo.projects.capture-sessions.playback-map.build': parseBuildPlaybackMapBody,
+  'apollo.projects.capture-sessions.playback-map.anchors.add': parsePlaybackAnchorBody,
+})
+
+test('T-F4.012 every key a Wave 20 request schema requires is a key its parser refuses to do without', () => {
+  // The precondition audit classifies `direction.run` as a base-version-bound
+  // action on the strength of `required: ['baseVersionId', 'baseHash', ...]` in
+  // the *schema*. Nothing read the parser. Making `baseHash` optional there —
+  // defaulting to a zero digest — left the audit, the OpenAPI and every gate
+  // green, and only the service's own re-check of the pair kept the build from
+  // writing unfenced. This loop is the missing edge: the schema's `required`
+  // drives the parser, one key at a time, off the published example.
+  for (const [id, parse] of Object.entries(WAVE20_PARSERS)) {
+    const entry = capability(id)
+    const schema = getPublicSchema(entry.inputSchemaRef).schema
+    const examples = PUBLIC_SCHEMA_EXAMPLES[entry.inputSchemaRef]
+    assert.ok(examples?.length > 0, `${entry.inputSchemaRef} must publish an example`)
+    const example = examples[0]
+
+    // The published example is what a caller copies. If the parser refuses it,
+    // the documentation is a trap.
+    assert.doesNotThrow(() => parse(example), `${id} must accept its own published example`)
+
+    assert.ok(schema.required.length > 0, `${id} must require something`)
+    for (const key of schema.required) {
+      const { [key]: _removed, ...without } = example
+      refuses(() => parse(without), key)
+    }
+  }
+})
+
+test('T-F4.015 a version ref the server builds at full width survives its own published bound', () => {
+  // `presentBuiltPlaybackMap` builds `<sessionId>:playback:<trackId>:v<n>` out
+  // of two ids a caller may legitimately choose 128 characters long. Published
+  // as `idSchema` the composite was 269 characters against a maximum of 128, so
+  // the API handed out a fence it would refuse back — and the parser, capped at
+  // the 200 `identifier` allows, refused it too.
+  const widest = `${'s'.repeat(128)}:playback:${'t'.repeat(128)}:v999999999`
+  assert.equal(widest.length, 277)
+
+  const request = getPublicSchema('apollo://schemas/add-react-playback-anchor-request/v1').schema
+  assert.ok(
+    widest.length <= request.properties.baseVersionId.maxLength,
+    `the published baseVersionId bound (${request.properties.baseVersionId.maxLength}) must accept a ref the server builds (${widest.length})`,
+  )
+  for (const ref of [
+    'apollo://schemas/react-playback-map-read/v1',
+    'apollo://schemas/react-playback-map-built/v1',
+    'apollo://schemas/multicam-match-plan-read/v1',
+  ]) {
+    const published = getPublicSchema(ref).schema.properties.data.properties.versionRef
+    const bound = published.maxLength ?? published.oneOf[0].maxLength
+    assert.ok(bound >= widest.length, `${ref} publishes versionRef with maxLength ${bound}`)
+  }
+
+  // And the parser accepts what the schema accepts.
+  const parsed = parsePlaybackAnchorBody({
+    baseVersionId: widest,
+    baseHash: HASH,
+    reactionTrackId: 'track-reaction',
+    anchor: { anchorId: 'anchor-1', reactionTick: '900', referenceTick: '450' },
+  })
+  assert.equal(parsed.baseVersionId, widest)
+  // Still bounded: 300 is the grammar, not "anything".
+  refuses(
+    () => parsePlaybackAnchorBody({
+      baseVersionId: 'x'.repeat(301),
+      baseHash: HASH,
+      reactionTrackId: 'track-reaction',
+      anchor: { anchorId: 'anchor-1', reactionTick: '900', referenceTick: '450' },
+    }),
+    'baseVersionId',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// Derived truths an agent acts on
+// ---------------------------------------------------------------------------
+
+function criticReport(overrides = {}) {
+  return {
+    reportId: 'report-1',
+    projectId: 'project-1',
+    projectVersionId: 'project-version-1',
+    action: 'accept',
+    cause: 'none',
+    confidence: 9_000,
+    confidenceBand: 'high',
+    referenceCameraId: 'camera-a',
+    matchPlanId: null,
+    issues: [],
+    evaluatedAt: '2026-09-01T00:00:00.000Z',
+    reportHash: HASH,
+    ...overrides,
+  }
+}
+
+test('T-F4.014 the correction budget does not move when the caller changes the page size', () => {
+  // `evaluate` counts bounded corrections over a fixed window before it decides
+  // whether another one is allowed. The listing used to count over the caller's
+  // own page, so `?limit=1` reported the budget as unspent for a version whose
+  // next correction the evaluator will refuse — an agent reading the listing
+  // would have asked for a correction that cannot happen.
+  const rows = [
+    criticReport({ reportId: 'r3', action: 'bounded-correction', evaluatedAt: '2026-09-03T00:00:00.000Z' }),
+    criticReport({ reportId: 'r2', action: 'bounded-correction', evaluatedAt: '2026-09-02T00:00:00.000Z' }),
+    criticReport({ reportId: 'r1', action: 'accept', evaluatedAt: '2026-09-01T00:00:00.000Z' }),
+  ]
+  const seen = []
+  const list = listColorCriticReportsService({
+    reports: {
+      async listForProjectVersion({ limit }) {
+        seen.push(limit)
+        return rows.slice(0, limit ?? 25)
+      },
+    },
+  })
+  const scope = { workspaceId: 'ws-1', projectId: 'project-1', projectVersionId: 'project-version-1' }
+  return Promise.all([list(scope), list({ ...scope, limit: 1 }), list({ ...scope, limit: 100 })])
+    .then(([wide, narrow, widest]) => {
+      for (const [label, answer] of [['default', wide], ['limit=1', narrow], ['limit=100', widest]]) {
+        assert.equal(answer.correctionsApplied, 2, `${label} must see both bounded corrections`)
+        assert.equal(answer.correctionBudgetExhausted, true, `${label} must see the budget spent`)
+      }
+      // The page itself still honours the caller.
+      assert.equal(narrow.reports.length, 1)
+      assert.equal(wide.reports.length, 3)
+      // And the budget was always counted over the evaluator's window.
+      assert.ok(
+        seen.filter((limit) => limit === COLOR_CRITIC_BUDGET_WINDOW).length >= 2,
+        `the budget read must use the evaluator window; saw ${seen.join(',')}`,
+      )
+    })
+})
+
+test('T-F4.014 a verdict about one project is not readable under another project path', async () => {
+  // The route is `/v1/projects/{projectId}/color-critic-reports/{reportId}`.
+  // A path segment that names a project is either enforced or it is a lie the
+  // client believes: a verdict about project A returned under project B's URL
+  // is filed against the wrong cut, and the 404 that should have happened did
+  // not. The fake below deliberately IGNORES the projectId hint, so this proves
+  // the service refuses rather than the query.
+  const reports = { async read({ reportId }) { return reportId === 'report-1' ? criticReport() : null } }
+  const read = readColorCriticReportService({ reports })
+  const listIssues = listColorCriticIssuesService({ reports })
+
+  assert.equal((await read({ workspaceId: 'ws-1', projectId: 'project-1', reportId: 'report-1' })).reportId, 'report-1')
+  for (const call of [
+    () => read({ workspaceId: 'ws-1', projectId: 'project-2', reportId: 'report-1' }),
+    () => listIssues({ workspaceId: 'ws-1', projectId: 'project-2', reportId: 'report-1' }),
+  ]) {
+    await assert.rejects(call, (error) => {
+      assert.equal(error.code, 'COLOR_CRITIC_REPORT_NOT_FOUND')
+      return true
+    })
+  }
+  // The issue listing under the owning project still answers.
+  assert.equal(
+    (await listIssues({ workspaceId: 'ws-1', projectId: 'project-1', reportId: 'report-1' })).reportId,
+    'report-1',
+  )
+})
+
+test('T-F4.012 a stale refusal reaches the caller with the version and hash that are current', () => {
+  // The audit rows say these refusals "carry the current pair". They did not:
+  // the public presenter forwarded `details` only for AUTH_SCOPE_REQUIRED, so a
+  // UI that wanted to offer "reload and retry" got a generic message and
+  // nothing to reload to.
+  for (const code of [
+    'CAPTURE_SESSION_VERSION_STALE',
+    'SYNC_DIAGNOSTIC_VERSION_STALE',
+    'PLAYBACK_MAP_VERSION_STALE',
+    'PERSISTENCE_CONFLICT',
+  ]) {
+    const presented = presentPublicDomainError(
+      new DomainError(code, 'moved on', {
+        currentVersionId: 'capture-session-1:playback:track-reaction:v7',
+        currentVersion: 7,
+        currentHash: OTHER_HASH,
+      }),
+      'req-1',
+    )
+    assert.equal(presented.error.code, code)
+    assert.deepEqual(presented.error.details, {
+      currentVersionId: 'capture-session-1:playback:track-reaction:v7',
+      currentVersion: 7,
+      currentHash: OTHER_HASH,
+    })
+  }
+
+  // A project fence names its half `currentBaseHash`; that travels too.
+  const conflict = presentPublicDomainError(
+    new DomainError('VERSION_CONFLICT', 'stale', {
+      currentVersionId: 'project-version-9',
+      currentBaseHash: OTHER_HASH,
+    }),
+    'req-2',
+  )
+  assert.deepEqual(conflict.error.details, {
+    currentVersionId: 'project-version-9',
+    currentBaseHash: OTHER_HASH,
+  })
+
+  // Nothing else in `details` crosses, and a malformed pair is dropped rather
+  // than published: details are internal, and a future throw must not be able
+  // to leak through this door.
+  const noisy = presentPublicDomainError(
+    new DomainError('PERSISTENCE_CONFLICT', 'stale', {
+      currentVersion: 3,
+      currentHash: 'not-a-digest',
+      internalCursor: 'row-4711',
+    }),
+    'req-3',
+  )
+  assert.deepEqual(noisy.error.details, { currentVersion: 3 })
+  assert.equal(
+    presentPublicDomainError(new DomainError('PERSISTENCE_CONFLICT', 'x', {}), 'req-4').error.details,
+    undefined,
+  )
+})
+
+test('T-F4.015 a published example states what the fixture it was built from actually holds', () => {
+  // The examples are built by the real presenters, but the ARGUMENTS handed to
+  // those presenters are still written by hand. Replacing one derived value
+  // with a literal that says the opposite — `manualReviewRequired: false` over
+  // a map with uncovered stretches — passed every gate, because Ajv only checks
+  // that an example is well-typed. This checks that it is also true.
+  for (const ref of [
+    'apollo://schemas/react-playback-map-built/v1',
+    'apollo://schemas/react-playback-map-anchored/v1',
+    'apollo://schemas/react-playback-map-read/v1',
+  ]) {
+    const { data } = PUBLIC_SCHEMA_EXAMPLES[ref][0]
+    assert.equal(
+      data.manualReviewRequired,
+      data.map.uncovered.length > 0,
+      `${ref} must say a person is needed exactly when the map has a stretch nobody could resolve`,
+    )
+  }
+  // The same rule for the two counters on the verdict listing: the summary is
+  // derived from the reports it lists, so the example cannot claim otherwise.
+  const listing = PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/color-critic-report-list/v1'][0].data
+  assert.equal(
+    listing.correctionBudgetExhausted,
+    listing.correctionsApplied >= 2,
+    'the example must exhaust the budget exactly when it has spent it',
+  )
+  assert.ok(listing.reports.length > 0, 'the listing example must list something')
 })
