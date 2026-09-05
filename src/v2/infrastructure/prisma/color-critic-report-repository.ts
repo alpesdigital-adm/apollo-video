@@ -205,6 +205,34 @@ interface ReportRow {
     blueGain: number | null
     saturation: number | null
   }[]
+  measurements: readonly { measurementId: string; stage: string }[]
+}
+
+/**
+ * The FK trail that says WHICH measurements the verdict rested on, checked
+ * against the ones the hashed body names.
+ *
+ * The rows are outside the report hash and outside every CHECK — they exist so
+ * a re-measured camera can be asked which verdicts rest on it — so without this
+ * they could be deleted and the rejection would still read back intact,
+ * unciteable. They are not a second source of truth: the body is, and a row that
+ * disagrees with it means somebody edited one of the two.
+ */
+function assertMeasurementCitations(row: ReportRow, sections: readonly Readonly<ColorCriticSection>[]): void {
+  const cited = new Set(row.measurements.map((entry) => `${entry.stage}|${entry.measurementId}`))
+  const expected = new Set(sections.flatMap((section) => section.measurements.map((measurement) =>
+    `${section.stage}|${measurementRowId(row.workspaceId, measurement.measurementId)}`)))
+  if (
+    cited.size !== row.measurements.length ||
+    cited.size !== expected.size ||
+    [...expected].some((key) => !cited.has(key))
+  ) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `Stored colour critic report ${row.reportId} does not cite the measurements it was reached over`,
+      { cited: cited.size, expected: expected.size },
+    )
+  }
 }
 
 function hydrateReport(row: ReportRow): Readonly<ColorCriticReport> {
@@ -330,6 +358,7 @@ function hydrateReport(row: ReportRow): Readonly<ColorCriticReport> {
     evaluatedAt: row.evaluatedAt.toISOString(),
     reportHash: row.reportHash,
   }
+  assertMeasurementCitations(row, report.sections)
   // Re-checks the report hash, the cause-to-action table, and every embedded
   // measurement. A verdict softened from reject to approve in the database
   // fails here rather than releasing an export nobody approved.
@@ -340,6 +369,7 @@ const REPORT_INCLUDE = {
   dimensions: true,
   issues: true,
   proposedDeltas: true,
+  measurements: { select: { measurementId: true, stage: true } },
 } as const
 
 export class PrismaColorCriticReportRepository implements ColorCriticReportRepository {

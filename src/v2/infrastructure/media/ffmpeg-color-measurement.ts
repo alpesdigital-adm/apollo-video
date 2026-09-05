@@ -72,12 +72,25 @@ export const SKIN_BAND_EVALUATOR: Readonly<ColorEvaluatorRef> = Object.freeze({
   version: FFMPEG_COLOR_MEASUREMENT_VERSION,
 })
 
+/**
+ * One range to measure.
+ *
+ * The source extent is named EITHER in frames or in seconds, never both. A
+ * capture session counts in ticks and a coverage interval converts to seconds
+ * exactly; frames are this adapter's unit, and the frame rate is something only
+ * the probe knows. Asking an application service to convert would force it to
+ * carry a frame rate it has no instrument for — and a frame index derived from
+ * a guessed rate points at the wrong picture without ever failing.
+ */
 export interface ColorMeasurementRangeRequest {
   /** Session ticks the range describes. */
   readonly sessionRange: Readonly<TickInterval>
   /** Source frame indices to decode, half-open. */
-  readonly sourceStartFrame: number
-  readonly sourceEndFrame: number
+  readonly sourceStartFrame?: number
+  readonly sourceEndFrame?: number
+  /** The same extent in seconds from the start of the file, half-open. */
+  readonly sourceStartSeconds?: number
+  readonly sourceEndSeconds?: number
   readonly measurementId?: string
 }
 
@@ -258,6 +271,57 @@ function dimensionsFrom(stats: FrameStatistics, evidenceRef: string): Readonly<R
 }
 
 /**
+ * The frame extent of one requested range, whichever unit it arrived in.
+ *
+ * Exactly one pair must be present. Accepting both would let two answers to
+ * the same question disagree, and the measurement records the frame range it
+ * decoded — a `sourceRange` that did not describe the decoded bytes would be a
+ * confident lie about which part of the recording was read.
+ */
+function resolveSourceFrames(
+  request: Readonly<ColorMeasurementRangeRequest>,
+  fps: number,
+): Readonly<{ sourceStartFrame: number; sourceEndFrame: number }> {
+  const byFrame = request.sourceStartFrame !== undefined || request.sourceEndFrame !== undefined
+  const bySeconds = request.sourceStartSeconds !== undefined || request.sourceEndSeconds !== undefined
+  if (byFrame === bySeconds) {
+    throw new DomainError(
+      'INVALID_ARGUMENT',
+      'A colour measurement range names its source extent either in frames or in seconds, never both and never neither',
+    )
+  }
+  if (bySeconds) {
+    const start = request.sourceStartSeconds
+    const end = request.sourceEndSeconds
+    if (
+      !Number.isFinite(fps) || fps <= 0 ||
+      typeof start !== 'number' || !Number.isFinite(start) || start < 0 ||
+      typeof end !== 'number' || !Number.isFinite(end) || end <= start
+    ) {
+      throw new DomainError('INVALID_ARGUMENT', 'Colour measurement source range must be a forward second range')
+    }
+    const sourceStartFrame = Math.floor(start * fps)
+    // At least one frame: a range shorter than a frame period still names a
+    // moment of the recording, and rounding it to nothing would turn "measure
+    // this instant" into "measure nothing" without saying so.
+    const sourceEndFrame = Math.max(sourceStartFrame + 1, Math.ceil(end * fps))
+    if (!Number.isSafeInteger(sourceStartFrame) || !Number.isSafeInteger(sourceEndFrame)) {
+      throw new DomainError('INVALID_ARGUMENT', 'Colour measurement source range does not fit in frame indices')
+    }
+    return Object.freeze({ sourceStartFrame, sourceEndFrame })
+  }
+  const sourceStartFrame = request.sourceStartFrame
+  const sourceEndFrame = request.sourceEndFrame
+  if (
+    !Number.isSafeInteger(sourceStartFrame) || (sourceStartFrame as number) < 0 ||
+    !Number.isSafeInteger(sourceEndFrame) || (sourceEndFrame as number) <= (sourceStartFrame as number)
+  ) {
+    throw new DomainError('INVALID_ARGUMENT', 'Colour measurement source range must be a forward frame range')
+  }
+  return Object.freeze({ sourceStartFrame: sourceStartFrame as number, sourceEndFrame: sourceEndFrame as number })
+}
+
+/**
  * Infrastructure class in the repository's plain-`node` style: fields are
  * declared and assigned in the constructor, never as parameter properties.
  */
@@ -322,13 +386,8 @@ export class FfmpegColorMeasurement {
     const sampleRate = 1_000 / sampleEveryMs
 
     const measurements: Readonly<CameraColorMeasurement>[] = []
-    for (const range of input.ranges) {
-      if (
-        !Number.isSafeInteger(range.sourceStartFrame) || range.sourceStartFrame < 0 ||
-        !Number.isSafeInteger(range.sourceEndFrame) || range.sourceEndFrame <= range.sourceStartFrame
-      ) {
-        throw new DomainError('INVALID_ARGUMENT', 'Colour measurement source range must be a forward frame range')
-      }
+    for (const request of input.ranges) {
+      const range = resolveSourceFrames(request, probe.fps)
       const startSeconds = range.sourceStartFrame / probe.fps
       const durationSeconds = (range.sourceEndFrame - range.sourceStartFrame) / probe.fps
       const expectedFrames = Math.min(MAX_SAMPLED_FRAMES, Math.max(1, Math.ceil(durationSeconds * sampleRate)))
@@ -368,7 +427,7 @@ export class FfmpegColorMeasurement {
       }
       const stats = statistics(bytes)
       const evidenceRef = `rawvideo-rgb24:${createHash('sha256').update(bytes).digest('hex')}`
-      const measurementId = range.measurementId ?? `ccm-${createHash('sha256')
+      const measurementId = request.measurementId ?? `ccm-${createHash('sha256')
         .update(`${input.sourceSha256}|${input.cameraId}|${range.sourceStartFrame}|${range.sourceEndFrame}`)
         .digest('hex')
         .slice(0, 24)}`
@@ -378,7 +437,7 @@ export class FfmpegColorMeasurement {
         sourceAssetId: input.sourceAssetId,
         sourceSha256: input.sourceSha256,
         cameraId: input.cameraId,
-        range: range.sessionRange,
+        range: request.sessionRange,
         sourceRange: { startFrame: range.sourceStartFrame, endFrame: range.sourceEndFrame },
         sampledFrames: stats.frames,
         technical,

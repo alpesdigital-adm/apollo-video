@@ -300,10 +300,32 @@ test('T-FR-184 a difference confined to one second is localized to that range', 
   ])
   const measurements = [...referenceRanges, ...lateRanges]
 
+  // The reference camera is an approval, so it arrives the only way it can:
+  // inside the match plan that named it. Without one the critic reports the
+  // cross-camera comparison as unavailable rather than measuring it against
+  // whichever camera sorts first.
+  const matchPlan = deriveMulticamMatchPlan({
+    planId: 'mmp-integration-localized',
+    workspaceId: 'workspace-color',
+    projectId: 'project-color',
+    sessionId: 'session-color-1',
+    sessionVersion: 1,
+    referenceEpoch: 1,
+    referenceCameraId: 'camera-a',
+    referenceCameraSelection: {
+      selectedBy: { kind: 'director', id: 'director-1' },
+      selectedAt: '2029-06-01T10:00:00.000Z',
+      baseVersionId: 'session-color-1:v1',
+      baseHash: '7'.repeat(64),
+    },
+    measurements,
+    lineage: { colorProbeIds: ['probe-a', 'probe-b'] },
+    createdAt: '2029-06-01T10:00:01.000Z',
+  })
   // Both sides of the output transform read the same bytes here, so every
   // cross-stage dimension is a no-op and only the between-camera comparison
   // can move the verdict.
-  const report = critique(measurements, measurements)
+  const report = critique(measurements, measurements, { matchPlan })
   const localized = report.dimensions.find((entry) => entry.dimension === 'localizedMismatch')
   assert.equal(localized.status, 'measured')
   assert.equal(localized.classification, 'localized')

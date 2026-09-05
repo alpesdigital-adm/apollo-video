@@ -933,6 +933,14 @@ export interface DeriveMulticamMatchPlanInput {
   lineage: Readonly<MatchPlanLineage>
   createdAt: string
   policy?: Partial<MulticamMatchPolicy>
+  /**
+   * What the caller knows about the EVIDENCE it collected that this module
+   * cannot see from the measurements alone — a camera whose parts were sampled
+   * rather than read whole, for instance. They join the derived issues, so the
+   * confidence a plan reports is read next to the evidence it rests on instead
+   * of next to a silently narrowed sample.
+   */
+  evidenceIssues?: readonly Readonly<MatchPlanIssue>[]
   /** The plan this derivation replaces (a reference change or re-measurement). */
   supersedes?: Readonly<MulticamMatchPlan>
 }
@@ -998,7 +1006,7 @@ export function deriveMulticamMatchPlan(input: DeriveMulticamMatchPlanInput): Re
     .sort()
   assertDomain(cameraIds.length >= 1, 'INVALID_ARGUMENT', 'a match plan needs at least one camera besides the reference')
 
-  const issues: MatchPlanIssue[] = []
+  const issues: MatchPlanIssue[] = [...(input.evidenceIssues ?? [])]
   const nonComparableRanges: NonComparableRange[] = []
   const cameraTransforms: CameraMatchTransform[] = []
 

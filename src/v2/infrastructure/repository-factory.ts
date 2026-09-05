@@ -222,8 +222,17 @@ import {
   readSyntheticCriticBlockEvidenceService,
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
+import { evaluateColorCriticService, selectRenderMatchPlan } from '../application/color-critic.ts'
+import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
+import {
+  addMulticamMatchRangeOverrideService,
+  deriveMulticamMatchPlanService,
+} from '../application/multicam-color-match.ts'
+import { setProjectColorPlanService } from '../application/project-color-plans.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluator.ts'
+import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
 import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
 import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
@@ -2009,6 +2018,13 @@ export function createProjectProxyRenderWorker(
     colorPipelines: createColorPipelineCompilationRepository(),
     colorPlans: createProjectColorPlanRepository(),
     luts: new LocalProjectLutRenderMaterializer(createProjectLutSelectionRepository(), join(resolve(artifactRoot), '.lut-work'), createWorkspaceLutRepository()),
+    // F4.014. The colour verdict is taken on the bytes this worker just wrote
+    // and lands on the review it is about to persist. Assembled here because it
+    // needs the three things a worker has no business knowing: where FFmpeg is,
+    // where scratch space lives, and which storage driver this deployment uses.
+    // Judging, locating and cleaning up arrive together, so no deployment can
+    // wire the verdict and leave its intermediates behind.
+    colorCritic: createColorCriticRuntime(environment, clock),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -2369,4 +2385,135 @@ export function createMarkerMediaPort(environment: NodeJS.ProcessEnv = process.e
  */
 export function createCaptureMediaResolver(environment: NodeJS.ProcessEnv = process.env) {
   return new CaptureMediaResolver(resolveV2Client(), createArtifactSourceMaterializer(environment))
+}
+
+/**
+ * The colour critic, assembled (F4.014).
+ *
+ * The evaluator writes its "before" intermediates under the artifact root's
+ * scratch space and promotes its evidence crops through the same verified
+ * storage every other derived artifact goes through — object storage, never a
+ * database column, because a crop is media.
+ */
+export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = process.env) {
+  const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
+  if (!artifactRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Artifact root is not configured')
+  return new FfmpegColorCriticEvaluator({
+    workRoot: join(resolve(artifactRoot), '.color-critic-work'),
+    storage: createVerifiedMediaStorage(environment),
+    ...(environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {}),
+  })
+}
+
+/**
+ * The colour critic as the render worker takes it: judge, locate, clean up.
+ *
+ * One object, built around one evaluator instance, because the evaluator's
+ * intermediates can only be removed by the evaluator that wrote them. Splitting
+ * them into separate factory calls is what let a deployment wire the judging
+ * and leave a full re-encode of every source on disk after every render.
+ */
+export function createColorCriticRuntime(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const evaluator = createColorCriticEvaluator(environment)
+  return Object.freeze({
+    evaluate: evaluateColorCriticService({
+      evaluator,
+      reports: createColorCriticReportRepository(),
+      matchPlans: createMulticamMatchPlanRepository(),
+      clock,
+    }),
+    cleanup: (operationId: string) => evaluator.cleanup(operationId),
+    locateSession: createProjectCaptureSessionLocator(),
+  })
+}
+
+/**
+ * Which capture session a project's colour verdict should read its reference
+ * camera from.
+ *
+ * Not "the most recently updated head": a project can hold several capture
+ * sessions, and an unrelated session touched last would hand the critic a
+ * reference camera nobody approved for these frames. The session is the one
+ * whose match plan knows every camera the render actually cut to, and only when
+ * exactly one does — zero or several is `null`, which makes the critic report
+ * the cross-camera comparison unavailable rather than measure it against a
+ * guess.
+ */
+export function createProjectCaptureSessionLocator() {
+  const sessions = createCaptureSessionRepository()
+  const plans = createMulticamMatchPlanRepository()
+  return async (context: {
+    workspaceId: string
+    projectId: string
+    cameraIds: readonly string[]
+  }): Promise<string | null> => {
+    if (context.cameraIds.length === 0) return null
+    const heads = await sessions.listHeads({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      limit: COLOR_CRITIC_SESSION_CANDIDATE_LIMIT,
+    })
+    const candidates: { sessionId: string; plan: MulticamMatchPlan }[] = []
+    for (const head of heads) {
+      const stored = await plans.readHead({
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        sessionId: head.sessionId,
+      })
+      if (stored) candidates.push({ sessionId: head.sessionId, plan: stored.plan })
+    }
+    return selectRenderMatchPlan({ cameraIds: context.cameraIds, candidates })?.sessionId ?? null
+  }
+}
+
+/** How many of a project's capture sessions the locator will consider. */
+const COLOR_CRITIC_SESSION_CANDIDATE_LIMIT = 25
+
+/**
+ * The multicam colour match, assembled (F4.013).
+ *
+ * The reference camera is a human decision the service checks for itself; every
+ * number in the plan is measured here by a real instrument, and the resulting
+ * layers are written into the project's ColorPlan through the same command a
+ * person's edit would use.
+ */
+export function createDeriveMulticamMatchPlanService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  return deriveMulticamMatchPlanService({
+    sessions: createCaptureSessionRepository(),
+    media: createCaptureMediaResolver(environment),
+    probe: new FfmpegColorMeasurement(
+      environment.FFMPEG_PATH?.trim() ? { ffmpegPath: environment.FFMPEG_PATH.trim() } : {},
+    ),
+    measurements: createCameraColorMeasurementRepository(),
+    plans: createMulticamMatchPlanRepository(),
+    criticReports: createColorCriticReportRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+export function createAddMulticamMatchRangeOverrideService(clock: () => Date = () => new Date()) {
+  return addMulticamMatchRangeOverrideService({
+    plans: createMulticamMatchPlanRepository(),
+    colorPlans: createProjectColorPlanRepository(),
+    setProjectColorPlan: createSetProjectColorPlanService(clock),
+    clock,
+  })
+}
+
+function createSetProjectColorPlanService(clock: () => Date) {
+  return setProjectColorPlanService({
+    repository: createProjectColorPlanRepository(),
+    luts: createWorkspaceLutRepository(),
+    createId: (kind) => `${kind}-${randomUUID()}`,
+    createEventId: randomUUID,
+    clock,
+  })
 }

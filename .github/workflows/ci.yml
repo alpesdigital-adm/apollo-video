@@ -237,6 +237,12 @@ jobs:
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
+      - name: Run Wave 20 colour measurement against decoded frames
+        run: npm run test:integration:color-measurement
+
+      - name: Run Wave 20 multicam colour match against real pixels
+        run: npm run test:integration:color-match
+
       - name: Run Wave 20 repository round trip against the schema
         run: npm run test:e2e:wave20-journey
       - name: Run Wave 20 capture sync worker against generated audio
@@ -263,6 +269,12 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-capture-sync-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_CAPTURE_SYNC_E2E: "1"
+
+      - name: Run Wave 20 colour critic gate against PostgreSQL
+        run: npm run test:e2e:color-critic
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-color-critic-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_COLOR_CRITIC_E2E: "1"
 
       - name: Run Wave 19 capture protocol and diagnostic browser journey
         run: npm run test:e2e:sync-diagnostic-browser

@@ -708,6 +708,23 @@ test('T-FR-183 a correction beyond the policy limit is clamped and says a human 
 const INTERMEDIATE = { sourceAssetId: 'artifact-intermediate', sourceSha256: sha('d') }
 const OUTPUT = { sourceAssetId: 'artifact-output', sourceSha256: sha('e') }
 
+/**
+ * The plan that says which camera the others were corrected towards.
+ *
+ * Passed by default because the reference camera is an approval, and a report
+ * that compared cameras without one would be comparing them against whichever
+ * camera sorts first. `matchPlan: undefined` in a test is therefore a
+ * deliberate statement — "nobody approved a reference here" — and the critic
+ * answers it with an unavailable cross-camera dimension.
+ */
+const REFERENCE_PLAN = (() => {
+  const before = [
+    measurement({ ...INTERMEDIATE, measurementId: 'ccm-reference-a', cameraId: 'camera-a' }),
+    measurement({ ...INTERMEDIATE, measurementId: 'ccm-reference-b', cameraId: 'camera-b' }),
+  ]
+  return derive(before, { planId: 'mmp-reference' })
+})()
+
 function critique(before, after, overrides = {}) {
   return evaluateColorCritic({
     reportId: 'ccr-1',
@@ -717,6 +734,7 @@ function critique(before, after, overrides = {}) {
     subject: { kind: 'output', artifactId: 'artifact-output' },
     before,
     after,
+    matchPlan: REFERENCE_PLAN,
     creativeIntent: { declared: false },
     evaluatedAt: at(100),
     ...overrides,
@@ -1065,6 +1083,36 @@ test('T-FR-184 two cameras that never overlap are an evidence gap, never an appr
   assert.equal(report.cause, 'evidence-unavailable')
   assert.equal(report.action, 'human-review')
   assert.notEqual(report.action, 'approve')
+})
+
+test('T-FR-184 without an approved reference camera the cross-camera comparison is unavailable, not measured against whichever camera sorts first', () => {
+  // Two cameras that differ by a whole stop and no plan naming the reference.
+  // The alphabetically first camera is not an approval, so nothing here is
+  // measured against it — and a report that could not read a dimension cannot
+  // approve.
+  const shared = { start: 0, end: 1_000 }
+  const before = [
+    measurement({ ...INTERMEDIATE, ...shared, measurementId: 'ccm-before-a', cameraId: 'camera-a', exposure: 0.5 }),
+    measurement({ ...INTERMEDIATE, ...shared, measurementId: 'ccm-before-b', cameraId: 'camera-b', exposure: lumaAtEv(0.5, 1) }),
+  ]
+  const after = [
+    measurement({ ...OUTPUT, ...shared, measurementId: 'ccm-after-a', cameraId: 'camera-a', exposure: 0.5 }),
+    measurement({ ...OUTPUT, ...shared, measurementId: 'ccm-after-b', cameraId: 'camera-b', exposure: lumaAtEv(0.5, 1) }),
+  ]
+  const approved = critique(before, after)
+  assert.equal(dimensionOf(approved, 'exposureMismatch').status, 'measured',
+    'with a reference the comparison is a measurement')
+  assert.equal(approved.matchPlanId, REFERENCE_PLAN.planId)
+
+  const unapproved = critique(before, after, { matchPlan: undefined })
+  assert.equal(unapproved.matchPlanId, null)
+  for (const dimension of ['whiteBalanceMismatch', 'exposureMismatch', 'localizedMismatch']) {
+    const result = dimensionOf(unapproved, dimension)
+    assert.equal(result.status, 'unavailable', dimension)
+    assert.match(result.reason, /reference camera/, dimension)
+  }
+  assert.equal(unapproved.cause, 'evidence-unavailable')
+  assert.notEqual(unapproved.action, 'approve')
 })
 
 test('T-FR-184 even a dimension nobody needed still refuses to be silent', () => {

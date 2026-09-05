@@ -1041,7 +1041,14 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
     'correctionsApplied must be a non-negative integer',
   )
   const cameraIds = [...new Set(after.map((measurement) => measurement.cameraId))].sort()
-  const referenceCameraId = matchPlan?.referenceCameraId ?? cameraIds[0] ?? null
+  // The reference camera is the one decision this report never makes for
+  // itself: it is the camera a person approved, and it arrives only inside a
+  // match plan. Falling back to the alphabetically first measured camera would
+  // answer every cross-camera dimension against a reference nobody chose, and
+  // would do it silently. With no plan there is no reference, so the
+  // cross-camera dimensions come back `unavailable` — which the cause table
+  // already refuses to approve.
+  const referenceCameraId = matchPlan?.referenceCameraId ?? null
   const evaluators = evaluatorRefs([...before, ...after])
   const criticId = COLOR_CRITIC_EVALUATOR.id
   const pairs = pairStages(before, after)
@@ -1231,6 +1238,14 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
       ))
       continue
     }
+    if (referenceCameraId === null) {
+      drafts.push(unavailableDimension(
+        dimension, 'after-output-transform',
+        'no match plan named the reference camera these frames were corrected towards, so there is nothing to compare them against',
+        measurementConfidence,
+      ))
+      continue
+    }
     if (comparisons.length === 0) {
       drafts.push(unavailableDimension(
         dimension, 'after-output-transform',
@@ -1387,6 +1402,12 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
       drafts.push(notApplicableDimension(
         'localizedMismatch', 'after-output-transform',
         'a mismatch needs two cameras; only one was measured on the delivered bytes',
+      ))
+    } else if (referenceCameraId === null) {
+      drafts.push(unavailableDimension(
+        'localizedMismatch', 'after-output-transform',
+        'no match plan named the reference camera these frames were corrected towards, so there is nothing to compare them against',
+        measurementConfidence,
       ))
     } else if (comparisons.length === 0) {
       drafts.push(unavailableDimension(
