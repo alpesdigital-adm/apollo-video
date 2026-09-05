@@ -1076,3 +1076,57 @@ export function compileReactPlaybackPlanService(dependencies: {
     })
   }
 }
+
+const PLAYBACK_PIECE_LISTING_MAX = 500
+
+export interface ReactPlaybackPieceListing {
+  readonly map: Readonly<PlaybackMap>
+  readonly versionRef: string
+  readonly manualReviewRequired: boolean
+  readonly pieces: readonly Readonly<PlaybackPiece>[]
+  /** Pieces the mode filter removed, so a narrowed list never reads as the map. */
+  readonly filteredOut: number
+  /** Pieces beyond the limit, so a truncated list never reads as complete. */
+  readonly omittedPieces: number
+}
+
+/**
+ * The pieces of one map, optionally narrowed to one playback mode.
+ *
+ * A separate read from the map itself because the two are asked for different
+ * reasons: the map answers "is this resolved?", the pieces answer "what did the
+ * player do, where, with what evidence, and how far off was the line we fitted".
+ * The uncovered stretches stay on the map rather than being folded in here — a
+ * stretch nobody could measure is not a piece with missing fields, and giving it
+ * one would be the zero-instead-of-null mistake in another shape.
+ */
+export function listReactPlaybackPiecesService(dependencies: { repository: PlaybackMapRepository }) {
+  const read = readReactPlaybackMapService(dependencies)
+  return async (input: {
+    workspaceId: string
+    sessionId: string
+    reactionTrackId: string
+    version?: number
+    mode?: PlaybackMode
+    limit?: number
+  }): Promise<Readonly<ReactPlaybackPieceListing>> => {
+    const limit = input.limit ?? 100
+    assertDomain(
+      Number.isSafeInteger(limit) && limit >= 1 && limit <= PLAYBACK_PIECE_LISTING_MAX,
+      'INVALID_ARGUMENT',
+      `limit must be between 1 and ${PLAYBACK_PIECE_LISTING_MAX}`,
+    )
+    const current = await read(input)
+    const matching = input.mode === undefined
+      ? current.map.pieces
+      : current.map.pieces.filter((piece) => piece.mode === input.mode)
+    return Object.freeze({
+      map: current.map,
+      versionRef: current.versionRef,
+      manualReviewRequired: current.manualReviewRequired,
+      pieces: Object.freeze(matching.slice(0, limit)),
+      filteredOut: current.map.pieces.length - matching.length,
+      omittedPieces: Math.max(0, matching.length - limit),
+    })
+  }
+}

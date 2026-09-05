@@ -420,6 +420,23 @@ test('T-F4.014 a colour critic report is content-addressed and comes back as it 
     null,
     'workspace B could read a workspace A verdict',
   )
+  // The project the read names is narrowed in the query, not only checked
+  // afterwards: `/v1/projects/{projectId}/color-critic-reports/{reportId}`
+  // asserts a containment, and a row of another project must never leave the
+  // database under it. The owning project still reads.
+  assert.equal(
+    await reports.read({
+      workspaceId: A,
+      projectId: `${reportA.projectId}-not-this-one`,
+      reportId: reportA.reportId,
+    }),
+    null,
+    'a verdict of one project came back under another project',
+  )
+  assert.equal(
+    (await reports.read({ workspaceId: A, projectId: reportA.projectId, reportId: reportA.reportId })).reportId,
+    reportA.reportId,
+  )
 
   // The measurements the verdict was reached over are rows, not names inside a
   // JSON document: the report cites them through a link table with a Restrict

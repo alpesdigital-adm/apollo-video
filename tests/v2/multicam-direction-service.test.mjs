@@ -330,7 +330,14 @@ function wire(options = {}) {
   let issued = 0
   const sessions = {
     async readHead({ workspaceId, sessionId }) {
-      return workspaceId === WORKSPACE && sessionId === world.session.sessionId ? world.session : null
+      if (workspaceId !== WORKSPACE || sessionId !== world.session.sessionId) return null
+      // The port is scoped to the workspace and nothing else. `sessionProjectId`
+      // is how a test produces the case the port cannot refuse: a session this
+      // workspace really does own, belonging to a different project than the one
+      // in the path.
+      return options.sessionProjectId
+        ? { ...world.session, projectId: options.sessionProjectId }
+        : world.session
     },
     async listCoverage() { return world.coverages },
     async listClockMaps() { return world.clockMaps },
@@ -954,4 +961,27 @@ test('T-F4.012 the sweep says what its ceiling and its short tail did not measur
   assert.equal(tails.length, 3, 'a 300 s part swept in 99.95 s windows leaves 150 ms nobody can measure')
   assert.ok(tails.every((entry) => /the last 150 ms/.test(entry.reason)))
   console.log(`sweep ceilings=${ceilings.length} windows=${wired.visual.seen.length} tails=${tails.length}`)
+})
+
+test('T-F4.012 a capture session of another project cannot re-cut this project timeline', async () => {
+  // `/v1/projects/{projectId}/capture-sessions/{sessionId}/direction` asserts a
+  // containment the workspace-scoped session port cannot check. Without this
+  // the EditPlan, the project version and the outbox event all came from the
+  // project in the path while the shots came from somebody else's session —
+  // one workspace, two projects, one silently re-cut timeline.
+  const wired = wire({ sessionProjectId: 'project-somebody-else' })
+  await assert.rejects(
+    () => wired.execute(request()),
+    (error) => {
+      assert.equal(error.code, 'INVALID_ARGUMENT')
+      assert.match(error.message, /belongs to another project/)
+      return true
+    },
+  )
+  assert.equal(wired.directions.calls.appendVersion, 0, 'a session of another project writes no direction')
+  assert.equal(wired.commands.calls.commitOrReplay, 0, 'and commits no project version')
+
+  // The same request against the session that does belong here still runs.
+  const same = wire()
+  assert.equal((await same.execute(request())).direction.sessionId, SESSION)
 })

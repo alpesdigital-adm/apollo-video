@@ -33,9 +33,20 @@ export interface ColorCriticReportRepository {
     createdAt: string
   }): Promise<Readonly<{ report: Readonly<ColorCriticReport>; replayed: boolean }>>
 
+  /**
+   * One report by its id.
+   *
+   * `projectId` narrows the query where the caller knows which project it is
+   * asking about — every `/v1/projects/{projectId}/...` read does. It is
+   * optional because the invalidation sweeps read by id alone, and required in
+   * spirit at the boundary: `readColorCriticReportService` refuses a report
+   * whose stored `projectId` is not the one in the path, so a verdict about
+   * project A can never be returned under project B's URL.
+   */
   read(input: {
     workspaceId: string
     reportId: string
+    projectId?: string
   }): Promise<Readonly<ColorCriticReport> | null>
 
   readByHash(input: {

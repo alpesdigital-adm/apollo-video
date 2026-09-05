@@ -4,9 +4,9 @@
     "uiActions": 128,
     "capabilities": 116,
     "endpoints": 116,
-    "registeredCapabilities": 325,
-    "operableCapabilities": 325,
-    "publicContractCapabilities": 325,
+    "registeredCapabilities": 340,
+    "operableCapabilities": 340,
+    "publicContractCapabilities": 340,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -6074,6 +6074,171 @@
       "endpoint": "POST /v1/projects/{projectId}/transformation-fallbacks/{ledgerId}/actions",
       "inputSchemaRef": "apollo://schemas/transformation-fallback-action-request/v1",
       "outputSchemaRef": "apollo://schemas/transformation-fallback-action-result/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.direction.run",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/direction",
+      "inputSchemaRef": "apollo://schemas/direct-multicam-session-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-direction-directed/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.direction.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-direction-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.direction.candidates.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/candidates",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-angle-candidate-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.direction.shots.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/shots",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-shot-decision-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.direction.protected-selections.direct",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/protected-selections",
+      "inputSchemaRef": "apollo://schemas/protect-multicam-selection-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-direction-directed/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.color-match.derive",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match",
+      "inputSchemaRef": "apollo://schemas/derive-multicam-match-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-match-plan-derived/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.color-match.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/multicam-match-plan-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.color-match.overrides.add",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match/overrides",
+      "inputSchemaRef": "apollo://schemas/add-multicam-match-override-request/v1",
+      "outputSchemaRef": "apollo://schemas/multicam-match-override-applied/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.color-critic-reports.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/color-critic-report-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.color-critic-reports.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports/{reportId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/color-critic-report-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.color-critic-reports.issues.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports/{reportId}/issues",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/color-critic-issue-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.build",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
+      "inputSchemaRef": "apollo://schemas/build-react-playback-map-request/v1",
+      "outputSchemaRef": "apollo://schemas/react-playback-map-built/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/react-playback-map-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.pieces.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/pieces",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/react-playback-piece-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.anchors.add",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors",
+      "inputSchemaRef": "apollo://schemas/add-react-playback-anchor-request/v1",
+      "outputSchemaRef": "apollo://schemas/react-playback-map-anchored/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

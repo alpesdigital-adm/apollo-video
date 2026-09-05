@@ -595,9 +595,15 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
     }
   }
 
-  async read(input: { workspaceId: string; reportId: string }) {
+  async read(input: { workspaceId: string; reportId: string; projectId?: string }) {
     const row = await this.client.v2ColorCriticReport.findFirst({
-      where: { workspaceId: input.workspaceId, reportId: input.reportId },
+      where: {
+        workspaceId: input.workspaceId,
+        reportId: input.reportId,
+        // Narrowed in the query when the caller named a project, so a report of
+        // another project never leaves the database in the first place.
+        ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      },
       include: REPORT_INCLUDE,
     })
     return row ? hydrateReport(row) : null

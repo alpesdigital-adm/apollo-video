@@ -227,7 +227,13 @@ import {
   readSyntheticCriticBlockEvidenceService,
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
-import { evaluateColorCriticService, selectRenderMatchPlan } from '../application/color-critic.ts'
+import {
+  evaluateColorCriticService,
+  listColorCriticIssuesService,
+  listColorCriticReportsService,
+  readColorCriticReportService,
+  selectRenderMatchPlan,
+} from '../application/color-critic.ts'
 import {
   evaluateMulticamLongformGateService,
   explainMulticamLongformGateService,
@@ -239,7 +245,15 @@ import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
 import {
   addMulticamMatchRangeOverrideService,
   deriveMulticamMatchPlanService,
+  readMulticamMatchPlanService,
 } from '../application/multicam-color-match.ts'
+import {
+  deriveMulticamEvidenceService,
+  directMulticamSessionService,
+  listMulticamAngleCandidatesService,
+  listMulticamShotDecisionsService,
+  readMulticamDirectionService,
+} from '../application/multicam-direction.ts'
 import { setProjectColorPlanService } from '../application/project-color-plans.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
@@ -271,6 +285,7 @@ import { FfmpegMulticamVisualEvidenceProvider } from './analysis/ffmpeg-multicam
 import { PrismaMulticamDiarizationSource } from './prisma/multicam-diarization-source.ts'
 import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
 import { PrismaMulticamDirectionRepository } from './prisma/multicam-direction-repository.ts'
+
 import {
   PrismaCameraColorMeasurementRepository,
   PrismaMulticamMatchPlanRepository,
@@ -286,6 +301,7 @@ import {
   compileReactPlaybackPlanService,
   editReactPlaybackAnchorService,
   listReactPlaybackMapVersionsService,
+  listReactPlaybackPiecesService,
   listReferenceDependentsService,
   readReactPlaybackMapService,
   type PlaybackMediaPort,
@@ -2633,6 +2649,88 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
   })
 }
 
+
+/**
+ * The multicam direction, assembled (F4.012).
+ *
+ * This is the composition root the phase-3 hand-off named as missing: the
+ * diarization source, the visual provider and the command repository existed
+ * and nothing pulled them. `MulticamPerceptionSource` still has no adapter, so
+ * reaction evidence is absent rather than zero — a session nobody ran
+ * perception over produces no reaction observations at all, which the direction
+ * reads as "nobody measured" and answers by holding the current angle.
+ *
+ * Deliberately separate from `createMulticamDirectionReadServices` below. This
+ * one builds an FFmpeg provider and a media materializer that need a configured
+ * artifact root; a route that only reads a stored direction must not be able to
+ * fail on a deployment setting it never uses.
+ */
+export function createDirectMulticamSessionService(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
+  const directions = createMulticamDirectionRepository()
+  const sessions = createCaptureSessionRepository()
+  return directMulticamSessionService({
+    sessions,
+    diagnostics: createSyncDiagnosticRepository(),
+    protocols: createCaptureProtocolRepository(),
+    directions,
+    commands: createMulticamDirectionCommandRepository(),
+    deriveEvidence: deriveMulticamEvidenceService({
+      sessions,
+      directions,
+      diarization: createMulticamDiarizationSource(),
+      visual: createMulticamVisualEvidenceProvider(environment),
+      media: createCaptureMediaResolver(environment),
+      clock,
+    }),
+    clock,
+    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
+    createEventId: randomUUID,
+  })
+}
+
+/** The three reads over a stored direction. Repository only, no media. */
+export function createMulticamDirectionReadServices() {
+  const directions = createMulticamDirectionRepository()
+  return Object.freeze({
+    read: readMulticamDirectionService({ directions }),
+    listCandidates: listMulticamAngleCandidatesService({ directions }),
+    listShots: listMulticamShotDecisionsService({ directions }),
+  })
+}
+
+/** The read over a stored match plan. Repository only, no probe. */
+export function createMulticamMatchPlanReadService() {
+  return readMulticamMatchPlanService({ plans: createMulticamMatchPlanRepository() })
+}
+
+/**
+ * The reads over stored colour verdicts (F4.014).
+ *
+ * There is no `evaluate` here on purpose. The critic runs inside the proxy
+ * render, where the server measures the delivered file, its sha and the clips
+ * the timeline was cut from; a route that took those from a request would let a
+ * caller supply the evidence for a verdict about their own render.
+ */
+export function createColorCriticReportReadServices() {
+  const reports = createColorCriticReportRepository()
+  return Object.freeze({
+    list: listColorCriticReportsService({ reports }),
+    read: readColorCriticReportService({ reports }),
+    listIssues: listColorCriticIssuesService({ reports }),
+  })
+}
+
+/** The two reads over a stored playback map. Repository only, no fingerprinter. */
+export function createReactPlaybackMapReadServices() {
+  const repository = createPlaybackMapRepository()
+  return Object.freeze({
+    read: readReactPlaybackMapService({ repository }),
+    listPieces: listReactPlaybackPiecesService({ repository }),
+  })
+}
 /**
  * The files a compiled plan may cut from, resolved the way the renderer will.
  *

@@ -114,6 +114,11 @@ export const DOMAIN_ERROR_CODES = [
   // is named apart from INVALID_ARGUMENT so the refusal says which field was the
   // lie rather than "invalid request".
   'DIRECTION_CALLER_SUPPLIED_DERIVATION',
+  // A session nobody has directed yet, or a version of its chain that does not
+  // exist. Separate from CAPTURE_SESSION_NOT_FOUND because the remedy differs:
+  // the session is there and the answer is "run the direction", not "check the
+  // id".
+  'MULTICAM_DIRECTION_NOT_FOUND',
   // F4.013/F4.014 — multicamera colour match and colour critic. Each is a
   // refusal of evidence with its own remedy: sources that were never brought
   // to one colourimetry cannot be compared, an HDR source has no tone-map to
@@ -127,6 +132,12 @@ export const DOMAIN_ERROR_CODES = [
   'COLOR_MEASUREMENT_INSUFFICIENT',
   'COLOR_REFERENCE_UNAVAILABLE',
   'COLOR_STAGE_VIOLATION',
+  // Nothing has been derived or judged yet for this session or project version.
+  // Distinct from COLOR_REFERENCE_UNAVAILABLE, which says a reference camera
+  // was named and the session carries no such camera: that one is a bad
+  // argument, these two are an absent record.
+  'MULTICAM_MATCH_PLAN_NOT_FOUND',
+  'COLOR_CRITIC_REPORT_NOT_FOUND',
   // F4.015 — react playback maps. A map with an uncovered stretch is not a
   // malformed request and not a missing record: it is a complete answer that
   // says a person has to look. Compiling it anyway would approximate an edit.
