@@ -100,6 +100,14 @@ export const DOMAIN_ERROR_CODES = [
   'CAPTURE_COVERAGE_UNVERIFIED',
   'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED',
   'CAPTURE_SESSION_DERIVATION_STALE',
+  // F4.012 — multicamera direction. Two refusals an operator acts on
+  // differently: the first says the chosen angle has no source law for the
+  // range it was cut over (fix the sync, or re-direct); the second says two
+  // tracks fold to one colour key (rename a track), which would apply one
+  // camera's correction to another camera's frames.
+  'DIRECTION_RANGE_UNRESOLVABLE',
+  'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
+  'CAMERA_IDENTITY_COLLISION',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',
