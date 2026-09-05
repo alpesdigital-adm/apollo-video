@@ -583,3 +583,25 @@ test('T-F4.012 the range a caller names is a position, and omitting it directs w
   assert.equal(named.direction.range.end, sec(120))
   assert.equal(named.direction.range.end - named.direction.range.start, createTickInterval(sec(10), sec(120)).end - sec(10))
 })
+
+test('T-F4.012 the plan drops what described the timeline it replaced, and says so', async () => {
+  const wired = wire()
+  const result = await wired.execute(request())
+  // Exclusions and retained ranges named source seconds of the single recording
+  // the old timeline was trimmed from; this one is cut from several cameras, so
+  // carrying them would be a description of a timeline that no longer exists.
+  assert.deepEqual([...result.editPlan.editorial.retainedSourceRanges], [])
+  assert.deepEqual([...result.editPlan.editorial.exclusions], [])
+  assert.deepEqual([...result.editPlan.subtitleTracks], [])
+  assert.deepEqual([...result.editPlan.retimedTranscript.words], [])
+  assert.equal(result.editPlan.retimedTranscript.sourceTranscriptId, 'transcript-base', 'the transcript it came from is still named')
+  for (const fragment of ['Subtitle cues', 'retimed transcript', 'editorial exclusions']) {
+    assert.ok(
+      result.editPlan.director.assumptions.some((assumption) => assumption.includes(fragment)),
+      `the plan states out loud that it dropped ${fragment}`,
+    )
+  }
+  // Every Director decision id satisfies the validator's grammar, which is
+  // narrower than the session-id grammar it is derived from.
+  assert.ok(result.editPlan.director.decisions.every((decision) => /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(decision.id)))
+})

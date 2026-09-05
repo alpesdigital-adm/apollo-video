@@ -598,8 +598,18 @@ export interface DirectMulticamSessionRequest {
 }
 
 export interface DirectMulticamSessionServiceResult extends MulticamDirectionCommandResult {
-  readonly direction: Readonly<MulticamDirection>
-  readonly directionVersion: number
+  /**
+   * Null on a replay whose direction the chain has since moved past.
+   *
+   * A retry must return the first answer, and the Command it returns is still
+   * the one that produced the stored version. What is no longer available is
+   * "the direction as it stands now", because it is a different cut — handing
+   * back the current head under the old Command's name would be the wrong
+   * answer dressed as the right one, and refusing the retry would break
+   * idempotency over something the caller cannot fix.
+   */
+  readonly direction: Readonly<MulticamDirection> | null
+  readonly directionVersion: number | null
   /**
    * Null on a replay. A retry returns the first answer without doing the work
    * again, and re-running the compile step to fill this in would be new work
@@ -719,6 +729,17 @@ export function buildMulticamEditPlan(input: {
     effectTracks: Object.freeze([]),
     transitions: Object.freeze(transitions),
     markers: Object.freeze([]),
+    // The exclusions and retained ranges named source seconds of the single
+    // recording the old timeline was trimmed from; after a re-cut across
+    // cameras they describe nothing. `commandType` stays whatever produced the
+    // base plan because the field is a closed literal of two values and
+    // `direct-multicam-session` is not one of them — a divergence reported
+    // rather than hidden (director-run.ts:71).
+    editorial: Object.freeze({
+      commandType: input.base.editorial.commandType,
+      exclusions: Object.freeze([]),
+      retainedSourceRanges: Object.freeze([]),
+    }),
     retimedTranscript: Object.freeze({
       sourceTranscriptId: input.base.retimedTranscript.sourceTranscriptId,
       words: Object.freeze([]),
@@ -759,6 +780,17 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   assumptions: readonly string[]
   omittedShots: number
 }> {
+  // `validId` (director-run.ts:268) refuses the `/` a session id may contain
+  // (`capture-session.ts:50`), so the id is folded rather than interpolated
+  // raw — a decision that cannot be validated cannot be logged.
+  //
+  // Unreachable today, and left in on purpose: `sync-diagnostic.ts:151` uses a
+  // NARROWER id grammar than `capture-session.ts:50` and refuses the same `/`,
+  // so a session id containing one can have no diagnostic and therefore cannot
+  // be directed at all. That divergence between two authority modules is
+  // reported rather than relied on; the day it is reconciled, this keeps
+  // working.
+  const token = direction.sessionId.replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 80)
   const directionRef = `multicam-direction:${direction.sessionId}:v${directionVersion}`
   const diagnosticRef = `sync-diagnostic:${direction.sessionId}:v${direction.diagnosticVersion}`
   const byConfidence = [...direction.shots]
@@ -767,7 +799,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   const omittedShots = byConfidence.length - cited.length
   const weakest = byConfidence[0]
   const summary: DirectorDecisionInput = {
-    id: `decision-angle-summary-${direction.sessionId}`.slice(0, 127),
+    id: `decision-angle-summary-${token}`,
     category: 'angle',
     choice: `${direction.shots.length} shot(s) across ${new Set(direction.shots.map((shot) => shot.chosen.trackId)).size} angle(s)`,
     reason: [
@@ -789,7 +821,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
     alternatives: Object.freeze(direction.warnings.slice(0, 8).map((warning) => `${warning.code}: ${warning.detail}`.slice(0, 512))),
   }
   const seam: DirectorDecisionInput = {
-    id: `decision-angle-seams-${direction.sessionId}`.slice(0, 127),
+    id: `decision-angle-seams-${token}`,
     category: 'transition',
     choice: 'straight-cut',
     reason: 'Angle changes over one continuous audio bed: a straight cut with a bounded edge fade is invisible, and any other transition would assert an editorial beat the evidence did not find.',
@@ -798,7 +830,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
     alternatives: Object.freeze(['cross-dissolve: refused — the Director plan admits only straight cuts (director-run.ts:134)']),
   }
   const audio: DirectorDecisionInput = {
-    id: `decision-angle-audio-${direction.sessionId}`.slice(0, 127),
+    id: `decision-angle-audio-${token}`,
     category: 'insert',
     choice: direction.audio.trackId ?? 'source-audio-per-clip',
     reason: direction.audio.trackId
@@ -813,6 +845,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
     assumptions: Object.freeze([
       'Subtitle cues from the timeline this direction replaced are dropped: their frames named a different cut, and a caption over the wrong angle is worse than none.',
       'The retimed transcript is emptied for the same reason; re-running the Director over this plan restores both.',
+      'The editorial exclusions and retained source ranges are cleared: they named seconds of the single recording the old timeline was trimmed from, and this timeline is cut from several.',
       ...(omittedShots > 0
         ? [`${omittedShots} shot decision(s) exceed the 64-decision cap and are stored in full in the direction rather than in this log.`]
         : []),
@@ -929,18 +962,13 @@ export function directMulticamSessionService(dependencies: DirectMulticamSession
         throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', 'Idempotency key was already used with a different multicam direction request')
       }
       const head = await dependencies.directions.readHead({ workspaceId, sessionId })
-      if (!head || head.direction.directionHash !== existing.result.command.payload.directionHash) {
-        throw new DomainError(
-          'PERSISTENCE_CONFLICT',
-          `The stored direction for ${sessionId} is no longer the one command ${existing.result.command.id} was compiled from`,
-          { commandDirectionHash: existing.result.command.payload.directionHash, currentDirectionHash: head?.direction.directionHash ?? null },
-        )
-      }
+      const sameDirection = head !== null
+        && head.direction.directionHash === existing.result.command.payload.directionHash
       return Object.freeze({
         ...existing.result,
         replayed: true,
-        direction: head.direction,
-        directionVersion: head.version,
+        direction: sameDirection ? head.direction : null,
+        directionVersion: sameDirection ? head.version : null,
         compilation: null,
         evidenceReplayed: true,
       })
