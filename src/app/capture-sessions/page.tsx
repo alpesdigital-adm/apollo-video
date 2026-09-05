@@ -393,6 +393,14 @@ export default function CaptureSessionsPage() {
         </a>
       </p>
 
+      <p data-testid="open-playback-map">
+        <a
+          href={`/playback-map?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
+        >
+          Ver o que o player fez nesta reação
+        </a>
+      </p>
+
       {sync && (
         <section data-testid="sync-detail">
           <h2>
