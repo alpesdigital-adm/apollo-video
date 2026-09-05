@@ -174,8 +174,16 @@ function observation(reactionSecond, referenceSecond, overrides = {}) {
 /**
  * The unhealthy scenario, as a list of windows.
  *
- * playing 0-6 · paused 6-10 · playing 10-14 · commentary 14-26 · replay 26-30 ·
- * seek 30-34 · hidden 34-36 · playing 36-40, against a thirty-second reference.
+ * playing 0-6 · paused 6-10 · playing 10-14 · commentary 14-25 · playing 25-28 ·
+ * replay 28-31 · seek 31-34 · hidden 34-36 · playing 36-40, against a
+ * thirty-second reference.
+ *
+ * Both no-reference stretches resume the reference at the tick it left (6 and
+ * 10), which is what makes each of them a pause-class gap at all. The replay
+ * therefore follows a *locked* run rather than a gap: a stretch with no
+ * reference after which the reference resumes BEHIND is not a pause — "paused
+ * then rewound" and "played on unobserved then rewound further back" both fit —
+ * and the aggregate leaves it uncovered instead of picking one.
  */
 function scenarioObservations() {
   const windows = []
@@ -187,9 +195,10 @@ function scenarioObservations() {
   push(0, 6, 0)
   push(6, 10, null)
   push(10, 14, 6)
-  push(14, 26, null)
-  push(26, 30, 2)
-  push(30, 34, 20)
+  push(14, 25, null)
+  push(25, 28, 10)
+  push(28, 31, 2)
+  push(31, 34, 20)
   push(34, 36, null)
   push(36, 40, 26)
   return windows
@@ -391,10 +400,10 @@ test('T-F4.015 buildPlaybackMap separates a pause, a commentary, a replay, a see
   const map = scenarioMap()
   assert.equal(map.schemaVersion, PLAYBACK_MAP_SCHEMA_VERSION)
   assert.deepEqual(map.pieces.map((piece) => piece.mode), [
-    'playing', 'paused', 'playing', 'commentary-only', 'replay', 'seek', 'playing',
+    'playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek', 'playing',
   ])
 
-  const [first, paused, resumed, commentary, replay, seek, tail] = map.pieces
+  const [first, paused, resumed, commentary, resumedAgain, replay, seek, tail] = map.pieces
   // The reference does not advance during the pause, and playback resumes from
   // the tick it left.
   assert.equal(paused.referenceRange, null)
@@ -402,9 +411,11 @@ test('T-F4.015 buildPlaybackMap separates a pause, a commentary, a replay, a see
   assert.equal(paused.discontinuityReason, 'pause')
   assert.equal(resumed.referenceRange.start, first.referenceRange.end)
 
-  // Longer than the pause ceiling, so it is commentary and not a pause.
+  // Longer than the pause ceiling, so it is commentary and not a pause — and
+  // the reference still resumes where it left, which is what lets it be either.
   assert.equal(commentary.referenceRange, null)
   assert.ok(commentary.reactionRange.end - commentary.reactionRange.start > POLICY.maxPauseTicks)
+  assert.equal(resumedAgain.referenceRange.start, resumed.referenceRange.end)
 
   assert.equal(replay.direction, 'backward')
   assert.equal(replay.discontinuityReason, 'rewind')
@@ -571,11 +582,21 @@ test('T-F4.015 an anchor resolves the hidden stretch and records who placed it',
   assert.equal(next.status, 'resolved')
   assert.equal(next.uncovered.length, 0)
   assert.deepEqual(next.pieces.map((piece) => piece.mode), [
-    'playing', 'paused', 'playing', 'commentary-only', 'replay', 'seek', 'playing', 'playing',
+    'playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek',
+    'playing', 'playing',
   ])
   const resolved = next.pieces.find((piece) => piece.detectionMethod === 'manual-anchor')
   assert.deepEqual(resolved.reactionRange, createTickInterval(seconds(34), seconds(36)))
-  assert.deepEqual(resolved.referenceRange, createTickInterval(seconds(24), seconds(26)))
+  // The anchor names reaction second 35, one second into the uncovered [34, 36),
+  // and reference second 24 — so the piece starts at reference 23, not 24.
+  // Anchoring the reference tick to the head of the range instead ignored the
+  // instant the operator pointed at and shifted the whole piece by a second.
+  assert.deepEqual(resolved.referenceRange, createTickInterval(seconds(23), seconds(25)))
+  // The requirement, not the implementation: the anchored instant resolves to
+  // the anchored reference instant. This is the assertion the offset bug fails.
+  const atAnchor = resolveReactionTick(next, seconds(35))
+  assert.equal(atAnchor.status, 'resolved')
+  assert.equal(atAnchor.referenceTick, seconds(24))
   assert.equal(resolved.discontinuityReason, 'manual-anchor')
   // One point is not a slope: the operator asserted continuity, nobody measured
   // it, so the piece carries no rate.
