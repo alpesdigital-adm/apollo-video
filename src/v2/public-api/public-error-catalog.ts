@@ -173,6 +173,11 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
       'CAPTURE_COVERAGE_OVERLAP_UNRESOLVED', 'CAPTURE_SESSION_DERIVATION_STALE',
       'DIRECTION_RANGE_UNRESOLVABLE', 'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
       'CAMERA_IDENTITY_COLLISION',
+      // Colour match and critic refusals: the measurements arrived intact and
+      // say something the system will not build a correction on.
+      'COLOR_SOURCES_INCOMPARABLE', 'COLOR_HDR_SDR_UNSUPPORTED',
+      'COLOR_RANGES_NOT_COMPARABLE', 'COLOR_MEASUREMENT_INSUFFICIENT',
+      'COLOR_REFERENCE_UNAVAILABLE', 'COLOR_STAGE_VIOLATION',
     ],
   },
   {

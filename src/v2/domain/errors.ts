@@ -108,6 +108,19 @@ export const DOMAIN_ERROR_CODES = [
   'DIRECTION_RANGE_UNRESOLVABLE',
   'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
   'CAMERA_IDENTITY_COLLISION',
+  // F4.013/F4.014 — multicamera colour match and colour critic. Each is a
+  // refusal of evidence with its own remedy: sources that were never brought
+  // to one colourimetry cannot be compared, an HDR source has no tone-map to
+  // stand behind a comparison, ranges that never overlap in session time
+  // measure different moments, too few frames measure nothing, a reference
+  // camera without a measurement anchors nothing, and a match placed after
+  // the creative LUT would grade the grade instead of the camera.
+  'COLOR_SOURCES_INCOMPARABLE',
+  'COLOR_HDR_SDR_UNSUPPORTED',
+  'COLOR_RANGES_NOT_COMPARABLE',
+  'COLOR_MEASUREMENT_INSUFFICIENT',
+  'COLOR_REFERENCE_UNAVAILABLE',
+  'COLOR_STAGE_VIOLATION',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',
