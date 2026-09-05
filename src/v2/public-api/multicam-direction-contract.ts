@@ -225,8 +225,23 @@ export function presentShotDecisionListing(listing: Readonly<MulticamShotDecisio
  * `direction` is null on a replay whose chain has moved past it: the Command
  * that comes back is still the one the first call produced, and handing back
  * today's head under it would be the wrong answer dressed as the right one.
+ *
+ * The compiled `DirectedEditPlan` is deliberately not republished here. It is
+ * the project's plan, readable through the project's own capabilities under the
+ * version id below, and copying it into this response would be a second copy
+ * that nothing keeps in step with the first. What travels is the fence a caller
+ * needs for its next command and the impact this one recorded.
+ *
+ * Typed as the fields it presents rather than the whole service result, so a
+ * renamed field on the service is a compile error here and an example can be
+ * built from the real command factory without also building a Director plan.
  */
-export function presentDirectedSession(result: Readonly<DirectMulticamSessionServiceResult>) {
+type PresentableDirectedSession = Pick<
+  DirectMulticamSessionServiceResult,
+  'direction' | 'directionVersion' | 'version' | 'command' | 'impact' | 'evidenceReplayed'
+>
+
+export function presentDirectedSession(result: Readonly<PresentableDirectedSession>) {
   return Object.freeze({
     direction: result.direction === null ? null : presentMulticamDirection(result.direction),
     directionVersion: result.directionVersion,
@@ -247,21 +262,18 @@ export function presentDirectedSession(result: Readonly<DirectMulticamSessionSer
       shotCount: result.impact.shotCount,
       manualReviewRequired: result.impact.manualReviewRequired,
     }),
-    editPlan: Object.freeze({
-      durationFrames: result.editPlan.durationFrames,
-      fps: result.editPlan.fps,
-      clipCount: result.editPlan.videoTracks.reduce((total, track) => total + track.clips.length, 0),
-      transitionCount: result.editPlan.transitions.length,
-      sourceCount: result.editPlan.sources.length,
-    }),
     // What this cut made stale. Reported, never deleted: an artifact that is no
     // longer current is still the artifact somebody approved.
-    invalidatedArtifacts: result.invalidations.map((invalidation) => Object.freeze({
-      artifactId: invalidation.artifactId,
-      kind: invalidation.kind,
-      variantId: invalidation.variantId,
-      status: invalidation.status,
+    invalidatedArtifacts: result.impact.affectedArtifacts.map((artifact) => Object.freeze({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      variantId: artifact.variantId,
+      sourceVersionId: artifact.sourceVersionId,
     })),
+    // The frames the impact says have to be recomputed. A range, not a flag:
+    // "the whole timeline" and "the last twenty seconds" are different amounts
+    // of render.
+    affectedRanges: result.impact.affectedRanges.map((range) => Object.freeze({ ...range })),
     // True when the evidence set was already stored: the same observations for
     // the same session version are the same set, not a second opinion.
     evidenceReplayed: result.evidenceReplayed,

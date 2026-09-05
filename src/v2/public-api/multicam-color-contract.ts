@@ -78,6 +78,11 @@ function token(value: unknown, field: string): string {
  * rather than summarised: `parametersHash` alone identifies a transform without
  * saying what it does, and a person asked to approve a correction of a camera
  * they filmed deserves to read the numbers rather than a digest of them.
+ *
+ * The shape is the one `colorTransformSchema` already publishes for a
+ * ColorPlan (`schema-registry.ts`), including an **absent** `lut` rather than a
+ * null one — a second shape for the same object would let a client parse the
+ * project's plan and fail on the match plan that wrote half of it.
  */
 export function presentColorTransform(transform: Readonly<ColorTransform>) {
   return Object.freeze({
@@ -93,7 +98,7 @@ export function presentColorTransform(transform: Readonly<ColorTransform>) {
       parameters: Object.freeze({ ...transform.implementation.parameters }),
       parametersHash: transform.implementation.parametersHash,
     }),
-    lut: transform.lut === undefined ? null : Object.freeze({ ...transform.lut }),
+    ...(transform.lut === undefined ? {} : { lut: Object.freeze({ ...transform.lut }) }),
   })
 }
 
