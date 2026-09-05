@@ -108,6 +108,12 @@ export const DOMAIN_ERROR_CODES = [
   'DIRECTION_RANGE_UNRESOLVABLE',
   'DIRECTION_SOURCE_CADENCE_UNSUPPORTED',
   'CAMERA_IDENTITY_COLLISION',
+  // A direction request that carried a score, an eligibility, a measurement or
+  // an approval. Not a malformed body — the JSON parses and the field has the
+  // right type — but a claim the server derives and the caller may not make. It
+  // is named apart from INVALID_ARGUMENT so the refusal says which field was the
+  // lie rather than "invalid request".
+  'DIRECTION_CALLER_SUPPLIED_DERIVATION',
   // F4.013/F4.014 — multicamera colour match and colour critic. Each is a
   // refusal of evidence with its own remedy: sources that were never brought
   // to one colourimetry cannot be compared, an HDR source has no tone-map to
