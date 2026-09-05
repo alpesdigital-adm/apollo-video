@@ -690,11 +690,15 @@ export function assertLegacyRuntimeAudit(
     'INVALID_ARGUMENT',
     'legacy runtime audit must name the modules it started from',
   )
+  // The count is only required to be a count. Whether it covered the entry
+  // modules is the `module-graph-scanned` check's job: a scan that reached
+  // fewer modules than it was asked to is a failed criterion, not a malformed
+  // audit, and treating it as malformed would hide which entry went missing.
   assertDomain(
     Number.isSafeInteger(audit.scannedModuleCount) &&
-      audit.scannedModuleCount >= audit.entryModules.length,
+      audit.scannedModuleCount >= 0,
     'INVALID_ARGUMENT',
-    'legacy runtime audit scanned fewer modules than it entered',
+    'legacy runtime audit did not report how many modules it scanned',
   )
   for (const violation of audit.violations) {
     assertDomain(

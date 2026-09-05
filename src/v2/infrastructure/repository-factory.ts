@@ -74,6 +74,10 @@ import type {
 } from '../application/ports/multicam-match-plan-repository.ts'
 import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
 import type { RenderablePlanSnapshotRepository } from '../application/ports/renderable-plan-snapshot-repository.ts'
+import type {
+  LegacyRuntimeAuditPort,
+  MulticamLongformGateRepository,
+} from '../application/ports/multicam-longform-gate-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -224,6 +228,13 @@ import {
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
 import { evaluateColorCriticService, selectRenderMatchPlan } from '../application/color-critic.ts'
+import {
+  evaluateMulticamLongformGateService,
+  explainMulticamLongformGateService,
+  listMulticamLongformGatesService,
+  readLatestMulticamLongformGateService,
+  readMulticamLongformGateService,
+} from '../application/multicam-longform-gate.ts'
 import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
 import {
   addMulticamMatchRangeOverrideService,
@@ -266,6 +277,8 @@ import {
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
+import { PrismaMulticamLongformGateRepository } from './prisma/multicam-longform-gate-repository.ts'
+import { ModuleGraphLegacyRuntimeAudit } from './audit/module-graph-legacy-runtime-audit.ts'
 import { PrismaRenderSourceRepository } from './prisma/render-source-repository.ts'
 import { FfmpegPlaybackFingerprinter } from './media/ffmpeg-playback-fingerprint.ts'
 import {
@@ -2348,6 +2361,46 @@ export function createPlaybackMapRepository(): PlaybackMapRepository {
 
 export function createRenderablePlanSnapshotRepository(): RenderablePlanSnapshotRepository {
   return new PrismaRenderablePlanSnapshotRepository(resolveV2Client())
+}
+
+export function createMulticamLongformGateRepository(): MulticamLongformGateRepository {
+  return new PrismaMulticamLongformGateRepository(resolveV2Client())
+}
+
+/**
+ * Criterion 10's evidence producer (F4.016).
+ *
+ * A separate factory from the repository because it reads the module graph
+ * rather than PostgreSQL, and because a caller that wants to scan a different
+ * entry set — a worker, say — should be able to say so without a database.
+ */
+export function createLegacyRuntimeAudit(): LegacyRuntimeAuditPort {
+  return new ModuleGraphLegacyRuntimeAudit()
+}
+
+/**
+ * The F4.016 phase gate, assembled.
+ *
+ * The signature the API lane needs: `evaluate({ workspaceId, projectId,
+ * sessionId?, actor, idempotencyKey })`. Everything the evaluation reads is
+ * fetched by these two dependencies; the request carries no evidence.
+ */
+export function createMulticamLongformGateRuntime(clock: () => Date = () => new Date()) {
+  const repository = createMulticamLongformGateRepository()
+  return Object.freeze({
+    repository,
+    legacyAudit: createLegacyRuntimeAudit(),
+    evaluate: evaluateMulticamLongformGateService({
+      repository,
+      legacyAudit: createLegacyRuntimeAudit(),
+      clock,
+      createId: () => `mlg-${randomUUID()}`,
+    }),
+    read: readMulticamLongformGateService({ repository }),
+    readLatest: readLatestMulticamLongformGateService({ repository }),
+    list: listMulticamLongformGatesService({ repository }),
+    explain: explainMulticamLongformGateService({ repository }),
+  })
 }
 
 /**
