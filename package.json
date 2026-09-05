@@ -57,6 +57,7 @@
     "test:integration:color-measurement": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/color-measurement.integration.mjs",
     "test:e2e:sync-diagnostic-persistence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-persistence.e2e.mjs",
     "test:e2e:wave20-persistence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-persistence.e2e.mjs",
+    "test:e2e:playback-map": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/playback-map.e2e.mjs",
     "test:e2e:wave20-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-persistence-journey.e2e.mjs",
     "test:e2e:sync-diagnostic-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-browser.e2e.mjs",
     "test:e2e:sync-diagnostic-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-diagnostic-journey.e2e.mjs",

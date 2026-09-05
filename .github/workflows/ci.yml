@@ -253,6 +253,11 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-wave20-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_WAVE20_PERSISTENCE_E2E: "1"
+      - name: Run Wave 20 react playback journey against PostgreSQL
+        run: npm run test:e2e:playback-map
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-playback-map-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PLAYBACK_MAP_E2E: "1"
       - name: Run Wave 20 capture sync worker persistence against PostgreSQL
         run: npm run test:e2e:capture-sync-persistence
         env:
