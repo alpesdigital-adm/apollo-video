@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { after, before } from 'node:test'
@@ -18,8 +18,13 @@ import {
   MATCH_PROVIDER_VERSIONS,
 } from '../../src/v2/domain/multicam-match-plan.ts'
 import { createTickInterval } from '../../src/v2/domain/session-time.ts'
+import { colorCriticSourceKey } from '../../src/v2/application/ports/color-critic-evaluator.ts'
+import { FfmpegColorCriticEvaluator } from '../../src/v2/infrastructure/media/ffmpeg-color-critic-evaluator.ts'
 import { FfmpegColorMeasurement } from '../../src/v2/infrastructure/media/ffmpeg-color-measurement.ts'
-import { FfmpegColorPipelineProcessor } from '../../src/v2/infrastructure/media/ffmpeg-color-pipeline-processor.ts'
+import {
+  buildFfmpegColorPipelineFilter,
+  FfmpegColorPipelineProcessor,
+} from '../../src/v2/infrastructure/media/ffmpeg-color-pipeline-processor.ts'
 
 const require = createRequire(import.meta.url)
 const ffmpeg = require('ffmpeg-static')
@@ -51,13 +56,6 @@ const SECONDS = 2
 const TICKS_PER_SECOND = 48_000
 /** The blue attenuation camera B was shot with. */
 const BLUE_ATTENUATION = 0.85
-/**
- * The creative look. `curves` is a per-channel non-linear transfer, which is
- * exactly the property that makes the stage order matter: a channel gain and a
- * non-linear curve do not commute, so the same correction lands differently
- * depending on which side of the look it is applied.
- */
-const LOOK = "curves=b='0/0 0.5/0.25 1/1'"
 
 const METADATA = Object.freeze({
   colorSpace: 'rec709',
@@ -71,6 +69,7 @@ const METADATA = Object.freeze({
 const BASE = `testsrc2=size=${WIDTH}x${HEIGHT}:rate=${RATE}:duration=${SECONDS}`
 
 let root = null
+let cube = null
 const files = new Map()
 const measurer = new FfmpegColorMeasurement({ timeoutMs: 120_000 })
 const processor = new FfmpegColorPipelineProcessor()
@@ -148,15 +147,63 @@ const IDENTITY_GLOBAL = Object.freeze([
   transform('output-identity', 'output', 'ffmpeg-zscale', { mode: 'identity' }),
 ])
 
+/**
+ * The creative look as a real 3D LUT — the same non-linear blue transfer the
+ * `curves` filter above applies, in the form the product actually ships it in.
+ *
+ * It has to be a real LUT and not a disabled stage, because the claim under
+ * test is that Apollo's own chain puts the match BEFORE the look: a no-op look
+ * cannot move a pixel, so its position could not be measured either.
+ */
+const LUT_SIZE = 17
+const LUT_ARTIFACT_ID = 'lut-look-1'
+/**
+ * A gamma on the blue channel. A power law is the sharpest possible statement
+ * of "these two stages do not commute": a gain g applied before it comes out as
+ * g^2.2, and applied after it as g, so the same correction lands 15% apart
+ * depending on which side of the look it is on.
+ */
+const blueTransfer = (value) => value ** 2.2
+
+function cubeText() {
+  const lines = ['TITLE "apollo colour match integration look"', `LUT_3D_SIZE ${LUT_SIZE}`, 'DOMAIN_MIN 0.0 0.0 0.0', 'DOMAIN_MAX 1.0 1.0 1.0', '']
+  const step = 1 / (LUT_SIZE - 1)
+  // .cube orders red fastest, then green, then blue.
+  for (let bi = 0; bi < LUT_SIZE; bi += 1) {
+    for (let gi = 0; gi < LUT_SIZE; gi += 1) {
+      for (let ri = 0; ri < LUT_SIZE; ri += 1) {
+        lines.push(`${(ri * step).toFixed(6)} ${(gi * step).toFixed(6)} ${blueTransfer(bi * step).toFixed(6)}`)
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`
+}
+
+/** The global layer with the look ENABLED, bound to that immutable cube. */
+function lookGlobal(cubeSha256) {
+  const parameters = Object.freeze({ intensity: 1, mode: 'lut3d' })
+  return Object.freeze([
+    IDENTITY_GLOBAL[0],
+    IDENTITY_GLOBAL[1],
+    Object.freeze({
+      id: 'creative-look', kind: 'creative-lut', version: 'v1', enabled: true,
+      input: METADATA, output: METADATA,
+      implementation: Object.freeze({
+        provider: 'apollo-lut', version: 'v1',
+        parameters, parametersHash: calculateCanonicalHash(parameters),
+      }),
+      lut: Object.freeze({ artifactId: LUT_ARTIFACT_ID, sha256: cubeSha256 }),
+    }),
+    IDENTITY_GLOBAL[3],
+  ])
+}
+
 before(async () => {
   root = await mkdtemp(join(tmpdir(), 'apollo-color-match-'))
   // Camera A is the reference. Camera B is the same scene through a lens that
   // lost blue — a real white-balance divergence, not a tag.
   await encode('cameraA', 'null')
   await encode('cameraB', `colorchannelmixer=rr=1:gg=1:bb=${BLUE_ATTENUATION}`)
-  // The reference through the creative look: what a matched camera has to
-  // land on once the look is applied to it too.
-  await encodeFrom('referenceLook', 'cameraA', LOOK)
   // Frames that really clip, on a picture that is otherwise fine: the top half
   // is pinned to white and the bottom half is a usable mid grey. A wholly white
   // frame would prove the same rule against a fixture nobody would ship.
@@ -165,7 +212,21 @@ before(async () => {
     `drawbox=x=0:y=0:w=${WIDTH}:h=${HEIGHT / 2}:color=white:t=fill`,
     `color=c=gray:size=${WIDTH}x${HEIGHT}:rate=${RATE}:duration=${SECONDS}`,
   )
+  // The creative look, as the cube the renderer would materialize.
+  const cubePath = join(root, 'look.cube')
+  const text = cubeText()
+  await writeFile(cubePath, text, 'utf8')
+  cube = { path: cubePath, sha256: createHash('sha256').update(text).digest('hex') }
+  // Camera A through that look: what a matched camera B has to land on once the
+  // same look is applied to it too.
+  await encodeFrom('referenceLut', 'cameraA', lut3dFilter(cubePath))
 })
+
+/** The same link the processor emits for an enabled creative LUT. */
+function lut3dFilter(path) {
+  const escaped = path.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
+  return `lut3d=file='${escaped}':interp=tetrahedral`
+}
 
 after(async () => {
   if (!root) return
@@ -261,9 +322,13 @@ test('T-F4.013 a derived match moves the camera blue ratio onto the reference in
   t.diagnostic(`corrected sha256 ${rendered.sha256.slice(0, 16)} bytes ${rendered.byteSize}`)
 })
 
-test('T-F4.013 the same correction applied after the look leaves the camera measurably off', async () => {
-  // The gain under test is the derived one, not a number chosen for the test:
-  // the falsification has to be about the pipeline the system would build.
+test('T-F4.013 the chain the processor builds puts the match before the look, and the other order lands measurably off', async () => {
+  // The whole point of this falsification is that it runs the PRODUCT'S chain.
+  // The gain is the derived one, the look is a real enabled creative LUT, the
+  // canonical render is `processor.process` itself, and the swapped render is
+  // that same chain with the two links moved past each other. Nothing here
+  // retypes a filter, so reordering the stages inside the processor makes the
+  // canonical render fail instead of leaving both renders identical.
   const plan = deriveMulticamMatchPlan({
     planId: 'mmp-integration-2',
     workspaceId: 'workspace-integration',
@@ -285,30 +350,77 @@ test('T-F4.013 the same correction applied after the look leaves the camera meas
     lineage: { colorProbeIds: [] },
     createdAt: '2029-06-01T10:00:00.000Z',
   })
-  const parameters = plan.cameraTransforms[0].transform.implementation.parameters
-  // The exact filter the processor builds for this transform, so the two
-  // orders differ in nothing but their order.
-  const matchFilter = [
-    `colorchannelmixer=rr=${Number(parameters['red-gain']).toFixed(6)}:gg=${Number(parameters['green-gain']).toFixed(6)}:bb=${Number(parameters['blue-gain']).toFixed(6)}`,
-    `eq=brightness=${Number(parameters.brightness).toFixed(6)}:contrast=${Number(parameters.contrast).toFixed(6)}:saturation=${Number(parameters.saturation).toFixed(6)}`,
-  ].join(',')
-  // Both chains start from the SAME camera B file and apply the SAME match and
-  // the SAME look. Only the order differs.
-  await encodeFrom('correctThenLook', 'cameraB', `${matchFilter},${LOOK}`)
-  await encodeFrom('lookThenCorrect', 'cameraB', `${LOOK},${matchFilter}`)
+  const layers = compileMatchPlanToColorPlanLayers(plan, {
+    editPlanClipsByCameraId: { 'cam-a': [{ clipId: 'clip-1' }], 'cam-b': [{ clipId: 'clip-2' }] },
+  })
+  const colorPlan = createColorPlan({
+    schemaVersion: 'color-plan/v1',
+    metadata: METADATA,
+    outputMetadata: METADATA,
+    global: lookGlobal(cube.sha256),
+    sourceMetadata: { 'artifact-a': METADATA, 'artifact-b': METADATA },
+    sources: {},
+    cameras: layers.cameras,
+    segments: layers.segments,
+  })
+  const pipeline = resolveColorPlan(colorPlan, { sourceId: 'artifact-b', cameraId: 'cam-b', segmentId: 'clip-2' })
+  assert.equal(pipeline.stages[1].enabled, true, 'the match stage is the derived correction')
+  assert.equal(pipeline.stages[2].enabled, true, 'the look really bends a channel; a disabled stage cannot be out of order')
+  const execution = { pipeline, executionHash: calculateCanonicalHash({ kind: 'order', pipelineHash: pipeline.pipelineHash }) }
+  const lutPaths = { [LUT_ARTIFACT_ID]: cube.path }
 
-  const withLook = await measure('referenceLook', 'cam-a', 'artifact-a')
-  const canonical = await measure('correctThenLook', 'cam-b', 'artifact-b')
-  const swapped = await measure('lookThenCorrect', 'cam-b', 'artifact-b')
+  // The two candidate orders, both assembled from the LINKS THE PROCESSOR
+  // EMITS, so a change to how a match or a look is rendered reaches both sides
+  // of the comparison. Only the middle two links move; the technical link stays
+  // first and the output and pixel-format links stay last whichever order the
+  // processor happens to build.
+  const built = buildFfmpegColorPipelineFilter({ execution, lutPaths })
+  const links = built.filter.split(',')
+  const isMatch = (link) => link.startsWith('colorchannelmixer=') || link.startsWith('eq=')
+  const isLook = (link) => link.startsWith('lut3d=')
+  const matchLinks = links.filter(isMatch)
+  const lookLink = links.find(isLook)
+  const others = links.filter((link) => !isMatch(link) && !isLook(link))
+  assert.equal(matchLinks.length, 2, built.filter)
+  assert.ok(lookLink !== undefined, built.filter)
+  const matchThenLook = [others[0], ...matchLinks, lookLink, ...others.slice(1)]
+  const lookThenMatch = [others[0], lookLink, ...matchLinks, ...others.slice(1)]
+
+  await encodeFrom('matchThenLook', 'cameraB', matchThenLook.join(','))
+  await encodeFrom('lookThenMatch', 'cameraB', lookThenMatch.join(','))
+
+  const withLook = await measure('referenceLut', 'cam-a', 'artifact-a')
+  const canonicalMeasurements = await measure('matchThenLook', 'cam-b', 'artifact-b')
+  const swapped = await measure('lookThenMatch', 'cam-b', 'artifact-b')
 
   const target = mean(withLook.map(blueOverGreen))
-  const canonicalError = Math.abs(mean(canonical.map(blueOverGreen)) - target) / target
+  const canonicalError = Math.abs(mean(canonicalMeasurements.map(blueOverGreen)) - target) / target
   const swappedError = Math.abs(mean(swapped.map(blueOverGreen)) - target) / target
-  console.log(`T-F4.013 stage-order falsification N=2 target=${target.toFixed(6)} match-before-look=${mean(canonical.map(blueOverGreen)).toFixed(6)}(err ${(canonicalError * 100).toFixed(2)}%) match-after-look=${mean(swapped.map(blueOverGreen)).toFixed(6)}(err ${(swappedError * 100).toFixed(2)}%)`)
+  console.log(`T-F4.013 stage-order falsification N=2 target=${target.toFixed(6)} match-before-look=${mean(canonicalMeasurements.map(blueOverGreen)).toFixed(6)}(err ${(canonicalError * 100).toFixed(2)}%) match-after-look=${mean(swapped.map(blueOverGreen)).toFixed(6)}(err ${(swappedError * 100).toFixed(2)}%)`)
 
-  assert.ok(canonicalError < 0.03, `the canonical order did not land the correction: ${canonicalError}`)
+  assert.ok(canonicalError < 0.03,
+    `the match-before-look order did not land the correction: ${canonicalError}`)
   assert.ok(swappedError > canonicalError * 3,
     `moving the match after the look changed nothing measurable (${swappedError} vs ${canonicalError}); the stage order would then be a convention rather than a requirement`)
+
+  // …and the order the PRODUCT builds is the one that landed. This is the half
+  // that fails when the processor's stage order changes: the measurement above
+  // is a fact about FFmpeg, this is a claim about Apollo.
+  assert.equal(built.filter, matchThenLook.join(','),
+    `the processor renders the look before the match, which measured ${(swappedError * 100).toFixed(2)}% off the reference`)
+
+  // And the file the processor actually writes lands where the filter says.
+  const rendered = await processor.process({
+    sourcePath: files.get('cameraB').path,
+    outputPath: join(root, 'cameraB-processor-look.mp4'),
+    execution,
+    lutPaths,
+  })
+  files.set('processorLook', { path: rendered.outputPath, sha256: rendered.sha256 })
+  const renderedRatios = (await measure('processorLook', 'cam-b', 'artifact-b')).map(blueOverGreen)
+  const renderedError = Math.abs(mean(renderedRatios) - target) / target
+  assert.ok(renderedError < 0.03,
+    `the rendered proxy is ${(renderedError * 100).toFixed(2)}% off the reference; the chain the processor ran is not the chain that lands`)
 })
 
 test('T-F4.014 clipping declared as creative intent is still rejected on real frames', async () => {

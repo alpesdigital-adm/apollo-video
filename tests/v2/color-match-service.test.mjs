@@ -864,6 +864,59 @@ test('T-F4.013 apollo-match v2 renders a colorchannelmixer before the eq', () =>
   assert.match(filters[mixer], /rr=0\.950000:gg=1\.000000:bb=1\.400000/)
 })
 
+test('T-F4.013 the chain the processor builds puts the match before the creative look', () => {
+  // The integration suite measures what this order costs in pixels
+  // (`color-match.integration.mjs`: 14.61% off the reference when the two are
+  // swapped). This is the same claim at unit speed, so moving the stages inside
+  // `buildFfmpegColorPipelineFilter` cannot pass `npm test` and wait for a
+  // machine with FFmpeg on it to notice.
+  const lutParameters = Object.freeze({ intensity: 1, mode: 'lut3d' })
+  const base = execution({
+    mode: 'adjust', brightness: 0.08, contrast: 1, saturation: 1,
+    'red-gain': 0.95, 'green-gain': 1, 'blue-gain': 1.4,
+  }, 'v2')
+  const stages = [
+    base.pipeline.stages[0],
+    base.pipeline.stages[1],
+    Object.freeze({
+      ...base.pipeline.stages[2],
+      enabled: true,
+      implementation: Object.freeze({
+        provider: 'apollo-lut', version: 'v1',
+        parameters: lutParameters, parametersHash: calculateCanonicalHash(lutParameters),
+      }),
+      lut: Object.freeze({ artifactId: 'lut-look-1', sha256: sha('a') }),
+    }),
+    base.pipeline.stages[3],
+  ]
+  const content = {
+    schemaVersion: base.pipeline.schemaVersion,
+    sourceMetadata: base.pipeline.sourceMetadata,
+    outputMetadata: base.pipeline.outputMetadata,
+    stages,
+    target: base.pipeline.target,
+  }
+  const withLook = {
+    ...base,
+    pipeline: {
+      ...content,
+      manifestKey: stages.map((s) => `${s.kind}:${s.id}@${s.version}:${s.implementation.parametersHash}`).join('>'),
+      pipelineHash: calculateCanonicalHash(content),
+    },
+  }
+  const built = buildFfmpegColorPipelineFilter({
+    execution: withLook,
+    lutPaths: { 'lut-look-1': '/luts/look.cube' },
+  })
+  const links = built.filter.split(',')
+  const mixer = links.findIndex((link) => link.startsWith('colorchannelmixer='))
+  const eq = links.findIndex((link) => link.startsWith('eq='))
+  const lut = links.findIndex((link) => link.startsWith('lut3d='))
+  assert.ok(mixer >= 0 && eq >= 0 && lut >= 0, built.filter)
+  assert.ok(mixer < lut && eq < lut,
+    `a correction applied after the look corrects a picture the look already reshaped: ${built.filter}`)
+})
+
 test('T-F4.013 a v1 match carrying a gain is refused instead of silently upgraded', () => {
   assert.throws(
     () => buildFfmpegColorPipelineFilter({
