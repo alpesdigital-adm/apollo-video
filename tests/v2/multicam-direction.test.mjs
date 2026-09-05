@@ -258,11 +258,11 @@ function sequence(direction) {
 // Podcast: master recorder as the clock, two cameras, one lapel mic per camera body.
 // ---------------------------------------------------------------------------
 
-function podcastWorld({ cameraBGap = false, cameraBRestart = false, observations, protectedSelections, range, cameraAGap = false } = {}) {
-  const master = track({ trackId: 'track-master-audio', role: 'master-audio', deviceId: 'dev-rec', assetId: 'asset-master', coverage: createTickInterval(t(0), sec(600)), syncAudioPolicy: 'final-candidate', includeInFinalMix: true })
+function podcastWorld({ cameraBGap = false, cameraBRestart = false, observations, protectedSelections, range, cameraAGap = false, masterAudio = {}, micAAudio = {} } = {}) {
+  const master = track({ trackId: 'track-master-audio', role: 'master-audio', deviceId: 'dev-rec', assetId: 'asset-master', coverage: createTickInterval(t(0), sec(600)), syncAudioPolicy: 'final-candidate', includeInFinalMix: true, ...masterAudio })
   const cameraA = track({ trackId: 'track-camera-a', role: 'camera-main', deviceId: 'dev-a', assetId: 'asset-cam-a', coverage: createTickInterval(t(0), cameraAGap ? sec(125) : sec(600)) })
   const cameraB = track({ trackId: 'track-camera-b', role: 'camera-main', deviceId: 'dev-b', assetId: 'asset-cam-b', coverage: createTickInterval(t(0), cameraBGap || cameraBRestart ? sec(200) : sec(540)) })
-  const micA = track({ trackId: 'track-mic-a', role: 'microphone', deviceId: 'dev-a', assetId: 'asset-mic-a', coverage: createTickInterval(t(0), sec(600)) })
+  const micA = track({ trackId: 'track-mic-a', role: 'microphone', deviceId: 'dev-a', assetId: 'asset-mic-a', coverage: createTickInterval(t(0), sec(600)), ...micAAudio })
   const micB = track({ trackId: 'track-mic-b', role: 'microphone', deviceId: 'dev-b', assetId: 'asset-mic-b', coverage: createTickInterval(t(0), sec(540)) })
   let { session, clock } = buildSession({
     referenceTrack: master,
@@ -299,8 +299,12 @@ function podcastWorld({ cameraBGap = false, cameraBRestart = false, observations
   const clockMaps = [
     mapFor(session, clock, 'track-camera-a', t(45_000)),
     mapFor(session, clock, 'track-camera-b', sec(30), { refit: cameraBRestart }),
+    // A microphone only needs a map when it is the audio bed: the bed is resolved
+    // to source ticks exactly like an angle, and a track with no map is unusable.
+    ...(micAAudio.includeInFinalMix ? [mapFor(session, clock, 'track-mic-a', t(45_000))] : []),
   ]
-  const coverages = ['track-master-audio', 'track-camera-a', 'track-camera-b'].map((trackId) => coverageFor(session, trackId))
+  const coverages = ['track-master-audio', 'track-camera-a', 'track-camera-b', ...(micAAudio.includeInFinalMix ? ['track-mic-a'] : [])]
+    .map((trackId) => coverageFor(session, trackId))
   const diagnostic = diagnosticFor(session, [
     { trackId: 'track-camera-a', offsetMs: 500 },
     { trackId: 'track-camera-b', offsetMs: 30_000, coverageBps: 9_000, residualMs: 12 },
@@ -390,6 +394,38 @@ test('T-FR-150 golden 1: a podcast follows the active speaker across two cameras
     ['asset-master', 'audio', 18_000],
   ])
   console.log(`golden-1 podcast shots=${compiled.clips.length} durationFrames=${compiled.durationFrames} directionHash=${direction.directionHash.slice(0, 12)}`)
+})
+
+test('T-FR-150 golden 1b: the audio bed reads what the audio IS, not only that somebody marked it for the mix', () => {
+  // A recorder whose channel carries no final content (`syncAudioPolicy: 'none'`)
+  // is still legally markable for the mix (`capture-session.ts:363` gates only by
+  // role), so reading `includeInFinalMix` alone laid an empty channel under every
+  // shot while the lapel microphone that WAS a final candidate sat unused.
+  const world = podcastWorld({
+    masterAudio: { syncAudioPolicy: 'none', includeInFinalMix: true },
+    micAAudio: { syncAudioPolicy: 'final-candidate', includeInFinalMix: true },
+  })
+  const direction = world.direct()
+  assert.equal(direction.audio.trackId, 'track-mic-a', 'the final candidate wins over the marked-but-silent master')
+  assert.deepEqual(
+    direction.audio.rejected.find((entry) => entry.trackId === 'track-master-audio'),
+    { trackId: 'track-master-audio', reason: 'audio-not-final-candidate' },
+  )
+  for (const shot of direction.shots) assert.equal(shot.audioTrackId, 'track-mic-a')
+  const compiled = compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: world.coverages })
+  for (const clip of compiled.clips) assert.equal(clip.audioSourceAssetId, 'asset-mic-a')
+
+  // A camera whose audio exists only to line clocks up is refused for the same
+  // reason, by name, even when it is marked for the mix.
+  const syncOnly = podcastWorld({ masterAudio: { syncAudioPolicy: 'sync-only', includeInFinalMix: true } }).direct()
+  assert.equal(syncOnly.audio.trackId, null)
+  assert.deepEqual(
+    syncOnly.audio.rejected.find((entry) => entry.trackId === 'track-master-audio'),
+    { trackId: 'track-master-audio', reason: 'audio-not-final-candidate' },
+  )
+  assert.ok(syncOnly.warnings.some((warning) => warning.code === 'audio-master-unavailable'), 'a session with no bed says so instead of picking one')
+  assert.equal(syncOnly.manualReviewRequired, true)
+  console.log(`golden-1b audio bed=${direction.audio.trackId} rejected=${direction.audio.rejected.length} noBed=${syncOnly.audio.trackId}`)
 })
 
 test('T-FR-150 golden 1 is sensitive: swapping which microphone spoke changes the shots', () => {

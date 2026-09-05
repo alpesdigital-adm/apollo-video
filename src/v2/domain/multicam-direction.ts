@@ -125,6 +125,7 @@ export const ANGLE_REJECTIONS = Object.freeze([
   'protocol-ceiling',
   'quality-below-floor',
   'excluded-from-final-mix',
+  'audio-not-final-candidate',
 ] as const)
 export type AngleRejection = (typeof ANGLE_REJECTIONS)[number]
 
@@ -506,28 +507,43 @@ function contextForTrack(track: Readonly<CaptureTrack>, speakerCameras: Readonly
 }
 
 /**
- * The audio bed for every shot: the recorder's master, else a final-mix
- * microphone, else a final-mix picture track (a reactor's camera in a react
- * session), ordered by role rank then id so the choice is deterministic.
- * Tracks the session excluded from the mix are recorded as rejected.
+ * The audio bed for every shot.
+ *
+ * Two independent fields have to agree before a track's audio may be laid
+ * under a shot. `includeInFinalMix` is the operator's intent, and the session
+ * only gates it by role (`capture-session.ts:363`); `syncAudioPolicy` is what
+ * the audio actually IS — `'none'` says these bytes carry neither sync nor
+ * final content, `'sync-only'` says they exist to line clocks up
+ * (`capture-session.ts:92`). `'none' + includeInFinalMix: true` is a legal
+ * session, so reading intent alone would put a reference tone or an empty
+ * channel under every shot while a `'final-candidate'` microphone sat unused.
+ * A track is a bed only when it is marked for the mix AND its audio is
+ * `'final-candidate'` or `'available'`; `'final-candidate'` — audio somebody
+ * asserted is deliverable — outranks `'available'` before role rank is even
+ * consulted. Everything rejected is named with the field that rejected it.
  */
 function deriveAudioSource(session: Readonly<CaptureSession>): Readonly<{ trackId: string | null; rejected: readonly Readonly<{ trackId: string; reason: AngleRejection }>[] }> {
   const rejected: Array<Readonly<{ trackId: string; reason: AngleRejection }>> = []
-  const ranked = [...session.tracks]
+  const roleOrder = (track: Readonly<CaptureTrack>) =>
+    track.role === 'master-audio' ? 0 : track.role === 'microphone' ? 1 : 2
+  const preferred = [...session.tracks]
     .filter((track) => track.role !== 'scratch-audio' && track.role !== 'screen' && track.role !== 'reference-video')
     .sort((left, right) => {
+      const byPolicy = (left.syncAudioPolicy === 'final-candidate' ? 0 : 1) - (right.syncAudioPolicy === 'final-candidate' ? 0 : 1)
+      if (byPolicy !== 0) return byPolicy
+      const byPreference = roleOrder(left) - roleOrder(right)
+      if (byPreference !== 0) return byPreference
       const byRole = ROLE_RANK[left.role] - ROLE_RANK[right.role]
       return byRole !== 0 ? byRole : left.trackId.localeCompare(right.trackId)
     })
-  const preferred = [
-    ...ranked.filter((track) => track.role === 'master-audio'),
-    ...ranked.filter((track) => track.role === 'microphone'),
-    ...ranked.filter((track) => track.role !== 'master-audio' && track.role !== 'microphone'),
-  ]
   let chosen: string | null = null
   for (const track of preferred) {
     if (!track.includeInFinalMix) {
       rejected.push(Object.freeze({ trackId: track.trackId, reason: 'excluded-from-final-mix' as const }))
+      continue
+    }
+    if (track.syncAudioPolicy === 'none' || track.syncAudioPolicy === 'sync-only') {
+      rejected.push(Object.freeze({ trackId: track.trackId, reason: 'audio-not-final-candidate' as const }))
       continue
     }
     if (chosen === null) chosen = track.trackId
