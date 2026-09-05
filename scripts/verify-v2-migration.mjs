@@ -33,6 +33,100 @@ function names(sql, pattern) {
   return new Set([...sql.matchAll(pattern)].map((match) => match[1]))
 }
 
+/**
+ * Walk a migration the way PostgreSQL's lexer would, and report the first
+ * place the structure stops making sense.
+ *
+ * Everything else in this file reads migrations as text, which is blind to the
+ * one mistake text search cannot see: a CHECK whose regex literal lost its
+ * closing quote swallows the statements after it, and the file still contains
+ * every string the assertions look for. Wave 20 shipped exactly that — the
+ * `color_measurement_components` name CHECK was written `'^[A-Za-z]...{0,63}`
+ * with the `$'` missing — and nothing here noticed, because the parenthesis it
+ * ate belonged to a CREATE TABLE two lines further down.
+ *
+ * Counting quotes is not enough either: a swallowed region re-pairs the ones
+ * after it, so the file ends balanced. Parenthesis depth is what breaks, and it
+ * breaks at the statement that could no longer be closed.
+ */
+function firstStructuralFault(sql) {
+  let index = 0
+  let line = 1
+  let depth = 0
+  let statementStart = 1
+  const skipQuoted = (terminator) => {
+    const openedAt = line
+    index += 1
+    while (index < sql.length) {
+      if (sql[index] === '\n') { line += 1; index += 1; continue }
+      if (sql[index] === terminator) {
+        // A doubled quote is an escaped one, not the end of the literal.
+        if (sql[index + 1] === terminator) { index += 2; continue }
+        index += 1
+        return null
+      }
+      index += 1
+    }
+    return { line: openedAt, why: `unterminated ${terminator === "'" ? 'string literal' : 'quoted identifier'}` }
+  }
+  while (index < sql.length) {
+    const character = sql[index]
+    if (character === '\n') { line += 1; index += 1; continue }
+    if (character === '-' && sql[index + 1] === '-') {
+      while (index < sql.length && sql[index] !== '\n') index += 1
+      continue
+    }
+    if (character === '/' && sql[index + 1] === '*') {
+      let nesting = 1
+      index += 2
+      while (index < sql.length && nesting > 0) {
+        if (sql[index] === '\n') line += 1
+        if (sql[index] === '/' && sql[index + 1] === '*') { nesting += 1; index += 2; continue }
+        if (sql[index] === '*' && sql[index + 1] === '/') { nesting -= 1; index += 2; continue }
+        index += 1
+      }
+      continue
+    }
+    if (character === '$') {
+      const tag = /^\$[A-Za-z_0-9]*\$/.exec(sql.slice(index))
+      if (tag) {
+        const end = sql.indexOf(tag[0], index + tag[0].length)
+        if (end < 0) return { line, why: 'unterminated dollar-quoted string' }
+        for (let cursor = index; cursor < end + tag[0].length; cursor += 1) {
+          if (sql[cursor] === '\n') line += 1
+        }
+        index = end + tag[0].length
+        continue
+      }
+    }
+    if (character === "'" || character === '"') {
+      const fault = skipQuoted(character)
+      if (fault) return fault
+      continue
+    }
+    if (character === '(') {
+      if (depth === 0) statementStart = line
+      depth += 1
+      index += 1
+      continue
+    }
+    if (character === ')') {
+      depth -= 1
+      if (depth < 0) return { line, why: 'closing parenthesis with nothing open' }
+      index += 1
+      continue
+    }
+    if (character === ';') {
+      if (depth !== 0) return { line: statementStart, why: `statement ends with ${depth} parenthesis still open` }
+      index += 1
+      continue
+    }
+    index += 1
+  }
+  if (depth !== 0) return { line: statementStart, why: `file ends with ${depth} parenthesis still open` }
+  return null
+}
+
 function assertSetContains(actual, expected, label) {
   const missing = [...expected].filter((name) => !actual.has(name))
   assert.deepEqual(missing, [], `${label} missing from committed migration`)
@@ -43,11 +137,21 @@ const generated = runPrisma(
   ['migrate', 'diff', '--from-empty', '--to-schema-datamodel', schemaPath, '--script'],
   true,
 )
-const committed = readdirSync(migrationsPath, { withFileTypes: true })
+const migrationFiles = readdirSync(migrationsPath, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .sort((left, right) => left.name.localeCompare(right.name))
-  .map((entry) => readFileSync(`${migrationsPath}/${entry.name}/migration.sql`, 'utf8'))
-  .join('\n')
+  .map((entry) => ({
+    name: entry.name,
+    sql: readFileSync(`${migrationsPath}/${entry.name}/migration.sql`, 'utf8'),
+  }))
+
+const structuralFaults = migrationFiles
+  .map((file) => ({ file, fault: firstStructuralFault(file.sql) }))
+  .filter((entry) => entry.fault !== null)
+  .map((entry) => `${entry.file.name}/migration.sql:${entry.fault.line}: ${entry.fault.why}`)
+assert.deepEqual(structuralFaults, [], 'migrations PostgreSQL could not parse')
+
+const committed = migrationFiles.map((file) => file.sql).join('\n')
 const operationActorAuditMigration = readFileSync(
   `${migrationsPath}/20260805000000_public_operation_actor_audit/migration.sql`,
   'utf8',

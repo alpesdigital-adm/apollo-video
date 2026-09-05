@@ -481,7 +481,7 @@ CREATE TABLE "color_measurement_components" (
     -- and asked for by name (rOverG, bOverG), so they use the identifier
     -- grammar rather than the lowercase ColorPlan token one.
     CONSTRAINT "color_measurement_components_name_check"
-        CHECK ("name" ~ '^[A-Za-z][A-Za-z0-9_]{0,63})
+        CHECK ("name" ~ '^[A-Za-z][A-Za-z0-9_]{0,63}$')
 );
 
 CREATE UNIQUE INDEX "color_measurement_components_id_workspaceId_key" ON "color_measurement_components"("id", "workspaceId");
