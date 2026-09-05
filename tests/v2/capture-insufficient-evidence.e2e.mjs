@@ -6,6 +6,7 @@ import {
   addCaptureSessionTrack,
   createCaptureSession,
 } from '../../src/v2/domain/capture-session.ts'
+import { createSessionClock } from '../../src/v2/domain/session-clock.ts'
 import { evaluateSyncEvidence } from '../../src/v2/domain/sync-evidence.ts'
 import {
   createTickInterval,
@@ -100,6 +101,32 @@ function session() {
   })
 }
 
+/**
+ * The clock this session always assumed and never stated.
+ *
+ * Both tracks are written on a 90 kHz media clock, which is a tick rate and not
+ * a shutter: inverting it would claim ninety thousand frames a second. Until
+ * Wave 20 the worker filled that hole with a hardcoded 30000/1001, so this
+ * fixture passed on a default that happened to match the `NTSC` rate it hands
+ * `evaluateSyncEvidence` two lines below. The worker now refuses to invent a
+ * rate — correctly — and this fixture has to say which one it means, or the run
+ * fails for a reason that has nothing to do with the evidence under test.
+ */
+function fakeSessionClock(current) {
+  return createSessionClock({
+    sessionId: current.sessionId,
+    timebase: SESSION_TB,
+    frameRate: NTSC,
+    authority: {
+      origin: 'primary-camera',
+      sourceId: current.referenceTrackId,
+      provenance: 'original-capture',
+      evidenceRef: 'probe-reference-camera',
+    },
+    establishedAt: at(0),
+  })
+}
+
 function fakeSessions(current) {
   const evidence = []
   const maps = []
@@ -111,7 +138,7 @@ function fakeSessions(current) {
     async listVersions() { return [current] },
     async listHeads() { return [] },
     async persistClock() { throw new Error('unused') },
-    async readClock() { return null },
+    async readClock() { return fakeSessionClock(current) },
     async persistClockMap(input) { maps.push(input.map); return { map: input.map, replayed: false } },
     async readClockMap() { return null },
     async listClockMaps() { return maps },
