@@ -577,16 +577,18 @@ CREATE TABLE "match_plan_measurements" (
     "cameraId" VARCHAR(128) NOT NULL,
     "isReference" BOOLEAN NOT NULL,
 
-    CONSTRAINT "match_plan_measurements_pkey" PRIMARY KEY ("id"),
-    -- A plan carries a measurement of its reference camera, and only one row
-    -- may claim to be it.
-    CONSTRAINT "match_plan_measurements_reference_check"
-        CHECK ("isReference" IS NOT NULL)
+    CONSTRAINT "match_plan_measurements_pkey" PRIMARY KEY ("id")
 );
 
 CREATE INDEX "match_plan_measurements_workspaceId_measurementId_idx" ON "match_plan_measurements"("workspaceId", "measurementId");
 CREATE UNIQUE INDEX "match_plan_measurements_id_workspaceId_key" ON "match_plan_measurements"("id", "workspaceId");
 CREATE UNIQUE INDEX "match_plan_measurements_plan_measurement_key" ON "match_plan_measurements"("workspaceId", "planId", "measurementId");
+
+-- A plan is built against one reference camera, so at most one of its
+-- measurements may claim to be the reference. Prisma cannot express a partial
+-- index, and a CHECK on a single row cannot see the other rows it would have
+-- to compare itself with.
+CREATE UNIQUE INDEX "match_plan_measurements_reference_key" ON "match_plan_measurements"("workspaceId", "planId") WHERE "isReference";
 
 CREATE TABLE "camera_match_transforms" (
     "id" VARCHAR(160) NOT NULL,

@@ -400,6 +400,14 @@ test('T-F4.012 every Wave 20 table is workspace-scoped, keyed and cascade-bound'
     sql,
     /ALTER TABLE "match_plan_measurements" ADD CONSTRAINT "match_plan_measurements_measurementId_workspaceId_fkey" FOREIGN KEY \("measurementId", "workspaceId"\) REFERENCES "camera_color_measurements"\("id", "workspaceId"\) ON DELETE RESTRICT/,
   )
+
+  // A plan is built against one reference camera, so at most one of its
+  // measurements may claim to be the reference. A CHECK cannot say this: it
+  // sees one row, and the rule is about the others.
+  assert.match(
+    sql,
+    /CREATE UNIQUE INDEX "match_plan_measurements_reference_key" ON "match_plan_measurements"\("workspaceId", "planId"\) WHERE "isReference";/,
+  )
 })
 
 test('T-F4.012 versioned aggregates are chains with heads, and instants are claimed once', () => {
