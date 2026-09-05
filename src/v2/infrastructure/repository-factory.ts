@@ -71,6 +71,7 @@ import type {
   MulticamMatchPlanRepository,
 } from '../application/ports/multicam-match-plan-repository.ts'
 import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
+import type { RenderablePlanSnapshotRepository } from '../application/ports/renderable-plan-snapshot-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -250,6 +251,7 @@ import {
   PrismaMulticamMatchPlanRepository,
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
+import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2270,6 +2272,10 @@ export function createColorCriticReportRepository(): ColorCriticReportRepository
 
 export function createPlaybackMapRepository(): PlaybackMapRepository {
   return new PrismaPlaybackMapRepository(resolveV2Client())
+}
+
+export function createRenderablePlanSnapshotRepository(): RenderablePlanSnapshotRepository {
+  return new PrismaRenderablePlanSnapshotRepository(resolveV2Client())
 }
 
 /**
