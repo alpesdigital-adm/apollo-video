@@ -9,8 +9,6 @@ import ffmpegStatic from 'ffmpeg-static'
 import type { PlaybackObservation } from '../../domain/playback-map.ts'
 import {
   convertTick,
-  createTimebase,
-  rational,
   timebaseFromRate,
   type Timebase,
 } from '../../domain/session-time.ts'
@@ -418,9 +416,4 @@ export class FfmpegPlaybackFingerprinter {
     for (let index = 0; index < samples.length; index += 1) samples[index] = bytes.readInt16LE(index * 2)
     return samples
   }
-}
-
-/** The timebase one sample of `sampleRate` audio is counted in. */
-export function sampleTimebaseFor(sampleRate: number): Readonly<Timebase> {
-  return createTimebase(rational(BigInt(1), BigInt(Math.round(sampleRate))))
 }
