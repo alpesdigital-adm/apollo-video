@@ -9,6 +9,7 @@ import type { ColorMetadata, ColorTransform, resolveColorPlan } from '../../doma
 import type { CameraColorMeasurement } from '../../domain/color-measurement.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createTickInterval } from '../../domain/session-time.ts'
+import { colorCriticSourceKey } from '../../application/ports/color-critic-evaluator.ts'
 import type {
   ColorCriticEvaluator,
   ColorCriticEvidenceCrop,
@@ -193,24 +194,31 @@ export class FfmpegColorCriticEvaluator implements ColorCriticEvaluator {
         'No clip of the delivered timeline names both a camera and a forward frame range',
       )
     }
-    const sourcesById = new Map(input.sources.map((source) => [source.artifactId, source]))
+    // Keyed by (source × pipelineHash), the key the renderer's colour pre-pass
+    // dedups its own executions by: a per-segment override gives two clips of
+    // one file two different chains, and each is a different "before".
+    const sourcesByKey = new Map(
+      input.sources.map((source) => [colorCriticSourceKey(source.artifactId, source.pipeline.pipelineHash), source]),
+    )
     const before: Readonly<CameraColorMeasurement>[] = []
     const after: Readonly<CameraColorMeasurement>[] = []
     const evidence: Readonly<ColorCriticEvidenceCrop>[] = []
-    // One intermediate per source, reused by every clip cut from it: the colour
-    // chain is a whole-file pre-pass, so running it once per clip would burn
-    // the same seconds again for the same bytes.
-    const intermediates = new Map<string, Readonly<{ path: string; sha256: string }>>()
+    // One intermediate per (source × pipeline), reused by every clip cut from it
+    // through the same chain: the colour chain is a whole-file pre-pass, so
+    // running it once per clip would burn the same seconds again for the same
+    // bytes.
+    const intermediates = new Map<string, Readonly<{ path: string; sha256: string; fps: number }>>()
 
     for (const [ordinal, clip] of clips.entries()) {
-      const source = sourcesById.get(clip.sourceArtifactId)
+      const sourceKey = colorCriticSourceKey(clip.sourceArtifactId, clip.pipelineHash)
+      const source = sourcesByKey.get(sourceKey)
       if (!source) {
         throw new DomainError(
           'INVALID_RENDER_INPUT',
-          `Clip ${clip.clipId} names source ${clip.sourceArtifactId}, which was not materialized for this render`,
+          `Clip ${clip.clipId} names source ${clip.sourceArtifactId} under pipeline ${clip.pipelineHash}, which was not materialized for this render`,
         )
       }
-      let intermediate = intermediates.get(source.artifactId)
+      let intermediate = intermediates.get(sourceKey)
       if (!intermediate) {
         const outputPath = join(directory, `color-before-${String(ordinal).padStart(3, '0')}.mp4`)
         await rm(outputPath, { force: true })
@@ -227,8 +235,16 @@ export class FfmpegColorCriticEvaluator implements ColorCriticEvaluator {
           ...(input.lutPaths ? { lutPaths: input.lutPaths } : {}),
           ...(input.signal ? { signal: input.signal } : {}),
         })
-        intermediate = Object.freeze({ path: produced.outputPath, sha256: produced.sha256 })
-        intermediates.set(source.artifactId, intermediate)
+        // The intermediate keeps the SOURCE's frame rate — the processor passes
+        // no `-r`. Converting a source frame index to seconds through the
+        // timeline rate would point the crop at a different instant than the one
+        // the measurement resolved, and would do it without ever failing.
+        intermediate = Object.freeze({
+          path: produced.outputPath,
+          sha256: produced.sha256,
+          fps: produced.probe.fps,
+        })
+        intermediates.set(sourceKey, intermediate)
       }
 
       // Both sides carry the SAME range — the shot's place on the delivered
@@ -244,7 +260,7 @@ export class FfmpegColorCriticEvaluator implements ColorCriticEvaluator {
         sourceAssetId: source.artifactId,
         sourceSha256: intermediate.sha256,
         sessionId: null,
-        sampleEveryMs: sampleEveryMs(sourceFrames, input.fps),
+        sampleEveryMs: sampleEveryMs(sourceFrames, intermediate.fps),
         ranges: [{ sessionRange: range, sourceStartFrame: clip.sourceInFrame, sourceEndFrame: clip.sourceOutFrame }],
         ...(input.signal ? { signal: input.signal } : {}),
       })
@@ -267,7 +283,7 @@ export class FfmpegColorCriticEvaluator implements ColorCriticEvaluator {
         stage: 'before-output-transform',
         clip,
         mediaPath: intermediate.path,
-        atSeconds: (clip.sourceInFrame + sourceFrames / 2) / input.fps,
+        atSeconds: (clip.sourceInFrame + sourceFrames / 2) / intermediate.fps,
         ...(input.signal ? { signal: input.signal } : {}),
       }))
       evidence.push(await this.crop({

@@ -17,11 +17,21 @@ import type { CameraColorMeasurement } from '../../domain/color-measurement.ts'
  * could state what the frames look like.
  */
 
-/** One shot of the timeline: where it came from and where it landed. */
+/**
+ * One shot of the timeline: where it came from, which colour chain the render
+ * applied to it, and where it landed.
+ *
+ * `pipelineHash` is part of the identity and not a decoration: a per-segment
+ * match override gives two clips of the same file different chains, and the
+ * renderer writes one intermediate per (source × pipelineHash). A clip that
+ * named only its source would be measured against whichever of those chains
+ * happened to be built first.
+ */
 export interface ColorCriticSubjectClip {
   readonly clipId: string
   readonly cameraId: string
   readonly sourceArtifactId: string
+  readonly pipelineHash: string
   readonly sourceInFrame: number
   readonly sourceOutFrame: number
   readonly timelineInFrame: number
@@ -34,6 +44,17 @@ export interface ColorCriticSourceRef {
   readonly path: string
   readonly sha256: string
   readonly pipeline: Readonly<ReturnType<typeof resolveColorPlan>>
+}
+
+/**
+ * The key a clip and its source ref meet on: one materialized file put through
+ * one resolved pipeline. It lives in the port because both sides depend on it
+ * being the same key — the service builds the refs with it and the adapter
+ * caches its intermediates by it — and because it is the key the renderer's own
+ * pre-pass dedups by.
+ */
+export function colorCriticSourceKey(artifactId: string, pipelineHash: string): string {
+  return `${artifactId}|${pipelineHash}`
 }
 
 /**

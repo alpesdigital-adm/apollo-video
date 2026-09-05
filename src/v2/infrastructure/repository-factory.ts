@@ -220,7 +220,8 @@ import {
   readSyntheticCriticBlockEvidenceService,
   readSyntheticCriticReportService,
 } from '../application/synthetic-critic-report-queries.ts'
-import { evaluateColorCriticService } from '../application/color-critic.ts'
+import { evaluateColorCriticService, selectRenderMatchPlan } from '../application/color-critic.ts'
+import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
 import {
   addMulticamMatchRangeOverrideService,
   deriveMulticamMatchPlanService,
@@ -2016,8 +2017,9 @@ export function createProjectProxyRenderWorker(
     // and lands on the review it is about to persist. Assembled here because it
     // needs the three things a worker has no business knowing: where FFmpeg is,
     // where scratch space lives, and which storage driver this deployment uses.
-    colorCritic: createColorCriticService(environment, clock),
-    colorCriticSessionId: createProjectCaptureSessionLocator(),
+    // Judging, locating and cleaning up arrive together, so no deployment can
+    // wire the verdict and leave its intermediates behind.
+    colorCritic: createColorCriticRuntime(environment, clock),
     ...(Number.isSafeInteger(configuredLease) && configuredLease > 0 ? { leaseDurationMs: configuredLease } : {}),
     ...(Number.isSafeInteger(configuredHeartbeat) && configuredHeartbeat > 0 ? { heartbeatIntervalMs: configuredHeartbeat } : {}),
     ...(Number.isSafeInteger(configuredRetryBase) && configuredRetryBase > 0 ? { retryBaseDelayMs: configuredRetryBase } : {}),
@@ -2360,31 +2362,72 @@ export function createColorCriticEvaluator(environment: NodeJS.ProcessEnv = proc
   })
 }
 
-export function createColorCriticService(
+/**
+ * The colour critic as the render worker takes it: judge, locate, clean up.
+ *
+ * One object, built around one evaluator instance, because the evaluator's
+ * intermediates can only be removed by the evaluator that wrote them. Splitting
+ * them into separate factory calls is what let a deployment wire the judging
+ * and leave a full re-encode of every source on disk after every render.
+ */
+export function createColorCriticRuntime(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
-  return evaluateColorCriticService({
-    evaluator: createColorCriticEvaluator(environment),
-    reports: createColorCriticReportRepository(),
-    matchPlans: createMulticamMatchPlanRepository(),
-    clock,
+  const evaluator = createColorCriticEvaluator(environment)
+  return Object.freeze({
+    evaluate: evaluateColorCriticService({
+      evaluator,
+      reports: createColorCriticReportRepository(),
+      matchPlans: createMulticamMatchPlanRepository(),
+      clock,
+    }),
+    cleanup: (operationId: string) => evaluator.cleanup(operationId),
+    locateSession: createProjectCaptureSessionLocator(),
   })
 }
 
 /**
  * Which capture session a project's colour verdict should read its reference
- * camera from: the most recent head of that project. Returned as a locator
- * rather than an id on the request, so nothing a caller sends can point the
- * critic at another session's match plan.
+ * camera from.
+ *
+ * Not "the most recently updated head": a project can hold several capture
+ * sessions, and an unrelated session touched last would hand the critic a
+ * reference camera nobody approved for these frames. The session is the one
+ * whose match plan knows every camera the render actually cut to, and only when
+ * exactly one does — zero or several is `null`, which makes the critic report
+ * the cross-camera comparison unavailable rather than measure it against a
+ * guess.
  */
 export function createProjectCaptureSessionLocator() {
   const sessions = createCaptureSessionRepository()
-  return async (context: { workspaceId: string; projectId: string }): Promise<string | null> => {
-    const heads = await sessions.listHeads({ workspaceId: context.workspaceId, projectId: context.projectId, limit: 1 })
-    return heads[0]?.sessionId ?? null
+  const plans = createMulticamMatchPlanRepository()
+  return async (context: {
+    workspaceId: string
+    projectId: string
+    cameraIds: readonly string[]
+  }): Promise<string | null> => {
+    if (context.cameraIds.length === 0) return null
+    const heads = await sessions.listHeads({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      limit: COLOR_CRITIC_SESSION_CANDIDATE_LIMIT,
+    })
+    const candidates: { sessionId: string; plan: MulticamMatchPlan }[] = []
+    for (const head of heads) {
+      const stored = await plans.readHead({
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        sessionId: head.sessionId,
+      })
+      if (stored) candidates.push({ sessionId: head.sessionId, plan: stored.plan })
+    }
+    return selectRenderMatchPlan({ cameraIds: context.cameraIds, candidates })?.sessionId ?? null
   }
 }
+
+/** How many of a project's capture sessions the locator will consider. */
+const COLOR_CRITIC_SESSION_CANDIDATE_LIMIT = 25
 
 /**
  * The multicam colour match, assembled (F4.013).

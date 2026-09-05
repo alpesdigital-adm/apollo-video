@@ -12,11 +12,12 @@ import {
 } from '../domain/color-critic-report.ts'
 import { DomainError, assertDomain } from '../domain/errors.ts'
 import type { MulticamMatchPlan } from '../domain/multicam-match-plan.ts'
-import type {
-  ColorCriticEvaluator,
-  ColorCriticEvidenceCrop,
-  ColorCriticSourceRef,
-  ColorCriticSubjectClip,
+import {
+  colorCriticSourceKey,
+  type ColorCriticEvaluator,
+  type ColorCriticEvidenceCrop,
+  type ColorCriticSourceRef,
+  type ColorCriticSubjectClip,
 } from './ports/color-critic-evaluator.ts'
 import type { ColorCriticReportRepository } from './ports/color-critic-report-repository.ts'
 import type { MulticamMatchPlanRepository } from './ports/multicam-match-plan-repository.ts'
@@ -145,6 +146,13 @@ export function colorCriticProxyIssues(input: {
  * the renderer used (`ffmpeg-editorial-proxy-renderer.ts:505-512`), not by a
  * pipeline chosen for it afterwards.
  *
+ * The source refs are keyed by (artifact × pipelineHash), the same key the
+ * renderer's colour pre-pass dedups its executions by
+ * (`ffmpeg-editorial-proxy-renderer.ts:527-552`). One ref per artifact would be
+ * a lie the moment a per-segment override gives two clips of one camera
+ * different chains: the "before" side would then be produced by a chain that was
+ * never applied to the clip the report names.
+ *
  * A clip with no `cameraId` is dropped, not defaulted. Attributing an unlabelled
  * shot to some camera would put one camera's frames in another camera's verdict.
  */
@@ -189,13 +197,15 @@ export function colorCriticRenderInputs(input: {
       clipId: clip.id,
       cameraId: clip.cameraId,
       sourceArtifactId: clip.sourceArtifactId,
+      pipelineHash: pipeline.pipelineHash,
       sourceInFrame: clip.sourceInFrame,
       sourceOutFrame: clip.sourceOutFrame,
       timelineInFrame: clip.timelineInFrame,
       timelineOutFrame: clip.timelineOutFrame,
     }))
-    if (!sources.has(clip.sourceArtifactId)) {
-      sources.set(clip.sourceArtifactId, Object.freeze({
+    const key = colorCriticSourceKey(clip.sourceArtifactId, pipeline.pipelineHash)
+    if (!sources.has(key)) {
+      sources.set(key, Object.freeze({
         artifactId: asset.artifactId,
         path: asset.path,
         sha256: asset.sha256,
@@ -247,6 +257,76 @@ export interface EvaluateColorCriticResult {
   /** How many bounded corrections this project version had already had. */
   readonly correctionsApplied: number
   readonly correctionBudgetExhausted: boolean
+}
+
+/**
+ * The verdict was reached and could not be written down.
+ *
+ * It carries the report it could not persist, because losing a computed
+ * rejection to a database hiccup is how a blocked export becomes an
+ * acknowledgeable warning: the frames were judged, and saying they were not
+ * would be false. The gate reads `proxyIssues` off this error and reports the
+ * verdict it actually has; the missing row is a second, separate problem.
+ */
+export class ColorCriticVerdictNotRecordedError extends DomainError {
+  readonly report: Readonly<ColorCriticReport>
+  readonly proxyIssues: readonly Readonly<ProxyQualityIssue>[]
+
+  constructor(input: {
+    report: Readonly<ColorCriticReport>
+    proxyIssues: readonly Readonly<ProxyQualityIssue>[]
+    cause: unknown
+  }) {
+    super(
+      'PERSISTENCE_CONFLICT',
+      `The colour critic judged this render ${input.report.action} (${input.report.cause}) and could not record the verdict`,
+      {
+        reportId: input.report.reportId,
+        action: input.report.action,
+        cause: input.report.cause,
+        persistenceError: input.cause instanceof DomainError ? input.cause.code : 'unknown',
+      },
+    )
+    this.name = 'ColorCriticVerdictNotRecordedError'
+    this.report = input.report
+    this.proxyIssues = Object.freeze([...input.proxyIssues])
+  }
+}
+
+/**
+ * Whether a stored match plan is a plan ABOUT these frames.
+ *
+ * A project can hold several capture sessions, and the head of the wrong one is
+ * a reference camera nobody approved for this render. A plan qualifies only when
+ * it knows every camera the delivered timeline cuts to — its reference plus the
+ * cameras it corrects.
+ */
+export function matchPlanCoversCameras(
+  plan: Readonly<MulticamMatchPlan>,
+  cameraIds: readonly string[],
+): boolean {
+  const known = new Set<string>([
+    plan.referenceCameraId,
+    ...plan.cameraTransforms.map((entry) => entry.cameraId),
+  ])
+  return cameraIds.length > 0 && cameraIds.every((cameraId) => known.has(cameraId))
+}
+
+/**
+ * Which of a project's capture sessions shaped this render's colour.
+ *
+ * Exactly one candidate must know every camera the render cut to. Zero means no
+ * plan describes these frames; more than one means the evidence cannot say which
+ * did, and picking either would put a reference camera nobody chose behind every
+ * cross-camera number in the report. Both answers are `null`, and `null` makes
+ * the critic report the comparison as unavailable rather than guessing.
+ */
+export function selectRenderMatchPlan<T extends { readonly plan: Readonly<MulticamMatchPlan> }>(input: {
+  cameraIds: readonly string[]
+  candidates: readonly T[]
+}): T | null {
+  const covering = input.candidates.filter((candidate) => matchPlanCoversCameras(candidate.plan, input.cameraIds))
+  return covering.length === 1 ? covering[0]! : null
 }
 
 /**
@@ -309,12 +389,17 @@ export function evaluateColorCriticService(dependencies: {
     })
     const correctionsApplied = previous.filter((report) => report.action === 'bounded-correction').length
 
+    // The reference camera comes from a match plan or it does not come at all.
+    // A head that does not know every camera these frames were cut from is a
+    // plan about another session's cameras, and measuring this render's
+    // exposure against it would answer with a reference nobody approved here.
+    const judgedCameraIds = [...new Set(request.clips.map((clip) => clip.cameraId))].sort()
     let matchPlan: Readonly<MulticamMatchPlan> | undefined
     if (request.sessionId && dependencies.matchPlans) {
       const head = await dependencies.matchPlans.readHead({
         workspaceId, projectId, sessionId: id(request.sessionId, 'sessionId'),
       })
-      matchPlan = head?.plan
+      matchPlan = head && matchPlanCoversCameras(head.plan, judgedCameraIds) ? head.plan : undefined
     }
 
     const measured = await dependencies.evaluator.measureStages({
@@ -362,7 +447,21 @@ export function evaluateColorCriticService(dependencies: {
       ...(request.policy ? { policy: request.policy } : {}),
       evaluatedAt,
     })
-    const persisted = await dependencies.reports.persist({ report, createdAt: evaluatedAt })
+    // The verdict exists before the row does. If the row cannot be written the
+    // verdict is still what it is, so it leaves inside the failure rather than
+    // being discarded — a rejection lost to a deadlock would otherwise reach the
+    // gate as "this render's colour was not judged", which is false, and which a
+    // person can acknowledge away.
+    let persisted: Awaited<ReturnType<ColorCriticReportRepository['persist']>>
+    try {
+      persisted = await dependencies.reports.persist({ report, createdAt: evaluatedAt })
+    } catch (error) {
+      throw new ColorCriticVerdictNotRecordedError({
+        report,
+        proxyIssues: colorCriticProxyIssues({ report, fps: request.fps, evidence: measured.evidence }),
+        cause: error,
+      })
+    }
     return Object.freeze({
       report: persisted.report,
       replayed: persisted.replayed,

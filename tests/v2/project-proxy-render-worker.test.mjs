@@ -20,6 +20,9 @@ import { runNextProjectProxyRenderOperationService } from '../../src/v2/applicat
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { SUBTITLE_ANCHOR_PERCEPTION_FIXTURES, subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
 import { materializeSubtitlePresetSnapshot, SUBTITLE_STYLE_REGISTRY, subtitlePresetHash } from '../../src/v2/domain/subtitle-system.ts'
+import { evaluateColorCriticService } from '../../src/v2/application/color-critic.ts'
+import { DomainError } from '../../src/v2/domain/errors.ts'
+import { buildMeasurement } from './wave20-fixtures.mjs'
 
 const colorCompilation = Object.freeze({
   id: 'color-pipeline-proxy-test', sourceArtifactId: 'artifact-project-proxy-source',
@@ -162,6 +165,23 @@ function source() {
     originalFileName: 'source.mp4',
     uploadReceivedAt: '2026-07-18T21:58:00.000Z',
     criticIssues: Object.freeze([]),
+  })
+}
+
+/** The same source, but with a clip that names the camera it was cut from. */
+function multicamSource() {
+  const base = source()
+  return Object.freeze({
+    ...base,
+    editPlan: Object.freeze({
+      ...base.editPlan,
+      videoTracks: Object.freeze([{ kind: 'base-video', clips: Object.freeze([
+        Object.freeze({
+          id: 'clip-1', sourceArtifactId: 'artifact-project-proxy-source', cameraId: 'cam-main',
+          sourceInFrame: 0, sourceOutFrame: 300, timelineInFrame: 0, timelineOutFrame: 300, rate: 1,
+        }),
+      ]) }]),
+    }),
   })
 }
 
@@ -726,4 +746,156 @@ test('T-FR-173 project proxy worker decides the subtitle anchor from persisted p
     mismatched.render().placementPlan.placementPlanHash,
   )
   assert.notEqual(matchedParametersHash, mismatched.manifest().recipe.parametersHash)
+})
+
+// ---------------------------------------------------------------------------
+// F4.014 — the colour verdict reaching the gate, inside the worker
+// ---------------------------------------------------------------------------
+
+/**
+ * The critic as the worker takes it, built on the REAL
+ * `evaluateColorCriticService` over a fake evaluator and a fake report store.
+ * Only the two things a unit test cannot have are faked — decoded frames and a
+ * database — so what runs between the render and the review here is the code
+ * that runs in production.
+ */
+function colorCriticRuntime(options = {}) {
+  const calls = { evaluated: 0, cleaned: 0, located: [], measured: [] }
+  const evaluator = {
+    async measureStages(input) {
+      calls.measured.push(input)
+      if (options.evaluatorFails) {
+        throw new DomainError('COLOR_MEASUREMENT_INSUFFICIENT', 'the intermediate could not be decoded')
+      }
+      return {
+        before: [buildMeasurement({
+          measurementId: 'ccm-before-worker', cameraId: 'cam-main',
+          sourceAssetId: 'artifact-project-proxy-source', sourceSha256: 'c'.repeat(64),
+        })],
+        after: [buildMeasurement({
+          measurementId: 'ccm-after-worker', cameraId: 'cam-main',
+          sourceAssetId: 'artifact-project-proxy-output', sourceSha256: 'd'.repeat(64),
+          ...(options.highlights !== undefined ? { highlights: options.highlights } : {}),
+        })],
+        evidence: [],
+      }
+    },
+    async cleanup() { calls.cleaned += 1 },
+  }
+  const rows = new Map()
+  const reports = {
+    async persist({ report }) {
+      if (options.persistFails) throw new Error('deadlock detected')
+      const held = rows.get(report.reportHash)
+      if (held) return { report: held, replayed: true }
+      rows.set(report.reportHash, report)
+      return { report, replayed: false }
+    },
+    async read() { return null },
+    async readByHash({ reportHash }) { return rows.get(reportHash) ?? null },
+    async listForProjectVersion() { return [] },
+    async findDependentsOfMatchPlan() { return [] },
+    async findDependentsOfMeasurement() { return [] },
+  }
+  const evaluate = evaluateColorCriticService({
+    evaluator, reports, clock: () => new Date('2026-07-18T22:05:00.000Z'),
+  })
+  return {
+    calls,
+    rows,
+    colorCritic: Object.freeze({
+      async evaluate(request) { calls.evaluated += 1; return evaluate(request) },
+      async cleanup(operationId) { await evaluator.cleanup(operationId) },
+      async locateSession(context) { calls.located.push([...context.cameraIds]); return null },
+    }),
+  }
+}
+
+/** The compilation the critic can read a creative intent off. */
+const criticCompilation = Object.freeze({
+  ...colorCompilation,
+  pipeline: Object.freeze({ ...colorCompilation.pipeline, stages: Object.freeze([]) }),
+})
+
+async function runWithCritic(options = {}) {
+  const immutableSource = multicamSource()
+  const operations = createOperations(immutableSource)
+  const runtime = colorCriticRuntime(options)
+  let review = null
+  const base = dependencies(operations, {
+    colorPipelines: { async read() { return { compilation: criticCompilation } } },
+    projects: {
+      async readImmutableSource() { return immutableSource },
+      async attachCompletedOutput() { base.calls.attached += 1 },
+    },
+    proxyReviews: {
+      async persistGenerated(input) {
+        base.calls.reviewed += 1
+        review = input.review
+        return { ...input.review, id: input.id }
+      },
+    },
+    colorCritic: runtime.colorCritic,
+  })
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-color-critic')
+  return { outcome, review, runtime, base }
+}
+
+test('T-F4.014 a colour rejection reaches the proxy review as a hard issue and blocks the final export', async () => {
+  // The delivered frames clip 6% of their pixels: irreversible, so the verdict
+  // is a rejection whatever anybody declares about it.
+  const run = await runWithCritic({ highlights: 0.06 })
+  assert.equal(run.outcome.status, 'succeeded', 'a rejected colour is a blocked review, not a failed render')
+  assert.equal(run.runtime.calls.evaluated, 1)
+  assert.deepEqual(run.runtime.calls.located, [['cam-main']],
+    'the session is located by the cameras this render cut to, not by which session was touched last')
+  const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
+  assert.ok(hard.length >= 1, `the rejection never reached the review: ${JSON.stringify(run.review.criticIssues)}`)
+  assert.ok(hard.every((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
+  assert.ok(hard.every((issue) => issue.evidenceIds.some((ref) => ref.startsWith('color-critic-report:'))))
+  assert.equal(run.review.status, 'blocked')
+  assert.equal(run.review.finalAllowed, false)
+  // The critic's intermediates and crops are released with the renderer's.
+  assert.equal(run.runtime.calls.cleaned, 1, 'a full re-encode of every source per render is not a cache')
+})
+
+test('T-F4.014 a critic that was wired and could not run leaves a warning, not an approval', async () => {
+  const run = await runWithCritic({ evaluatorFails: true })
+  assert.equal(run.outcome.status, 'succeeded')
+  const warnings = run.review.criticIssues.filter((issue) => issue.code === 'COLOR_CRITIC_UNAVAILABLE')
+  assert.equal(warnings.length, 1)
+  assert.equal(warnings[0].severity, 'warning')
+  assert.match(warnings[0].message, /was not judged/)
+  assert.equal(run.review.status, 'warning-ack-required')
+  assert.equal(run.review.finalAllowed, false)
+  assert.equal(run.runtime.calls.cleaned, 1, 'a failed evaluation still wrote intermediates')
+})
+
+test('T-F4.014 a rejection whose report could not be written still blocks, and says why it is unrecorded', async () => {
+  // The verdict was reached on the frames and the database refused the row.
+  // Reporting that as "its colour was not judged" would be false, and a person
+  // could acknowledge the warning and export a rejected render.
+  const run = await runWithCritic({ highlights: 0.06, persistFails: true })
+  assert.equal(run.outcome.status, 'succeeded')
+  assert.equal(run.runtime.rows.size, 0, 'nothing was stored')
+  const hard = run.review.criticIssues.filter((issue) => issue.severity === 'hard')
+  assert.ok(hard.length >= 1, `a lost row must not lose the rejection: ${JSON.stringify(run.review.criticIssues)}`)
+  assert.ok(hard.every((issue) => issue.code === 'COLOR_CRITIC_REJECTED'))
+  const unrecorded = run.review.criticIssues.filter((issue) => issue.code === 'COLOR_CRITIC_REPORT_UNRECORDED')
+  assert.equal(unrecorded.length, 1)
+  assert.match(unrecorded[0].message, /could not be recorded/)
+  assert.ok(run.review.criticIssues.every((issue) => issue.code !== 'COLOR_CRITIC_UNAVAILABLE'),
+    'frames that were judged must never be reported as unjudged')
+  assert.equal(run.review.status, 'blocked')
+  assert.equal(run.review.finalAllowed, false)
+})
+
+test('T-F4.014 an approved colour adds nothing to the review and still releases the critic work', async () => {
+  const run = await runWithCritic()
+  assert.equal(run.outcome.status, 'succeeded')
+  assert.deepEqual(run.review.criticIssues, [])
+  assert.equal(run.review.status, 'ready-for-final')
+  assert.equal(run.review.finalAllowed, true)
+  assert.equal(run.runtime.calls.cleaned, 1)
+  assert.equal(run.runtime.rows.size, 1, 'the approving verdict is recorded too')
 })

@@ -27,6 +27,7 @@ import type { OperationTelemetrySink } from './ports/operation-telemetry.ts'
 import { runPublicOperationSpan } from './public-operation-span-telemetry.ts'
 import {
   colorCriticRenderInputs,
+  ColorCriticVerdictNotRecordedError,
   type EvaluateColorCriticRequest,
   type EvaluateColorCriticResult,
 } from './color-critic.ts'
@@ -72,12 +73,26 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
    * that review: `reject` blocks the final export, `human-review` and
    * `bounded-correction` hold it in `warning-ack-required` until a person
    * acknowledges them. Optional, because a deployment without an evaluator has
-   * no colour verdict to report — but see `colourVerdictUnavailable` below for
-   * what happens when it is wired and cannot run.
+   * no colour verdict to report.
+   *
+   * It is one object rather than three fields because judging and cleaning up
+   * are not separable: the evaluator re-encodes every video source and writes
+   * two PNGs per camera, and a deployment that wired `evaluate` without
+   * `cleanup` would leak all of it on every render. `locateSession` finds the
+   * capture session whose match plan named the reference camera these frames
+   * were corrected towards; it is given the cameras the render actually cut to,
+   * because "the project's most recent session" is not the same question.
    */
-  colorCritic?: (request: EvaluateColorCriticRequest) => Promise<Readonly<EvaluateColorCriticResult>>
-  /** The capture session whose match plan named the reference camera, if any. */
-  colorCriticSessionId?: (context: { workspaceId: string; projectId: string }) => Promise<string | null>
+  colorCritic?: Readonly<{
+    evaluate: (request: EvaluateColorCriticRequest) => Promise<Readonly<EvaluateColorCriticResult>>
+    /** Remove the intermediates and crops this operation wrote. Reports, never throws. */
+    cleanup: (operationId: string) => Promise<void>
+    locateSession?: (context: {
+      workspaceId: string
+      projectId: string
+      cameraIds: readonly string[]
+    }) => Promise<string | null>
+  }>
   catalogOutput: (target: { workspaceId: string; artifactId: string; manifestId: string }) => Promise<unknown>
 }) {
   const clock = dependencies.clock ?? (() => new Date())
@@ -329,10 +344,15 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         })
         if (criticInputs.clips.length > 0) {
           try {
-            const sessionId = dependencies.colorCriticSessionId
-              ? await dependencies.colorCriticSessionId({ workspaceId: operation.workspaceId, projectId: context.projectId })
+            const cameraIds = [...new Set(criticInputs.clips.map((clip) => clip.cameraId))].sort()
+            const sessionId = dependencies.colorCritic.locateSession
+              ? await dependencies.colorCritic.locateSession({
+                  workspaceId: operation.workspaceId,
+                  projectId: context.projectId,
+                  cameraIds,
+                })
               : null
-            const verdict = await dependencies.colorCritic({
+            const verdict = await dependencies.colorCritic.evaluate({
               workspaceId: operation.workspaceId,
               projectId: context.projectId,
               projectVersionId: context.projectVersionId,
@@ -349,18 +369,31 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
             })
             colorCriticIssues.push(...verdict.proxyIssues)
           } catch (error) {
-            // ADR-147: evidence nobody could read is a decision, not an
-            // approval. A critic that was wired and could not run leaves the
-            // proxy waiting for a person rather than passing it through — and
-            // it does not fail the render, because a rendered file that nobody
-            // judged is still a rendered file.
-            colorCriticIssues.push(Object.freeze({
-              code: 'COLOR_CRITIC_UNAVAILABLE',
-              severity: 'warning',
-              category: 'technical',
-              message: `The colour critic could not evaluate this render (${error instanceof DomainError ? error.code : 'unknown'}); its colour was not judged.`,
-              correctable: false,
-            }))
+            if (error instanceof ColorCriticVerdictNotRecordedError) {
+              // The frames WERE judged; only the row is missing. Reporting the
+              // verdict as a warning here is how a rejection a database hiccup
+              // swallowed becomes something a person can click through.
+              colorCriticIssues.push(...error.proxyIssues, Object.freeze({
+                code: 'COLOR_CRITIC_REPORT_UNRECORDED',
+                severity: 'warning' as const,
+                category: 'technical' as const,
+                message: `The colour verdict ${error.report.action} (${error.report.cause}) on report ${error.report.reportId} was reached but could not be recorded; it is reported here from the run that computed it.`,
+                correctable: false,
+              }))
+            } else {
+              // ADR-147: evidence nobody could read is a decision, not an
+              // approval. A critic that was wired and could not run leaves the
+              // proxy waiting for a person rather than passing it through — and
+              // it does not fail the render, because a rendered file that nobody
+              // judged is still a rendered file.
+              colorCriticIssues.push(Object.freeze({
+                code: 'COLOR_CRITIC_UNAVAILABLE',
+                severity: 'warning',
+                category: 'technical',
+                message: `The colour critic could not evaluate this render (${error instanceof DomainError ? error.code : 'unknown'}); its colour was not judged.`,
+                correctable: false,
+              }))
+            }
           }
         }
       }
@@ -480,10 +513,16 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      // Every port that wrote media for this operation gets released here, the
+      // colour critic included: its "before" intermediate is a full re-encode of
+      // every video source and it writes two PNGs per camera. `allSettled`
+      // because a cleanup that fails is reported by its own adapter and must not
+      // hide the render's own outcome.
       await Promise.allSettled([
         dependencies.renderer.cleanup(operation.id),
         dependencies.luts.cleanup(operation.id),
         dependencies.sources.cleanup(operation.id),
+        ...(dependencies.colorCritic ? [dependencies.colorCritic.cleanup(operation.id)] : []),
       ])
     }
   }
