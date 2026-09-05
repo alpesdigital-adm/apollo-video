@@ -520,6 +520,15 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
   const measurementIds = new Set(measurements.map((measurement) => measurement.measurementId))
   assertDomain(measurementIds.size === measurements.length, 'INVALID_ARGUMENT', 'measurementIds must be unique within a plan')
   const referenceCameraId = assertToken(content.referenceCameraId, 'referenceCameraId')
+  // Every consumer of a plan reads the reference camera's colourimetry out of
+  // its measurement — the layer compiler and the override amendment both do.
+  // Making that an invariant here is what lets them stop guessing.
+  assertDomain(
+    measurements.some((measurement) => measurement.cameraId === referenceCameraId),
+    'COLOR_REFERENCE_UNAVAILABLE',
+    `a match plan must carry a measurement of its reference camera ${referenceCameraId}`,
+    { referenceCameraId },
+  )
   const cameraTransforms = Object.freeze(content.cameraTransforms.map((entry, index) => {
     const field = `cameraTransforms[${index}]`
     assertDomain(entry.cameraId !== referenceCameraId, 'INVALID_ARGUMENT', `${field} must not correct the reference camera`)
