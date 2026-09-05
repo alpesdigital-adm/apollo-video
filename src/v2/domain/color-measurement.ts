@@ -150,6 +150,14 @@ const HASH = /^[a-f0-9]{64}$/
 /** The ColorPlan camera key grammar (`color-and-export.ts:80`), lowercase only. */
 const CAMERA_TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 const TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
+/**
+ * Component names are read by people and by the match derivation, which asks
+ * for `rOverG` and `bOverG` by name. They are not ColorPlan keys, so they use
+ * the identifier grammar rather than the lowercase token one; the token
+ * grammar would have rejected every white-balance measurement this module can
+ * produce.
+ */
+const COMPONENT_KEY = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 
 /**
  * Below this many decoded frames a range has not been measured, whatever the
@@ -182,6 +190,11 @@ function assertHash(value: unknown, field: string): string {
 
 function assertToken(value: unknown, field: string): string {
   assertDomain(typeof value === 'string' && TOKEN.test(value), 'INVALID_ARGUMENT', `${field} is not a canonical token`)
+  return value
+}
+
+function assertComponentKey(value: unknown, field: string): string {
+  assertDomain(typeof value === 'string' && COMPONENT_KEY.test(value), 'INVALID_ARGUMENT', `${field} is not a component name`)
   return value
 }
 
@@ -251,7 +264,7 @@ function normalizedDimension(
       ? undefined
       : Object.freeze(Object.fromEntries(
           Object.entries(value.components)
-            .map(([key, nested]) => [assertToken(key, `${field}.components key`), assertFinite(nested, `${field}.components.${key}`)] as const)
+            .map(([key, nested]) => [assertComponentKey(key, `${field}.components key`), assertFinite(nested, `${field}.components.${key}`)] as const)
             .sort(([left], [right]) => left.localeCompare(right)),
         ))
     return Object.freeze({

@@ -249,6 +249,8 @@ export const DEFAULT_COLOR_CRITIC_POLICY = Object.freeze({
   maxProposedGain: 1.25,
   /** Bounds on a proposed saturation multiplier. */
   proposedSaturationRange: Object.freeze([0.67, 1.5] as const),
+  /** Below this share of the contrast it had before, the stage flattened the image. */
+  contrastRegressionRatio: 0.7,
 })
 export type ColorCriticPolicy = typeof DEFAULT_COLOR_CRITIC_POLICY
 
@@ -1269,10 +1271,33 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
 
   // --- match regression: good before, bad after ----------------------------
   {
+    // A regression is a quantity that was inside its limit before the stage
+    // and outside it after. Highlights and blacks are the two the critic also
+    // reports on their own; contrast collapse is only visible here, which is
+    // why the dimension is not redundant with `clipping`.
     const regressionChecks = [
-      { source: 'highlights', band: bands.clipping },
-      { source: 'blacks', band: bands.crushedBlacks },
-    ] as const
+      {
+        source: 'highlights' as const,
+        threshold: bands.clipping.hard,
+        regressed: (pair: StagePair) =>
+          measuredValue(pair.before, 'highlights')! < bands.clipping.hard &&
+          measuredValue(pair.after, 'highlights')! >= bands.clipping.hard,
+      },
+      {
+        source: 'blacks' as const,
+        threshold: bands.crushedBlacks.hard,
+        regressed: (pair: StagePair) =>
+          measuredValue(pair.before, 'blacks')! < bands.crushedBlacks.hard &&
+          measuredValue(pair.after, 'blacks')! >= bands.crushedBlacks.hard,
+      },
+      {
+        source: 'contrast' as const,
+        threshold: policy.contrastRegressionRatio,
+        regressed: (pair: StagePair) =>
+          measuredValue(pair.after, 'contrast')! <
+          measuredValue(pair.before, 'contrast')! * policy.contrastRegressionRatio,
+      },
+    ]
     const unreadable = pairs.some((pair) => regressionChecks.some(({ source }) =>
       pair.before.dimensions[source].status !== 'measured' || pair.after.dimensions[source].status !== 'measured'))
     if (pairs.length === 0 || unreadable) {
@@ -1283,8 +1308,8 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
       ))
     } else {
       const regressed = pairs.flatMap((pair) => regressionChecks
-        .filter(({ source, band }) => measuredValue(pair.before, source)! < band.hard && measuredValue(pair.after, source)! >= band.hard)
-        .map(({ source }) => ({ pair, source })))
+        .filter((check) => check.regressed(pair))
+        .map(({ source, threshold }) => ({ pair, source, threshold })))
       const severity = severityFor(regressed.length, bands.matchRegression, 'above')
       drafts.push({
         result: {
@@ -1300,10 +1325,9 @@ export function evaluateColorCritic(input: EvaluateColorCriticInput): Readonly<C
           ...(severity ? { classification: 'technical-defect' as const } : {}),
         },
         issues: severity
-          ? regressed.map(({ pair, source }) => issue(
+          ? regressed.map(({ pair, source, threshold }) => issue(
               'matchRegression', severity, 'technical-defect', 'correctable-technical-defect',
-              COLOR_CRITIC_ACROSS_STAGES, measuredValue(pair.after, source)!,
-              source === 'highlights' ? bands.clipping.hard : bands.crushedBlacks.hard,
+              COLOR_CRITIC_ACROSS_STAGES, measuredValue(pair.after, source)!, threshold,
               Math.min(pair.before.confidence, pair.after.confidence),
               [evidenceOf(pair.after, source)!], pair.cameraId, pair.after.range,
             ))
