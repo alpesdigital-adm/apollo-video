@@ -1575,6 +1575,19 @@ export interface PlaybackShot {
    * only thing the audience came for.
    */
   readonly audioSourceAssetId: string
+  /**
+   * Where in the reaction that audio starts and ends, in output frames.
+   *
+   * Stated rather than implied. Without these, a `playing` shot carries only the
+   * reference's frame numbers while its audio comes from the reaction, and the
+   * offset happens to equal `timelineInFrame` only because the pieces tile from
+   * zero and the compiler accumulates spans in order. Nothing said so, and
+   * nothing would have caught a compiler that stopped tiling from zero.
+   * `EditorialCutClip` (application/apply-editorial-cut-command.ts:52-71) names
+   * the same pair for the same reason.
+   */
+  readonly audioSourceInFrame: number
+  readonly audioSourceOutFrame: number
 }
 
 /**
@@ -1642,9 +1655,13 @@ export function compilePlaybackToShots(
       `piece ${piece.pieceId} is shorter than one output frame`,
     )
     const fromReference = piece.referenceRange !== null
+    // Where the reactor's own recording is at this instant. It is the source for
+    // a no-reference piece and the audio for every piece, so it is computed once
+    // and stated on the shot rather than inferred from the timeline position.
+    const reactionIn = toFrames(piece.reactionRange.start, options.reactionTimebase)
     const sourceIn = fromReference
       ? toFrames(piece.referenceRange!.start, options.referenceTimebase)
-      : toFrames(piece.reactionRange.start, options.reactionTimebase)
+      : reactionIn
     if (fromReference) {
       const measured = toFrames(piece.referenceRange!.end, options.referenceTimebase) - sourceIn
       // The renderer cuts at rate 1, so the source span and the timeline span
@@ -1667,6 +1684,8 @@ export function compilePlaybackToShots(
       timelineOutFrame: timeline + span,
       rate: 1 as const,
       audioSourceAssetId: map.reactionMedia.assetId,
+      audioSourceInFrame: reactionIn,
+      audioSourceOutFrame: reactionIn + span,
     }))
     timeline += span
   }

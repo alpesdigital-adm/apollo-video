@@ -712,6 +712,16 @@ test('T-F4.015 compiling picks the reference for playback, the reaction for sile
         : REFERENCE_MEDIA.assetId,
     )
     assert.equal(shot.sourceOutFrame - shot.sourceInFrame, shot.timelineOutFrame - shot.timelineInFrame)
+    // The reactor's audio is cut from where the reactor's recording actually is,
+    // stated on the shot rather than inferred from the timeline position. The
+    // two coincide only because these pieces tile from zero; the piece the
+    // anchor resolved is the one that would expose an inferred offset.
+    assert.equal(
+      shot.audioSourceInFrame,
+      Number(resolved.pieces[index].reactionRange.start / 3000n),
+      'the reaction audio is cut from the reaction instant, not from the timeline instant',
+    )
+    assert.equal(shot.audioSourceOutFrame - shot.audioSourceInFrame, shot.timelineOutFrame - shot.timelineInFrame)
     if (index > 0) assert.equal(shot.timelineInFrame, shots[index - 1].timelineOutFrame)
   }
   // The replay really does point back at reference frames already used.
