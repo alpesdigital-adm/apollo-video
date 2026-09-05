@@ -15,7 +15,10 @@ import {
 import { PLAYBACK_MODES } from '../../src/v2/domain/playback-map.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../../src/v2/application/multicam-direction.ts'
 import { FOUNDATION_AGENT_TOOL_SAFETY } from '../../src/v2/public-api/agent-tool-safety.ts'
-import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
+import {
+  assertPublicCapabilityQuery,
+  FOUNDATION_CAPABILITIES,
+} from '../../src/v2/public-api/capability-registry.ts'
 import {
   parseDirectMulticamSessionBody,
   parseProtectMulticamSelectionBody,
@@ -330,4 +333,54 @@ test('T-F4.012 the fifteen Wave 20 capabilities obey the query and command rules
     }
   }
   assert.equal(commands.length, 6)
+})
+
+test('T-F4.012 each new endpoint resolves to exactly one capability before the handler runs', () => {
+  // `assertPublicCapabilityQuery` runs inside `authenticateExternalRequest`,
+  // ahead of every handler body. A path template that overlapped an existing
+  // one would fail here as CAPABILITY_PARITY_MISSING rather than in production.
+  const resolved = [
+    ['GET', '/v1/projects/p1/capture-sessions/s1/direction', {}],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/direction', {}],
+    ['GET', '/v1/projects/p1/capture-sessions/s1/direction/candidates', { startTicks: '90', limit: '5' }],
+    ['GET', '/v1/projects/p1/capture-sessions/s1/direction/shots', {}],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/direction/protected-selections', {}],
+    ['GET', '/v1/projects/p1/capture-sessions/s1/color-match', {}],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/color-match', {}],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/color-match/overrides', {}],
+    ['GET', '/v1/projects/p1/color-critic-reports', { projectVersionId: 'project-version-1' }],
+    ['GET', '/v1/projects/p1/color-critic-reports/r1', {}],
+    ['GET', '/v1/projects/p1/color-critic-reports/r1/issues', { severity: 'hard' }],
+    ['GET', '/v1/projects/p1/capture-sessions/s1/playback-map', { reactionTrackId: 'track-reaction' }],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/playback-map', {}],
+    ['GET', '/v1/projects/p1/capture-sessions/s1/playback-map/pieces', { reactionTrackId: 'track-reaction', mode: 'paused' }],
+    ['POST', '/v1/projects/p1/capture-sessions/s1/playback-map/anchors', {}],
+  ].map(([method, path, query]) => assertPublicCapabilityQuery(
+    method,
+    path,
+    new URLSearchParams(query),
+    FOUNDATION_CAPABILITIES,
+  ).id)
+  assert.deepEqual([...resolved].sort(), [...WAVE20_IDS].sort())
+
+  // The two filters a read cannot guess are refused before the handler, not
+  // defaulted inside it.
+  for (const [path, missing] of [
+    ['/v1/projects/p1/capture-sessions/s1/playback-map', 'reactionTrackId'],
+    ['/v1/projects/p1/color-critic-reports', 'projectVersionId'],
+  ]) {
+    refuses(
+      () => assertPublicCapabilityQuery('GET', path, new URLSearchParams(), FOUNDATION_CAPABILITIES),
+      missing,
+    )
+  }
+  refuses(
+    () => assertPublicCapabilityQuery(
+      'GET',
+      '/v1/projects/p1/capture-sessions/s1/direction',
+      new URLSearchParams({ trackId: 'track-camera-a' }),
+      FOUNDATION_CAPABILITIES,
+    ),
+    'trackId',
+  )
 })
