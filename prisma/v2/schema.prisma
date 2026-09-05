@@ -251,6 +251,7 @@ model V2Workspace {
   matchNonComparableRanges               V2MatchNonComparableRange[]
   matchPlanIssues                        V2MatchPlanIssue[]
   colorCriticReports                     V2ColorCriticReport[]
+  colorCriticReportMeasurements          V2ColorCriticReportMeasurement[]
   colorCriticDimensionResults            V2ColorCriticDimensionResult[]
   colorCriticIssues                      V2ColorCriticIssue[]
   colorCriticProposedDeltas              V2ColorCriticProposedDelta[]
@@ -9384,6 +9385,7 @@ model V2CameraColorMeasurement {
   session    V2CaptureSessionHead?         @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
   dimensions V2ColorMeasurementDimension[]
   matchPlans V2MatchPlanMeasurement[]
+  criticReports V2ColorCriticReportMeasurement[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, measurementHash])
@@ -9687,6 +9689,7 @@ model V2ColorCriticReport {
   dimensions     V2ColorCriticDimensionResult[]
   issues         V2ColorCriticIssue[]
   proposedDeltas V2ColorCriticProposedDelta[]
+  measurements   V2ColorCriticReportMeasurement[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, reportHash])
@@ -9694,6 +9697,25 @@ model V2ColorCriticReport {
   @@index([workspaceId, projectVersionId, action])
   @@index([workspaceId, matchPlanId])
   @@map("color_critic_reports")
+}
+
+model V2ColorCriticReportMeasurement {
+  id            String @id @db.VarChar(160)
+  workspaceId   String @db.VarChar(128)
+  reportId      String @db.VarChar(160)
+  measurementId String @db.VarChar(128)
+  stage         String @db.VarChar(32)
+  ordinal       Int
+
+  workspace   V2Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  report      V2ColorCriticReport      @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  measurement V2CameraColorMeasurement @relation(fields: [measurementId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, reportId, stage, ordinal], map: "color_critic_report_measurements_stage_ordinal_key")
+  @@unique([workspaceId, reportId, stage, measurementId], map: "color_critic_report_measurements_cited_key")
+  @@index([workspaceId, measurementId])
+  @@map("color_critic_report_measurements")
 }
 
 model V2ColorCriticDimensionResult {
@@ -9740,7 +9762,6 @@ model V2ColorCriticIssue {
   thresholdVersion   String  @db.VarChar(64)
   confidence         Float
   evidenceRefsJson   String  @default("[]") @db.Text
-  evidenceArtifactId String? @db.VarChar(128)
 
   workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   report    V2ColorCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)

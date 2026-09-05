@@ -69,7 +69,7 @@ function planRowId(workspaceId: string, projectId: string, sessionId: string, ve
 }
 
 /** The stored row of a measurement, which its children and joins point at. */
-function measurementRowId(workspaceId: string, measurementId: string): string {
+export function measurementRowId(workspaceId: string, measurementId: string): string {
   return childRowId([workspaceId, measurementId], 128)
 }
 
@@ -255,7 +255,7 @@ function measurementWriteData(
 
 type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 
-async function writeMeasurement(
+export async function writeMeasurement(
   transaction: TransactionClient,
   workspaceId: string,
   measurement: Readonly<CameraColorMeasurement>,

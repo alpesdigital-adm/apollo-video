@@ -112,3 +112,42 @@ ALTER TABLE "playback_anchors" ALTER COLUMN "ordinal" DROP DEFAULT;
 ALTER TABLE "playback_anchors"
     ADD CONSTRAINT "playback_anchors_ordinal_check" CHECK ("ordinal" >= 0);
 CREATE UNIQUE INDEX "playback_anchors_map_ordinal_key" ON "playback_anchors"("workspaceId", "mapId", "ordinal");
+
+-- Which measurements a colour critic report judged, as rows.
+--
+-- The report already carried them, inside `sectionsJson`, where nothing can
+-- join to them: no foreign key, so `camera_color_measurements`' ON DELETE
+-- RESTRICT did not extend to a report that cites one, and no query could ask
+-- "which reports rest on this measurement" the way findDependentsOfMatchPlan
+-- asks it of a plan. A citation that only a JSON blob knows about is a citation
+-- the database cannot honour.
+--
+-- This is the same shape `match_plan_measurements` has, and for the same stated
+-- reason: the plan and a critic report that cite one measurement cite one row.
+-- The measured values stay in `sectionsJson` — the report is a judgement of the
+-- numbers as they were read, and its hash covers them — but the identity of
+-- what it judged is now a row with a foreign key behind it.
+CREATE TABLE "color_critic_report_measurements" (
+    "id" VARCHAR(160) NOT NULL,
+    "workspaceId" VARCHAR(128) NOT NULL,
+    "reportId" VARCHAR(160) NOT NULL,
+    "measurementId" VARCHAR(128) NOT NULL,
+    "stage" VARCHAR(32) NOT NULL,
+    "ordinal" INTEGER NOT NULL,
+
+    CONSTRAINT "color_critic_report_measurements_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "color_critic_report_measurements_stage_check"
+        CHECK ("stage" IN ('before-output-transform', 'after-output-transform')),
+    CONSTRAINT "color_critic_report_measurements_ordinal_check" CHECK ("ordinal" >= 0)
+);
+
+CREATE UNIQUE INDEX "color_critic_report_measurements_id_workspaceId_key" ON "color_critic_report_measurements"("id", "workspaceId");
+CREATE UNIQUE INDEX "color_critic_report_measurements_stage_ordinal_key" ON "color_critic_report_measurements"("workspaceId", "reportId", "stage", "ordinal");
+CREATE UNIQUE INDEX "color_critic_report_measurements_cited_key" ON "color_critic_report_measurements"("workspaceId", "reportId", "stage", "measurementId");
+CREATE INDEX "color_critic_report_measurements_workspaceId_measurementId_idx" ON "color_critic_report_measurements"("workspaceId", "measurementId");
+
+ALTER TABLE "color_critic_report_measurements" ADD CONSTRAINT "color_critic_report_measurements_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "workspaces"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "color_critic_report_measurements" ADD CONSTRAINT "color_critic_report_measurements_reportId_workspaceId_fkey" FOREIGN KEY ("reportId", "workspaceId") REFERENCES "color_critic_reports"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
+-- RESTRICT, like the plan's: a measurement a verdict rests on cannot be
+-- deleted while the verdict stands.
+ALTER TABLE "color_critic_report_measurements" ADD CONSTRAINT "color_critic_report_measurements_measurementId_workspaceId_fkey" FOREIGN KEY ("measurementId", "workspaceId") REFERENCES "camera_color_measurements"("id", "workspaceId") ON DELETE RESTRICT ON UPDATE CASCADE;

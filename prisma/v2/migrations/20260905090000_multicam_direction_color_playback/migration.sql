@@ -946,7 +946,6 @@ CREATE TABLE "color_critic_issues" (
     "thresholdVersion" VARCHAR(64) NOT NULL,
     "confidence" DOUBLE PRECISION NOT NULL,
     "evidenceRefsJson" TEXT NOT NULL DEFAULT '[]',
-    "evidenceArtifactId" VARCHAR(128),
 
     CONSTRAINT "color_critic_issues_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "color_critic_issues_vocabulary_check"

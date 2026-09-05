@@ -62,4 +62,18 @@ export interface ColorCriticReportRepository {
     workspaceId: string
     matchPlanId: string
   }): Promise<readonly Readonly<ColorCriticReportRef>[]>
+
+  /**
+   * Reports whose verdict was reached over one colour measurement.
+   *
+   * The same question as above, asked of the evidence rather than of the plan:
+   * a camera re-measured after a re-ingest makes every verdict over the old
+   * reading stale. It is answerable because the citation is a row with a
+   * foreign key, not a name inside a JSON document — the measured numbers stay
+   * in the report, but which measurement they came from is a join.
+   */
+  findDependentsOfMeasurement(input: {
+    workspaceId: string
+    measurementId: string
+  }): Promise<readonly Readonly<ColorCriticReportRef>[]>
 }

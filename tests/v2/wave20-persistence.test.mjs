@@ -111,24 +111,24 @@ const TABLES = Object.freeze([
 ])
 
 /** The body of one named CHECK, with its parentheses balanced. */
-function checkBody(constraint) {
-  const anchor = sql.indexOf(`CONSTRAINT "${constraint}"`)
+function checkBody(constraint, text = sql) {
+  const anchor = text.indexOf(`CONSTRAINT "${constraint}"`)
   assert.notEqual(anchor, -1, `${constraint} is not declared by the migration`)
-  const open = sql.indexOf('CHECK (', anchor) + 'CHECK ('.length
+  const open = text.indexOf('CHECK (', anchor) + 'CHECK ('.length
   let depth = 1
   let cursor = open
   while (depth > 0) {
-    const char = sql[cursor]
+    const char = text[cursor]
     if (char === '(') depth += 1
     if (char === ')') depth -= 1
     cursor += 1
   }
-  return sql.slice(open, cursor - 1)
+  return text.slice(open, cursor - 1)
 }
 
 /** The literals of `"<column>" IN (...)` inside a CHECK, in source order. */
-function inList(constraint, column) {
-  const body = checkBody(constraint)
+function inList(constraint, column, text = sql) {
+  const body = checkBody(constraint, text)
   const match = new RegExp(`"${column}" IN\\s*\\(`).exec(body)
   assert.notEqual(match, null, `${constraint} does not constrain ${column} to a set`)
   const open = match.index + match[0].length
@@ -143,8 +143,8 @@ function inList(constraint, column) {
   return [...body.slice(open, cursor - 1).matchAll(/'([^']*)'/g)].map((match) => match[1])
 }
 
-function assertSet(constraint, column, expected, label) {
-  const actual = inList(constraint, column)
+function assertSet(constraint, column, expected, label, text = sql) {
+  const actual = inList(constraint, column, text)
   assert.deepEqual(
     [...actual].sort(),
     [...expected].sort(),
@@ -609,6 +609,40 @@ test('T-F4.015 an anchor note the domain accepts fits the column its evidence is
     `playback_anchors.evidenceRef holds ${evidenceRef} characters, short of the `
       + `${decoration + actorId + PLAYBACK_ANCHOR_NOTE_MAX} the CHECK can derive from the columns beside it`,
   )
+})
+
+test('T-F4.014 a critic report cites its measurements as rows a query can reach', () => {
+  // The report kept the measured numbers inside sectionsJson, where nothing can
+  // join to them: no foreign key, so camera_color_measurements' RESTRICT did
+  // not extend to a verdict that cites one, and no query could ask which
+  // verdicts rest on a measurement. The citation is a row now, shaped like
+  // match_plan_measurements and bound the same way.
+  assert.match(rehydration, /CREATE TABLE "color_critic_report_measurements" \(/)
+  assert.ok(
+    rehydration.includes('CONSTRAINT "color_critic_report_measurements_pkey" PRIMARY KEY ("id")'),
+    'the citation table needs a primary key',
+  )
+  assert.ok(
+    rehydration.includes(
+      'CREATE UNIQUE INDEX "color_critic_report_measurements_cited_key" ON "color_critic_report_measurements"("workspaceId", "reportId", "stage", "measurementId");',
+    ),
+    'one report cites one measurement once per stage',
+  )
+  assertSet(
+    'color_critic_report_measurements_stage_check', 'stage',
+    COLOR_CRITIC_STAGES, 'COLOR_CRITIC_STAGES', rehydration,
+  )
+  assert.match(
+    rehydration,
+    /ADD CONSTRAINT "color_critic_report_measurements_reportId_workspaceId_fkey" FOREIGN KEY \("reportId", "workspaceId"\) REFERENCES "color_critic_reports"\("id", "workspaceId"\) ON DELETE CASCADE/,
+    'the citation belongs to the report and goes when it goes',
+  )
+  assert.match(
+    rehydration,
+    /ADD CONSTRAINT "color_critic_report_measurements_measurementId_workspaceId_fkey" FOREIGN KEY \("measurementId", "workspaceId"\) REFERENCES "camera_color_measurements"\("id", "workspaceId"\) ON DELETE RESTRICT/,
+    'a measurement a standing verdict rests on may not be deleted',
+  )
+  assert.match(schema, /@@map\("color_critic_report_measurements"\)/, 'the citation table has no Prisma model')
 })
 
 test('T-F4.013 the rehydration migration adds the columns the hash covers', () => {

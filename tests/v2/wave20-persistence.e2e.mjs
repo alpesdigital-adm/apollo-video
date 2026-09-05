@@ -72,7 +72,8 @@ test(
     const clean = async () => {
       for (const table of [
         client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
-        client.v2ColorCriticDimensionResult, client.v2ColorCriticReport,
+        client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
+        client.v2ColorCriticReport,
         client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
         client.v2PlaybackMapHead, client.v2PlaybackMap,
         client.v2MatchPlanIssue, client.v2MatchNonComparableRange, client.v2MatchRangeOverride,
@@ -833,7 +834,8 @@ test(
     const clean = async () => {
       for (const table of [
         client.v2ColorCriticProposedDelta, client.v2ColorCriticIssue,
-        client.v2ColorCriticDimensionResult, client.v2ColorCriticReport,
+        client.v2ColorCriticDimensionResult, client.v2ColorCriticReportMeasurement,
+        client.v2ColorCriticReport,
         client.v2PlaybackUncoveredRange, client.v2PlaybackAnchor, client.v2PlaybackPiece,
         client.v2PlaybackMapHead, client.v2PlaybackMap,
         client.v2MatchPlanIssue, client.v2MatchNonComparableRange, client.v2MatchRangeOverride,
@@ -1252,6 +1254,39 @@ test(
     })
     assert.equal(criticDependents.length, 1)
     assert.equal(criticDependents[0].action, reportA.action)
+
+    // The same question asked of the evidence: which verdicts rest on this
+    // measurement. It is answerable because the citation is a row, and the row
+    // exists because `persist` writes the measurements it judged the way the
+    // match plan does.
+    const citedMeasurement = reportA.sections[0].measurements[0]
+    const measurementDependents = await reports.findDependentsOfMeasurement({
+      workspaceId: A, measurementId: citedMeasurement.measurementId,
+    })
+    assert.equal(measurementDependents.length, 1, 'the verdict over that measurement was not found')
+    assert.equal(measurementDependents[0].reportId, reportA.reportId)
+    assert.deepEqual(
+      await reports.findDependentsOfMeasurement({
+        workspaceId: B, measurementId: citedMeasurement.measurementId,
+      }),
+      [],
+      'workspace B saw a workspace A citation',
+    )
+    identical(
+      await measurements.read({ workspaceId: A, measurementId: citedMeasurement.measurementId }),
+      citedMeasurement,
+      'the measurement the verdict was reached over',
+    )
+    // RESTRICT, not CASCADE: deleting the measurement a standing verdict rests
+    // on would leave a judgement of numbers nobody can look up.
+    const citedRow = await client.v2CameraColorMeasurement.findFirstOrThrow({
+      where: { workspaceId: A, measurementId: citedMeasurement.measurementId },
+      select: { id: true },
+    })
+    await refused(
+      /color_critic_report_measurements_measurementId_workspaceId_fkey|[Ff]oreign key constraint/,
+      () => client.v2CameraColorMeasurement.delete({ where: { id: citedRow.id } }),
+    )
 
     // The confidence and its band move together, so the row stays legal — and
     // the verdict is still refused.

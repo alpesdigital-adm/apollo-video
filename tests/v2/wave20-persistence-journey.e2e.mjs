@@ -352,6 +352,7 @@ test('T-F4.014 a colour critic report is content-addressed and comes back as it 
   const kit = await load()
   const client = createMemoryPrismaClient()
   const reports = new kit.PrismaColorCriticReportRepository(client)
+  const measurements = new kit.PrismaCameraColorMeasurementRepository(client)
   const matchA = kit.buildMatchWorld({ workspaceId: A, projectId: PROJECT_A, sessionId: SESSION })
   const matchB = kit.buildMatchWorld({ workspaceId: B, projectId: PROJECT_B, sessionId: SESSION })
   const reportA = kit.buildCriticReport({
@@ -397,6 +398,40 @@ test('T-F4.014 a colour critic report is content-addressed and comes back as it 
     await reports.read({ workspaceId: B, reportId: reportA.reportId }),
     null,
     'workspace B could read a workspace A verdict',
+  )
+
+  // The measurements the verdict was reached over are rows, not names inside a
+  // JSON document: the report cites them through a link table with a Restrict
+  // foreign key, and the repository stores any it does not already hold — the
+  // same write-through the match plan does, so a verdict cannot cite a
+  // measurement nobody can read.
+  const cited = reportA.sections.flatMap((section) => section.measurements)
+  assert.equal(cited.length, 4, 'two cameras, before and after the output transform')
+  const links = client.rows('V2ColorCriticReportMeasurement').filter((row) => row.workspaceId === A)
+  assert.equal(links.length, cited.length)
+  assert.deepEqual(
+    [...new Set(links.map((row) => row.stage))].sort(),
+    ['after-output-transform', 'before-output-transform'],
+  )
+  for (const measurement of cited) {
+    identical(
+      kit.stringifyWithTicks,
+      await measurements.read({ workspaceId: A, measurementId: measurement.measurementId }),
+      measurement,
+      `the cited measurement ${measurement.measurementId}`,
+    )
+  }
+  // Rule 7 for the critic: a camera re-measured makes every verdict over the
+  // old reading stale, and now something can say which ones.
+  const byMeasurement = await reports.findDependentsOfMeasurement({
+    workspaceId: A, measurementId: cited[0].measurementId,
+  })
+  assert.equal(byMeasurement.length, 1, 'the verdict over that measurement was not found')
+  assert.equal(byMeasurement[0].reportId, reportA.reportId)
+  assert.deepEqual(
+    await reports.findDependentsOfMeasurement({ workspaceId: B, measurementId: cited[0].measurementId }),
+    [],
+    'workspace B saw a workspace A citation',
   )
 
   await reports.persist({ report: reportB, createdAt: at(22) })

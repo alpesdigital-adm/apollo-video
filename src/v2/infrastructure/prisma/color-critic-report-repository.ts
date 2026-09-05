@@ -35,6 +35,9 @@ import {
 } from '../../domain/color-critic-report.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { createTickInterval } from '../../domain/session-time.ts'
+// The measurement is one row, written one way. A second copy of that write
+// here would be a second opinion about the same table.
+import { measurementRowId, writeMeasurement } from './multicam-match-plan-repository.ts'
 import { getV2PostgresClient } from '../prisma-postgres/client.ts'
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -364,6 +367,38 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
 
     try {
       await this.client.$transaction(async (transaction) => {
+        // Measurements first, exactly as the match plan does it
+        // (multicam-match-plan-repository.ts:569-593): the citation is a
+        // Restrict foreign key, so a verdict cannot name a measurement that is
+        // not stored, and a measurement a verdict rests on cannot be deleted
+        // while the verdict stands. A measurement already stored with different
+        // content is a refusal and not an overwrite — two readings of the same
+        // bytes that disagree are two measurements, and the report says which
+        // one it judged.
+        const cited = report.sections.flatMap((section) => section.measurements)
+        const known = await transaction.v2CameraColorMeasurement.findMany({
+          where: {
+            workspaceId: report.workspaceId,
+            measurementId: { in: cited.map((measurement) => measurement.measurementId) },
+          },
+          select: { measurementId: true, measurementHash: true },
+        })
+        const storedHashes = new Map(known.map((entry) => [entry.measurementId, entry.measurementHash]))
+        for (const measurement of cited) {
+          const existing = storedHashes.get(measurement.measurementId)
+          if (existing === undefined) {
+            await writeMeasurement(transaction, report.workspaceId, measurement, at)
+            storedHashes.set(measurement.measurementId, measurement.measurementHash)
+            continue
+          }
+          if (existing !== measurement.measurementHash) {
+            throw new DomainError(
+              'PERSISTENCE_CONFLICT',
+              `Colour measurement ${measurement.measurementId} is already stored with different content`,
+            )
+          }
+        }
+
         await transaction.v2ColorCriticReport.create({
           data: {
             id: rowId,
@@ -412,6 +447,22 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
           },
         })
 
+        // What the verdict was reached over, as rows. `sectionsJson` keeps the
+        // numbers as they were read — the report is a judgement of those, and
+        // its hash covers them — but the identity of what it judged belongs
+        // where a query can reach it: a re-measured camera can now be asked
+        // which verdicts rest on it, the way a re-derived plan can.
+        await transaction.v2ColorCriticReportMeasurement.createMany({
+          data: report.sections.flatMap((section) => section.measurements.map((measurement, ordinal) => ({
+            id: childRowId([rowId, section.stage, measurement.measurementId], 160),
+            workspaceId: report.workspaceId,
+            reportId: rowId,
+            measurementId: measurementRowId(report.workspaceId, measurement.measurementId),
+            stage: section.stage,
+            ordinal,
+          }))),
+        })
+
         await transaction.v2ColorCriticDimensionResult.createMany({
           data: report.dimensions.map((dimension) => ({
             id: childRowId([rowId, dimension.dimension], 160),
@@ -451,8 +502,13 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
               threshold: issue.threshold,
               thresholdVersion: issue.thresholdVersion,
               confidence: issue.confidence,
+              // A ColorCriticIssue cites `evidenceRefs` and nothing else
+              // (color-critic-report.ts ColorCriticIssue). There was a column
+              // here for a visual-evidence artifact, written as a literal null
+              // on every path and read by nothing — a write someone forgot, to
+              // the next author. It comes back when the domain has an artifact
+              // to put in it.
               evidenceRefsJson: JSON.stringify(issue.evidenceRefs),
-              evidenceArtifactId: null,
             })),
           })
         }
@@ -550,6 +606,34 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
   }): Promise<readonly Readonly<ColorCriticReportRef>[]> {
     const rows = await this.client.v2ColorCriticReport.findMany({
       where: { workspaceId: input.workspaceId, matchPlanId: input.matchPlanId },
+      orderBy: { evaluatedAt: 'desc' },
+      select: {
+        reportId: true,
+        projectVersionId: true,
+        action: true,
+        cause: true,
+        matchPlanId: true,
+        matchPlanHash: true,
+        evaluatedAt: true,
+      },
+    })
+    return Object.freeze(rows.map((row) => Object.freeze({
+      ...row,
+      evaluatedAt: row.evaluatedAt.toISOString(),
+    })))
+  }
+
+  async findDependentsOfMeasurement(input: {
+    workspaceId: string
+    measurementId: string
+  }): Promise<readonly Readonly<ColorCriticReportRef>[]> {
+    const rows = await this.client.v2ColorCriticReport.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        measurements: {
+          some: { measurementId: measurementRowId(input.workspaceId, input.measurementId) },
+        },
+      },
       orderBy: { evaluatedAt: 'desc' },
       select: {
         reportId: true,
