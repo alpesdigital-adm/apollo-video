@@ -12,7 +12,7 @@ import type {
   MulticamDirectionCommandResult,
   MulticamProjectMediaLink,
 } from '../../application/ports/multicam-direction-command-repository.ts'
-import { stableSerialize } from '../../application/version-hash.ts'
+import { calculateVersionHash, stableSerialize } from '../../application/version-hash.ts'
 import { parseCommandArtifactInvalidation } from '../../domain/command-impact.ts'
 import { validateDirectedEditPlan, type DirectedEditPlan } from '../../domain/director-run.ts'
 import { createEditCommand, type EditScope } from '../../domain/edit-command.ts'
@@ -72,6 +72,27 @@ function parseArray(value: string, field: string): readonly unknown[] {
     return parsed
   } catch {
     throw new DomainError('PERSISTENCE_CONFLICT', `Stored ${field} is invalid`)
+  }
+}
+
+/**
+ * A snapshot's bytes, proved against the `contentHash` stored beside them.
+ *
+ * Both readers of the EditPlan snapshot needed this and neither had it: the
+ * direction is derived on top of the plan `readContext` returns, and a retry
+ * hands the plan back out of `hydrateStoredCommand`, so an edited snapshot
+ * would have produced a direction — and a replayed answer — over bytes whose
+ * hash nobody checked. The authority reader of the same snapshot does check it
+ * (`project-proxy-render-repository.ts:99`), and CONTRACT §4 asks hydration to
+ * re-verify every hash. `calculateVersionHash` is canonical over the parsed
+ * object, so a re-serialization with different key order still reproduces it.
+ */
+function assertSnapshotHash(plan: unknown, contentHash: string, what: string): void {
+  if (calculateVersionHash(plan) !== contentHash) {
+    throw new DomainError(
+      'PERSISTENCE_CONFLICT',
+      `${what} does not hash to the contentHash stored beside it`,
+    )
   }
 }
 
@@ -148,6 +169,7 @@ function hydrateStoredCommand(row: StoredCommand, replayed: boolean): MulticamDi
     createdAt: versionRow.createdAt.toISOString(),
   })
   const editPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'multicam EditPlan') as unknown as DirectedEditPlan
+  assertSnapshotHash(editPlan, versionRow.editPlanSnapshot.contentHash, 'the multicam EditPlan a retry hands back')
   if (editPlan.projectVersionId !== version.id) {
     throw new DomainError('PERSISTENCE_CONFLICT', 'Stored multicam EditPlan names another project version')
   }
@@ -268,6 +290,7 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
     })
     const currentPlan = parseRecord(versionRow.editPlanSnapshot.contentJson, 'current project EditPlan') as unknown as
       EditorialCutEditPlan | DirectedEditPlan
+    assertSnapshotHash(currentPlan, versionRow.editPlanSnapshot.contentHash, 'the project EditPlan this direction is derived on top of')
     const currentDurationFrames = Number(currentPlan.durationFrames)
     if (!Number.isSafeInteger(currentDurationFrames) || currentDurationFrames <= 0) {
       throw new DomainError('PERSISTENCE_CONFLICT', 'Current EditPlan duration is invalid')
