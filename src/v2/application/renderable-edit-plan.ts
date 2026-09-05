@@ -288,6 +288,11 @@ export function calculateRenderablePlanHash(plan: Readonly<DirectedEditPlan>): s
   return calculateCanonicalHash({
     schemaVersion: 'renderable-edit-plan/v1',
     compilerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
+    id: plan.id,
+    // In, because the same cut belonging to two project versions is two plans:
+    // leaving it out let a recompile under a newer version replay the older
+    // plan's row and hand back a plan pointing at a version nobody asked for.
+    projectVersionId: plan.projectVersionId,
     storyPlanId: plan.storyPlanId,
     treatmentPlanId: plan.treatmentPlanId,
     directorRunId: plan.directorRunId,
