@@ -1095,6 +1095,34 @@ test(
       world.exportIds.outputArtifact,
     )
 
+    // `renderable_plan_snapshots.sourceHash` is a plain column: the snapshot's
+    // hash covers the plan document, not the binding columns beside it, so one
+    // UPDATE used to promote a stale plan to evidence while the gate still
+    // recorded the reference as verified. Criteria 4 and 6 now read the same
+    // binding out of the document they just re-derived, so a fabricated column
+    // changes nothing — and reverting to the column makes this fail.
+    for (const origin of ['react-playback', 'multi-range-synthesis']) {
+      const row = await client.v2RenderablePlanSnapshot.findFirstOrThrow({
+        where: { workspaceId: W, origin },
+      })
+      await client.$executeRawUnsafe(
+        'UPDATE "renderable_plan_snapshots" SET "sourceHash" = $1 WHERE "id" = $2',
+        sha('e'),
+        row.id,
+      )
+      const forged = await run(`f4016-world-key-source-${origin}`)
+      assert.deepEqual(
+        failing(forged.gate),
+        [],
+        `a fabricated ${origin} sourceHash changed what the gate concluded`,
+      )
+      await client.$executeRawUnsafe(
+        'UPDATE "renderable_plan_snapshots" SET "sourceHash" = $1 WHERE "id" = $2',
+        row.sourceHash,
+        row.id,
+      )
+    }
+
     const healthy = await run('f4016-world-key-healthy-again')
     assert.equal(healthy.gate.report.satisfied, 10, 'the world did not come back')
 

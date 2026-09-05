@@ -250,6 +250,35 @@ function criterionFailed(
   }
 }
 
+/**
+ * Whether the plan says, in the document whose hash was just recomputed, that
+ * it was compiled from exactly this source at exactly this hash.
+ *
+ * `renderable_plan_snapshots.sourceHash` is a plain column: the snapshot's hash
+ * covers the plan document (`calculateRenderablePlanHash`), and the owning
+ * repository re-derives that on read, but nothing covers the binding columns
+ * beside it. One `UPDATE ... SET "sourceHash" = <the current map hash>`
+ * promoted a stale plan to evidence and neither the repository nor the gate
+ * noticed. The same binding IS inside the document —
+ * `assembleDirectedEditPlan` writes `"<origin>:<id>:<hash>"` into
+ * `lineageRefs` — so the criterion reads it there instead.
+ */
+function planCompiledFrom(
+  plan: Readonly<{ lineageRefs: readonly string[] }>,
+  origin: RenderablePlanOrigin,
+  sourceId: string,
+  sourceHash: string,
+): boolean {
+  return plan.lineageRefs.includes(`${origin}:${sourceId}:${sourceHash}`)
+}
+
+/** Clips counted off the verified document, not off the column beside it. */
+function planClipCount(
+  plan: Readonly<{ videoTracks: readonly Readonly<{ clips: readonly unknown[] }>[] }>,
+): number {
+  return plan.videoTracks[0]?.clips.length ?? 0
+}
+
 function seconds(ticks: bigint, secondsPerTick: Rational): number {
   return Number(ticks) * (Number(secondsPerTick.num) / Number(secondsPerTick.den))
 }
@@ -1138,14 +1167,18 @@ implements MulticamLongformGateRepository {
           ),
           check(
             'map-compiled-into-plan',
-            Boolean(plan && plan.sourceHash === map.mapHash && plan.clipCount >= 1),
+            Boolean(
+              plan &&
+              planCompiledFrom(plan.plan, REACT_PLAYBACK_ORIGIN, map.mapId, map.mapHash) &&
+              planClipCount(plan.plan) >= 1,
+            ),
             snapshot.unverified
               ? 'evidence-unverified'
               : plan ? 'evidence-stale' : 'evidence-missing',
             snapshot.unverified
               ? `the newest renderable plan compiled from map ${map.mapId} did not re-derive to its stored hash`
               : plan
-                ? `snapshot ${plan.planId} compiled ${plan.clipCount} clips from source hash ${plan.sourceHash.slice(0, 12)} (map ${map.mapHash.slice(0, 12)})`
+                ? `plan ${plan.planId} carries ${planClipCount(plan.plan)} clips and declares [${plan.plan.lineageRefs.filter((entry) => entry.startsWith(`${REACT_PLAYBACK_ORIGIN}:`)).join(', ').slice(0, 120)}] against map hash ${map.mapHash.slice(0, 12)}`
                 : `playback map ${map.mapId} was never compiled into a renderable plan`,
             plan
               ? [mapRef, ref('renderable-plan-snapshot', plan.planId, plan.planHash, true)]
@@ -1376,14 +1409,19 @@ implements MulticamLongformGateRepository {
           check(
             'context-proof-recorded',
             proofSize >= 1 &&
-              Boolean(plan && plan.sourceHash === synthesis.synthesisHash),
+              Boolean(plan && planCompiledFrom(
+                plan.plan,
+                MULTI_RANGE_SYNTHESIS_ORIGIN,
+                synthesis.id,
+                synthesis.synthesisHash,
+              )),
             snapshot.unverified
               ? 'evidence-unverified'
               : plan ? 'requirement-unmet' : 'evidence-missing',
             snapshot.unverified
               ? `the newest renderable plan compiled from synthesis ${synthesis.id} did not re-derive to its stored hash`
               : plan
-                ? `context proof records ${proof.claimsIncluded.length} claims and ${proof.qualifiersIncluded.length} qualifiers; plan ${plan.planId} compiled ${plan.clipCount} clips from hash ${plan.sourceHash.slice(0, 12)}`
+                ? `context proof records ${proof.claimsIncluded.length} claims and ${proof.qualifiersIncluded.length} qualifiers; plan ${plan.planId} carries ${planClipCount(plan.plan)} clips and declares [${plan.plan.lineageRefs.filter((entry) => entry.startsWith(`${MULTI_RANGE_SYNTHESIS_ORIGIN}:`)).join(', ').slice(0, 100)}]`
                 : `context proof records ${proofSize} entries but the synthesis was never compiled into a renderable plan`,
             planRefs,
           ),
