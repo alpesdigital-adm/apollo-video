@@ -1,6 +1,7 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import {
   assertCameraColorMeasurementIntegrity,
+  assertSessionTickInterval,
   measuredComponent,
   measuredValue,
   serializeTicksDeep,
@@ -12,7 +13,7 @@ import {
   assertMulticamMatchPlanIntegrity,
   type MulticamMatchPlan,
 } from './multicam-match-plan.ts'
-import { createTickInterval, intervalIntersection, intervalsOverlap, type TickInterval } from './session-time.ts'
+import { intervalIntersection, intervalsOverlap, type TickInterval } from './session-time.ts'
 
 /**
  * The colour critic (F4.014, FR-184).
@@ -495,7 +496,7 @@ function normalizedSubject(value: Readonly<ColorCriticSubject>): Readonly<ColorC
     // the one interval a caller hands the critic, and a millisecond float
     // would otherwise land in the canonically hashed body as a JS number
     // while every other range in the report hashes as decimal tick text.
-    ...(value.range !== undefined ? { range: createTickInterval(value.range.start, value.range.end) } : {}),
+    ...(value.range !== undefined ? { range: assertSessionTickInterval(value.range, 'subject.range') } : {}),
   })
 }
 
@@ -774,7 +775,7 @@ function createColorCriticReport(content: Readonly<ColorCriticReportContent>): R
     ...issue,
     code: assertToken(issue.code, `issues[${index}].code`),
     evidenceRefs: Object.freeze([...issue.evidenceRefs]),
-    range: issue.range ? createTickInterval(issue.range.start, issue.range.end) : null,
+    range: issue.range ? assertSessionTickInterval(issue.range, `issues[${index}].range`) : null,
   })))
   const body: ColorCriticReportContent = Object.freeze({
     schemaVersion: COLOR_CRITIC_REPORT_SCHEMA_VERSION,

@@ -6,6 +6,7 @@ import {
 } from './color-and-export.ts'
 import {
   assertCameraColorMeasurementIntegrity,
+  assertSessionTickInterval,
   COLOR_MEASUREMENT_COMPARABILITY_DIMENSIONS,
   COLOR_MEASUREMENT_MINIMUM_FRAMES,
   measuredComponent,
@@ -15,7 +16,6 @@ import {
 } from './color-measurement.ts'
 import { assertDomain } from './errors.ts'
 import {
-  createTickInterval,
   intervalDuration,
   intervalIntersection,
   intervalsOverlap,
@@ -559,7 +559,7 @@ function normalizedOverride(value: Readonly<MatchRangeOverride>, index: number):
     overrideId: assertId(value.overrideId, `${field}.overrideId`),
     cameraId: assertToken(value.cameraId, `${field}.cameraId`),
     ...(value.segmentId !== undefined ? { segmentId: assertToken(value.segmentId, `${field}.segmentId`) } : {}),
-    ...(value.range !== undefined ? { range: createTickInterval(value.range.start, value.range.end) } : {}),
+    ...(value.range !== undefined ? { range: assertSessionTickInterval(value.range, `${field}.range`) } : {}),
     transform: assertMatchStageTransform(value.transform),
     reason: value.reason,
     actor: assertActor(value.actor, `${field}.actor`),
@@ -689,7 +689,7 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
     nonComparableRanges: Object.freeze(content.nonComparableRanges.map((entry) => Object.freeze({
       cameraId: assertToken(entry.cameraId, 'nonComparableRanges.cameraId'),
       measurementId: assertId(entry.measurementId, 'nonComparableRanges.measurementId'),
-      range: createTickInterval(entry.range.start, entry.range.end),
+      range: assertSessionTickInterval(entry.range, 'nonComparableRanges.range'),
       reason: entry.reason,
     }))),
     humanReviewRequired: content.humanReviewRequired === true,

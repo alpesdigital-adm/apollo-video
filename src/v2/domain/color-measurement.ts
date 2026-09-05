@@ -209,6 +209,27 @@ function assertUnitInterval(value: unknown, field: string): number {
   return finite
 }
 
+/**
+ * A session range whose boundaries really are ticks.
+ *
+ * `createTickInterval` checks the 64-bit range but not the type
+ * (`session-time.ts:140-147`), and a JS number compares against a `bigint`
+ * without complaint, so `{ start: 1000.5, end: 2000.5 }` passes it unchanged.
+ * Such a range then reaches the canonical hasher as a number while every real
+ * tick range is flattened to decimal text — the same interval hashing two
+ * ways. Ticks are `bigint` (CONTRACT §2), and this is where the three colour
+ * aggregates say so.
+ */
+export function assertSessionTickInterval(value: Readonly<TickInterval>, field: string): Readonly<TickInterval> {
+  assertDomain(
+    value !== null && typeof value === 'object' &&
+      typeof value.start === 'bigint' && typeof value.end === 'bigint',
+    'INVALID_ARGUMENT',
+    `${field} must be a tick interval whose boundaries are bigint ticks`,
+  )
+  return createTickInterval(value.start, value.end)
+}
+
 function normalizedMetadata(value: Readonly<ColorMetadata>, field: string): Readonly<ColorMetadata> {
   assertDomain(value && typeof value === 'object', 'INVALID_ARGUMENT', `${field} is invalid`)
   assertDomain(value.range === 'full' || value.range === 'limited', 'INVALID_ARGUMENT', `${field}.range is invalid`)
@@ -394,7 +415,7 @@ export function createCameraColorMeasurement(input: {
     sourceAssetId: assertId(input.sourceAssetId, 'sourceAssetId'),
     sourceSha256: assertHash(input.sourceSha256, 'sourceSha256'),
     cameraId: input.cameraId,
-    range: createTickInterval(input.range.start, input.range.end),
+    range: assertSessionTickInterval(input.range, 'range'),
     sourceRange: Object.freeze({ startFrame: input.sourceRange.startFrame, endFrame: input.sourceRange.endFrame }),
     sampledFrames: input.sampledFrames,
     technical,
