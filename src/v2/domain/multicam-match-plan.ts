@@ -50,11 +50,18 @@ export const MATCH_PROVIDER = 'apollo-match' as const
  *
  * v1 is what the FFmpeg processor accepts today (`ffmpeg-color-pipeline-
  * processor.ts:107-110`): an `eq` filter. v2 adds per-channel gains for white
- * balance, to be rendered as `colorchannelmixer=rr=<redGain>:gg=<greenGain>:
- * bb=<blueGain>` before the same `eq`. The version token is part of
+ * balance, to be rendered as `colorchannelmixer=rr=<red-gain>:gg=<green-gain>:
+ * bb=<blue-gain>` before the same `eq`. The version token is part of
  * `implementation.version`, so a v2 transform hashes differently from a v1
  * one and existing v1 compilations are untouched. Extending the processor
  * whitelist is integration work; this table is the contract it implements.
+ *
+ * The gain parameter names are `red-gain`/`green-gain`/`blue-gain`, not the
+ * camelCase spellings the deltas use, because `createColorPlan` validates
+ * every `implementation.parameters` key against the ColorPlan TOKEN grammar
+ * (`color-and-export.ts:80,298`), which is lowercase-only. A camelCase key
+ * makes the whole compiled `cameras` layer unacceptable to the authority, so
+ * the wire shape is constrained by it rather than by this module's taste.
  */
 export const MATCH_PROVIDER_VERSIONS = Object.freeze({
   v1: Object.freeze({
@@ -65,12 +72,19 @@ export const MATCH_PROVIDER_VERSIONS = Object.freeze({
   v2: Object.freeze({
     version: 'v2',
     parameters: Object.freeze([
-      'mode', 'brightness', 'contrast', 'saturation', 'redGain', 'greenGain', 'blueGain',
+      'mode', 'brightness', 'contrast', 'saturation', 'red-gain', 'green-gain', 'blue-gain',
     ] as const),
     filters: 'colorchannelmixer,eq',
   }),
 })
 export type MatchProviderVersion = keyof typeof MATCH_PROVIDER_VERSIONS
+
+/** The three v2 parameter keys, in the exact spelling that reaches the processor. */
+export const MATCH_WHITE_BALANCE_PARAMETERS = Object.freeze({
+  redGain: 'red-gain',
+  greenGain: 'green-gain',
+  blueGain: 'blue-gain',
+} as const)
 
 /**
  * Safe bounds. brightness/contrast/saturation are the processor's own
@@ -270,6 +284,19 @@ function transformId(cameraId: string, segmentId?: string): string {
 }
 
 function implementation(version: MatchProviderVersion, parameters: Readonly<Record<string, string | number | boolean>>) {
+  // The canonical hasher refuses non-finite numbers with a raw TypeError, and
+  // `createColorPlan` refuses a key outside the ColorPlan token grammar. Both
+  // are checked here, before anything is hashed, so a bad parameter is a named
+  // domain refusal instead of a crash or a plan the authority will not accept.
+  for (const [key, value] of Object.entries(parameters)) {
+    assertDomain(TOKEN.test(key), 'INVALID_ARGUMENT', `match parameter ${key} is not a ColorPlan parameter key`)
+    assertDomain(
+      typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value)),
+      'INVALID_ARGUMENT',
+      `match parameter ${key} must be a finite number, a string or a boolean`,
+      { parameter: key },
+    )
+  }
   const sorted = Object.freeze(Object.fromEntries(
     Object.entries(parameters).sort(([left], [right]) => left.localeCompare(right)),
   ))
@@ -306,6 +333,34 @@ export interface MatchAdjustParameters {
 }
 
 /**
+ * Refuse a non-finite or missing parameter before `round6` dereferences it and
+ * before the canonical hasher sees it: `undefined.toFixed` and "canonical
+ * values cannot contain non-finite numbers" are both raw TypeErrors, and this
+ * function is reachable from an exported entry point (`addMulticamMatch-
+ * RangeOverride`), where a caller mistake must be a 422 and not a 500.
+ */
+function assertFiniteParameters(parameters: Readonly<MatchAdjustParameters>): void {
+  assertDomain(parameters !== null && typeof parameters === 'object', 'INVALID_ARGUMENT', 'match parameters are required')
+  for (const field of ['brightness', 'contrast', 'saturation'] as const) {
+    assertDomain(
+      typeof parameters[field] === 'number' && Number.isFinite(parameters[field]),
+      'INVALID_ARGUMENT',
+      `match parameter ${field} must be a finite number`,
+      { parameter: field },
+    )
+  }
+  if (parameters.gains === undefined) return
+  for (const field of ['redGain', 'greenGain', 'blueGain'] as const) {
+    assertDomain(
+      typeof parameters.gains[field] === 'number' && Number.isFinite(parameters.gains[field]),
+      'INVALID_ARGUMENT',
+      `match parameter ${MATCH_WHITE_BALANCE_PARAMETERS[field]} must be a finite number`,
+      { parameter: MATCH_WHITE_BALANCE_PARAMETERS[field] },
+    )
+  }
+}
+
+/**
  * An enabled match. v1 when the three `eq` terms suffice; v2 as soon as a
  * channel gain is present. Values are rounded to six decimals so the same
  * measurement always hashes to the same transform.
@@ -316,6 +371,7 @@ export function createMatchAdjustTransform(input: {
   parameters: Readonly<MatchAdjustParameters>
   segmentId?: string
 }): Readonly<ColorTransform> {
+  assertFiniteParameters(input.parameters)
   const base = {
     mode: 'adjust',
     brightness: round6(input.parameters.brightness),
@@ -325,7 +381,12 @@ export function createMatchAdjustTransform(input: {
   const gains = input.parameters.gains
   const version: MatchProviderVersion = gains ? 'v2' : 'v1'
   const parameters = gains
-    ? { ...base, redGain: round6(gains.redGain), greenGain: round6(gains.greenGain), blueGain: round6(gains.blueGain) }
+    ? {
+        ...base,
+        [MATCH_WHITE_BALANCE_PARAMETERS.redGain]: round6(gains.redGain),
+        [MATCH_WHITE_BALANCE_PARAMETERS.greenGain]: round6(gains.greenGain),
+        [MATCH_WHITE_BALANCE_PARAMETERS.blueGain]: round6(gains.blueGain),
+      }
     : base
   return assertMatchStageTransform(Object.freeze({
     id: transformId(input.cameraId, input.segmentId),
@@ -371,6 +432,14 @@ export function assertMatchStageTransform(transform: Readonly<ColorTransform>): 
     'INVALID_ARGUMENT',
     `match transform ${transform.id} carries parameters outside apollo-match ${version}`,
   )
+  // A stored transform reaches `createColorPlan` unchanged, and that authority
+  // refuses any parameter key outside its lowercase TOKEN grammar. Refusing it
+  // here means the plan never carries a layer the ColorPlan would reject.
+  assertDomain(
+    Object.keys(parameters).every((key) => TOKEN.test(key)),
+    'INVALID_ARGUMENT',
+    `match transform ${transform.id} carries a parameter key the ColorPlan grammar rejects`,
+  )
   assertDomain(
     calculateCanonicalHash(parameters) === transform.implementation.parametersHash,
     'INVALID_ARGUMENT',
@@ -397,7 +466,7 @@ export function assertMatchStageTransform(transform: Readonly<ColorTransform>): 
     `match transform ${transform.id} parameters are outside safe bounds`,
   )
   if (version === 'v2') {
-    for (const key of ['redGain', 'greenGain', 'blueGain'] as const) {
+    for (const key of Object.values(MATCH_WHITE_BALANCE_PARAMETERS)) {
       const gain = Number(parameters[key])
       assertDomain(
         Number.isFinite(gain) && gain >= MATCH_PARAMETER_BOUNDS.gain[0] && gain <= MATCH_PARAMETER_BOUNDS.gain[1],
@@ -498,17 +567,79 @@ function normalizedOverride(value: Readonly<MatchRangeOverride>, index: number):
 }
 
 /**
+ * The plan-wide rules, in one place, run by the constructor AND by the
+ * integrity door. A stored plan did not necessarily come out of this process's
+ * constructor: it may have been written by an older build, or edited and
+ * re-hashed. Both consumers of a plan (`compileMatchPlanToColorPlanLayers`,
+ * `addMulticamMatchRangeOverride`) read the reference camera's measurement, so
+ * the rule that it exists is checked on the way in AND on the way out.
+ */
+function assertMatchPlanInvariants(
+  plan: Readonly<MulticamMatchPlanContent>,
+  code: 'INVALID_ARGUMENT' | 'PERSISTENCE_CONFLICT',
+): void {
+  assertDomain(
+    plan.pipelineStage === MATCH_PIPELINE_STAGE,
+    'COLOR_STAGE_VIOLATION',
+    `a multicam match plan is a ${MATCH_PIPELINE_STAGE}-stage plan; received ${String(plan.pipelineStage)}`,
+  )
+  const measurementIds = new Set(plan.measurements.map((measurement) => measurement.measurementId))
+  assertDomain(measurementIds.size === plan.measurements.length, code, 'measurementIds must be unique within a plan')
+  assertDomain(
+    plan.measurements.some((measurement) => measurement.cameraId === plan.referenceCameraId),
+    'COLOR_REFERENCE_UNAVAILABLE',
+    `a match plan must carry a measurement of its reference camera ${plan.referenceCameraId}`,
+    { referenceCameraId: plan.referenceCameraId },
+  )
+  for (const [index, entry] of plan.cameraTransforms.entries()) {
+    assertDomain(
+      entry.cameraId !== plan.referenceCameraId,
+      code,
+      `cameraTransforms[${index}] must not correct the reference camera`,
+    )
+    for (const id of entry.derivedFrom) {
+      assertDomain(measurementIds.has(id), code, `cameraTransforms[${index}].derivedFrom names a measurement outside the plan`)
+    }
+  }
+  assertDomain(
+    new Set(plan.cameraTransforms.map((entry) => entry.cameraId)).size === plan.cameraTransforms.length,
+    code,
+    'a camera is corrected at most once per plan',
+  )
+  const knownCameras = new Set([plan.referenceCameraId, ...plan.cameraTransforms.map((entry) => entry.cameraId)])
+  for (const [index, override] of plan.rangeOverrides.entries()) {
+    assertDomain(
+      knownCameras.has(override.cameraId),
+      code,
+      `rangeOverrides[${index}] targets camera ${override.cameraId}, which the plan does not know`,
+    )
+  }
+  assertDomain(
+    new Set(plan.rangeOverrides.map((override) => override.overrideId)).size === plan.rangeOverrides.length,
+    code,
+    'overrideIds must be unique within a plan',
+  )
+}
+
+/** The reference camera's measurement, or the named refusal instead of a crash. */
+function referenceMeasurementOf(plan: Readonly<MulticamMatchPlan>): Readonly<CameraColorMeasurement> {
+  const found = plan.measurements.find((measurement) => measurement.cameraId === plan.referenceCameraId)
+  assertDomain(
+    found !== undefined,
+    'COLOR_REFERENCE_UNAVAILABLE',
+    `plan ${plan.planId} carries no measurement of its reference camera ${plan.referenceCameraId}`,
+    { planId: plan.planId, referenceCameraId: plan.referenceCameraId },
+  )
+  return found
+}
+
+/**
  * Assemble and validate a plan from its parts. Used by derivation and by the
  * override amendment; not a public constructor for hand-written transforms —
  * the numbers in a plan come from measurements or from an override that names
  * its actor and reason.
  */
 function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): Readonly<MulticamMatchPlan> {
-  assertDomain(
-    content.pipelineStage === MATCH_PIPELINE_STAGE,
-    'COLOR_STAGE_VIOLATION',
-    `a multicam match plan is a ${MATCH_PIPELINE_STAGE}-stage plan; received ${String(content.pipelineStage)}`,
-  )
   assertDomain(
     Number.isSafeInteger(content.sessionVersion) && content.sessionVersion >= 1 &&
       Number.isSafeInteger(content.referenceEpoch) && content.referenceEpoch >= 0,
@@ -517,24 +648,9 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
   )
   const sessionId = assertId(content.sessionId, 'sessionId')
   const measurements = Object.freeze(content.measurements.map((measurement) => assertCameraColorMeasurementIntegrity(measurement)))
-  const measurementIds = new Set(measurements.map((measurement) => measurement.measurementId))
-  assertDomain(measurementIds.size === measurements.length, 'INVALID_ARGUMENT', 'measurementIds must be unique within a plan')
   const referenceCameraId = assertToken(content.referenceCameraId, 'referenceCameraId')
-  // Every consumer of a plan reads the reference camera's colourimetry out of
-  // its measurement — the layer compiler and the override amendment both do.
-  // Making that an invariant here is what lets them stop guessing.
-  assertDomain(
-    measurements.some((measurement) => measurement.cameraId === referenceCameraId),
-    'COLOR_REFERENCE_UNAVAILABLE',
-    `a match plan must carry a measurement of its reference camera ${referenceCameraId}`,
-    { referenceCameraId },
-  )
   const cameraTransforms = Object.freeze(content.cameraTransforms.map((entry, index) => {
     const field = `cameraTransforms[${index}]`
-    assertDomain(entry.cameraId !== referenceCameraId, 'INVALID_ARGUMENT', `${field} must not correct the reference camera`)
-    for (const id of entry.derivedFrom) {
-      assertDomain(measurementIds.has(id), 'INVALID_ARGUMENT', `${field}.derivedFrom names a measurement outside the plan`)
-    }
     return Object.freeze({
       cameraId: assertToken(entry.cameraId, `${field}.cameraId`),
       transform: assertMatchStageTransform(entry.transform),
@@ -549,26 +665,7 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
       rangePairs: entry.rangePairs,
     })
   }))
-  assertDomain(
-    new Set(cameraTransforms.map((entry) => entry.cameraId)).size === cameraTransforms.length,
-    'INVALID_ARGUMENT',
-    'a camera is corrected at most once per plan',
-  )
-  const knownCameras = new Set([referenceCameraId, ...cameraTransforms.map((entry) => entry.cameraId)])
-  const rangeOverrides = Object.freeze(content.rangeOverrides.map((override, index) => {
-    const normalized = normalizedOverride(override, index)
-    assertDomain(
-      knownCameras.has(normalized.cameraId),
-      'INVALID_ARGUMENT',
-      `rangeOverrides[${index}] targets camera ${normalized.cameraId}, which the plan does not know`,
-    )
-    return normalized
-  }))
-  assertDomain(
-    new Set(rangeOverrides.map((override) => override.overrideId)).size === rangeOverrides.length,
-    'INVALID_ARGUMENT',
-    'overrideIds must be unique within a plan',
-  )
+  const rangeOverrides = Object.freeze(content.rangeOverrides.map((override, index) => normalizedOverride(override, index)))
   const body: MulticamMatchPlanContent = Object.freeze({
     schemaVersion: MULTICAM_MATCH_PLAN_SCHEMA_VERSION,
     planId: assertId(content.planId, 'planId'),
@@ -605,6 +702,7 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
     supersedes: content.supersedes === null ? null : assertId(content.supersedes, 'supersedes'),
     createdAt: assertInstant(content.createdAt, 'createdAt'),
   })
+  assertMatchPlanInvariants(body, 'INVALID_ARGUMENT')
   return Object.freeze({ ...body, planHash: calculateMulticamMatchPlanHash(body) })
 }
 
@@ -625,7 +723,7 @@ export function assertMulticamMatchPlanIntegrity(plan: Readonly<MulticamMatchPla
     'PERSISTENCE_CONFLICT',
     'multicam match plan hash does not match its stored content',
   )
-  assertDomain(plan.pipelineStage === MATCH_PIPELINE_STAGE, 'COLOR_STAGE_VIOLATION', 'stored plan is not a match-stage plan')
+  assertMatchPlanInvariants(content, 'PERSISTENCE_CONFLICT')
   for (const measurement of plan.measurements) assertCameraColorMeasurementIntegrity(measurement)
   for (const entry of plan.cameraTransforms) assertMatchStageTransform(entry.transform)
   for (const override of plan.rangeOverrides) assertMatchStageTransform(override.transform)
@@ -711,6 +809,73 @@ function assertMeasurementSufficient(measurement: Readonly<CameraColorMeasuremen
   }
 }
 
+/**
+ * The merged policy, checked field by field.
+ *
+ * Every entry is a named safety limit, and a limit that is zero, negative or
+ * not a number does not loosen the limit — it silently changes what the plan
+ * REPORTS. `exposureGamma: 0` makes every exposure delta come out as exactly
+ * 0 EV, so the `exposure-delta-exceeds-policy` issue disappears and
+ * `humanReviewRequired` flips to false while the brightness correction is
+ * still applied at full strength. A caller may raise a limit; it may not
+ * disable the instrument that measures whether the limit was crossed.
+ */
+function normalizedPolicy(overrides: Partial<MulticamMatchPolicy> | undefined): MulticamMatchPolicy {
+  const policy = { ...DEFAULT_MULTICAM_MATCH_POLICY, ...(overrides ?? {}) }
+  const positive = (field: keyof MulticamMatchPolicy): number => {
+    const value = policy[field]
+    assertDomain(
+      typeof value === 'number' && Number.isFinite(value) && value > 0,
+      'INVALID_ARGUMENT',
+      `policy.${String(field)} must be a finite number greater than zero`,
+      { field: String(field), received: value as unknown },
+    )
+    return value
+  }
+  for (const field of [
+    'exposureGamma', 'maxExposureCorrectionEv', 'maxBrightnessOffset',
+    'exposureDispersionEvScale', 'gainDispersionScale', 'maxWhiteBalanceGain',
+  ] as const) positive(field)
+  assertDomain(
+    policy.maxWhiteBalanceGain > 1,
+    'INVALID_ARGUMENT',
+    'policy.maxWhiteBalanceGain must exceed 1; a ceiling at or below unity forbids every correction it is meant to bound',
+    { received: policy.maxWhiteBalanceGain },
+  )
+  assertDomain(
+    policy.maxBrightnessOffset <= MATCH_PARAMETER_BOUNDS.brightness[1],
+    'INVALID_ARGUMENT',
+    `policy.maxBrightnessOffset cannot exceed the eq brightness bound ${MATCH_PARAMETER_BOUNDS.brightness[1]}`,
+    { received: policy.maxBrightnessOffset },
+  )
+  assertDomain(
+    typeof policy.whiteBalanceGainTolerance === 'number' && Number.isFinite(policy.whiteBalanceGainTolerance) &&
+      policy.whiteBalanceGainTolerance >= 0 && policy.whiteBalanceGainTolerance < 1,
+    'INVALID_ARGUMENT',
+    'policy.whiteBalanceGainTolerance must be within [0, 1)',
+    { received: policy.whiteBalanceGainTolerance },
+  )
+  assertDomain(
+    Number.isSafeInteger(policy.minimumSampledFrames) && policy.minimumSampledFrames >= COLOR_MEASUREMENT_MINIMUM_FRAMES,
+    'INVALID_ARGUMENT',
+    `policy.minimumSampledFrames may be raised above ${COLOR_MEASUREMENT_MINIMUM_FRAMES} but never lowered below it`,
+    { received: policy.minimumSampledFrames },
+  )
+  assertUnitInterval(policy.singleRangeConfidenceCap, 'policy.singleRangeConfidenceCap')
+  for (const field of ['contrastRange', 'saturationRange'] as const) {
+    const range = policy[field]
+    assertDomain(
+      Array.isArray(range) && range.length === 2 &&
+        range.every((bound) => typeof bound === 'number' && Number.isFinite(bound) && bound > 0) &&
+        range[0]! < range[1]!,
+      'INVALID_ARGUMENT',
+      `policy.${field} must be an ordered pair of positive multipliers`,
+      { received: range as unknown },
+    )
+  }
+  return Object.freeze(policy)
+}
+
 export interface DeriveMulticamMatchPlanInput {
   planId: string
   workspaceId: string
@@ -740,7 +905,7 @@ export interface DeriveMulticamMatchPlanInput {
  * the remedy. No partial plan is produced.
  */
 export function deriveMulticamMatchPlan(input: DeriveMulticamMatchPlanInput): Readonly<MulticamMatchPlan> {
-  const policy: MulticamMatchPolicy = Object.freeze({ ...DEFAULT_MULTICAM_MATCH_POLICY, ...(input.policy ?? {}) })
+  const policy = normalizedPolicy(input.policy)
   const referenceCameraId = assertToken(input.referenceCameraId, 'referenceCameraId')
   assertDomain(
     Array.isArray(input.measurements) && input.measurements.length >= 2,
@@ -963,7 +1128,17 @@ export function addMulticamMatchRangeOverride(
 ): Readonly<MulticamMatchPlan> {
   const previous = assertMulticamMatchPlanIntegrity(plan)
   const cameraId = assertToken(input.override.cameraId, 'override.cameraId')
-  const metadata = previous.measurements.find((measurement) => measurement.cameraId === previous.referenceCameraId)!.technical.metadata
+  // The same rule `normalizedOverride` enforces, but here — before the
+  // transform is built from `range!` and canonically hashed. Reached later it
+  // is a raw TypeError on an exported entry point, which is a 500 for a
+  // caller mistake that the catalogue already has a 422 for.
+  assertDomain(
+    (input.override.segmentId === undefined) !== (input.override.range === undefined),
+    'INVALID_ARGUMENT',
+    'an override must target exactly one of segmentId or range',
+  )
+  assertFiniteParameters(input.override.parameters)
+  const metadata = referenceMeasurementOf(previous).technical.metadata
   const segmentId = input.override.segmentId !== undefined ? assertToken(input.override.segmentId, 'override.segmentId') : undefined
   const override: MatchRangeOverride = {
     overrideId: input.override.overrideId,
@@ -1019,7 +1194,7 @@ export function compileMatchPlanToColorPlanLayers(
 ): Readonly<CompiledMatchPlanLayers> {
   const verified = assertMulticamMatchPlanIntegrity(plan)
   const clipsByCamera = input.editPlanClipsByCameraId
-  const metadata = verified.measurements.find((measurement) => measurement.cameraId === verified.referenceCameraId)!.technical.metadata
+  const metadata = referenceMeasurementOf(verified).technical.metadata
   const cameras: Record<string, readonly Readonly<ColorTransform>[]> = {}
   const omitted: string[] = []
 
@@ -1068,9 +1243,9 @@ export function compileMatchPlanToColorPlanLayers(
           ...(override.transform.implementation.version === MATCH_PROVIDER_VERSIONS.v2.version
             ? {
                 gains: {
-                  redGain: Number(override.transform.implementation.parameters.redGain),
-                  greenGain: Number(override.transform.implementation.parameters.greenGain),
-                  blueGain: Number(override.transform.implementation.parameters.blueGain),
+                  redGain: Number(override.transform.implementation.parameters[MATCH_WHITE_BALANCE_PARAMETERS.redGain]),
+                  greenGain: Number(override.transform.implementation.parameters[MATCH_WHITE_BALANCE_PARAMETERS.greenGain]),
+                  blueGain: Number(override.transform.implementation.parameters[MATCH_WHITE_BALANCE_PARAMETERS.blueGain]),
                 },
               }
             : {}),
