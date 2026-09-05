@@ -366,7 +366,10 @@ test('T-F4.014 a colour critic report is content-addressed and comes back as it 
   assert.equal(reportA.dimensions.length, 12, 'every dimension answers, even when the answer is "not read"')
   assert.ok(reportA.dimensions.some((dimension) => dimension.status !== 'measured'))
 
-  assert.equal((await reports.persist({ report: reportA, createdAt: at(20) })).replayed, false)
+  const persisted = await reports.persist({ report: reportA, createdAt: at(20) })
+  assert.equal(persisted.replayed, false)
+  assert.notEqual(persisted.report, reportA, 'persist must return the stored report, not its argument')
+  identical(kit.stringifyWithTicks, persisted.report, reportA, 'the report persist handed back')
   assert.equal(
     (await reports.persist({ report: reportA, createdAt: at(21) })).replayed,
     true,
@@ -461,7 +464,13 @@ test('T-F4.015 a react playback map survives its own anchor and keeps the versio
   assert.ok(playbackA.map.pieces.some((piece) => piece.mode === 'replay' && piece.direction === 'backward'))
   assert.ok(playbackA.map.pieces.some((piece) => piece.mode === 'seek' && piece.discontinuityReason === 'seek'))
 
-  assert.equal((await maps.appendVersion({ map: playbackA.map, occurredAt: at(30) })).replayed, false)
+  const appended = await maps.appendVersion({ map: playbackA.map, occurredAt: at(30) })
+  assert.equal(appended.replayed, false)
+  // What comes back is what the database holds, not the object that was handed
+  // in: the write path runs the same hash-on-read the reader would, so a map
+  // that cannot round trip fails where it was created.
+  assert.notEqual(appended.map, playbackA.map, 'appendVersion must return the stored map, not its argument')
+  identical(kit.stringifyWithTicks, appended.map, playbackA.map, 'the map appendVersion handed back')
   identical(
     kit.stringifyWithTicks,
     await maps.readHead({ workspaceId: A, sessionId: REACT, reactionTrackId: REACTION_TRACK }),

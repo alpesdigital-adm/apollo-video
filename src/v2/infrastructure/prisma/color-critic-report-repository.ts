@@ -481,7 +481,19 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
           })
         }
       })
-      return Object.freeze({ report, replayed: false })
+      // Read back what was written rather than handing the caller its own
+      // object. Returning the in-memory aggregate reports success for a write
+      // that stored something unreadable, and the reader who opens it next
+      // inherits the failure — hash-on-read has to run on the write path too,
+      // where the report that cannot round trip can still be fixed.
+      const stored = await this.read({ workspaceId: report.workspaceId, reportId: report.reportId })
+      if (!stored) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          `Colour critic report ${report.reportId} vanished between write and read`,
+        )
+      }
+      return Object.freeze({ report: stored, replayed: false })
     } catch (error) {
       if (!isPrismaCode(error, 'P2002')) throw error
       const stored = await this.read({ workspaceId: report.workspaceId, reportId: report.reportId })

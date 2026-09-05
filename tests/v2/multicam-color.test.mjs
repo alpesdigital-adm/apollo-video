@@ -359,6 +359,19 @@ test('T-FR-183 assertMatchStageTransform refuses every transform the ColorPlan w
     'INVALID_ARGUMENT',
     /outside apollo-match v2/,
   )
+  // An adjust that names no adjustment. This used to be read as the identity
+  // (brightness 0, contrast 1, saturation 1), which is a bypass with an
+  // adjust's label — and, stored, a row camera_match_transforms_mode_check
+  // refuses with a raw 23514 because the projected columns are NULL.
+  for (const missing of ['brightness', 'contrast', 'saturation']) {
+    const partial = { ...adjust }
+    delete partial[missing]
+    throwsCode(
+      () => assertMatchStageTransform(build({ parameters: partial })),
+      'INVALID_ARGUMENT',
+      new RegExp(`must state its ${missing}`),
+    )
+  }
 })
 
 test('T-FR-183 a camera that only needs exposure stays on apollo-match v1', () => {

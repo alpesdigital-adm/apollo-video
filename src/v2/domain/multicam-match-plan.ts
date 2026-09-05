@@ -455,9 +455,23 @@ export function assertMatchStageTransform(transform: Readonly<ColorTransform>): 
     return transform
   }
   assertDomain(parameters.mode === 'adjust', 'INVALID_ARGUMENT', `enabled match ${transform.id} must declare adjust mode`)
-  const brightness = Number(parameters.brightness ?? 0)
-  const contrast = Number(parameters.contrast ?? 1)
-  const saturation = Number(parameters.saturation ?? 1)
+  // Present, not defaulted. `?? 0` and `?? 1` accepted an adjust transform that
+  // named no adjustment and quietly read it as the identity — which is a bypass
+  // wearing an adjust's clothes, and which the row it is stored as cannot be:
+  // camera_match_transforms_mode_check requires all three for mode 'adjust', so
+  // the domain's silent default became a raw 23514 at write time instead of a
+  // refusal where the transform was built.
+  for (const field of ['brightness', 'contrast', 'saturation'] as const) {
+    assertDomain(
+      parameters[field] !== undefined && parameters[field] !== null,
+      'INVALID_ARGUMENT',
+      `enabled match ${transform.id} must state its ${field}`,
+      { parameter: field },
+    )
+  }
+  const brightness = Number(parameters.brightness)
+  const contrast = Number(parameters.contrast)
+  const saturation = Number(parameters.saturation)
   assertDomain(
     Number.isFinite(brightness) && brightness >= MATCH_PARAMETER_BOUNDS.brightness[0] && brightness <= MATCH_PARAMETER_BOUNDS.brightness[1] &&
       Number.isFinite(contrast) && contrast >= MATCH_PARAMETER_BOUNDS.contrast[0] && contrast <= MATCH_PARAMETER_BOUNDS.contrast[1] &&
@@ -621,6 +635,30 @@ function assertMatchPlanInvariants(
   )
 }
 
+/**
+ * The provenance a camera transform must carry: at least one measurement it was
+ * derived from, and at least one pair of comparable ranges behind that
+ * measurement.
+ */
+function assertDerivation(
+  derivedFrom: readonly string[],
+  rangePairs: number,
+  field: string,
+): readonly string[] {
+  assertDomain(
+    Array.isArray(derivedFrom) && derivedFrom.length >= 1,
+    'INVALID_ARGUMENT',
+    `${field}.derivedFrom must name the measurement the correction came from`,
+  )
+  assertDomain(
+    Number.isSafeInteger(rangePairs) && rangePairs >= 1,
+    'INVALID_ARGUMENT',
+    `${field}.rangePairs must count at least one pair of comparable ranges`,
+    { rangePairs },
+  )
+  return [...derivedFrom]
+}
+
 /** The reference camera's measurement, or the named refusal instead of a crash. */
 function referenceMeasurementOf(plan: Readonly<MulticamMatchPlan>): Readonly<CameraColorMeasurement> {
   const found = plan.measurements.find((measurement) => measurement.cameraId === plan.referenceCameraId)
@@ -654,7 +692,13 @@ function createMulticamMatchPlan(content: Readonly<MulticamMatchPlanContent>): R
     return Object.freeze({
       cameraId: assertToken(entry.cameraId, `${field}.cameraId`),
       transform: assertMatchStageTransform(entry.transform),
-      derivedFrom: Object.freeze([...entry.derivedFrom]),
+      // A correction nobody can trace back to a measurement is a number with no
+      // provenance, and one derived from no comparable range is a number with no
+      // population — camera_match_transforms_derivation_check says both, and
+      // said them alone until now: the plan copied whatever it was given
+      // through, so the disagreement surfaced as a 23514 from underneath the
+      // repository instead of a refusal here.
+      derivedFrom: Object.freeze(assertDerivation(entry.derivedFrom, entry.rangePairs, field)),
       deltas: Object.freeze({
         exposureEv: entry.deltas.exposureEv,
         whiteBalance: entry.deltas.whiteBalance ? Object.freeze({ ...entry.deltas.whiteBalance }) : null,

@@ -413,7 +413,25 @@ export class PrismaPlaybackMapRepository implements PlaybackMapRepository {
           )
         }
       })
-      return Object.freeze({ map, replayed: false })
+      // Read back what was written rather than handing the caller its own
+      // object. `appendVersion` returning the in-memory map reported success
+      // for a version that could never be read again — an anchor array stored
+      // out of the order its hash covers was written, acknowledged, and only
+      // fatal to whoever opened it next. Hash-on-read belongs on the write
+      // path, where the map that cannot round trip can still be fixed.
+      const written = await this.readVersion({
+        workspaceId: map.workspaceId,
+        sessionId: map.sessionId,
+        reactionTrackId: map.reactionTrackId,
+        version: map.version,
+      })
+      if (!written) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          `The playback map for ${map.sessionId}/${map.reactionTrackId} vanished between write and read`,
+        )
+      }
+      return Object.freeze({ map: written, replayed: false })
     } catch (error) {
       if (!isPrismaCode(error, 'P2002')) throw error
       const stored = await this.readVersion({
