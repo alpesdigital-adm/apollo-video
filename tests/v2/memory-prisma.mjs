@@ -63,6 +63,29 @@ function compareValues(left, right) {
   return String(left) < String(right) ? -1 : 1
 }
 
+/**
+ * A double the way a DOUBLE PRECISION column gives it back through Prisma.
+ *
+ * Prisma serialises a float parameter with sixteen significant digits, so a
+ * JS number that needs seventeen — 0.22745236862429172, or 0.1 + 0.2 — is
+ * stored as a DIFFERENT double and read back as that different double. Against
+ * a real PostgreSQL 16 that is what turned one colour measurement into
+ * "camera colour measurement hash does not match its stored content": the
+ * write succeeded, the read was refused for ever.
+ *
+ * Keeping the JS value verbatim here would make this client lie about the
+ * channel it stands in for, and every round trip through it would stay green
+ * while the same data was unreadable in production. So the lossy step is
+ * modelled: what goes into a Float column comes back out of it. Integers and
+ * anything a domain rounds are unaffected — 16 digits is a wide channel — and
+ * a value that is not is refused by its own aggregate hash, here, where the
+ * fixture that produced it can be fixed.
+ */
+function throughFloatColumn(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value
+  return Number(value.toPrecision(16))
+}
+
 export function createMemoryPrismaClient() {
   const tables = new Map([...MODELS.keys()].map((name) => [name, []]))
 
@@ -184,7 +207,7 @@ export function createMemoryPrismaClient() {
       if (field.kind === 'object') continue
       const value = data[field.name]
       if (value !== undefined) {
-        row[field.name] = value
+        row[field.name] = field.type === 'Float' ? throughFloatColumn(value) : value
         continue
       }
       const fallback = scalarDefault(field)

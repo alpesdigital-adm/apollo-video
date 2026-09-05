@@ -198,9 +198,31 @@ function assertComponentKey(value: unknown, field: string): string {
   return value
 }
 
+/**
+ * Six decimals, the precision every other Wave 20 aggregate already rounds to
+ * (multicam-match-plan.ts:265, color-critic-report.ts:450).
+ *
+ * A measurement is hashed, and the hash has to survive the column it is stored
+ * in. A DOUBLE PRECISION column reached through Prisma is not a lossless
+ * channel for a JS number: the parameter is serialised with sixteen
+ * significant digits, so a statistic that needs seventeen —
+ * `lumaAtEv(0.5, -2.5)` is 0.22745236862429172, and any real ffmpeg-derived
+ * number can be — is stored as a different double and read back as that
+ * different double. The measurement then fails its own integrity check on
+ * every read: written once, refused for ever.
+ *
+ * Rounding here rather than in the repository is deliberate. The number the
+ * hash covers and the number in the column have to be the same number, and the
+ * only place that can be guaranteed is where the measurement is made. A
+ * luminance statistic is not measured to the seventeenth digit by anything.
+ */
+function round6(value: number): number {
+  return Math.round(value * 1e6) / 1e6
+}
+
 function assertFinite(value: unknown, field: string): number {
   assertDomain(typeof value === 'number' && Number.isFinite(value), 'INVALID_ARGUMENT', `${field} must be a finite number`)
-  return value
+  return round6(value as number)
 }
 
 function assertUnitInterval(value: unknown, field: string): number {

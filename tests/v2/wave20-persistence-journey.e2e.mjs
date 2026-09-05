@@ -533,6 +533,59 @@ test('T-F4.015 a react playback map survives its own anchor and keeps the versio
   )
 })
 
+/**
+ * A double a DOUBLE PRECISION column reached through Prisma cannot hand back.
+ *
+ * Prisma serialises a float parameter with sixteen significant digits. A JS
+ * number that needs seventeen is therefore stored as a different double, and an
+ * aggregate that hashes it can never be read again — which is exactly what a
+ * real PostgreSQL 16 did to one colour measurement, and what the in-memory
+ * client here now reproduces.
+ */
+const beyondTheColumn = (value) => typeof value === 'number'
+  && Number.isFinite(value)
+  && Number(value.toPrecision(16)) !== value
+
+function unstorableDoubles(node, path, found = []) {
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => unstorableDoubles(item, `${path}[${index}]`, found))
+    return found
+  }
+  if (node !== null && typeof node === 'object' && !(node instanceof Date)) {
+    for (const [key, value] of Object.entries(node)) unstorableDoubles(value, `${path}.${key}`, found)
+    return found
+  }
+  if (beyondTheColumn(node)) found.push(`${path} = ${node}`)
+  return found
+}
+
+test('T-F4.013 no Wave 20 aggregate carries a number its column cannot hand back', async () => {
+  const kit = await load()
+  const match = kit.buildMatchWorld({ workspaceId: A, projectId: PROJECT_A, sessionId: SESSION })
+  const aggregates = [
+    ['direction', kit.buildDirectionWorld({ workspaceId: A, sessionId: SESSION, projectId: PROJECT_A })],
+    ['match', match],
+    ['critic', kit.buildCriticReport({
+      workspaceId: A, projectId: PROJECT_A, projectVersionId: VERSION_A,
+      reportId: 'w20j-report-precision', matchPlan: match.plan,
+    })],
+    ['playback', kit.buildPlaybackWorld({ workspaceId: A, sessionId: REACT, projectId: PROJECT_A })],
+  ]
+
+  // The measurement that found this: camera B is two and a half stops under
+  // camera A, and `lumaAtEv(0.5, -2.5)` is 0.22745236862429172 — seventeen
+  // digits. Rounding it in the fixture would have hidden the defect in the
+  // domain; the domain rounds it now, and this asserts nothing has grown a new
+  // one anywhere in the wave.
+  const found = aggregates.flatMap(([name, value]) => unstorableDoubles(value, name))
+  assert.deepEqual(found, [], 'these numbers would come back from PostgreSQL as different numbers')
+
+  assert.ok(
+    beyondTheColumn(0.1 + 0.2) && beyondTheColumn(kit.lumaAtEv(0.5, -2.5) * 1.0000000000000002),
+    'the storability rule must be able to fail, or it asserts nothing',
+  )
+})
+
 test('T-F4.015 anchors answered out of tick order come back in the order they were placed', async () => {
   const kit = await load()
   const client = createMemoryPrismaClient()
