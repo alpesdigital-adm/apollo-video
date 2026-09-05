@@ -11,10 +11,10 @@ import {
 } from '../../src/v2/domain/capture-session.ts'
 import {
   CAMERA_ID_TOKEN,
-  CAMERA_IDENTITY_COLLISION,
   colorCameraIdForTrack,
   colorCameraIdsForSession,
 } from '../../src/v2/domain/camera-identity.ts'
+import { DOMAIN_ERROR_CODES } from '../../src/v2/domain/errors.ts'
 import {
   assertMulticamEvidenceSetIntegrity,
   createMulticamEvidenceSet,
@@ -30,7 +30,6 @@ import {
   DEFAULT_DIRECTION_POLICY,
   deriveAngleCandidates,
   directionConfidenceBand,
-  DIRECTION_RANGE_UNRESOLVABLE,
   DIRECTION_RULES,
   directMulticam,
   millisecondsToTicks,
@@ -58,8 +57,10 @@ import { createTrackCoverage } from '../../src/v2/domain/track-coverage.ts'
 
 const t = (n) => BigInt(n)
 const HZ = 90_000
-const sec = (n) => t(HZ) * t(n)
-const ms = (n) => t(90) * t(n)
+// Seconds may be fractional: 90 000 ticks per second is 90 per millisecond, so a
+// half-second interjection is an exact tick count and never a rounded float.
+const ms = (n) => t(90) * t(Math.round(n))
+const sec = (n) => ms(n * 1_000)
 const at = (second) => new Date(Date.parse('2029-04-01T09:00:00.000Z') + second * 1000).toISOString()
 const h = (n) => String(n).repeat(64).slice(0, 64)
 const seconds = (tick) => Number(tick) / HZ
@@ -149,7 +150,16 @@ function coverageFor(session, trackId, { confidenceBps = 9_800 } = {}) {
   })
 }
 
-function mapFor(session, clock, trackId, offsetTicks) {
+/**
+ * One piecewise map per track, pieces in the order the recorder wrote the files.
+ *
+ * `refit` builds the second piece as a re-fit rather than a restart: the source
+ * ticks continue without a gap, so the boundary cause must be a continuous one
+ * (`piecewise-clock-map.ts:66-70` refuses `file-split`/`recorder-restart` when
+ * nothing is missing) and the later piece admits a wider residual. Nothing is
+ * lost across it — but no single law spans it, so a selection cannot cross it.
+ */
+function mapFor(session, clock, trackId, offsetTicks, { refit = false } = {}) {
   const entry = session.tracks.find((candidate) => candidate.trackId === trackId)
   const source = createSourceClock({ sourceId: entry.sourceAssetId, timebase: entry.timebase, provenance: 'original-capture' })
   const claims = offsetTicks !== t(0)
@@ -167,12 +177,20 @@ function mapFor(session, clock, trackId, offsetTicks) {
         sourceCoverage: piece.coverage,
         driftRate: rational(1),
         offsetTicks,
-        residualBoundTicks: t(0),
-        confidence: 'high',
+        residualBoundTicks: index === 0 || !refit ? t(0) : t(4_500),
+        confidence: index === 0 || !refit ? 'high' : 'medium',
         anchorIds: claims ? [`anchor-${trackId}`] : [],
         evidenceRefs: claims ? [`marker-${trackId}`] : [],
       }),
-      ...(index === 0 ? {} : { openedBy: 'recorder-restart', openedByDetail: `recorder wrote part ${piece.ordinal} after the card filled` }),
+      ...(index === 0 ? {} : {
+        // The boundary cause is read from what the recorder did, not typed: a
+        // restart that lost material is a restart; a re-fit over continuous
+        // ticks is the fit admitting one line did not describe the span.
+        openedBy: refit ? 'residual-exceeded' : 'recorder-restart',
+        openedByDetail: refit
+          ? `the residual passed its bound after ${piece.coverage.start} source ticks`
+          : `recorder wrote part ${piece.ordinal} (${piece.splitReason})`,
+      }),
     })),
   })
 }
@@ -209,17 +227,22 @@ function diagnosticFor(session, tracks, { ceiling = 'automatic', version = 1 } =
   })
 }
 
-let observationCounter = 0
+/**
+ * Observation ids are derived from what the observation says, never from a
+ * counter: two fixtures describing the same evidence must produce the same
+ * bytes, or "the same inputs hash to the same direction" would be testing the
+ * order the fixtures happened to run in.
+ */
 function observe(trackId, [from, to], kind, value, confidence = 0.9, unit = sec) {
-  observationCounter += 1
+  const id = `obs-${kind}-${trackId}-${unit(from)}-${unit(to)}`
   return {
-    observationId: `obs-${String(observationCounter).padStart(3, '0')}-${kind}`,
+    observationId: id,
     trackId,
     range: createTickInterval(unit(from), unit(to)),
     kind,
     value: { kind, ...value },
     confidence,
-    provenance: { method: `fixture/${kind}`, evaluatorKind: 'controlled', evidenceRef: `run:${kind}:${observationCounter}`, producedAt: at(0) },
+    provenance: { method: `fixture/${kind}`, evaluatorKind: 'controlled', evidenceRef: `run:${id}`, producedAt: at(0) },
   }
 }
 
@@ -234,10 +257,10 @@ function sequence(direction) {
 // Podcast: master recorder as the clock, two cameras, one lapel mic per camera body.
 // ---------------------------------------------------------------------------
 
-function podcastWorld({ cameraBGap = false, observations, protectedSelections, range, cameraAGap = false } = {}) {
+function podcastWorld({ cameraBGap = false, cameraBRestart = false, observations, protectedSelections, range, cameraAGap = false } = {}) {
   const master = track({ trackId: 'track-master-audio', role: 'master-audio', deviceId: 'dev-rec', assetId: 'asset-master', coverage: createTickInterval(t(0), sec(600)), syncAudioPolicy: 'final-candidate', includeInFinalMix: true })
   const cameraA = track({ trackId: 'track-camera-a', role: 'camera-main', deviceId: 'dev-a', assetId: 'asset-cam-a', coverage: createTickInterval(t(0), cameraAGap ? sec(125) : sec(600)) })
-  const cameraB = track({ trackId: 'track-camera-b', role: 'camera-main', deviceId: 'dev-b', assetId: 'asset-cam-b', coverage: createTickInterval(t(0), cameraBGap ? sec(200) : sec(540)) })
+  const cameraB = track({ trackId: 'track-camera-b', role: 'camera-main', deviceId: 'dev-b', assetId: 'asset-cam-b', coverage: createTickInterval(t(0), cameraBGap || cameraBRestart ? sec(200) : sec(540)) })
   const micA = track({ trackId: 'track-mic-a', role: 'microphone', deviceId: 'dev-a', assetId: 'asset-mic-a', coverage: createTickInterval(t(0), sec(600)) })
   const micB = track({ trackId: 'track-mic-b', role: 'microphone', deviceId: 'dev-b', assetId: 'asset-mic-b', coverage: createTickInterval(t(0), sec(540)) })
   let { session, clock } = buildSession({
@@ -253,6 +276,17 @@ function podcastWorld({ cameraBGap = false, observations, protectedSelections, r
       lineage: { ...LINEAGE, operation: 'add-track-part', commandId: 'command-part-b-2' },
     })
   }
+  if (cameraBRestart) {
+    // Camera B rolled over to a second card without losing a frame: two files,
+    // continuous source ticks, and a map the fitter had to split in two anyway.
+    // Nothing is missing at the boundary, but no single law spans it, so cutting
+    // B → B across it is a cut from an angle to itself.
+    session = addCaptureSessionTrackPart(session, {
+      trackId: 'track-camera-b',
+      part: part({ partId: 'part-track-camera-b-2', ordinal: 1, sourceAssetId: 'asset-cam-b-2', coverage: createTickInterval(sec(200), sec(540)), splitReason: 'card-change' }),
+      lineage: { ...LINEAGE, operation: 'add-track-part', commandId: 'command-part-b-2' },
+    })
+  }
   if (cameraAGap) {
     session = addCaptureSessionTrackPart(session, {
       trackId: 'track-camera-a',
@@ -263,7 +297,7 @@ function podcastWorld({ cameraBGap = false, observations, protectedSelections, r
   // Camera A started half a second after the recorder; camera B thirty seconds after.
   const clockMaps = [
     mapFor(session, clock, 'track-camera-a', t(45_000)),
-    mapFor(session, clock, 'track-camera-b', sec(30)),
+    mapFor(session, clock, 'track-camera-b', sec(30), { refit: cameraBRestart }),
   ]
   const coverages = ['track-master-audio', 'track-camera-a', 'track-camera-b'].map((trackId) => coverageFor(session, trackId))
   const diagnostic = diagnosticFor(session, [
@@ -544,7 +578,12 @@ test('T-FR-150 golden 3: a reaction earns a cutaway of at least the minimum and 
 // ---------------------------------------------------------------------------
 
 test('T-FR-150 golden 4: a recorder gap in camera B is a rejection with both the sync and the coverage reason, and no shot touches it', () => {
-  const world = podcastWorld({ cameraBGap: true })
+  // B's guest speaks straight through the gap, so nothing but the missing
+  // material can explain the direction leaving B — and returning to it.
+  const world = podcastWorld({
+    cameraBGap: true,
+    observations: [speaks('track-mic-a', [1, 120]), speaks('track-mic-b', [120, 400]), speaks('track-mic-a', [400, 560])],
+  })
   // Camera B source [200 s, 230 s) is missing; with its 30 s offset that is session [230 s, 260 s).
   const inGap = deriveAngleCandidates({ ...world.inputs, window: createTickInterval(sec(235), sec(255)), previousShot: null })
   const cameraB = inGap.find((candidate) => candidate.trackId === 'track-camera-b')
@@ -598,7 +637,7 @@ test('T-FR-150 golden 4: when every camera is out of coverage the range stays un
   assert.equal(assertMulticamDirectionIntegrity(direction), direction)
   assert.throws(
     () => compileShotsToSourceRanges(direction, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1) }),
-    (error) => error.details.reason === DIRECTION_RANGE_UNRESOLVABLE && Array.isArray(error.details.uncovered),
+    (error) => error.code === 'DIRECTION_RANGE_UNRESOLVABLE' && Array.isArray(error.details.uncovered),
   )
 })
 
@@ -708,22 +747,24 @@ test('T-FR-150 rule 4: two redundant angles with equal evidence are not switched
 })
 
 test('T-FR-150 rule 5: a same-angle discontinuity is covered by the other angle and never cut silently', () => {
-  // Camera B gap while B is the only speaker for a long time: B → (gap) → B is a jump cut.
+  // Camera B changed card without losing a frame while B is the only speaker:
+  // the material is continuous but the source is two files, so B → B across the
+  // boundary is a cut from an angle to itself.
   const world = podcastWorld({
-    cameraBGap: true,
+    cameraBRestart: true,
     observations: [speaks('track-mic-b', [1, 560])],
   })
   const direction = world.direct()
   const seq = sequence(direction)
-  // Camera A covers the discontinuity for the policy's jump-cut length after 260 s, then B returns.
+  // Camera A covers the discontinuity for the policy's jump-cut length at 230 s, then B returns.
   const cover = direction.shots.find((shot) => shot.rule === 'jump-cut-avoided')
   assert.ok(cover, `expected a jump-cut cover in ${JSON.stringify(seq)}`)
   assert.equal(cover.chosen.trackId, 'track-camera-a')
-  assert.equal(seconds(cover.sessionRange.start), 260)
-  assert.equal(seconds(cover.sessionRange.end), 262)
+  assert.equal(seconds(cover.sessionRange.start), 230)
+  assert.equal(seconds(cover.sessionRange.end), 232)
   const next = direction.shots[cover.ordinal + 1]
   assert.equal(next.chosen.trackId, 'track-camera-b')
-  assert.equal(seconds(next.sessionRange.start), 262)
+  assert.equal(seconds(next.sessionRange.start), 232)
   assert.ok(!direction.warnings.some((warning) => warning.code === 'jump-cut-unavoidable'))
   for (let index = 1; index < direction.shots.length; index += 1) {
     assert.notEqual(direction.shots[index].chosen.trackId, direction.shots[index - 1].chosen.trackId, 'no two consecutive shots share a track')
@@ -893,7 +934,7 @@ test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap p
   assert.equal(assertMulticamDirectionIntegrity(forged), forged, 'the hash cannot tell a forged eligibility from a real one')
   assert.throws(
     () => compileShotsToSourceRanges(forged, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1) }),
-    (error) => error.details.reason === DIRECTION_RANGE_UNRESOLVABLE
+    (error) => error.code === 'DIRECTION_RANGE_UNRESOLVABLE'
       && error.details.shotId === fallback.shotId
       && error.details.trackId === 'track-camera-b'
       && error.details.cause === 'in-discontinuity',
@@ -910,7 +951,7 @@ test('T-FR-150 falsification: a forged eligible candidate over camera B\'s gap p
   })
   assert.throws(
     () => compileShotsToSourceRanges(honest, { session: world.session, clockMaps: world.clockMaps, planFps: rational(30, 1), coverages: [corrupt] }),
-    (error) => error.details.reason === DIRECTION_RANGE_UNRESOLVABLE && error.details.cause === 'coverage-corrupt',
+    (error) => error.code === 'DIRECTION_RANGE_UNRESOLVABLE' && error.details.cause === 'coverage-corrupt',
   )
 })
 
@@ -982,5 +1023,5 @@ test('T-FR-150 camera identity folds a track id into the ColorPlan token grammar
   assert.equal(ids.get('track-camera-a'), 'track-camera-a')
   assert.equal(ids.size, session.tracks.length)
   const collide = { sessionId: SESSION, tracks: [{ trackId: 'cam/a' }, { trackId: 'cam-a' }] }
-  assert.throws(() => colorCameraIdsForSession(collide), (error) => error.details.reason === CAMERA_IDENTITY_COLLISION && error.details.trackIds.length === 2)
+  assert.throws(() => colorCameraIdsForSession(collide), (error) => error.code === 'CAMERA_IDENTITY_COLLISION' && error.details.trackIds.length === 2)
 })
