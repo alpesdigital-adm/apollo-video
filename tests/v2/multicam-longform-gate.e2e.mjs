@@ -752,9 +752,14 @@ test(
     const CLIENT = 'f4016-client-c'
     const OTHER_CLIENT = 'f4016-client-d'
 
+    let world = null
     t.after(async () => {
       try {
-        await cleanGateWorld({ client, workspaceIds: [W, OTHER] })
+        // Through the world when it exists, because only it knows which
+        // catalogue rows it published; through the bare cleaner otherwise.
+        await (world
+          ? world.clean()
+          : cleanGateWorld({ client, workspaceIds: [W, OTHER] }))
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       } finally {
@@ -762,7 +767,7 @@ test(
       }
     })
 
-    const world = await buildGateWorld({
+    world = await buildGateWorld({
       client,
       workspaceId: W,
       projectId: PROJECT,

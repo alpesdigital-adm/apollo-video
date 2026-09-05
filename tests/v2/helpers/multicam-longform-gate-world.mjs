@@ -270,12 +270,20 @@ const TABLES = [
  * fixture that only cleans up on the way out makes the next run's failure
  * about the previous run.
  */
-export async function cleanGateWorld({ client, workspaceIds }) {
+export async function cleanGateWorld({ client, workspaceIds, protocolRowIds = [] }) {
   const workspaceId = { in: [...workspaceIds] }
   for (const table of TABLES) {
     const model = client[table]
     if (!model) throw new Error(`the fixture names a table the client does not have: ${table}`)
     await model.deleteMany({ where: { workspaceId } })
+  }
+  // `capture_protocols` is a global catalogue with no workspace column, so a
+  // suite that publishes one leaves it behind for every later suite — and
+  // `sync-diagnostic-persistence.e2e.mjs` asserts that its own first publish is
+  // not a replay. Only the rows THIS world created are removed; a protocol
+  // another suite published stays where it is.
+  if (protocolRowIds.length > 0) {
+    await client.v2CaptureProtocol.deleteMany({ where: { id: { in: [...protocolRowIds] } } })
   }
   await client.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
   await client.v2ProjectVersion.deleteMany({ where: { workspaceId } })
@@ -297,6 +305,8 @@ export async function buildGateWorld({
 }) {
   const workspaceIds = [workspaceId, ...(otherWorkspaceId ? [otherWorkspaceId] : [])]
   await cleanGateWorld({ client, workspaceIds })
+  /** Catalogue rows this world published, so cleanup takes back only its own. */
+  const protocolRowIds = []
 
   const sessions = new PrismaCaptureSessionRepository(client)
   const protocols = new PrismaCaptureProtocolRepository(client)
@@ -404,6 +414,7 @@ export async function buildGateWorld({
   const podcastProtocol = currentProtocolForScenario('podcast')
   await publishAndEvaluate({
     protocols, workspaceId, protocol: podcastProtocol, session: podcast.session, second: 60,
+    protocolRowIds,
   })
   // One session may hold evaluations against protocols of different scenarios
   // — the key is [workspace, session, sessionVersion, protocol, version] — and
@@ -419,6 +430,7 @@ export async function buildGateWorld({
     protocol: currentProtocolForScenario('teacher-and-screen'),
     session: podcast.session,
     second: 61,
+    protocolRowIds,
   })
 
   const evidenceSet = createMulticamEvidenceSet({
@@ -461,6 +473,7 @@ export async function buildGateWorld({
   const teacherProtocol = currentProtocolForScenario('teacher-and-screen')
   await publishAndEvaluate({
     protocols, workspaceId, protocol: teacherProtocol, session: teacher.session, second: 62,
+    protocolRowIds,
   })
 
   // ---- criterion 3: evidence that cannot resolve, and says so -------------
@@ -529,6 +542,7 @@ export async function buildGateWorld({
     protocol: currentProtocolForScenario('multicam'),
     session: insufficientSession,
     second: 63,
+    protocolRowIds,
   })
 
   // ---- criterion 4: a react session cut through a piecewise map ----------
@@ -988,7 +1002,8 @@ export async function buildGateWorld({
     criticReport,
     insufficientSession,
     snapshotIds,
-    clean: () => cleanGateWorld({ client, workspaceIds }),
+    protocolRowIds,
+    clean: () => cleanGateWorld({ client, workspaceIds, protocolRowIds }),
   }
 }
 
@@ -1091,8 +1106,19 @@ async function storeCaptureWorld({ sessions, diagnostics, workspaceId, world }) 
   await diagnostics.appendVersion({ diagnostic: world.diagnostic, occurredAt: at(33) })
 }
 
-async function publishAndEvaluate({ protocols, workspaceId, protocol, session, second }) {
-  await protocols.publish({ protocol, createdAt: at(second) })
+async function publishAndEvaluate({
+  protocols,
+  workspaceId,
+  protocol,
+  session,
+  second,
+  protocolRowIds,
+}) {
+  const published = await protocols.publish({ protocol, createdAt: at(second) })
+  // Only a row this world actually wrote is ours to delete later.
+  if (!published.replayed && protocolRowIds) {
+    protocolRowIds.push(`${protocol.protocolId}:v${protocol.version}`)
+  }
   const evaluation = evaluateCaptureProtocol({
     workspaceId,
     protocol,
