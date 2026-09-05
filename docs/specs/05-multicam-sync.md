@@ -405,6 +405,16 @@ Persistência em treze tabelas com `CHECK` e `EXCLUDE` que carregam as
 invariantes; API `/v1` com doze capabilities e rotas executáveis; worker durável
 com lease, heartbeat e fencing; página operável em `/capture-sessions`.
 
+**Corrigido na Wave 20 (F4.012):** o worker existia como função e nada o
+chamava — `POST .../sync-runs` enfileirava uma linha que nenhum processo
+consumia. A Wave 20 entregou o driver (`scripts/run-v2-capture-sync-worker.mjs`,
+`npm run worker:v2:capture-sync`, com `--once` para CI), a primeira
+implementação de `SyncSignalSource`
+(`infrastructure/media/ffmpeg-audio-sync-signal-source.ts`) e o produtor de
+`TrackCoverage` dentro do worker. O fallback de frame rate `30000/1001` saiu: a
+taxa vem do relógio persistido ou do timebase da track de referência, e sem
+nenhum dos dois o run é liquidado como falho com o motivo nomeado.
+
 ### 27.2 Decisões que a spec não previa
 
 **Sessão é cadeia imutável mais ponteiro.** A spec descrevia o modelo sem dizer
@@ -426,13 +436,32 @@ cresce estritamente por sessão e só o mais alto pode liquidar.
 
 ### 27.3 O que continua aberto
 
-- §9 correlação de áudio: a cascata consome sinais por uma porta; nenhum
-  fingerprinter de produção foi escrito.
+- §9 correlação de áudio: **entregue na Wave 20**. O adaptador decodifica as
+  duas trilhas, correlaciona janelas com `correlateAudioWindows` (F4.015) e
+  emite `SyncSignalObservation`; âncoras manuais do diagnóstico e marcadores
+  confirmados entram pela mesma porta. Medido sobre fixture gerada: erro de lag
+  de 0, 0, +18 e 0 ticks de 90 kHz em quatro atrasos (o único não nulo é o
+  atraso deliberadamente fora da grade de correlação).
 - §14 a §16, §19 a §24: Capture Protocol, Apollo Marker, react PlaybackMap,
   direção multicam e color match seguem fora de escopo (F4.009 a F4.016).
 - §26: a biblioteca de fingerprint, os thresholds por fps/duração e o tratamento
   de drift no áudio final sem alterar pitch continuam sem calibração contra
   material real.
+
+O que a Wave 20 deixou aberto, medido e não estimado:
+
+- **Drift não é ajustado.** `fitClockDrift` e a tabela `capture_drift_fits`
+  continuam sem escritor: não existe função de hash canônico para um
+  `ClockDriftFit`, e o repositório teria que inventar a serialização e a tabela
+  filha de âncoras. O worker segue passando `residualBoundTicks: 0` e o
+  diagnóstico segue relatando `driftPpm: null` — que é "não medido", não zero.
+- **Marcador confirmado não é prova admissível.** A cascata exige evidência de
+  ambiguidade de todo método que localiza por busca, e `MarkerDetection` guarda
+  só os ids das observações: o pico e o segundo pico que a fusão mediu não
+  sobrevivem no agregado. As observações de marcador são emitidas e descartadas
+  com `ambiguity-evidence-missing`, registrado no record.
+- **`SessionClock` continua sem escritor.** O worker resolve a taxa de quadros,
+  usa, e não persiste.
 
 ### 27.4 Não medido
 

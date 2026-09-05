@@ -2556,7 +2556,7 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     id: 'apollo.projects.capture-sessions.sync.request',
     version: '1.0.0',
     title: 'Synchronize a capture session',
-    description: 'Starts one durable synchronization of every non-reference track against the session clock, running the evidence cascade and persisting maps, coverage and drift without invoking any paid provider.',
+    description: 'Queues one durable synchronization of every non-reference track against the session clock. A worker claims the run, derives each track coverage from its parts, correlates the tracks by audio and files the evidence cascade verdict with a piecewise clock map for every track it could align, without invoking any paid provider. Clock drift is not fitted yet, so a diagnostic reports no drift rate.',
     exposure: 'public',
     operationKind: 'job',
     authMode: 'required',
