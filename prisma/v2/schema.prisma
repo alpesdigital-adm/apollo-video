@@ -9137,6 +9137,7 @@ model V2MulticamObservation {
   workspaceId     String   @db.VarChar(128)
   evidenceSetId   String   @db.VarChar(128)
   observationId   String   @db.VarChar(128)
+  ordinal         Int
   trackId         String   @db.VarChar(128)
   rangeStartTicks BigInt
   rangeEndTicks   BigInt
@@ -9153,6 +9154,7 @@ model V2MulticamObservation {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, evidenceSetId, observationId], map: "multicam_observations_set_observation_key")
+  @@unique([workspaceId, evidenceSetId, ordinal], map: "multicam_observations_set_ordinal_key")
   @@index([workspaceId, evidenceSetId, kind])
   @@map("multicam_observations")
 }
@@ -9508,6 +9510,7 @@ model V2MatchPlanMeasurement {
   workspaceId   String  @db.VarChar(128)
   planId        String  @db.VarChar(160)
   measurementId String  @db.VarChar(128)
+  ordinal       Int
   cameraId      String  @db.VarChar(128)
   isReference   Boolean
 
@@ -9517,6 +9520,7 @@ model V2MatchPlanMeasurement {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, planId, measurementId], map: "match_plan_measurements_plan_measurement_key")
+  @@unique([workspaceId, planId, ordinal], map: "match_plan_measurements_plan_ordinal_key")
   @@index([workspaceId, measurementId])
   @@map("match_plan_measurements")
 }
@@ -9560,6 +9564,7 @@ model V2MatchRangeOverride {
   workspaceId     String  @db.VarChar(128)
   planId          String  @db.VarChar(160)
   overrideId      String  @db.VarChar(128)
+  ordinal         Int
   cameraId        String  @db.VarChar(128)
   segmentId       String? @db.VarChar(128)
   rangeStartTicks BigInt?
@@ -9578,6 +9583,7 @@ model V2MatchRangeOverride {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, planId, overrideId])
+  @@unique([workspaceId, planId, ordinal], map: "match_range_overrides_plan_ordinal_key")
   @@index([workspaceId, planId, cameraId])
   @@map("match_range_overrides")
 }
@@ -9752,6 +9758,7 @@ model V2ColorCriticProposedDelta {
   id            String @id @db.VarChar(160)
   workspaceId   String @db.VarChar(128)
   reportId      String @db.VarChar(128)
+  ordinal       Int
   cameraId      String @db.VarChar(128)
   exposureEv    Float?
   redGain       Float?
@@ -9768,6 +9775,7 @@ model V2ColorCriticProposedDelta {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, reportId, cameraId])
+  @@unique([workspaceId, reportId, ordinal], map: "color_critic_proposed_deltas_report_ordinal_key")
   @@map("color_critic_proposed_deltas")
 }
 

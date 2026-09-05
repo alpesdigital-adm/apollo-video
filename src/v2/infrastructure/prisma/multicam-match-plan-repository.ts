@@ -58,9 +58,19 @@ function numberParameter(
   return typeof value === 'number' ? value : null
 }
 
-/** `<projectId>:<sessionId>:mp<version>` — one row per link of the chain. */
-function planRowId(projectId: string, sessionId: string, version: number): string {
-  return childRowId([projectId, sessionId, `mp${version}`], 160)
+/**
+ * Row keys carry the workspace because the primary key is global and the
+ * business ids are not: two workspaces may each have a `session-1`, and
+ * without the prefix the second one to write would be told its own aggregate
+ * already exists with different content.
+ */
+function planRowId(workspaceId: string, projectId: string, sessionId: string, version: number): string {
+  return childRowId([workspaceId, projectId, sessionId, `mp${version}`], 160)
+}
+
+/** The stored row of a measurement, which its children and joins point at. */
+function measurementRowId(workspaceId: string, measurementId: string): string {
+  return childRowId([workspaceId, measurementId], 128)
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +227,7 @@ function measurementWriteData(
   const measured = COLOR_MEASUREMENT_DIMENSIONS
     .filter((dimension) => measurement.dimensions[dimension].status === 'measured').length
   return {
-    id: measurement.measurementId,
+    id: measurementRowId(workspaceId, measurement.measurementId),
     workspaceId,
     sessionId: measurement.sessionId,
     schemaVersion: measurement.schemaVersion,
@@ -256,13 +266,14 @@ async function writeMeasurement(
   })
   for (const dimension of COLOR_MEASUREMENT_DIMENSIONS) {
     const result = measurement.dimensions[dimension]
-    const dimensionId = childRowId([measurement.measurementId, dimension], 160)
+    const parentId = measurementRowId(workspaceId, measurement.measurementId)
+    const dimensionId = childRowId([parentId, dimension], 160)
     const measured = result.status === 'measured'
     await transaction.v2ColorMeasurementDimension.create({
       data: {
         id: dimensionId,
         workspaceId,
-        measurementId: measurement.measurementId,
+        measurementId: parentId,
         dimension,
         status: result.status,
         value: measured ? result.value ?? null : null,
@@ -378,6 +389,7 @@ function hydrateTransform(
 function hydrateOverride(
   planId: string,
   row: {
+    ordinal: number
     overrideId: string
     cameraId: string
     segmentId: string | null
@@ -429,7 +441,7 @@ interface PlanRow {
   dependsOnMeasurementIdsJson: string
   planHash: string
   createdAt: Date
-  measurements: readonly { isReference: boolean; measurement: MeasurementRow }[]
+  measurements: readonly { ordinal: number; isReference: boolean; measurement: MeasurementRow }[]
   cameraTransforms: readonly Parameters<typeof hydrateTransform>[1][]
   rangeOverrides: readonly Parameters<typeof hydrateOverride>[1][]
   nonComparableRanges: readonly {
@@ -473,17 +485,24 @@ function hydratePlan(row: PlanRow): Readonly<StoredMulticamMatchPlan> {
     }),
     // Measurements are joined back rather than copied in: the plan and a
     // critic report that cite one measurement cite one row.
+    // The plan keeps the measurements in the order it was derived from, and
+    // that order is inside the plan hash: sorting them here by id would work
+    // for every fixture whose ids happen to be sorted and permute every other.
     measurements: Object.freeze(
       [...row.measurements]
-        .map((entry) => hydrateMeasurement(entry.measurement))
-        .sort((left, right) => left.measurementId.localeCompare(right.measurementId)),
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map((entry) => hydrateMeasurement(entry.measurement)),
     ),
     cameraTransforms: Object.freeze(
       [...row.cameraTransforms]
         .map((transform) => hydrateTransform(row.planId, transform))
         .sort((left, right) => left.cameraId.localeCompare(right.cameraId)),
     ),
-    rangeOverrides: Object.freeze(row.rangeOverrides.map((override) => hydrateOverride(row.planId, override))),
+    rangeOverrides: Object.freeze(
+      [...row.rangeOverrides]
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map((override) => hydrateOverride(row.planId, override)),
+    ),
     confidence: row.confidence,
     issues: Object.freeze(
       [...row.issues].sort((left, right) => left.ordinal - right.ordinal).map((issue) => Object.freeze({
@@ -521,9 +540,9 @@ function hydratePlan(row: PlanRow): Readonly<StoredMulticamMatchPlan> {
 }
 
 const PLAN_INCLUDE = {
-  measurements: { include: { measurement: { include: MEASUREMENT_INCLUDE } } },
+  measurements: { include: { measurement: { include: MEASUREMENT_INCLUDE } }, orderBy: { ordinal: 'asc' } },
   cameraTransforms: true,
-  rangeOverrides: { orderBy: { overrideId: 'asc' } },
+  rangeOverrides: { orderBy: { ordinal: 'asc' } },
   nonComparableRanges: true,
   issues: true,
 } as const
@@ -542,7 +561,7 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
   }): Promise<Readonly<{ stored: Readonly<StoredMulticamMatchPlan>; replayed: boolean }>> {
     const { plan, base } = input
     const version = base === null ? 1 : base.version + 1
-    const id = planRowId(plan.projectId, plan.sessionId, version)
+    const id = planRowId(plan.workspaceId, plan.projectId, plan.sessionId, version)
     const at = new Date(input.occurredAt)
     const reviewIssues = plan.issues.filter((issue) => issue.humanReviewRequired).length
 
@@ -609,11 +628,12 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
 
         if (plan.measurements.length > 0) {
           await transaction.v2MatchPlanMeasurement.createMany({
-            data: plan.measurements.map((measurement) => ({
+            data: plan.measurements.map((measurement, ordinal) => ({
               id: childRowId([id, measurement.measurementId], 160),
               workspaceId: plan.workspaceId,
               planId: id,
-              measurementId: measurement.measurementId,
+              ordinal,
+              measurementId: measurementRowId(plan.workspaceId, measurement.measurementId),
               cameraId: measurement.cameraId,
               isReference: measurement.cameraId === plan.referenceCameraId,
             })),
@@ -652,13 +672,14 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
           })
         }
 
-        for (const override of plan.rangeOverrides) {
+        for (const [ordinal, override] of plan.rangeOverrides.entries()) {
           const parameters = override.transform.implementation.parameters
           await transaction.v2MatchRangeOverride.create({
             data: {
               id: childRowId([id, override.overrideId], 160),
               workspaceId: plan.workspaceId,
               planId: id,
+              ordinal,
               overrideId: override.overrideId,
               cameraId: override.cameraId,
               segmentId: override.segmentId ?? null,
@@ -710,7 +731,7 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
         if (base === null) {
           await transaction.v2MulticamMatchPlanHead.create({
             data: {
-              id: childRowId([plan.projectId, plan.sessionId], 160),
+              id: childRowId([plan.workspaceId, plan.projectId, plan.sessionId], 160),
               workspaceId: plan.workspaceId,
               projectId: plan.projectId,
               sessionId: plan.sessionId,
@@ -836,7 +857,7 @@ export class PrismaMulticamMatchPlanRepository implements MulticamMatchPlanRepos
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.referenceCameraId ? { referenceCameraId: input.referenceCameraId } : {}),
         ...(input.measurementId
-          ? { measurements: { some: { measurementId: input.measurementId } } }
+          ? { measurements: { some: { measurementId: measurementRowId(input.workspaceId, input.measurementId) } } }
           : {}),
       },
       orderBy: [{ projectId: 'asc' }, { sessionId: 'asc' }, { version: 'desc' }],

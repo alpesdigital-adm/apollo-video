@@ -68,9 +68,16 @@ function parseTicks<T>(json: string, what: string): T {
   }
 }
 
-/** `<sessionId>:md<version>` — one row per link of the chain. */
-function directionRowId(sessionId: string, version: number): string {
-  return childRowId([sessionId, `md${version}`], 160)
+/**
+ * `<workspaceId>:<sessionId>:md<version>` — one row per link of the chain.
+ *
+ * The workspace is in the key because the primary key is global while a
+ * session id is not: two workspaces that both call a session `session-1` would
+ * otherwise fight over one row, and the second one to write would be told its
+ * own aggregate already exists with different content.
+ */
+function directionRowId(workspaceId: string, sessionId: string, version: number): string {
+  return childRowId([workspaceId, sessionId, `md${version}`], 160)
 }
 
 function shotRowId(directionId: string, ordinal: number): string {
@@ -435,7 +442,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
     createdAt: string
   }): Promise<Readonly<{ set: Readonly<MulticamEvidenceSet>; replayed: boolean }>> {
     const { set } = input
-    const id = childRowId([set.sessionId, `ev-${set.evidenceHash.slice(0, 16)}`], 128)
+    const id = childRowId([set.workspaceId, set.sessionId, `ev-${set.evidenceHash.slice(0, 16)}`], 128)
     const at = new Date(input.createdAt)
     try {
       await this.client.$transaction(async (transaction) => {
@@ -455,11 +462,16 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
         })
         if (set.observations.length === 0) return
         await transaction.v2MulticamObservation.createMany({
-          data: set.observations.map((observation) => ({
+          data: set.observations.map((observation, ordinal) => ({
             id: childRowId([id, observation.observationId], 160),
             workspaceId: set.workspaceId,
             evidenceSetId: id,
             observationId: observation.observationId,
+            // createMulticamEvidenceSet sorts the observations with its own
+            // comparator before hashing them, so the order is part of the
+            // aggregate. Reading them back in id order would permute the array
+            // and the hash would stop matching.
+            ordinal,
             trackId: observation.trackId,
             rangeStartTicks: observation.range.start,
             rangeEndTicks: observation.range.end,
@@ -493,7 +505,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
   async readEvidenceSet(input: { workspaceId: string; evidenceHash: string }) {
     const row = await this.client.v2MulticamEvidenceSet.findFirst({
       where: { workspaceId: input.workspaceId, evidenceHash: input.evidenceHash },
-      include: { observations: { orderBy: { observationId: 'asc' } } },
+      include: { observations: { orderBy: { ordinal: 'asc' } } },
     })
     return row ? hydrateEvidenceSet(row) : null
   }
@@ -502,7 +514,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
     const row = await this.client.v2MulticamEvidenceSet.findFirst({
       where: { workspaceId: input.workspaceId, sessionId: input.sessionId },
       orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
-      include: { observations: { orderBy: { observationId: 'asc' } } },
+      include: { observations: { orderBy: { ordinal: 'asc' } } },
     })
     return row ? hydrateEvidenceSet(row) : null
   }
@@ -514,7 +526,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
   }): Promise<Readonly<{ stored: Readonly<StoredMulticamDirection>; replayed: boolean }>> {
     const { direction, base } = input
     const version = base === null ? 1 : base.version + 1
-    const id = directionRowId(direction.sessionId, version)
+    const id = directionRowId(direction.workspaceId, direction.sessionId, version)
     const at = new Date(input.occurredAt)
     const lowConfidence = direction.shots.filter(
       (shot) => shot.confidenceBand === 'low' || shot.confidenceBand === 'insufficient',
@@ -664,7 +676,7 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
         if (base === null) {
           await transaction.v2MulticamDirectionHead.create({
             data: {
-              id: direction.sessionId,
+              id: childRowId([direction.workspaceId, direction.sessionId], 128),
               workspaceId: direction.workspaceId,
               sessionId: direction.sessionId,
               version: 1,

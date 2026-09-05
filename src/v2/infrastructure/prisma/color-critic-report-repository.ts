@@ -7,6 +7,7 @@ import type {
 import { parseWithTicks, stringifyWithTicks } from './bigint-json.ts'
 import { childRowId } from './child-row-id.ts'
 import {
+  COLOR_CRITIC_DIMENSIONS,
   COLOR_CRITIC_MAX_CORRECTION_ITERATIONS,
   COLOR_CRITIC_REPORT_SCHEMA_VERSION,
   DEFAULT_COLOR_CRITIC_POLICY,
@@ -73,6 +74,14 @@ function optionalList(value: readonly string[] | undefined): string {
 function readOptionalList(json: string, what: string): readonly string[] | undefined {
   const parsed = parse<string[] | null>(json, what)
   return parsed === null ? undefined : Object.freeze(parsed)
+}
+
+/**
+ * The stored row of a report. Prefixed with the workspace because the primary
+ * key is global while a report id is only unique inside one.
+ */
+function reportRowId(workspaceId: string, reportId: string): string {
+  return childRowId([workspaceId, reportId], 128)
 }
 
 function hydrateSubject(row: {
@@ -185,6 +194,7 @@ interface ReportRow {
     evidenceRefsJson: string
   }[]
   proposedDeltas: readonly {
+    ordinal: number
     cameraId: string
     exposureEv: number | null
     redGain: number | null
@@ -222,7 +232,7 @@ function hydrateReport(row: ReportRow): Readonly<ColorCriticReport> {
   }
   const proposedDeltas: readonly Readonly<ColorCriticProposedDelta>[] = Object.freeze(
     [...row.proposedDeltas]
-      .sort((left, right) => left.cameraId.localeCompare(right.cameraId))
+      .sort((left, right) => left.ordinal - right.ordinal)
       .map((delta) => Object.freeze({
         cameraId: delta.cameraId,
         exposureEv: delta.exposureEv,
@@ -258,7 +268,19 @@ function hydrateReport(row: ReportRow): Readonly<ColorCriticReport> {
     evaluators: Object.freeze(
       parse<ColorCriticEvaluator[]>(row.evaluatorsJson, `critic report ${row.reportId} evaluators`),
     ),
-    dimensions: Object.freeze(row.dimensions.map(hydrateDimension)),
+    // COLOR_CRITIC_DIMENSIONS order, which is the order evaluateColorCritic
+    // answers them in and therefore the order the report hash covers —
+    // alphabetical by column would put `cast` before `crushedBlacks`.
+    dimensions: Object.freeze(COLOR_CRITIC_DIMENSIONS.map((dimension) => {
+      const stored = row.dimensions.find((entry) => entry.dimension === dimension)
+      if (!stored) {
+        throw new DomainError(
+          'PERSISTENCE_CONFLICT',
+          `Stored colour critic report ${row.reportId} has no answer for ${dimension}`,
+        )
+      }
+      return hydrateDimension(stored)
+    })),
     issues: Object.freeze(
       [...row.issues].sort((left, right) => left.ordinal - right.ordinal).map((issue) => Object.freeze({
         code: issue.code,
@@ -312,7 +334,7 @@ function hydrateReport(row: ReportRow): Readonly<ColorCriticReport> {
 }
 
 const REPORT_INCLUDE = {
-  dimensions: { orderBy: { dimension: 'asc' } },
+  dimensions: true,
   issues: true,
   proposedDeltas: true,
 } as const
@@ -338,12 +360,13 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
     const insufficient = report.issues
       .filter((issue) => issue.classification === 'insufficient-evidence').length
     const unavailable = report.dimensions.filter((dimension) => dimension.status === 'unavailable').length
+    const rowId = reportRowId(report.workspaceId, report.reportId)
 
     try {
       await this.client.$transaction(async (transaction) => {
         await transaction.v2ColorCriticReport.create({
           data: {
-            id: report.reportId,
+            id: rowId,
             workspaceId: report.workspaceId,
             projectId: report.projectId,
             projectVersionId: report.projectVersionId,
@@ -391,9 +414,9 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
 
         await transaction.v2ColorCriticDimensionResult.createMany({
           data: report.dimensions.map((dimension) => ({
-            id: childRowId([report.reportId, dimension.dimension], 160),
+            id: childRowId([rowId, dimension.dimension], 160),
             workspaceId: report.workspaceId,
-            reportId: report.reportId,
+            reportId: rowId,
             dimension: dimension.dimension,
             status: dimension.status,
             stage: dimension.stage,
@@ -411,9 +434,9 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
         if (report.issues.length > 0) {
           await transaction.v2ColorCriticIssue.createMany({
             data: report.issues.map((issue, ordinal) => ({
-              id: childRowId([report.reportId, `i${ordinal}`], 160),
+              id: childRowId([rowId, `i${ordinal}`], 160),
               workspaceId: report.workspaceId,
-              reportId: report.reportId,
+              reportId: rowId,
               ordinal,
               code: issue.code,
               dimension: issue.dimension,
@@ -439,10 +462,11 @@ export class PrismaColorCriticReportRepository implements ColorCriticReportRepos
             // The bounds travel with the delta rather than living in a policy
             // the row cannot see: a stored correction stays checkable against
             // the limits that actually produced it.
-            data: correction.proposedDeltas.map((delta) => ({
-              id: childRowId([report.reportId, delta.cameraId], 160),
+            data: correction.proposedDeltas.map((delta, ordinal) => ({
+              id: childRowId([rowId, delta.cameraId], 160),
               workspaceId: report.workspaceId,
-              reportId: report.reportId,
+              reportId: rowId,
+              ordinal,
               cameraId: delta.cameraId,
               exposureEv: delta.exposureEv,
               redGain: delta.whiteBalance?.redGain ?? null,

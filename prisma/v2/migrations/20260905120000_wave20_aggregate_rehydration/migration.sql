@@ -49,3 +49,39 @@ ALTER TABLE "match_range_overrides"
           AND "transformJson"::jsonb -> 'implementation' ->> 'provider' = "provider"
           AND "transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion"
           AND "transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb);
+
+-- The other half of the same problem: four child collections are ordered by
+-- the aggregate that owns them, and their tables had no way to say so.
+--
+-- An evidence set sorts its observations with its own comparator before
+-- hashing them; a match plan keeps the measurements and the overrides in the
+-- order it was given; a bounded correction keeps its deltas in the order the
+-- critic proposed them. Read back in index order — or in id order, which is
+-- the same accident by another name — the array comes back permuted and the
+-- aggregate hash no longer matches, so the read is refused and the row might as
+-- well not have been written. Sorting on read by some column that happens to
+-- work for today's fixtures would be that same accident a third time.
+
+ALTER TABLE "multicam_observations" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "multicam_observations" ALTER COLUMN "ordinal" DROP DEFAULT;
+ALTER TABLE "multicam_observations"
+    ADD CONSTRAINT "multicam_observations_ordinal_check" CHECK ("ordinal" >= 0);
+CREATE UNIQUE INDEX "multicam_observations_set_ordinal_key" ON "multicam_observations"("workspaceId", "evidenceSetId", "ordinal");
+
+ALTER TABLE "match_plan_measurements" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "match_plan_measurements" ALTER COLUMN "ordinal" DROP DEFAULT;
+ALTER TABLE "match_plan_measurements"
+    ADD CONSTRAINT "match_plan_measurements_ordinal_check" CHECK ("ordinal" >= 0);
+CREATE UNIQUE INDEX "match_plan_measurements_plan_ordinal_key" ON "match_plan_measurements"("workspaceId", "planId", "ordinal");
+
+ALTER TABLE "match_range_overrides" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "match_range_overrides" ALTER COLUMN "ordinal" DROP DEFAULT;
+ALTER TABLE "match_range_overrides"
+    ADD CONSTRAINT "match_range_overrides_ordinal_check" CHECK ("ordinal" >= 0);
+CREATE UNIQUE INDEX "match_range_overrides_plan_ordinal_key" ON "match_range_overrides"("workspaceId", "planId", "ordinal");
+
+ALTER TABLE "color_critic_proposed_deltas" ADD COLUMN "ordinal" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "color_critic_proposed_deltas" ALTER COLUMN "ordinal" DROP DEFAULT;
+ALTER TABLE "color_critic_proposed_deltas"
+    ADD CONSTRAINT "color_critic_proposed_deltas_ordinal_check" CHECK ("ordinal" >= 0);
+CREATE UNIQUE INDEX "color_critic_proposed_deltas_report_ordinal_key" ON "color_critic_proposed_deltas"("workspaceId", "reportId", "ordinal");

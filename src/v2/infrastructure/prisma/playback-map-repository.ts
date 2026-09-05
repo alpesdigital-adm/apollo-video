@@ -36,8 +36,12 @@ function parse<T>(json: string, what: string): T {
   }
 }
 
-function mapRowId(sessionId: string, reactionTrackId: string, version: number): string {
-  return childRowId([sessionId, reactionTrackId, `pm${version}`], 160)
+/**
+ * The workspace leads the key because the primary key is global while a
+ * session id is only unique inside one workspace.
+ */
+function mapRowId(workspaceId: string, sessionId: string, reactionTrackId: string, version: number): string {
+  return childRowId([workspaceId, sessionId, reactionTrackId, `pm${version}`], 160)
 }
 
 /**
@@ -239,7 +243,7 @@ export class PrismaPlaybackMapRepository implements PlaybackMapRepository {
     occurredAt: string
   }): Promise<Readonly<{ map: Readonly<PlaybackMap>; replayed: boolean }>> {
     const { map } = input
-    const id = mapRowId(map.sessionId, map.reactionTrackId, map.version)
+    const id = mapRowId(map.workspaceId, map.sessionId, map.reactionTrackId, map.version)
     const at = new Date(input.occurredAt)
     const referenced = map.pieces.filter((piece) => piece.referenceRange !== null).length
     const manualAnchors = map.anchors.filter((anchor) => anchor.origin === 'manual').length
@@ -347,7 +351,7 @@ export class PrismaPlaybackMapRepository implements PlaybackMapRepository {
         if (map.version === 1) {
           await transaction.v2PlaybackMapHead.create({
             data: {
-              id: childRowId([map.sessionId, map.reactionTrackId], 160),
+              id: childRowId([map.workspaceId, map.sessionId, map.reactionTrackId], 160),
               workspaceId: map.workspaceId,
               sessionId: map.sessionId,
               reactionTrackId: map.reactionTrackId,
