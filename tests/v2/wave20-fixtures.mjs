@@ -667,6 +667,12 @@ export function anchorPlaybackMap(map, { anchorId, actorId, note, createdAt, str
  *   reference track's own hull — what a request that omits `range` directs —
  *   contains instants no camera covered. That is the case the request type
  *   documents at length and the one the compile step then refuses.
+ * - `trackPrefix` renames every track and asset of the world. Track coverage is
+ *   keyed by [workspaceId, trackId] alone (`capture_track_coverages`), so two
+ *   sessions of one workspace built from this fixture would upsert over each
+ *   other's coverage rows and the second session would appear to have derived
+ *   none. A suite that stores more than one of these worlds has to say which
+ *   tracks belong to which.
  * - `restart` splits one track into two files with a recorder gap between them,
  *   exactly as `addCaptureSessionTrackPart` models it. The clock map then has
  *   two pieces with a hole, so an analysis that straddles the hole resolves to
@@ -681,15 +687,17 @@ export function buildDirectableMulticamWorld({
   endSecond = 300,
   cameraEndSecond = endSecond,
   cameraBOffsetSeconds = 0,
+  trackPrefix = '',
   restart = null,
 }) {
+  const id = (name) => `${trackPrefix}${name}`
   const span = createTickInterval(tick(0), sec(endSecond))
   const pictureSpan = createTickInterval(tick(0), sec(cameraEndSecond))
   const master = track({
-    trackId: 'track-master-audio',
+    trackId: id('track-master-audio'),
     role: 'master-audio',
     deviceId: 'dev-rec',
-    assetId: 'asset-master',
+    assetId: id('asset-master'),
     coverage: span,
     syncAudioPolicy: 'final-candidate',
     includeInFinalMix: true,
@@ -700,11 +708,11 @@ export function buildDirectableMulticamWorld({
   const firstSpan = (trackId, whole) => (restart && restart.trackId === trackId
     ? createTickInterval(tick(0), sec(restart.stopSecond))
     : whole)
-  const cameraA = track({ trackId: 'track-camera-a', role: 'camera-main', deviceId: 'dev-a', assetId: 'asset-cam-a', coverage: firstSpan('track-camera-a', pictureSpan) })
-  const cameraB = track({ trackId: 'track-camera-b', role: 'camera-main', deviceId: 'dev-b', assetId: 'asset-cam-b', coverage: firstSpan('track-camera-b', pictureSpan) })
-  const screen = track({ trackId: 'track-screen', role: 'screen', deviceId: 'dev-screen', assetId: 'asset-screen', coverage: firstSpan('track-screen', pictureSpan) })
-  const micA = track({ trackId: 'track-mic-a', role: 'microphone', deviceId: 'dev-a', assetId: 'asset-mic-a', coverage: firstSpan('track-mic-a', span) })
-  const micB = track({ trackId: 'track-mic-b', role: 'microphone', deviceId: 'dev-b', assetId: 'asset-mic-b', coverage: firstSpan('track-mic-b', span) })
+  const cameraA = track({ trackId: id('track-camera-a'), role: 'camera-main', deviceId: 'dev-a', assetId: id('asset-cam-a'), coverage: firstSpan(id('track-camera-a'), pictureSpan) })
+  const cameraB = track({ trackId: id('track-camera-b'), role: 'camera-main', deviceId: 'dev-b', assetId: id('asset-cam-b'), coverage: firstSpan(id('track-camera-b'), pictureSpan) })
+  const screen = track({ trackId: id('track-screen'), role: 'screen', deviceId: 'dev-screen', assetId: id('asset-screen'), coverage: firstSpan(id('track-screen'), pictureSpan) })
+  const micA = track({ trackId: id('track-mic-a'), role: 'microphone', deviceId: 'dev-a', assetId: id('asset-mic-a'), coverage: firstSpan(id('track-mic-a'), span) })
+  const micB = track({ trackId: id('track-mic-b'), role: 'microphone', deviceId: 'dev-b', assetId: id('asset-mic-b'), coverage: firstSpan(id('track-mic-b'), span) })
 
   let session = createCaptureSession({
     workspaceId,
@@ -743,7 +751,7 @@ export function buildDirectableMulticamWorld({
     sessionId,
     timebase: TB,
     frameRate: rational(30, 1),
-    authority: { origin: 'master-audio', sourceId: 'asset-master', provenance: 'original-capture', evidenceRef: 'probe-master' },
+    authority: { origin: 'master-audio', sourceId: id('asset-master'), provenance: 'original-capture', evidenceRef: 'probe-master' },
     establishedAt: at(0),
   })
 
@@ -751,13 +759,13 @@ export function buildDirectableMulticamWorld({
   // nothing, and a millisecond measured on its file has nowhere to land on the
   // session clock.
   const clockMaps = ['track-camera-a', 'track-camera-b', 'track-screen', 'track-mic-a', 'track-mic-b']
-    .map((trackId) => mapFor(
+    .map((name) => mapFor(
       workspaceId,
       sessionId,
       session,
       clock,
-      trackId,
-      trackId === 'track-camera-b' ? sec(cameraBOffsetSeconds) : tick(0),
+      id(name),
+      name === 'track-camera-b' ? sec(cameraBOffsetSeconds) : tick(0),
     ))
   const coverages = session.tracks.map((entry) => coverageFor(workspaceId, session, entry.trackId))
 
@@ -769,9 +777,9 @@ export function buildDirectableMulticamWorld({
     previousVersionHash: null,
     sessionVersion: session.version,
     referenceEpoch: session.referenceEpoch,
-    tracks: ['track-camera-a', 'track-camera-b', 'track-screen', 'track-mic-a', 'track-mic-b'].map((trackId) => {
+    tracks: ['track-camera-a', 'track-camera-b', 'track-screen', 'track-mic-a', 'track-mic-b'].map((name) => {
       const base = {
-        trackId,
+        trackId: id(name),
         methods: ['apollo-marker'],
         confidence: 0.9,
         offsetMs: 0,

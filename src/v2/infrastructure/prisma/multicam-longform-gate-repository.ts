@@ -140,6 +140,26 @@ const MULTI_RANGE_SYNTHESIS_ORIGIN: RenderablePlanOrigin = 'multi-range-synthesi
 const SYNTHESIS_TARGET_MS = 120_000
 const DURATION_TOLERANCE_SECONDS = 1
 
+/**
+ * The narrowed vocabularies, exposed so a test can prove each one is a
+ * non-empty subset of the domain constant that owns it.
+ *
+ * Without this the derivation above is only a promise: `new Set(['synced-hgh'])`
+ * type-checks as a `Set<string>` and makes criterion 1 quietly stop firing.
+ */
+export const GATE_READER_VOCABULARIES = Object.freeze({
+  syncedStatuses: Object.freeze([...SYNCED_STATUSES]),
+  manualActions: Object.freeze([...MANUAL_ACTIONS]),
+  interruptedModes: Object.freeze([...INTERRUPTED_MODES]),
+  blockingCeilings: Object.freeze([...BLOCKING_CEILINGS]),
+  resolvedCriticActions: Object.freeze([...RESOLVED_CRITIC_ACTIONS]),
+  participantRoles: Object.freeze([...PARTICIPANT_ROLES]),
+  renderablePlanOrigins: Object.freeze([
+    REACT_PLAYBACK_ORIGIN,
+    MULTI_RANGE_SYNTHESIS_ORIGIN,
+  ]),
+})
+
 function isPrismaCode(error: unknown, code: string): boolean {
   return (
     typeof error === 'object' &&

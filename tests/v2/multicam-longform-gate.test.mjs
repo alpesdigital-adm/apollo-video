@@ -205,6 +205,72 @@ test('T-F4.016 a check cannot claim to pass on evidence whose hash did not verif
   )
 })
 
+test('T-F4.016 a reference with no stored hash is not the same thing as one that failed to verify', () => {
+  // The three states, counted apart. Conflating the last two is what made four
+  // of the ten criteria impossible to store: the migration refuses a passing
+  // row whose `unverifiedReferenceCount` is not zero, so a criterion citing a
+  // media artifact nobody downloaded aborted the whole persist() transaction.
+  const evidence = passingEvidence()
+  const criterion = evidence[8].criterion
+  assert.equal(criterion, 'final-mp4-inspectable')
+  evidence[8].checks[0].references = [
+    { ...REFERENCE[criterion] },
+    { type: 'media-artifact', id: 'artifact-final', hash: null, verified: false },
+  ]
+  const report = evaluate(evidence)
+  const item = report.criteria.find((entry) => entry.criterion === criterion)
+
+  assert.equal(report.approved, true, 'a pass citing a hash-less row was refused')
+  assert.equal(item.passed, true)
+  assert.equal(
+    item.unverifiedReferenceCount,
+    0,
+    'a row that stores no hash was counted as a hash that did not verify',
+  )
+  assert.equal(item.unhashedReferenceCount, 1)
+
+  // The other half of the distinction: a hash that WAS recomputed and
+  // disagreed still forbids the pass.
+  const tampered = passingEvidence()
+  tampered[8].checks[0].references = [
+    { ...REFERENCE[tampered[8].criterion], verified: false },
+  ]
+  assert.throws(
+    () => evaluate(tampered),
+    (error) => /did not verify/.test(String(error?.message)),
+  )
+})
+
+test('T-F4.016 a reference may not claim verification without a hash, or be cited twice', () => {
+  // Both invariants are load-bearing for the counts and are encoded again as
+  // CHECK constraints, so a domain that accepted either would turn a modelling
+  // bug into a write-time persistence failure.
+  const claiming = passingEvidence()
+  claiming[0].checks[0].references = [
+    { type: 'capture-session', id: 'session-podcast', hash: null, verified: true },
+  ]
+  assert.throws(
+    () => evaluate(claiming),
+    (error) =>
+      error?.code === 'INVALID_ARGUMENT' &&
+      /claims verification without a stored hash/.test(String(error?.message)),
+    'a reference with nothing to recompute claimed it had recomputed',
+  )
+
+  const duplicated = passingEvidence()
+  duplicated[0].checks[0].references = [
+    { ...REFERENCE[duplicated[0].criterion] },
+    { ...REFERENCE[duplicated[0].criterion] },
+  ]
+  assert.throws(
+    () => evaluate(duplicated),
+    (error) =>
+      error?.code === 'INVALID_ARGUMENT' &&
+      /lists the same reference twice/.test(String(error?.message)),
+    'one row counted as two pieces of evidence',
+  )
+})
+
 test('T-F4.016 a check that read nothing must say the evidence was missing', () => {
   const evidence = passingEvidence()
   evidence[2].checks[0] = {
@@ -484,5 +550,24 @@ test('T-F4.016 the migration encodes the same criteria, checks and reasons as th
   assert.ok(
     sql.includes(`"total" = ${MULTICAM_LONGFORM_CRITERIA.length}`),
     'the migration does not pin the criterion count',
+  )
+  // The column that keeps "no hash to recompute" out of the tamper count. Both
+  // tables carry it, and the checks table pins the two as disjoint.
+  assert.equal(
+    (sql.match(/"unhashedReferenceCount" INTEGER NOT NULL DEFAULT 0/g) ?? []).length,
+    2,
+    'the criteria and check tables do not both count hash-less references',
+  )
+  assert.ok(
+    sql.includes(
+      'AND ("unverifiedReferenceCount" + "unhashedReferenceCount") <= "referenceCount"',
+    ),
+    'the migration lets the two reference counts overlap',
+  )
+  assert.ok(
+    sql.includes(
+      'AND ("passed" = FALSE OR ("referenceCount" > 0 AND "unverifiedReferenceCount" = 0))',
+    ),
+    'the migration stopped refusing a pass built on a hash that did not verify',
   )
 })
