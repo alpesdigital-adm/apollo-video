@@ -20,6 +20,8 @@ import {
   colorCriticProxyIssues,
   colorCriticRenderInputs,
   evaluateColorCriticService,
+  matchPlanCoversCameras,
+  selectRenderMatchPlan,
 } from '../../src/v2/application/color-critic.ts'
 import { buildFfmpegColorPipelineFilter } from '../../src/v2/infrastructure/media/ffmpeg-color-pipeline-processor.ts'
 import { pipelineWithoutOutputTransform } from '../../src/v2/infrastructure/media/ffmpeg-color-critic-evaluator.ts'
@@ -1227,6 +1229,66 @@ test('T-F4.014 an approved verdict adds no issue to the review at all', () => {
   })
   assert.equal(report.action, 'approve')
   assert.deepEqual(colorCriticProxyIssues({ report, fps: 30 }), [])
+})
+
+test('T-F4.014 the session a verdict reads its reference from is the one that knows these cameras', () => {
+  // A project holds several capture sessions. "The most recently updated head"
+  // is not the question — an unrelated session touched last would hand the
+  // critic a reference camera nobody approved for these frames.
+  const plan = (sessionId, referenceCameraId, corrected) => ({
+    sessionId,
+    plan: { referenceCameraId, cameraTransforms: corrected.map((cameraId) => ({ cameraId })) },
+  })
+  const interview = plan('session-interview', 'cam-a', ['cam-b'])
+  const brollShoot = plan('session-broll', 'cam-x', ['cam-y'])
+
+  assert.equal(
+    selectRenderMatchPlan({ cameraIds: ['cam-a', 'cam-b'], candidates: [brollShoot, interview] })?.sessionId,
+    'session-interview',
+    'the plan that knows these cameras wins, whatever order the heads came back in',
+  )
+  assert.equal(
+    selectRenderMatchPlan({ cameraIds: ['cam-a', 'cam-b', 'cam-z'], candidates: [interview, brollShoot] }),
+    null,
+    'a plan that does not know every camera the render cut to is not a plan about these frames',
+  )
+  assert.equal(
+    selectRenderMatchPlan({ cameraIds: ['cam-a'], candidates: [interview, plan('session-reshoot', 'cam-a', ['cam-c'])] }),
+    null,
+    'two sessions that both know the cameras cannot say which shaped this render',
+  )
+  assert.equal(selectRenderMatchPlan({ cameraIds: [], candidates: [interview] }), null)
+  assert.equal(matchPlanCoversCameras(interview.plan, ['cam-b']), true)
+  assert.equal(matchPlanCoversCameras(interview.plan, ['cam-b', 'cam-x']), false)
+})
+
+test('T-F4.014 a head that does not know these cameras is not used as the reference', async () => {
+  const evaluator = fakeEvaluator({
+    before: [criticMeasurement({ measurementId: 'ccm-before-9', sourceAssetId: 'artifact-b', sourceSha256: sha('b'), cameraId: 'cam-b' })],
+    after: [criticMeasurement({ measurementId: 'ccm-after-9', sourceAssetId: 'artifact-proxy', sourceSha256: sha('1'), cameraId: 'cam-b' })],
+  })
+  const reports = fakeReportRepository()
+  const heads = new Map()
+  const evaluate = evaluateColorCriticService({
+    evaluator,
+    reports,
+    matchPlans: { async readHead({ sessionId }) { return heads.get(sessionId) ?? null } },
+    clock: () => new Date('2029-06-01T13:00:00.000Z'),
+  })
+
+  // A plan about another session's cameras: it names neither cam-b nor a
+  // correction for it.
+  heads.set('session-other', {
+    version: 1,
+    plan: {
+      planId: 'mmp-other', planHash: sha('3'),
+      referenceCameraId: 'cam-x', cameraTransforms: [{ cameraId: 'cam-y' }],
+    },
+  })
+  const foreign = await evaluate(criticRequest({ sessionId: 'session-other' }))
+  assert.equal(foreign.report.matchPlanId, null,
+    'a plan from an unrelated session must not become the reference camera of this verdict')
+  assert.equal(foreign.report.referenceCameraId, null)
 })
 
 test('T-F4.014 a clip with no camera is dropped rather than attributed to one', () => {

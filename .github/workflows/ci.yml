@@ -234,6 +234,9 @@ jobs:
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
+      - name: Run Wave 20 colour measurement against decoded frames
+        run: npm run test:integration:color-measurement
+
       - name: Run Wave 20 multicam colour match against real pixels
         run: npm run test:integration:color-match
 
