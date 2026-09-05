@@ -28,6 +28,7 @@ import { runNextSourceCleanupOperationService } from '../application/run-source-
 import { runNextLongFormIndexOperationService } from '../application/run-long-form-index-worker.ts'
 import { enqueueProviderJobService, runProviderJobWorkerOnce } from '../application/provider-jobs.ts'
 import { runNextProjectDirectorOperationService } from '../application/run-project-director-operation-worker.ts'
+import { runCaptureSyncWorker } from '../application/run-capture-sync-worker.ts'
 import { createEvidenceBoundBriefCompiler } from './brief/evidence-bound-brief-compiler-model.ts'
 import { produceContiguousEvidenceService } from '../application/contiguous-evidence.ts'
 import {
@@ -214,6 +215,7 @@ import {
 } from '../application/synthetic-critic-report-queries.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
 import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
 import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
@@ -2234,6 +2236,32 @@ export function createCaptureProtocolRepository(): CaptureProtocolRepository {
 
 export function createSyncDiagnosticRepository(): SyncDiagnosticRepository {
   return new PrismaSyncDiagnosticRepository(resolveV2Client())
+}
+
+/**
+ * The durable synchronization worker, assembled (F4.004/F4.006/F4.007).
+ *
+ * Everything the worker needs that a route has no business knowing: which
+ * storage driver materializes a capture part, where FFmpeg is, and where the
+ * operator's own anchors and confirmed markers are kept. The signal source is
+ * given the diagnostic repository so manual anchors and marker detections enter
+ * the cascade as evidence read from the record, never as something a caller
+ * could assert.
+ */
+export function createCaptureSyncWorker(environment: NodeJS.ProcessEnv = process.env) {
+  const sessions = createCaptureSessionRepository()
+  const runs = createCaptureSyncRunRepository()
+  const signals = new FfmpegAudioSyncSignalSource({
+    media: createCaptureMediaResolver(environment),
+    diagnostics: createSyncDiagnosticRepository(),
+  })
+  return async (owner: string) => runCaptureSyncWorker({
+    sessions,
+    runs,
+    signals,
+    owner,
+    clock: () => new Date(),
+  })()
 }
 
 /**

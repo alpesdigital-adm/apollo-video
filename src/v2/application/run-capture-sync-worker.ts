@@ -69,6 +69,13 @@ export interface SyncSignalSource {
 export interface CaptureSyncWorkerResult {
   readonly claimed: boolean
   readonly runId: string | null
+  /**
+   * The workspace the claimed run belongs to. A run id alone cannot be read
+   * back: every capture table is keyed by workspace first, so a driver holding
+   * only the id would have to be told the workspace by an environment
+   * variable — which is how a worker ends up reading the wrong tenant's row.
+   */
+  readonly workspaceId: string | null
   readonly settled: boolean
   readonly resolved: number
   readonly review: number
@@ -256,7 +263,7 @@ export function runCaptureSyncWorker(dependencies: {
     })
     if (!claim) {
       return Object.freeze({
-        claimed: false, runId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
+        claimed: false, runId: null, workspaceId: null, settled: false, resolved: 0, review: 0, insufficient: 0,
         coverageDerived: 0, coverageRefused: 0,
       })
     }
@@ -276,7 +283,8 @@ export function runCaptureSyncWorker(dependencies: {
         outcome: { status: 'failed', failureReason: reason },
       })
       return Object.freeze({
-        claimed: true, runId: run.id, settled: true, resolved: 0, review: 0, insufficient: 0,
+        claimed: true, runId: run.id, workspaceId: run.workspaceId, settled: true,
+        resolved: 0, review: 0, insufficient: 0,
         coverageDerived, coverageRefused,
       })
     }
@@ -302,8 +310,9 @@ export function runCaptureSyncWorker(dependencies: {
         },
       })
       return Object.freeze({
-        claimed: true, runId: run.id, settled: true, resolved: 0, review: 0, insufficient: 0,
-        coverageDerived: 0, coverageRefused: 0,
+        claimed: true, runId: run.id, workspaceId: run.workspaceId, settled: true,
+        resolved: 0, review: 0, insufficient: 0,
+        coverageDerived, coverageRefused,
         abandonedBecause: 'session-moved' as const,
       })
     }
@@ -387,7 +396,8 @@ export function runCaptureSyncWorker(dependencies: {
       })
       if (!alive) {
         return Object.freeze({
-          claimed: true, runId: run.id, settled: false, resolved, review, insufficient,
+          claimed: true, runId: run.id, workspaceId: run.workspaceId, settled: false,
+          resolved, review, insufficient,
           coverageDerived, coverageRefused,
           abandonedBecause: 'lease-lost' as const,
         })
@@ -487,6 +497,7 @@ export function runCaptureSyncWorker(dependencies: {
     return Object.freeze({
       claimed: true,
       runId: run.id,
+      workspaceId: run.workspaceId,
       settled: settlement.settled,
       resolved,
       review,
