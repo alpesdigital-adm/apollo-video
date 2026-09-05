@@ -334,9 +334,6 @@ test(
       syncConfidence: 1,
       sameAngleTicks: BigInt(0),
       spatialRelation: 'unknown',
-      eligible: true,
-      rejectionReasonsJson: JSON.stringify([]),
-      rejectionCount: 0,
       // The four readings the candidate hash covers, in the shape
       // `candidateEvidenceOf` writes (multicam-direction-repository.ts:101).
       // NOT NULL with the default dropped: a row without it never reaches a
@@ -352,16 +349,10 @@ test(
       candidateHash: hash('a'),
     }
     await client.v2MulticamAngleCandidate.create({ data: candidate })
-    // ADR-118: eligibility is the emptiness of the rejection list, not a
-    // second opinion about it.
-    await refused('multicam_angle_candidates_eligible_check', () =>
-      client.v2MulticamAngleCandidate.create({
-        data: {
-          ...candidate, id: `${directionId}:0:candidate-1`, candidateId: 'candidate-1',
-          eligible: true, rejectionCount: 1,
-          rejectionReasonsJson: JSON.stringify(['coverage-below-floor']),
-        },
-      }))
+    // ADR-118's rejected angles live in multicam_shot_alternatives, not here:
+    // this table holds the angle each shot chose, and the columns that used to
+    // say "eligible, nothing against it" could hold nothing else. The alternative
+    // written above carries the track that lost and the sentence saying why.
     await client.v2MulticamAngleScoreComponent.create({
       data: {
         id: `${candidate.id}:speaker`,

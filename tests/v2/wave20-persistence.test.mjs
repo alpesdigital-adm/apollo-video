@@ -212,9 +212,24 @@ test('T-F4.012 the direction constraints carry the direction numbers', () => {
     checkBody('multicam_directions_manual_review_check'),
     /"manualReviewRequired" = \("warningCount" > 0 OR "uncoveredCount" > 0 OR "lowConfidenceShotCount" > 0\)/,
   )
+  // And the flag that is NOT stored beside an equality, because no row this
+  // schema can hold could break it: multicam_angle_candidates keeps the angle
+  // each shot chose, the domain refuses to choose an ineligible one, so
+  // `eligible`/`rejectionCount`/`rejectionReasonsJson` had exactly one value
+  // apiece and their CHECK could never fail. A rejected angle is inspectable as
+  // a multicam_shot_alternatives row, which is where the reason lives.
+  for (const gone of ['"eligible"', '"rejectionCount"', '"rejectionReasonsJson"']) {
+    assert.equal(
+      sql.includes(gone),
+      false,
+      `${gone} cannot hold two values in this schema; a column that can hold one is not a fact`,
+    )
+  }
+  assert.equal(sql.includes('multicam_angle_candidates_eligible_check'), false)
   assert.match(
-    checkBody('multicam_angle_candidates_eligible_check'),
-    /"eligible" = \("rejectionCount" = 0\)/,
+    checkBody('multicam_shot_alternatives_reason_check'),
+    /char_length\(btrim\("rejectedBecause"\)\) >= 1/,
+    'the losing angle must say why it lost',
   )
 })
 

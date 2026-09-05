@@ -121,6 +121,20 @@ test('T-F4.012 a multicam direction and its evidence come back as they were writ
   assert.equal(first.stored.version, 1)
   assert.equal(first.replayed, false)
   identical(kit.stringifyWithTicks, first.stored.direction, worldA.direction, 'direction version 1')
+
+  // ADR-118 in this schema: the angle that lost is inspectable as a
+  // multicam_shot_alternatives row naming the track and, in words, why. The
+  // candidates table holds only the angle each shot CHOSE — which is why it no
+  // longer carries eligible/rejectionReasons columns that could hold one value
+  // apiece — so this is the row that has to survive the round trip.
+  const alternatives = client.rows('V2MulticamShotAlternative').filter((row) => row.workspaceId === A)
+  assert.ok(alternatives.length >= 1, 'the fixture must reject at least one angle')
+  for (const row of alternatives) {
+    assert.ok(row.rejectedBecause.trim().length >= 1, `alternative ${row.candidateId} lost for no stated reason`)
+  }
+  for (const row of client.rows('V2MulticamAngleCandidate').filter((entry) => entry.workspaceId === A)) {
+    assert.equal(row.eligible, undefined, 'a candidate row must not carry a column that can hold one value')
+  }
   assert.equal(
     (await directions.appendVersion({ direction: worldA.direction, base: null, occurredAt: at(4) })).replayed,
     true,

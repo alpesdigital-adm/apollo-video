@@ -222,8 +222,6 @@ function hydrateCandidate(row: {
   spatialRelation: string
   protectedSelectionId: string | null
   protectedReason: string | null
-  eligible: boolean
-  rejectionReasonsJson: string
   evidenceJson: string
   scoreTotal: number
   candidateHash: string
@@ -268,10 +266,17 @@ function hydrateCandidate(row: {
     protected: row.protectedSelectionId === null || row.protectedReason === null
       ? null
       : Object.freeze({ selectionId: row.protectedSelectionId, reason: row.protectedReason }),
-    eligible: row.eligible,
-    rejectionReasons: Object.freeze(
-      parse<AngleRejection[]>(row.rejectionReasonsJson, `candidate ${row.candidateId} rejection reasons`),
-    ),
+    // This table holds the angle each shot CHOSE, and `directMulticam` refuses
+    // to choose an ineligible one (multicam-direction.ts:1546-1550), so both
+    // facts are known without a column: eligible, with nothing against it.
+    //
+    // They are not assumed on the way out either. The candidate hash covers
+    // both, and `assertMulticamDirectionIntegrity` below recomputes it — a
+    // stored candidate that was in fact rejected would come back with a
+    // different hash and be refused. Storing them as columns added a CHECK no
+    // writable row could violate; the hash is the check that can.
+    eligible: true,
+    rejectionReasons: Object.freeze([] as AngleRejection[]),
     scoreComponents: hydrateScoreComponents(row.shotId, row.candidateId, row.scoreTotal, row.components),
     candidateHash: row.candidateHash,
   })
@@ -632,9 +637,6 @@ export class PrismaMulticamDirectionRepository implements MulticamDirectionRepos
               spatialRelation: shot.chosen.continuity.spatialRelation,
               protectedSelectionId: shot.chosen.protected?.selectionId ?? null,
               protectedReason: shot.chosen.protected?.reason ?? null,
-              eligible: shot.chosen.eligible,
-              rejectionReasonsJson: JSON.stringify(shot.chosen.rejectionReasons),
-              rejectionCount: shot.chosen.rejectionReasons.length,
               evidenceJson: JSON.stringify(candidateEvidenceOf(shot.chosen)),
               scoreTotal: shot.chosen.scoreComponents.total,
               candidateHash: shot.chosen.candidateHash,

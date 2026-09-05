@@ -286,6 +286,29 @@ CREATE INDEX "multicam_shot_alternatives_workspaceId_directionId_idx" ON "multic
 CREATE UNIQUE INDEX "multicam_shot_alternatives_id_workspaceId_key" ON "multicam_shot_alternatives"("id", "workspaceId");
 CREATE UNIQUE INDEX "multicam_shot_alternatives_workspaceId_shotId_candidateId_key" ON "multicam_shot_alternatives"("workspaceId", "shotId", "candidateId");
 
+-- The angle a shot CHOSE, one row per shot, and nothing else.
+--
+-- ADR-118 asks that a rejected angle stay inspectable, and in this schema it
+-- does — as a `multicam_shot_alternatives` row naming the track, the score it
+-- reached and, in words, why it lost. What is NOT here is a row per evaluated
+-- candidate, because `ShotDecision` (multicam-direction.ts:1087) does not
+-- retain the evaluated window: it keeps the chosen candidate and the
+-- summarised alternatives, and nothing this table could be given would be the
+-- rejected candidates themselves.
+--
+-- That is why this table carries no `eligible` / `rejectionReasonsJson` /
+-- `rejectionCount`. It did, with a CHECK that eligibility is the emptiness of
+-- the rejection list — and since the domain asserts the chosen candidate is
+-- eligible (multicam-direction.ts:1546-1550), every row this schema can hold
+-- had eligible = true and rejectionCount = 0. A constraint that no writable row
+-- can violate is not an invariant, it is a decoration that reads like one, and
+-- three columns that can hold exactly one value each read to the next author as
+-- data. The candidate hash still covers both facts, so a stored candidate that
+-- was not eligible fails its own hash on read (multicam-direction-repository.ts
+-- hydrateCandidate) — the guarantee survives the columns.
+--
+-- Storing every evaluated candidate remains open: it needs the domain to retain
+-- the decided window first, which is an aggregate change and not a column.
 CREATE TABLE "multicam_angle_candidates" (
     "id" VARCHAR(160) NOT NULL,
     "workspaceId" VARCHAR(128) NOT NULL,
@@ -313,9 +336,6 @@ CREATE TABLE "multicam_angle_candidates" (
     "spatialRelation" VARCHAR(16) NOT NULL,
     "protectedSelectionId" VARCHAR(128),
     "protectedReason" VARCHAR(512),
-    "eligible" BOOLEAN NOT NULL,
-    "rejectionReasonsJson" TEXT NOT NULL DEFAULT '[]',
-    "rejectionCount" INTEGER NOT NULL DEFAULT 0,
     "scoreTotal" DOUBLE PRECISION NOT NULL,
     "candidateHash" CHAR(64) NOT NULL,
 
@@ -341,14 +361,10 @@ CREATE TABLE "multicam_angle_candidates" (
               AND ("sourceStartTicks" IS NULL) = ("sourceEndTicks" IS NULL)
               AND ("sourceStartTicks" IS NULL OR "sourceStartTicks" < "sourceEndTicks")),
     CONSTRAINT "multicam_angle_candidates_protected_check"
-        CHECK (("protectedSelectionId" IS NULL) = ("protectedReason" IS NULL)),
-    -- ADR-118: a rejected candidate stays inspectable, and eligibility is
-    -- exactly the emptiness of its rejection list (multicam-direction.ts:1000).
-    CONSTRAINT "multicam_angle_candidates_eligible_check"
-        CHECK ("rejectionCount" >= 0 AND "eligible" = ("rejectionCount" = 0))
+        CHECK (("protectedSelectionId" IS NULL) = ("protectedReason" IS NULL))
 );
 
-CREATE INDEX "multicam_angle_candidates_workspaceId_directionId_eligible_idx" ON "multicam_angle_candidates"("workspaceId", "directionId", "eligible");
+CREATE INDEX "multicam_angle_candidates_workspaceId_directionId_idx" ON "multicam_angle_candidates"("workspaceId", "directionId");
 CREATE INDEX "multicam_angle_candidates_workspaceId_trackId_idx" ON "multicam_angle_candidates"("workspaceId", "trackId");
 CREATE UNIQUE INDEX "multicam_angle_candidates_id_workspaceId_key" ON "multicam_angle_candidates"("id", "workspaceId");
 CREATE UNIQUE INDEX "multicam_angle_candidates_workspaceId_shotId_candidateId_key" ON "multicam_angle_candidates"("workspaceId", "shotId", "candidateId");

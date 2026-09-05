@@ -9308,9 +9308,6 @@ model V2MulticamAngleCandidate {
   spatialRelation       String  @db.VarChar(16)
   protectedSelectionId  String? @db.VarChar(128)
   protectedReason       String? @db.VarChar(512)
-  eligible              Boolean
-  rejectionReasonsJson  String  @default("[]") @db.Text
-  rejectionCount        Int     @default(0)
   evidenceJson          String  @db.Text
   scoreTotal            Float
   candidateHash         String  @db.Char(64)
@@ -9321,7 +9318,7 @@ model V2MulticamAngleCandidate {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, shotId, candidateId])
-  @@index([workspaceId, directionId, eligible])
+  @@index([workspaceId, directionId])
   @@index([workspaceId, trackId])
   @@map("multicam_angle_candidates")
 }
