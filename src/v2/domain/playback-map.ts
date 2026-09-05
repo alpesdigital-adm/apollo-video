@@ -535,6 +535,17 @@ export function createPlaybackMap(input: CreatePlaybackMapInput): Readonly<Playb
     'INVALID_ARGUMENT',
     'the reaction and the reference cannot be the same track',
   )
+  // Two tracks can still name one file. If they do, `compilePlaybackToShots`
+  // emits shots whose `sourceAssetId` and `audioSourceAssetId` are the same
+  // bytes for every mode, and the reference/reaction distinction this aggregate
+  // exists to keep is erased without anything refusing.
+  assertDomain(
+    input.referenceMedia.assetId !== input.reactionMedia.assetId &&
+      input.referenceMedia.sha256 !== input.reactionMedia.sha256,
+    'INVALID_ARGUMENT',
+    'the reference and the reaction cannot be the same recording',
+    { assetId: input.referenceMedia.assetId },
+  )
   assertDomain(
     Number.isSafeInteger(input.sessionVersion) && input.sessionVersion >= 1 &&
       Number.isSafeInteger(input.referenceEpoch) && input.referenceEpoch >= 1,
@@ -655,10 +666,18 @@ export function createPlaybackMap(input: CreatePlaybackMapInput): Readonly<Playb
 
     const rate = piece.rate ?? null
     if (rate !== null) {
+      // Both halves, not just the numerator. `Rational` is a bare `{num, den}`
+      // record (session-time.ts:36-39) and nothing forces a rehydrated piece
+      // through `rational()`, which is what normalises the sign — so `1/-2` is
+      // the same negative rate as `-1/2` spelled another way, and `1/0` is not a
+      // number at all. Guarding only `num` let both through construction and
+      // integrity, and `resolveReactionTick` then answered with a reference tick
+      // outside the piece's own range.
       assertDomain(
-        rate.num > BigInt(0),
+        rate.num > BigInt(0) && rate.den > BigInt(0),
         'INVALID_ARGUMENT',
         `piece ${piece.pieceId} carries a non-positive rate; a measured playback rate is strictly positive`,
+        { rate: `${rate.num}/${rate.den}` },
       )
       assertDomain(
         referenceRange !== null,
@@ -897,9 +916,15 @@ export function resolveReactionTick(map: Readonly<PlaybackMap>, tick: bigint): P
   const rate = piece.rate ?? rational(BigInt(1), BigInt(1))
   const offset = scaleTicks(tick - piece.reactionRange.start, rate)
   const raw = piece.referenceRange.start + offset
-  // Clamped to the piece's own reference range: the range is the assertion, and
-  // a rounding at the far edge must not produce a tick the piece never claimed.
-  const referenceTick = raw >= piece.referenceRange.end ? piece.referenceRange.end - BigInt(1) : raw
+  // Clamped to the piece's own reference range at BOTH edges: the range is the
+  // assertion, and neither a rounding at the far edge nor an unnormalised rate
+  // may produce a tick the piece never claimed. The upper edge alone left the
+  // lower one open, and a lookup could answer with a negative reference tick.
+  const referenceTick = raw >= piece.referenceRange.end
+    ? piece.referenceRange.end - BigInt(1)
+    : raw < piece.referenceRange.start
+      ? piece.referenceRange.start
+      : raw
   return Object.freeze({
     status: 'resolved' as const,
     referenceTick,
@@ -927,10 +952,14 @@ function judgeWindow(
   const refs = observations.map((observation) => observation.evidenceRef)
   const claims = observations.filter((observation) => observation.referenceTick !== null)
   if (claims.length === 0) {
+    // Absence is a negative claim, so the weakest observer sets the number. The
+    // maximum was the wrong reducer here: one producer that is sure of nothing
+    // must not be outvoted into confidence by another. This is the confidence
+    // that eventually becomes a `paused` piece's, so it has to measure the gap.
     return Object.freeze({
       kind: 'absent' as const,
       tick,
-      confidence: Math.max(0, ...observations.map((observation) => observation.confidence)),
+      confidence: Math.min(1, ...observations.map((observation) => observation.confidence)),
       refs: Object.freeze(refs),
     })
   }
@@ -1084,6 +1113,18 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
       'an observation must fall inside the reaction recording',
     )
     assertUnitInterval(observation.confidence, 'observation confidence')
+    // The peak ratio is the admission gate (`minimumPeakRatioForAdmission`), and
+    // it was the one number reaching `judgeWindow` unchecked: `Infinity < 1.2`
+    // is false, so an infinite ratio was admitted and became a `playing` piece.
+    // The FFmpeg detector caps its own ratio, but this aggregate accepts
+    // observations from any producer — the phase-3 `SyncSignalSource` included.
+    assertDomain(
+      observation.peakRatio === undefined ||
+        (Number.isFinite(observation.peakRatio) && observation.peakRatio >= 0),
+      'INVALID_ARGUMENT',
+      'an observation peak ratio must be a finite, non-negative measurement',
+      { evidenceRef: observation.evidenceRef, peakRatio: String(observation.peakRatio) },
+    )
     const key = observation.reactionTick.toString()
     const bucket = grouped.get(key)
     if (bucket) bucket.push(observation)
@@ -1162,10 +1203,19 @@ export function buildPlaybackMap(input: BuildPlaybackMapInput): Readonly<Playbac
         continue
       }
       const junction = classifyJunction(before.run, after.run, input.policy)
-      if (junction !== 'stalled' && junction !== 'backward') {
-        // The reference moved while nobody could observe it. Played through,
-        // paused then seeked, or scrubbed — all three fit, so the domain names
-        // none of them (ADR-135).
+      if (junction !== 'stalled') {
+        // Anything but a reference that resumes where it left is a stretch more
+        // than one story fits, and the aggregate names none of them (ADR-135).
+        //
+        // Forward — played through, paused then seeked, or scrubbed.
+        //
+        // *Backward* belongs here too, and used to fall through to the pause
+        // branch: a reference that resumes behind where it stopped is equally
+        // explained by "paused, then rewound" and by "played on unobserved, then
+        // rewound further back". Calling that a pause published `status:
+        // 'resolved'` with no warning over evidence that supports at least two
+        // incompatible edits, and contradicted this module's own rule that a
+        // pause is the stretch where the reference resumes at the tick it left.
         uncovered.push(Object.freeze({ range, reason: 'manual-anchor-required' as const }))
         previousOutcome = 'uncovered'
         continue
@@ -1415,6 +1465,40 @@ export function applyPlaybackAnchor(
   })
 
   const span = intervalDuration(target!.range)
+  // The operator named an instant, not a range. The reference start of the piece
+  // is that instant walked back to the head of the uncovered stretch — anchoring
+  // `anchor.referenceTick` at `target.range.start` instead ignored the reaction
+  // tick the operator actually pointed at and shifted the whole resolved piece
+  // by `anchor.reactionTick - target.range.start` (a second, thirty frames, on
+  // this aggregate's own fixture).
+  const offsetIntoRange = anchor.reactionTick - target!.range.start
+  const referenceStart = anchor.referenceTick === null ? null : anchor.referenceTick - offsetIntoRange
+  if (referenceStart !== null) {
+    assertDomain(
+      referenceStart >= BigInt(0),
+      'INVALID_ARGUMENT',
+      'this anchor puts the head of the uncovered stretch before the reference begins',
+      {
+        reactionTick: anchor.reactionTick.toString(),
+        referenceTick: anchor.referenceTick!.toString(),
+        rangeStart: target!.range.start.toString(),
+      },
+    )
+    // The tail is refused, not clamped. Clamping would hand back a piece whose
+    // reference range is shorter than its reaction range, which asserts a rate
+    // nobody measured. A reference that ends mid-stretch is two pieces — playing,
+    // then commentary — and one anchor cannot say that.
+    assertDomain(
+      referenceStart + span <= map.referenceMedia.durationTicks,
+      'INVALID_ARGUMENT',
+      'this anchor runs the uncovered stretch past the end of the reference recording',
+      {
+        referenceStart: referenceStart.toString(),
+        spanTicks: span.toString(),
+        referenceDurationTicks: map.referenceMedia.durationTicks.toString(),
+      },
+    )
+  }
   const resolved: PlaybackPieceInput = {
     pieceId: `${map.mapId}:anchor-${anchor.anchorId}`,
     mode,
@@ -1423,14 +1507,9 @@ export function applyPlaybackAnchor(
     // assertion that playback ran on from there, which is why the piece carries
     // no rate: nobody measured a slope, and 1/1 written here would be a guess
     // indistinguishable from a measurement.
-    referenceRange: anchor.referenceTick === null
+    referenceRange: referenceStart === null
       ? null
-      : createTickInterval(
-        anchor.referenceTick,
-        anchor.referenceTick + span > map.referenceMedia.durationTicks
-          ? map.referenceMedia.durationTicks
-          : anchor.referenceTick + span,
-      ),
+      : createTickInterval(referenceStart, referenceStart + span),
     rate: null,
     direction: anchor.referenceTick === null ? 'none' : 'forward',
     confidence: placed.confidence,

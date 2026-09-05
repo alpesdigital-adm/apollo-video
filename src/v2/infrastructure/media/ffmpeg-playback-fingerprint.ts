@@ -180,6 +180,40 @@ export function confidenceFromPeakRatio(ratio: number): number {
   return Math.min(0.99, ceiling + (0.99 - ceiling) * (1 - trusted / ratio))
 }
 
+/**
+ * The most an absence can be believed, and why it is not 1.
+ *
+ * A window with no correlation proves the recording does not contain the
+ * reference's audio there. It does not prove the player was stopped: a reference
+ * can play a silent passage, and a reactor can mute it. Nothing this detector
+ * measures earns certainty about a negative.
+ */
+export const MAXIMUM_ABSENCE_CONFIDENCE = 0.95
+
+/**
+ * How confidently a refused window says the reference was not playing.
+ *
+ * The number a rejected window carries has to measure the rejection, not the
+ * sharpness of the correlation that was rejected. Two cases separate:
+ *
+ * - The peak never reached the correlation floor. Then the shortfall *is* the
+ *   measurement: nothing in the window is explained by the reference, and the
+ *   further below the floor it landed, the better established the absence. On
+ *   the F4.015 fixture the reactor's own noise peaks at 0.055–0.485 against a
+ *   floor of 0.5, which reads here as 0.05–0.85 — high where the window is
+ *   plainly not the reference, low where it half is.
+ * - The peak cleared the floor and only the runner-up test refused it. That is
+ *   ambiguity, not absence: the reference is plausibly there and the correlator
+ *   could not say where. Such a window is no evidence of a gap at all, so it
+ *   contributes nothing (0) and the domain's `min` across the run keeps it.
+ */
+export function absenceConfidence(peak: number, minimumPeak: number): number {
+  if (!Number.isFinite(peak) || peak <= 0) return MAXIMUM_ABSENCE_CONFIDENCE
+  if (!Number.isFinite(minimumPeak) || minimumPeak <= 0) return 0
+  if (peak >= minimumPeak) return 0
+  return Math.min(MAXIMUM_ABSENCE_CONFIDENCE, 1 - peak / minimumPeak)
+}
+
 export interface CorrelateAudioWindowsInput {
   readonly reference: Samples
   readonly candidate: Samples
@@ -209,7 +243,12 @@ export function correlateAudioWindows(
   const hopMs = input.hopMs ?? PLAYBACK_FINGERPRINT_DEFAULTS.hopMs
   const energyFloor = input.energyFloor ?? PLAYBACK_FINGERPRINT_DEFAULTS.energyFloor
   const correlationRate = input.correlationRate ?? PLAYBACK_FINGERPRINT_DEFAULTS.correlationRate
-  if (hopMs <= 0 || windowMs <= 0) throw new TypeError('correlateAudioWindows needs a positive window and hop')
+  // `NaN <= 0` is false, so a bare `<= 0` let a non-finite window through, and
+  // `Math.round(NaN)` windows produced an empty result — which the domain reads
+  // as "the reference was never playing", not as "bad input".
+  if (!Number.isFinite(hopMs) || !Number.isFinite(windowMs) || hopMs <= 0 || windowMs <= 0) {
+    throw new TypeError('correlateAudioWindows needs a positive window and hop')
+  }
 
   const reference = toFloat(input.reference)
   const candidate = toFloat(input.candidate)
@@ -230,7 +269,14 @@ export function correlateAudioWindows(
     const rms = windowEnergy(candidate, start, windowSamples) / Math.sqrt(windowSamples)
     const smallStart = Math.floor(start / factor)
     const available = smallReference.length - smallWindow
-    if (rms < energyFloor || available < 0 || smallStart + smallWindow > smallCandidate.length) {
+    // Non-finite PCM is treated as silence rather than slipping past both energy
+    // gates: `NaN < energyFloor` is false, every score was then NaN, the sort was
+    // a no-op and `lagSamples` came back 0 — naming the first sample of the
+    // reference as the answer, which this type's own contract forbids.
+    if (
+      !Number.isFinite(rms) || rms < energyFloor || available < 0 ||
+      smallStart + smallWindow > smallCandidate.length
+    ) {
       results.push(Object.freeze({
         startSample: start,
         lagSamples: null,
@@ -247,7 +293,7 @@ export function correlateAudioWindows(
     let needleEnergy = 0
     for (const value of needle) needleEnergy += value * value
     needleEnergy = Math.sqrt(needleEnergy)
-    if (needleEnergy === 0) {
+    if (!Number.isFinite(needleEnergy) || needleEnergy === 0) {
       results.push(Object.freeze({
         startSample: start,
         lagSamples: null,
@@ -385,7 +431,15 @@ export class FfmpegPlaybackFingerprinter {
               to: input.referenceTimebase,
             })
             : null,
-          confidence: correlation.confidence,
+          // A window the detector refused reports confidence in its ABSENCE, not
+          // the peak-over-runner-up ratio of a match that was rejected. Emitting
+          // `correlation.confidence` unconditionally sent numbers up to 0.86 on
+          // windows whose peak never reached a seventh of the floor, and the
+          // domain stamped them onto `paused` pieces as the confidence of the
+          // pause. See `absenceConfidence`.
+          confidence: locked
+            ? correlation.confidence
+            : absenceConfidence(correlation.peak, minimumPeak),
           method: 'audio-fingerprint' as const,
           evidenceRef: `fingerprint:${reactionTick}`,
           peakRatio: correlation.peakRatio,
