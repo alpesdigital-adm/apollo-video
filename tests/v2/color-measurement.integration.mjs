@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import test, { after, before } from 'node:test'
 import { promisify } from 'node:util'
 
-import { evaluateColorCritic } from '../../src/v2/domain/color-critic-report.ts'
+import { DEFAULT_COLOR_CRITIC_POLICY, evaluateColorCritic } from '../../src/v2/domain/color-critic-report.ts'
 import { deriveMulticamMatchPlan } from '../../src/v2/domain/multicam-match-plan.ts'
 import { createTickInterval } from '../../src/v2/domain/session-time.ts'
 import { FfmpegColorMeasurement } from '../../src/v2/infrastructure/media/ffmpeg-color-measurement.ts'
@@ -200,14 +200,14 @@ test('T-FR-183 real decoded frames put exposure and white balance in the right d
   })
 
   assert.ok(corrected.transform.implementation.parameters.brightness < 0, 'the brighter camera is darkened')
-  assert.ok(corrected.transform.implementation.parameters.blueGain < 1, 'the bluer camera loses blue')
+  assert.ok(corrected.transform.implementation.parameters['blue-gain'] < 1, 'the bluer camera loses blue')
   assert.ok(
-    strongPlan.cameraTransforms[0].transform.implementation.parameters.blueGain <
-      corrected.transform.implementation.parameters.blueGain,
+    strongPlan.cameraTransforms[0].transform.implementation.parameters['blue-gain'] <
+      corrected.transform.implementation.parameters['blue-gain'],
     'a stronger cast asks for a stronger correction',
   )
 
-  console.log(`T-FR-183 exposure A=${value(a, 'exposure')} B=${value(b, 'exposure')} bOverG A=${component(a, 'whiteBalance', 'bOverG')} B=${component(b, 'whiteBalance', 'bOverG')} B2=${component(strong, 'whiteBalance', 'bOverG')} deltaEv=${corrected.deltas.exposureEv} brightness=${corrected.transform.implementation.parameters.brightness} blueGain=${corrected.transform.implementation.parameters.blueGain} blueGain2=${strongPlan.cameraTransforms[0].transform.implementation.parameters.blueGain} frames=${a.sampledFrames} hash=${a.measurementHash.slice(0, 16)}`)
+  console.log(`T-FR-183 exposure A=${value(a, 'exposure')} B=${value(b, 'exposure')} bOverG A=${component(a, 'whiteBalance', 'bOverG')} B=${component(b, 'whiteBalance', 'bOverG')} B2=${component(strong, 'whiteBalance', 'bOverG')} deltaEv=${corrected.deltas.exposureEv} brightness=${corrected.transform.implementation.parameters.brightness} blue-gain=${corrected.transform.implementation.parameters['blue-gain']} blue-gain2=${strongPlan.cameraTransforms[0].transform.implementation.parameters['blue-gain']} frames=${a.sampledFrames} hash=${a.measurementHash.slice(0, 16)}`)
 })
 
 test('T-FR-183 clipped and crushed halves are measured as the share of the frame they occupy', async () => {
@@ -253,7 +253,7 @@ test('T-FR-184 the declaration is what separates a look from a defect', async ()
   assert.notEqual(undeclared.action, 'approve')
 
   const declared = critique(before_, after_, {
-    creativeIntent: { declared: true, castAllowedDelta: 0.5, lutId: 'lut-warm-1', note: 'warm look approved by the director' },
+    creativeIntent: { declared: true, castAllowedDelta: DEFAULT_COLOR_CRITIC_POLICY.maxDeclaredCastAllowance, lutId: 'lut-warm-1', note: 'warm look approved by the director' },
   })
   const declaredCast = declared.dimensions.find((entry) => entry.dimension === 'cast')
   assert.equal(declaredCast.value, castValue, 'the same bytes measured the same number')
@@ -268,7 +268,7 @@ test('T-FR-184 a creative look never excuses a clipped frame', async () => {
   const before_ = [await measure('cameraA', 'camera-a')]
   const after_ = [await measure('clipped', 'camera-a')]
   const report = critique(before_, after_, {
-    creativeIntent: { declared: true, castAllowedDelta: 0.9, lutId: 'lut-highkey-1', note: 'high key by design' },
+    creativeIntent: { declared: true, castAllowedDelta: 0.2, lutId: 'lut-highkey-1', note: 'high key by design' },
   })
   const clipping = report.dimensions.find((entry) => entry.dimension === 'clipping')
   const issue = report.issues.find((entry) => entry.dimension === 'clipping')

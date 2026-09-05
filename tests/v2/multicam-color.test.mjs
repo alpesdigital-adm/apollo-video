@@ -1059,6 +1059,23 @@ test('T-FR-184 two cameras that never overlap are an evidence gap, never an appr
   assert.notEqual(report.action, 'approve')
 })
 
+test('T-FR-184 even a dimension nobody needed still refuses to be silent', () => {
+  // Saturation is not in the required set — the verdict can be reached without
+  // it — but "nobody could read it" is still not "nothing was wrong with it".
+  const before = [measurement({ ...INTERMEDIATE, measurementId: 'ccm-before-a', cameraId: 'camera-a' })]
+  const after = [measurement({ ...OUTPUT, measurementId: 'ccm-after-a', cameraId: 'camera-a', unavailableDimensions: ['saturation'] })]
+  const report = critique(before, after)
+  for (const dimension of ['saturationExcess', 'saturationDeficit']) {
+    assert.equal(dimensionOf(report, dimension).status, 'unavailable', dimension)
+    const raised = report.issues.find((entry) => entry.dimension === dimension)
+    assert.equal(raised.classification, 'insufficient-evidence', dimension)
+    assert.equal(raised.severity, 'warning', `${dimension} is not required, so it does not block on its own`)
+  }
+  assert.equal(dimensionOf(report, 'clipping').status, 'measured', 'the required dimensions were all readable')
+  assert.equal(report.cause, 'evidence-unavailable')
+  assert.equal(report.action, 'human-review')
+})
+
 test('T-FR-184 a declared allowance cannot be large enough to write the verdict', () => {
   const before = [measurement({ ...INTERMEDIATE, measurementId: 'ccm-before-a', cameraId: 'camera-a', rOverG: 1 })]
   const after = [measurement({ ...OUTPUT, measurementId: 'ccm-after-a', cameraId: 'camera-a', rOverG: 5.55 })]
