@@ -372,6 +372,19 @@ export default function CaptureSessionsPage() {
         </p>
       )}
 
+      {/* The Wave 20 operator surfaces. They are sub-pages rather than shell
+          destinations — the shell declares a fixed set — so this is the place
+          they are reached from, and each of them links back here and to its
+          siblings. The links carry the session already chosen: landing on an
+          empty form would ask the operator to retype what they just clicked. */}
+      <p data-testid="open-multicam-direction">
+        <a
+          href={`/multicam-direction?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
+        >
+          Dirigir esta sessão entre as câmeras
+        </a>
+      </p>
+
       {sync && (
         <section data-testid="sync-detail">
           <h2>
