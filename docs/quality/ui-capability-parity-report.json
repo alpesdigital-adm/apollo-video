@@ -996,7 +996,7 @@
       ]
     },
     {
-      "uiAction": "src/app/playback-map/page.tsx:204",
+      "uiAction": "src/app/playback-map/page.tsx:211",
       "capabilityId": "apollo.projects.capture-sessions.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}",
@@ -1016,7 +1016,7 @@
       ]
     },
     {
-      "uiAction": "src/app/playback-map/page.tsx:240",
+      "uiAction": "src/app/playback-map/page.tsx:248",
       "capabilityId": "apollo.projects.capture-sessions.playback-map.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
@@ -1037,7 +1037,7 @@
       ]
     },
     {
-      "uiAction": "src/app/playback-map/page.tsx:251",
+      "uiAction": "src/app/playback-map/page.tsx:259",
       "capabilityId": "apollo.projects.capture-sessions.playback-map.pieces.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/pieces",
@@ -1058,7 +1058,7 @@
       ]
     },
     {
-      "uiAction": "src/app/playback-map/page.tsx:300",
+      "uiAction": "src/app/playback-map/page.tsx:308",
       "capabilityId": "apollo.projects.capture-sessions.playback-map.build",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
@@ -1083,7 +1083,7 @@
       ]
     },
     {
-      "uiAction": "src/app/playback-map/page.tsx:354",
+      "uiAction": "src/app/playback-map/page.tsx:362",
       "capabilityId": "apollo.projects.capture-sessions.playback-map.anchors.add",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors",

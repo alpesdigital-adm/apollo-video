@@ -175,7 +175,6 @@ export default function PlaybackMapPage() {
 
   const project = useMemo(() => encodeURIComponent(projectId.trim()), [projectId])
   const encodedSession = useMemo(() => encodeURIComponent(sessionId.trim()), [sessionId])
-  const reactor = useMemo(() => encodeURIComponent(reactionTrackId.trim()), [reactionTrackId])
   const sessionTicksPerSecond = useMemo(
     () => ticksPerSecondFrom(session?.clock.timebase),
     [session],
@@ -198,8 +197,16 @@ export default function PlaybackMapPage() {
     if (linkedTrack) setReactionTrackId(linkedTrack)
   }, [])
 
-  const loadSession = useCallback(async () => {
-    if (projectId.trim().length === 0 || sessionId.trim().length === 0) return
+  /**
+   * Read the session and answer which reactor this page is about.
+   *
+   * The answer is returned rather than only stored, because the read below
+   * needs it in the same pass: a `setState` does not reach the closure that
+   * called it, and a page that used the previous render's value would ask the
+   * API about the reactor the operator had before.
+   */
+  const loadSession = useCallback(async (): Promise<string> => {
+    if (projectId.trim().length === 0 || sessionId.trim().length === 0) return ''
     try {
       const response = await fetch(
         `/v1/projects/${project}/capture-sessions/${encodedSession}`,
@@ -208,22 +215,22 @@ export default function PlaybackMapPage() {
       const body = (await response.json()) as ApiEnvelope<{ session: SessionRead }>
       if (!response.ok || !body.data) {
         setMessage(body.error?.message ?? 'Não foi possível ler a sessão.')
-        return
+        return reactionTrackId.trim()
       }
       setSession(body.data.session)
+      if (reactionTrackId.trim().length > 0) return reactionTrackId.trim()
       // Which reactor is required, never guessed: a session with two reaction
       // tracks is two edits, and answering about the first would answer about
-      // the wrong one. Offering the first as a default is a suggestion the
+      // the wrong one. Offering the session's reaction track is a suggestion the
       // operator can see and change, not an assumption the page hides.
-      setReactionTrackId((current) => {
-        if (current.trim().length > 0) return current
-        const reaction = body.data!.session.tracks.find((track) => track.role === 'reaction')
-        return reaction?.trackId ?? ''
-      })
+      const reaction = body.data.session.tracks.find((track) => track.role === 'reaction')
+      setReactionTrackId(reaction?.trackId ?? '')
+      return reaction?.trackId ?? ''
     } catch {
       setMessage('A rede falhou ao ler a sessão.')
+      return reactionTrackId.trim()
     }
-  }, [encodedSession, project, projectId, sessionId])
+  }, [encodedSession, project, projectId, reactionTrackId, sessionId])
 
   const load = useCallback(async () => {
     if (projectId.trim().length === 0 || sessionId.trim().length === 0) return
@@ -231,12 +238,13 @@ export default function PlaybackMapPage() {
     setMessage(null)
     setConflict(null)
     try {
-      await loadSession()
-      if (reactionTrackId.trim().length === 0) {
+      const resolved = await loadSession()
+      if (resolved.length === 0) {
         setListing(null)
         setMessage('Diga qual reator: a sessão pode ter mais de um, e cada um é uma edição.')
         return
       }
+      const reactor = encodeURIComponent(resolved)
       const response = await fetch(
         `/v1/projects/${project}/capture-sessions/${encodedSession}/playback-map?reactionTrackId=${reactor}`,
         { headers: { accept: 'application/json' }, cache: 'no-store' },
@@ -266,7 +274,7 @@ export default function PlaybackMapPage() {
     } finally {
       setBusy(false)
     }
-  }, [encodedSession, loadSession, project, projectId, reactionTrackId, reactor, sessionId])
+  }, [encodedSession, loadSession, project, projectId, sessionId])
 
   const linkedRef = useRef(false)
   useEffect(() => {
