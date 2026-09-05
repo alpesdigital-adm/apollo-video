@@ -89,7 +89,12 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
   const uiUsername = `f4016-user-${suffix}`
   const uiPassword = `Multicam-Longform-${suffix}-secure`
   const createdAt = new Date('2029-05-01T09:00:00.000Z')
-  const seededAt = new Date('2029-05-01T09:30:00.000Z')
+  // An hour ago, on the real clock, not a fixed literal. The evaluation this
+  // test POSTs is stamped by the server's own clock, and `readLatest` orders by
+  // `evaluatedAt desc`: a seeded record dated 2029 — the year the other capture
+  // fixtures use — came back as the newest one and the page rendered the seeded
+  // history entry as the current gate.
+  const seededAt = new Date(Date.now() - 3_600_000)
   const h = (n) => String(n).repeat(64).slice(0, 64)
   const artifactId = `artifact-final-master-${suffix}`
   const criticReportId = `color-critic-report-${suffix}`
