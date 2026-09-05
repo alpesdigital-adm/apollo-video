@@ -88,7 +88,9 @@ export function colorCriticProxyIssues(input: {
   const code = COLOR_CRITIC_PROXY_ISSUE_CODES[report.action]
   const correctable = new Set<string>(COLOR_CRITIC_CORRECTABLE_DIMENSIONS)
   const fps = Number.isFinite(input.fps) && input.fps > 0 ? input.fps : 0
-  const cropRefs = (input.evidence ?? []).map((crop) => `color-crop:${crop.artifactKey}@${crop.sha256}`)
+  const evidence = input.evidence ?? []
+  const cropRef = (crop: Readonly<ColorCriticEvidenceCrop>) => `color-crop:${crop.artifactKey}@${crop.sha256}`
+  const cropRefs = evidence.map(cropRef)
   const reportRef = `color-critic-report:${report.reportId}@${report.reportHash}`
   // A rejection points at its blocking findings; anything else points at the
   // findings that made a human necessary, and failing that at the verdict
@@ -121,9 +123,13 @@ export function colorCriticProxyIssues(input: {
         }
       : {}),
     correctable: correctable.has(issue.dimension),
+    // The crops of the camera the issue is about, matched on the crop's own
+    // `cameraId` rather than on the shape of its storage key — a key that
+    // happened to contain the camera name would otherwise be the only reason
+    // the right picture reached the right issue.
     evidenceIds: Object.freeze([
       reportRef,
-      ...cropRefs.filter((ref) => issue.cameraId === null || ref.includes(issue.cameraId)),
+      ...evidence.filter((crop) => issue.cameraId === null || crop.cameraId === issue.cameraId).map(cropRef),
       ...issue.evidenceRefs,
     ]),
   })))
