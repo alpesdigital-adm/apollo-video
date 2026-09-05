@@ -621,6 +621,11 @@ async function measureSessionCameras(input: {
     const cameraId = input.cameraIdByTrack.get(track.trackId)!
     const parts = [...track.parts].sort((left, right) => left.ordinal - right.ordinal).slice(0, input.maxRanges)
     for (const part of parts) {
+      // Second zero of the file is the start of the part's coverage: a part's
+      // `coverage` counts the ticks that FILE covers in its own timebase, so
+      // its first decodable frame and its coverage start are the same instant
+      // by construction. Reading the window from the file's start and labelling
+      // it with the converted coverage start is therefore one range, not two.
       const sessionRange = partSessionRange(part, input.session.clock.timebase)
       if (sessionRange === null) continue
       const partSeconds = seconds(part.coverage, part.timebase)

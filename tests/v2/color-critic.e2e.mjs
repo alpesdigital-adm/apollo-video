@@ -342,6 +342,11 @@ test(
     })
     assert.equal(blockedRow.finalAllowed, false)
     assert.equal(blockedRow.status, 'blocked')
+    // The citation is durable, not merely computed: the review that comes back
+    // out of PostgreSQL still names the report and its hash, so somebody
+    // reading the block next month can find the verdict behind it.
+    assert.ok(blockedRow.criticIssues.some((issue) =>
+      issue.evidenceIds?.includes(`color-critic-report:${rejection.reportId}@${rejection.reportHash}`)))
 
     const auditContext = createExternalAuditContext({
       workspaceId, clientId, credentialId: `credential-${suffix}`, environment: 'production',
