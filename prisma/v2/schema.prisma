@@ -9309,6 +9309,7 @@ model V2MulticamAngleCandidate {
   eligible              Boolean
   rejectionReasonsJson  String  @default("[]") @db.Text
   rejectionCount        Int     @default(0)
+  evidenceJson          String  @db.Text
   scoreTotal            Float
   candidateHash         String  @db.Char(64)
 
@@ -9530,6 +9531,7 @@ model V2CameraMatchTransform {
   providerVersion  String  @db.VarChar(8)
   mode             String  @db.VarChar(16)
   enabled          Boolean
+  transformJson    String  @db.Text
   parametersJson   String  @db.Text
   deltasJson       String  @db.Text
   brightness       Float?
@@ -9565,6 +9567,7 @@ model V2MatchRangeOverride {
   transformId     String  @db.VarChar(128)
   provider        String  @db.VarChar(32)
   providerVersion String  @db.VarChar(8)
+  transformJson   String  @db.Text
   parametersJson  String  @db.Text
   reason          String  @db.VarChar(1024)
   actorKind       String  @db.VarChar(16)
