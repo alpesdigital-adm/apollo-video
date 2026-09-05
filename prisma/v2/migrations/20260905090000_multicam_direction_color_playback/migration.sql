@@ -96,8 +96,15 @@ CREATE TABLE "multicam_observations" (
         CHECK (char_length(btrim("evidenceRef")) >= 1 AND char_length(btrim("method")) >= 1),
     -- The declared kind and the kind inside the value are one fact said twice
     -- (multicam-evidence.ts assertValue).
+    --
+    -- COALESCE because a CHECK is violated only by FALSE: `->> 'kind'` on a
+    -- document with no `kind` is NULL, `NULL = "kind"` is unknown, and unknown
+    -- passes. Without it the constraint refused a value that names the WRONG
+    -- kind and accepted one that names NO kind — which is the repair-script
+    -- edit it exists to refuse.
     CONSTRAINT "multicam_observations_value_check"
-        CHECK (jsonb_typeof("valueJson"::jsonb) = 'object' AND "valueJson"::jsonb ->> 'kind' = "kind")
+        CHECK (jsonb_typeof("valueJson"::jsonb) = 'object'
+              AND COALESCE("valueJson"::jsonb ->> 'kind' = "kind", FALSE))
 );
 
 CREATE INDEX "multicam_observations_workspaceId_evidenceSetId_kind_idx" ON "multicam_observations"("workspaceId", "evidenceSetId", "kind");
@@ -801,8 +808,21 @@ CREATE TABLE "color_critic_reports" (
               AND "bytesEvaluatedCount" >= 0 AND "proposedDeltaCount" >= 0),
     -- ADR-147's cause table, transcribed from COLOR_CRITIC_CAUSE_ACTIONS: the
     -- action is looked up from the cause, never averaged out of the numbers.
+    --
+    -- The two sets come first because the CASE alone was not a constraint. A
+    -- CASE with no ELSE returns NULL for a cause it does not list, `action =
+    -- NULL` is unknown, and an unknown CHECK is a SATISFIED CHECK — so
+    -- ('not-a-real-cause', 'banana') was accepted by the table that claims to
+    -- encode the cause table. Closing both vocabularies makes the equality
+    -- reachable for every row that gets that far.
     CONSTRAINT "color_critic_reports_cause_action_check"
-        CHECK ("action" = CASE "cause"
+        CHECK ("cause" IN ('irreversible-technical-defect', 'evidence-unavailable',
+                          'correction-budget-exhausted', 'correction-confidence-insufficient',
+                          'correction-out-of-bounds', 'correction-not-derivable',
+                          'correctable-technical-defect', 'advisory-warning',
+                          'documented-intent', 'no-defect')
+              AND "action" IN ('approve', 'bounded-correction', 'human-review', 'reject')
+              AND "action" = CASE "cause"
                 WHEN 'irreversible-technical-defect' THEN 'reject'
                 WHEN 'evidence-unavailable' THEN 'human-review'
                 WHEN 'correction-budget-exhausted' THEN 'human-review'

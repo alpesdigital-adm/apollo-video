@@ -38,6 +38,7 @@ import {
 } from '../../src/v2/domain/multicam-match-plan.ts'
 import {
   COLOR_CRITIC_ACROSS_STAGES,
+  COLOR_CRITIC_ACTIONS,
   COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE,
   COLOR_CRITIC_CAUSES,
   COLOR_CRITIC_CAUSE_ACTIONS,
@@ -272,7 +273,14 @@ test('T-F4.014 the critic constraints are the cause table, not a paraphrase of i
   assertSet('color_critic_issues_vocabulary_check', 'severity', COLOR_CRITIC_SEVERITIES, 'COLOR_CRITIC_SEVERITIES')
   assertSet('color_critic_issues_vocabulary_check', 'cause', COLOR_CRITIC_CAUSES, 'COLOR_CRITIC_CAUSES')
 
-  // ADR-147: the action is looked up from the cause. The CASE is that lookup.
+  // ADR-147: the action is looked up from the cause. The CASE is that lookup —
+  // but only for a cause the CASE lists. A CASE with no ELSE returns NULL for
+  // anything else, `action = NULL` is unknown, and an unknown CHECK is a
+  // satisfied CHECK: ('not-a-real-cause', 'banana') was accepted. Both
+  // vocabularies are closed first, so the lookup is reachable for every row
+  // that gets past them.
+  assertSet('color_critic_reports_cause_action_check', 'cause', COLOR_CRITIC_CAUSES, 'COLOR_CRITIC_CAUSES')
+  assertSet('color_critic_reports_cause_action_check', 'action', COLOR_CRITIC_ACTIONS, 'COLOR_CRITIC_ACTIONS')
   const causeAction = checkBody('color_critic_reports_cause_action_check')
   for (const [cause, action] of Object.entries(COLOR_CRITIC_CAUSE_ACTIONS)) {
     assert.match(causeAction, new RegExp(`WHEN '${cause}' THEN '${action}'`), `${cause} must map to ${action}`)
@@ -282,7 +290,11 @@ test('T-F4.014 the critic constraints are the cause table, not a paraphrase of i
     COLOR_CRITIC_CAUSES.length,
     'the cause CASE must answer for every cause and no others',
   )
-  assert.doesNotMatch(causeAction, /ELSE/, 'a cause with no mapped action must make the CHECK unknown, not approve by default')
+  assert.doesNotMatch(
+    causeAction,
+    /ELSE/,
+    'an ELSE would give an unmapped cause a default action; the closed cause set is what refuses one',
+  )
 
   const coverage = checkBody('color_critic_reports_coverage_check')
   assert.match(coverage, new RegExp(`"sectionCount" = ${COLOR_CRITIC_STAGES.length}\\b`))
@@ -523,6 +535,33 @@ test('T-F4.015 every hashed child collection stores the order it is hashed in', 
     // does not know about — which is the same as not ordering them.
     assert.match(modelBlock(model), /\n\s+ordinal\s+Int\b/, `${model} must declare the ordinal column`)
   }
+})
+
+test('T-F4.013 a JSON document that omits the key is refused, not tolerated', () => {
+  // A CHECK is violated by FALSE and satisfied by unknown, and `jsonb ->> 'x'`
+  // on a document without `x` is NULL. Every equality between a JSON path and
+  // a projected column therefore has to be made false when the key is absent,
+  // or the constraint refuses a document that names the wrong value and accepts
+  // one that names none — which is the repair-script edit it exists to refuse.
+  const naked = []
+  for (const [name, text] of [['aggregates', sql], ['rehydration', rehydration]]) {
+    for (const [index, line] of text.split('\n').entries()) {
+      if (line.trimStart().startsWith('--')) continue
+      if (!line.includes("->>") && !line.includes("-> '")) continue
+      if (line.includes('COALESCE')) continue
+      naked.push(`${name}:${index + 1} ${line.trim()}`)
+    }
+  }
+  assert.deepEqual(naked, [], 'these comparisons pass for a JSON document that simply omits the key')
+
+  // And the one that is cast rather than compared says what type it expects
+  // first, so a non-boolean is a refusal and not an invalid-input-syntax error
+  // raised from underneath the writer.
+  assert.match(
+    rehydration,
+    /jsonb_typeof\("transformJson"::jsonb -> 'enabled'\) = 'boolean'/,
+    'the enabled flag must be type-checked before it is cast',
+  )
 })
 
 /** The declared width of one `"column" VARCHAR(n)` inside one CREATE TABLE. */

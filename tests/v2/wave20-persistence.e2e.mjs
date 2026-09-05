@@ -539,6 +539,26 @@ test(
         },
       }))
 
+    // A transform document that simply OMITS the implementation. Before the
+    // COALESCE wrappers every one of those equalities was NULL here, and a
+    // CHECK is satisfied by unknown: the row that carried no provider at all
+    // was accepted while the row that carried the wrong one was refused.
+    await refused('camera_match_transforms_transform_check', () =>
+      client.v2CameraMatchTransform.create({
+        data: {
+          id: `${planId}:camera-hollow`, workspaceId, planId, cameraId: 'camera-hollow',
+          transformId: 'match-camera-hollow', provider: 'apollo-match', providerVersion: 'v2',
+          mode: 'adjust', enabled: true,
+          transformJson: JSON.stringify({ id: 'match-camera-hollow', kind: 'match' }),
+          parametersJson: JSON.stringify({ mode: 'adjust' }),
+          deltasJson: JSON.stringify({}),
+          brightness: 0.1, contrast: 1.05, saturation: 1.02,
+          redGain: 1, greenGain: 1, blueGain: 1,
+          derivedFromJson: JSON.stringify([measurementId]), derivedFromCount: 1,
+          rangePairs: 1, confidence: 0.7,
+        },
+      }))
+
     // ---------------------------------------------------------------------
     // F4.014 — the colour critic
     // ---------------------------------------------------------------------
@@ -584,6 +604,28 @@ test(
     await refused('color_critic_reports_cause_action_check', () =>
       client.v2ColorCriticReport.create({
         data: { ...report, id: 'w20-critic-mismatch', reportId: 'w20-critic-mismatch', action: 'reject', reportHash: hash('4') },
+      }))
+    // A cause outside ADR-147's table. The CASE that looks the action up
+    // returns NULL for a cause it does not list, and `action = NULL` is
+    // unknown, which a CHECK accepts — so this pair was stored until the two
+    // vocabularies were closed in front of the lookup.
+    await refused('color_critic_reports_cause_action_check', () =>
+      client.v2ColorCriticReport.create({
+        data: {
+          ...report, id: 'w20-critic-unknown-cause', reportId: 'w20-critic-unknown-cause',
+          cause: 'not-a-real-cause', action: 'reject', reportHash: hash('8'),
+        },
+      }))
+    // An action outside COLOR_CRITIC_ACTIONS. The lookup alone already refused
+    // this one — the CASE cannot return 'banana' — so this row exercises the
+    // closed action set rather than proving it; the set is what makes the
+    // column's vocabulary readable in the schema instead of implied by a CASE.
+    await refused('color_critic_reports_cause_action_check', () =>
+      client.v2ColorCriticReport.create({
+        data: {
+          ...report, id: 'w20-critic-unknown-action', reportId: 'w20-critic-unknown-action',
+          action: 'banana', reportHash: hash('b'),
+        },
       }))
     // Nothing is approved while a dimension went unread.
     await refused('color_critic_reports_verdict_check', () =>

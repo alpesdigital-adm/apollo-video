@@ -21,6 +21,15 @@
 -- the migration's own rule. The two equalities below keep the JSON and the
 -- projected columns one fact rather than two: a repair script that edits the
 -- parameters column without editing the transform is refused here.
+--
+-- Every one of them is wrapped in COALESCE(..., FALSE), because a CHECK is
+-- violated only by FALSE and satisfied by unknown. `-> 'implementation' ->>
+-- 'provider'` on a document that has no implementation is NULL, so the bare
+-- equality accepted a transform that named the wrong provider only when it
+-- named one at all — a document missing the key entirely walked straight
+-- through, which is the exact edit these constraints exist to refuse.
+-- `enabled` is type-checked before it is cast for the same reason, and so a
+-- non-boolean is a refusal rather than an invalid-input-syntax error.
 
 ALTER TABLE "multicam_angle_candidates"
     ADD COLUMN "evidenceJson" TEXT NOT NULL DEFAULT '{}';
@@ -35,10 +44,11 @@ ALTER TABLE "camera_match_transforms" ALTER COLUMN "transformJson" DROP DEFAULT;
 ALTER TABLE "camera_match_transforms"
     ADD CONSTRAINT "camera_match_transforms_transform_check"
     CHECK (jsonb_typeof("transformJson"::jsonb) = 'object'
-          AND "transformJson"::jsonb -> 'implementation' ->> 'provider' = "provider"
-          AND "transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion"
-          AND "transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb
-          AND ("transformJson"::jsonb ->> 'enabled')::boolean = "enabled");
+          AND COALESCE("transformJson"::jsonb -> 'implementation' ->> 'provider' = "provider", FALSE)
+          AND COALESCE("transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion", FALSE)
+          AND COALESCE("transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb, FALSE)
+          AND COALESCE(jsonb_typeof("transformJson"::jsonb -> 'enabled') = 'boolean', FALSE)
+          AND COALESCE(("transformJson"::jsonb ->> 'enabled')::boolean = "enabled", FALSE));
 
 ALTER TABLE "match_range_overrides"
     ADD COLUMN "transformJson" TEXT NOT NULL DEFAULT '{}';
@@ -46,9 +56,9 @@ ALTER TABLE "match_range_overrides" ALTER COLUMN "transformJson" DROP DEFAULT;
 ALTER TABLE "match_range_overrides"
     ADD CONSTRAINT "match_range_overrides_transform_check"
     CHECK (jsonb_typeof("transformJson"::jsonb) = 'object'
-          AND "transformJson"::jsonb -> 'implementation' ->> 'provider' = "provider"
-          AND "transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion"
-          AND "transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb);
+          AND COALESCE("transformJson"::jsonb -> 'implementation' ->> 'provider' = "provider", FALSE)
+          AND COALESCE("transformJson"::jsonb -> 'implementation' ->> 'version' = "providerVersion", FALSE)
+          AND COALESCE("transformJson"::jsonb -> 'implementation' -> 'parameters' = "parametersJson"::jsonb, FALSE));
 
 -- The other half of the same problem: five child collections are ordered by
 -- the aggregate that owns them, and their tables had no way to say so.
