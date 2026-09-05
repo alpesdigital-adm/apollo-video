@@ -602,7 +602,11 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncovere
     policy: PLAYBACK_POLICY,
   })
 
-  return { session, map, referenceMedia, reactionMedia }
+  // The observations travel with the world. The persistence suites want the
+  // map; the F4.015 runtime suite wants what the detector saw, because the
+  // service under test is the one that calls a detector — handing it the
+  // finished map would test nothing it does.
+  return { session, map, referenceMedia, reactionMedia, observations }
 }
 
 /**

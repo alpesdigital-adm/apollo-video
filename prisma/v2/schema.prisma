@@ -260,6 +260,7 @@ model V2Workspace {
   playbackPieces                         V2PlaybackPiece[]
   playbackAnchors                        V2PlaybackAnchor[]
   playbackUncoveredRanges                V2PlaybackUncoveredRange[]
+  renderablePlanSnapshots                V2RenderablePlanSnapshot[]
   transformationProviders                V2TransformationProviderDefinition[]
   transformationProviderCapabilities     V2TransformationProviderCapability[]
   transformationProviderHealth           V2TransformationProviderHealth[]
@@ -761,6 +762,7 @@ model V2Project {
   captureSessionHeads                    V2CaptureSessionHead[]
   captureSyncRuns                        V2CaptureSyncRun[]
   editorialSyntheses                     V2EditorialSynthesis[]
+  renderablePlanSnapshots                V2RenderablePlanSnapshot[]
   multicamMatchPlans                     V2MulticamMatchPlan[]
   multicamMatchPlanHeads                 V2MulticamMatchPlanHead[]
   colorCriticReports                     V2ColorCriticReport[]
@@ -950,6 +952,7 @@ model V2ProjectVersion {
   assetSelections                  V2AssetSelection[]
   qualityIterations                V2QualityIteration[]
   perceptionTimelines              V2PerceptionTimeline[]
+  renderablePlanSnapshots          V2RenderablePlanSnapshot[]          @relation("RenderablePlanSnapshotVersion")
   mvpCoreGatesAsPrimary            V2MvpCoreGate[]                     @relation("MvpCoreGatePrimaryVersion")
   mvpCoreGatesAsCompanion          V2MvpCoreGate[]                     @relation("MvpCoreGateCompanionVersion")
   lutSelectionsAsBase              V2ProjectLutSelection[]             @relation("ProjectLutSelectionBase")
@@ -9963,4 +9966,46 @@ model V2PlaybackUncoveredRange {
   @@unique([workspaceId, mapId, ordinal])
   @@index([workspaceId, mapId, reason])
   @@map("playback_uncovered_ranges")
+}
+
+// ---------------------------------------------------------------------------
+// F4.015 / F4.016 — the compiled plan a derivation produced.
+//
+// A react playback map and a multi-range synthesis each decide a cut; neither
+// was renderable before Wave 20. This table holds what the compiler produced,
+// so a gate can point at the exact clips the renderer received rather than
+// recompiling months later against an aggregate that has moved on.
+//
+// `sourceHash` is the whole point: a map that gained an anchor, or a synthesis
+// that was rebuilt, leaves its snapshot naming a hash the head no longer has.
+// That is how staleness becomes visible instead of silent.
+// ---------------------------------------------------------------------------
+
+model V2RenderablePlanSnapshot {
+  id               String   @id @db.VarChar(200)
+  workspaceId      String   @db.VarChar(128)
+  projectId        String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  planId           String   @db.VarChar(200)
+  origin           String   @db.VarChar(32)
+  sourceId         String   @db.VarChar(160)
+  sourceHash       String   @db.Char(64)
+  sourceVersion    Int?
+  fps              Float
+  durationFrames   Int
+  clipCount        Int
+  planJson         String   @db.Text
+  planHash         String   @db.Char(64)
+  createdAt        DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion @relation("RenderablePlanSnapshotVersion", fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, planHash])
+  @@unique([workspaceId, origin, sourceId, sourceHash, projectVersionId], map: "renderable_plan_snapshots_source_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, origin, sourceId, createdAt(sort: Desc)])
+  @@map("renderable_plan_snapshots")
 }

@@ -73,6 +73,7 @@ import type {
   MulticamMatchPlanRepository,
 } from '../application/ports/multicam-match-plan-repository.ts'
 import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
+import type { RenderablePlanSnapshotRepository } from '../application/ports/renderable-plan-snapshot-repository.ts'
 import type { CaptureSessionRepository } from '../application/ports/capture-session-repository.ts'
 import type { CaptureSyncRunRepository } from '../application/ports/capture-sync-run-repository.ts'
 import type { EditorialSynthesisRepository } from '../application/ports/editorial-synthesis-repository.ts'
@@ -264,6 +265,20 @@ import {
   PrismaMulticamMatchPlanRepository,
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
+import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
+import { PrismaRenderSourceRepository } from './prisma/render-source-repository.ts'
+import { FfmpegPlaybackFingerprinter } from './media/ffmpeg-playback-fingerprint.ts'
+import {
+  buildReactPlaybackMapService,
+  compileReactPlaybackPlanService,
+  editReactPlaybackAnchorService,
+  listReactPlaybackMapVersionsService,
+  listReferenceDependentsService,
+  readReactPlaybackMapService,
+  type PlaybackMediaPort,
+  type PlaybackObservationSource,
+} from '../application/react-playback-map.ts'
+import { compileSynthesisRenderPlanService } from '../application/compile-synthesis-to-directed-plan.ts'
 import { PrismaCaptureSessionRepository } from './prisma/capture-session-repository.ts'
 import { PrismaCaptureSyncRunRepository } from './prisma/capture-sync-run-repository.ts'
 import { PrismaEditorialSynthesisRepository } from './prisma/editorial-synthesis-repository.ts'
@@ -2331,6 +2346,10 @@ export function createPlaybackMapRepository(): PlaybackMapRepository {
   return new PrismaPlaybackMapRepository(resolveV2Client())
 }
 
+export function createRenderablePlanSnapshotRepository(): RenderablePlanSnapshotRepository {
+  return new PrismaRenderablePlanSnapshotRepository(resolveV2Client())
+}
+
 /**
  * The durable synchronization worker, assembled (F4.004/F4.006/F4.007).
  *
@@ -2515,5 +2534,71 @@ function createSetProjectColorPlanService(clock: () => Date) {
     createId: (kind) => `${kind}-${randomUUID()}`,
     createEventId: randomUUID,
     clock,
+  })
+}
+
+/**
+ * The react playback map, assembled from the adapters that already exist
+ * (F4.015).
+ *
+ * Two of the three dependencies were built in earlier slices and had no caller:
+ * `CaptureMediaResolver` verifies a part's bytes against the artifact's
+ * recorded hash before handing over a path, and `FfmpegPlaybackFingerprinter`
+ * reports where each window of the reaction matched inside the reference. This
+ * is where they meet the services — and where the compiler proves the adapters
+ * satisfy the ports, which no test with a fake can.
+ *
+ * `workRoot` reads `APOLLO_V2_RENDER_WORK_ROOT`, the same variable the marker
+ * adapter reads (`marker-media-adapter.ts:130`), so one deployment setting
+ * governs the scratch directories FFmpeg writes into. Absent, the fingerprinter
+ * falls back to its own `mkdtemp` — which is correct on a developer machine and
+ * is why the variable is optional here rather than a refusal.
+ */
+export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = process.env) {
+  const repository = createPlaybackMapRepository()
+  const sessions = createCaptureSessionRepository()
+  const snapshots = createRenderablePlanSnapshotRepository()
+  const sources = createRenderSourceRepository()
+  const clock = () => new Date()
+  const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
+  const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
+  const observations: PlaybackObservationSource = new FfmpegPlaybackFingerprinter(
+    workRoot ? { workRoot } : {},
+  )
+  return Object.freeze({
+    build: buildReactPlaybackMapService({ repository, sessions, media, observations, snapshots, clock }),
+    anchor: editReactPlaybackAnchorService({ repository, snapshots, clock }),
+    read: readReactPlaybackMapService({ repository }),
+    listVersions: listReactPlaybackMapVersionsService({ repository }),
+    listReferenceDependents: listReferenceDependentsService({ repository }),
+    compile: compileReactPlaybackPlanService({ repository, sessions, sources, snapshots, clock }),
+  })
+}
+
+/**
+ * The files a compiled plan may cut from, resolved the way the renderer will.
+ *
+ * Deliberately the project's media-asset links rather than `media_artifacts`
+ * directly: `PrismaProjectProxyRenderRepository` resolves a plan's sources
+ * through those links, so an artifact this returns is one the render path can
+ * find, and one it omits is a compile-time refusal instead of a render-time one.
+ */
+export function createRenderSourceRepository() {
+  return new PrismaRenderSourceRepository(resolveV2Client())
+}
+
+/**
+ * The synthesis-to-render bridge, assembled (F4.016 condition 6).
+ *
+ * The synthesis is read from its own repository, the sources it cuts from are
+ * measured by the server through the project's media-asset links, and the plan
+ * is kept beside the synthesis. The caller brings ids and nothing else.
+ */
+export function createSynthesisRenderPlanService() {
+  return compileSynthesisRenderPlanService({
+    syntheses: createEditorialSynthesisRepository(),
+    sources: createRenderSourceRepository(),
+    snapshots: createRenderablePlanSnapshotRepository(),
+    clock: () => new Date(),
   })
 }

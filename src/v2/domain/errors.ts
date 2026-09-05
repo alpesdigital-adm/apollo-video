@@ -132,6 +132,18 @@ export const DOMAIN_ERROR_CODES = [
   // says a person has to look. Compiling it anyway would approximate an edit.
   'PLAYBACK_MAP_UNRESOLVED',
   'PLAYBACK_MAP_VERSION_STALE',
+  'PLAYBACK_MAP_NOT_FOUND',
+  // The runtime's refusals, each naming the remedy rather than a fault. A
+  // session without a reference-video track is not a react session and never
+  // will be; two reaction tracks are two edits and the caller has to say which;
+  // a track recorded in two files has no single clock to count reference ticks
+  // from; and a reaction the detector never locked onto is the ADR-135 hidden
+  // player — a person has to anchor it, because "played through", "paused then
+  // seeked" and "scrubbed" all fit the evidence equally well.
+  'PLAYBACK_SESSION_NOT_REACT',
+  'PLAYBACK_REACTION_TRACK_AMBIGUOUS',
+  'PLAYBACK_TRACK_NOT_SINGLE_PART',
+  'PLAYBACK_EVIDENCE_INSUFFICIENT',
   'PROJECT_NOT_FOUND',
   'PRODUCTION_BATCH_NOT_FOUND',
   'PRODUCTION_BATCH_ITEM_NOT_FOUND',
