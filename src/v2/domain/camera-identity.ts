@@ -25,9 +25,6 @@ import type { CaptureSession, CaptureTrack } from './capture-session.ts'
 /** Mirrors `TOKEN` in `color-and-export.ts:80`. A structural test keeps the two equal. */
 export const CAMERA_ID_TOKEN = /^[a-z0-9][a-z0-9._/-]{0,127}$/
 
-/** Reason carried in `DomainError.details.reason` when two tracks fold to one key. */
-export const CAMERA_IDENTITY_COLLISION = 'CAMERA_IDENTITY_COLLISION' as const
-
 const CAMERA_ID_MAX_LENGTH = 128
 
 /**
@@ -63,9 +60,9 @@ export function colorCameraIdsForSession(
     const holder = byKey.get(cameraId)
     if (holder !== undefined && holder !== track.trackId) {
       throw new DomainError(
-        'INVALID_ARGUMENT',
+        'CAMERA_IDENTITY_COLLISION',
         `tracks ${holder} and ${track.trackId} fold to the same camera key ${cameraId}; a colour correction could not tell them apart`,
-        { reason: CAMERA_IDENTITY_COLLISION, sessionId: session.sessionId, cameraId, trackIds: [holder, track.trackId] },
+        { sessionId: session.sessionId, cameraId, trackIds: [holder, track.trackId] },
       )
     }
     byKey.set(cameraId, track.trackId)

@@ -33,7 +33,7 @@ import type { CaptureSessionDerivationRef } from './track-coverage.ts'
  * value was measured from pixels/samples, produced under a controlled fixture,
  * or declared by a person. A diarization `speakerKey` is carried with
  * `identityResolved: false`, the same label the diarization aggregate uses
- * (`speaker-diarization.ts:25`): it separates clusters, it does not name
+ * (`speaker-diarization.ts:60`): it separates clusters, it does not name
  * people, and no rule downstream may pretend otherwise.
  *
  * **Time is session time in `bigint` ticks.** Observations arrive already

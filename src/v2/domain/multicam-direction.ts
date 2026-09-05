@@ -94,9 +94,6 @@ export const MULTICAM_DIRECTION_SCHEMA_VERSION = 'multicam-direction/v1' as cons
 export const DIRECTION_POLICY_SCHEMA_VERSION = 'direction-policy/v1' as const
 export const MULTICAM_SHOT_COMPILATION_SCHEMA_VERSION = 'multicam-shot-compilation/v1' as const
 
-/** Reason carried in `DomainError.details.reason` when a shot cannot be turned into source frames. */
-export const DIRECTION_RANGE_UNRESOLVABLE = 'DIRECTION_RANGE_UNRESOLVABLE' as const
-
 export const ANGLE_CONTEXTS = Object.freeze(['speaker', 'reaction', 'screen', 'wide', 'reference-video'] as const)
 export type AngleContext = (typeof ANGLE_CONTEXTS)[number]
 
@@ -399,7 +396,21 @@ type TrackResolution =
   | Readonly<{ status: 'uncovered'; reason: string; sourceGap: Readonly<TickInterval> | null }>
   | Readonly<{ status: 'map-missing' }>
 
-interface DirectionContext {
+/**
+ * Everything `resolveTrackWindow` reads, and nothing else.
+ *
+ * The compile step resolves the same windows without a diagnostic, evidence or
+ * a policy — it re-decides nothing. Narrowing the parameter is what lets it say
+ * so honestly: an earlier draft passed a `DirectionContext` whose diagnostic and
+ * evidence were `{} as unknown as …`, which would have become a silent lie the
+ * day the resolver started reading one of them.
+ */
+interface SourceWindowResolver {
+  readonly session: Readonly<CaptureSession>
+  readonly mapBySource: ReadonlyMap<string, Readonly<PiecewiseClockMap>>
+}
+
+interface DirectionContext extends SourceWindowResolver {
   readonly session: Readonly<CaptureSession>
   readonly resolved: Readonly<ResolvedDirectionPolicy>
   readonly format: Readonly<{ aspectRatio: OutputAspectRatio }>
@@ -668,7 +679,7 @@ function declaredSourceGap(
   return null
 }
 
-function resolveTrackWindow(ctx: DirectionContext, track: Readonly<CaptureTrack>, window: Readonly<TickInterval>): TrackResolution {
+function resolveTrackWindow(ctx: SourceWindowResolver, track: Readonly<CaptureTrack>, window: Readonly<TickInterval>): TrackResolution {
   const map = ctx.mapBySource.get(track.sourceAssetId) ?? null
   if (!map) {
     if (track.trackId !== ctx.session.referenceTrackId) return Object.freeze({ status: 'map-missing' as const })
@@ -1349,8 +1360,17 @@ function audioForShot(ctx: DirectionContext, range: Readonly<TickInterval>): Rea
   return Object.freeze({ trackId: track.trackId, detail: null })
 }
 
+/**
+ * Why each track that was not chosen was not chosen.
+ *
+ * An angle that COULD have been cut to and lost on score is a different answer
+ * from one that was never admissible, so an eligible appearance always beats an
+ * ineligible one — even when the ineligible window scored higher. Ranking by
+ * score alone let a candidate that was merely out of coverage in the first
+ * window mask the reason it lost in every window after it.
+ */
 function alternativesOf(decisions: readonly WindowDecision[], chosenTrackId: string): readonly Readonly<ShotAlternative>[] {
-  const best = new Map<string, Readonly<ShotAlternative>>()
+  const best = new Map<string, Readonly<ShotAlternative> & { eligible: boolean }>()
   for (const decision of decisions) {
     for (const candidate of decision.candidates) {
       if (candidate.trackId === chosenTrackId) continue
@@ -1358,17 +1378,23 @@ function alternativesOf(decisions: readonly WindowDecision[], chosenTrackId: str
         ? `scored ${candidate.scoreComponents.total.toFixed(3)} under ${decision.rule}`
         : candidate.rejectionReasons.join(', ')
       const known = best.get(candidate.trackId)
-      if (!known || candidate.scoreComponents.total > known.scoreTotal) {
-        best.set(candidate.trackId, Object.freeze({
+      const better = !known
+        || (candidate.eligible && !known.eligible)
+        || (candidate.eligible === known.eligible && candidate.scoreComponents.total > known.scoreTotal)
+      if (better) {
+        best.set(candidate.trackId, {
           candidateId: candidate.candidateId,
           trackId: candidate.trackId,
           scoreTotal: candidate.scoreComponents.total,
           rejectedBecause,
-        }))
+          eligible: candidate.eligible,
+        })
       }
     }
   }
-  return Object.freeze([...best.values()].sort((left, right) => left.trackId.localeCompare(right.trackId)))
+  return Object.freeze([...best.values()]
+    .sort((left, right) => left.trackId.localeCompare(right.trackId))
+    .map(({ eligible: _eligible, ...alternative }) => Object.freeze(alternative)))
 }
 
 function shotEvidenceRefs(ctx: DirectionContext, chosen: Readonly<AngleCandidate>): readonly string[] {
@@ -1553,18 +1579,27 @@ export function directMulticam(input: DirectMulticamInput): Readonly<MulticamDir
   let current: Run | null = null
   const queue = [...partitionWindows(ctx, range)]
   while (queue.length > 0) {
-    let window = queue.shift()!
-    // Rule 3: the cutaway cap is a boundary the evidence did not know about.
-    // Split the window there so the return can be decided at the cap and not
-    // at the end of a reaction that happens to last longer.
-    if (current && ctx.contextByTrack.get(current.trackId) === 'reaction') {
-      const cap = current.start + ctx.resolved.maxCutawayTicks
-      if (window.start < cap && cap < window.end) {
+    const window = queue.shift()!
+    const decision = decideWindow(ctx, window, current)
+    // Rule 3: the cutaway cap is a boundary the evidence did not know about, and
+    // it belongs to the run the DECISION starts, not to the run that preceded
+    // it. Splitting before deciding capped a cutaway one window too late — a
+    // ten-second reaction that began and ended inside a single evidence window
+    // ran its full length. Split at the cap and decide the two halves
+    // separately; the second half sees a reaction that has already held its
+    // maximum and returns.
+    if (decision.chosen && ctx.contextByTrack.get(decision.chosen.trackId) === 'reaction') {
+      const continues = current !== null
+        && current.trackId === decision.chosen.trackId
+        && current.pieceId === decision.chosen.sourcePieceId
+        && current.end === window.start
+      const cap = (continues ? current!.start : window.start) + ctx.resolved.maxCutawayTicks
+      if (cap > window.start && cap < window.end) {
         queue.unshift(createTickInterval(cap, window.end))
-        window = createTickInterval(window.start, cap)
+        queue.unshift(createTickInterval(window.start, cap))
+        continue
       }
     }
-    const decision = decideWindow(ctx, window, current)
     if (!decision.chosen) {
       const last = uncovered[uncovered.length - 1]
       if (last && last.end === window.start) last.end = window.end
@@ -1738,11 +1773,22 @@ export interface CompiledShotClip {
   readonly sourceAssetId: string
   readonly sourceInFrame: number
   readonly sourceOutFrame: number
+  /**
+   * The frame rate `sourceInFrame`/`sourceOutFrame` are counted in.
+   *
+   * The renderer trims the SOURCE stream (`trim=start_frame=…`,
+   * `ffmpeg-editorial-proxy-renderer.ts:752`) before resampling to the output
+   * fps, so these indexes belong to the source's own cadence, which the plan
+   * fps only happens to equal. Carried per clip so the integration can see
+   * which rate produced the number instead of assuming the plan's.
+   */
+  readonly sourceFrameRate: Rational
   readonly timelineInFrame: number
   readonly timelineOutFrame: number
   readonly rate: 1
   readonly audioTrackId: string | null
   readonly audioSourceAssetId?: string
+  /** Audio frames are plan-fps frames: the renderer divides them by `input.fps` (`:737-738`). */
   readonly audioSourceInFrame?: number
   readonly audioSourceOutFrame?: number
   readonly sessionRange: Readonly<TickInterval>
@@ -1754,6 +1800,7 @@ export interface CompiledShotSource {
   readonly partId: string
   readonly cameraId: string
   readonly kind: 'video' | 'audio'
+  readonly frameRate: Rational
   readonly durationFrames: number
 }
 
@@ -1776,10 +1823,19 @@ export interface CompileShotsInput {
   planFps: Rational
   /** When given, every shot is re-gated through `assertCoverageSelectable` before it becomes frames. */
   coverages?: readonly Readonly<TrackCoverage>[]
+  /**
+   * The probed frame rate of each track's media, as the artifact probe reported
+   * it. A `CaptureTrack` carries the media *timebase* (seconds per tick), which
+   * is not a frame rate: 1/90000 says nothing about cadence. So the rate arrives
+   * from the probe, per track, and a track without one falls back to `planFps` —
+   * recorded on every clip as `sourceFrameRate` so the assumption is visible
+   * rather than implied.
+   */
+  sourceFrameRates?: readonly Readonly<{ trackId: string; frameRate: Rational }>[]
 }
 
 function unresolvable(message: string, details: Record<string, unknown>): DomainError {
-  return new DomainError('INVALID_ARGUMENT', message, { reason: DIRECTION_RANGE_UNRESOLVABLE, ...details })
+  return new DomainError('DIRECTION_RANGE_UNRESOLVABLE', message, details)
 }
 
 /** `1/fps` seconds per frame, exactly. */
@@ -1836,26 +1892,27 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     )
     mapBySource.set(map.sourceId, map)
   }
-  const ctx: DirectionContext = {
-    session,
-    resolved: resolveDirectionPolicy(direction.policy, session.clock.timebase),
-    format: direction.format,
-    coverageByTrack,
-    mapBySource,
-    // The compile step never re-decides; the diagnostic and evidence are not consulted here.
-    diagnostic: { tracks: [] } as unknown as SyncDiagnostic,
-    ceiling: null,
-    sessionAutoEdit: { allowed: true, blockedBy: [] },
-    evidence: { observations: [] } as unknown as MulticamEvidenceSet,
-    speakerCameras: new Map(),
-    unmappedSpeakerObservations: [],
-    contextByTrack: new Map(),
-    cameraIds: colorCameraIdsForSession(session),
-    protectedSelections: [],
-    audioTrackId: direction.audio.trackId,
-    audioRejected: direction.audio.rejected,
+  // The compile step never re-decides, so it holds only what resolving a window
+  // needs: the session and the maps. The policy is still validated, because a
+  // stored direction naming a policy this build cannot express is not compilable.
+  resolveDirectionPolicy(direction.policy, session.clock.timebase)
+  const resolver: SourceWindowResolver = { session, mapBySource }
+  const cameraIds = colorCameraIdsForSession(session)
+  const frameRateByTrack = new Map<string, Rational>()
+  for (const entry of input.sourceFrameRates ?? []) {
+    assertDomain(
+      entry.frameRate.num > BigInt(0) && entry.frameRate.den > BigInt(0),
+      'INVALID_ARGUMENT',
+      `source frame rate for ${entry.trackId} must be a positive rational`,
+    )
+    assertDomain(!frameRateByTrack.has(entry.trackId), 'INVALID_ARGUMENT', `two source frame rates describe track ${entry.trackId}`)
+    frameRateByTrack.set(entry.trackId, entry.frameRate)
   }
-  const frames = frameTimebase(input.planFps)
+  const planFrames = frameTimebase(input.planFps)
+  const framesFor = (trackId: string) => {
+    const rate = frameRateByTrack.get(trackId) ?? input.planFps
+    return { rate, timebase: rationalEquals(rate, input.planFps) ? planFrames : frameTimebase(rate) }
+  }
   const clips: Array<Readonly<CompiledShotClip>> = []
   const sources = new Map<string, Readonly<CompiledShotSource>>()
   let timeline = 0
@@ -1863,7 +1920,7 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
   const resolveOrRefuse = (shot: Readonly<ShotDecision>, trackId: string, role: 'video' | 'audio') => {
     const track = session.tracks.find((entry) => entry.trackId === trackId)
     assertDomain(track !== undefined, 'CAPTURE_TRACK_NOT_FOUND', `shot ${shot.shotId} names ${trackId}, which is not in session ${session.sessionId}`)
-    const resolution = resolveTrackWindow(ctx, track!, shot.sessionRange)
+    const resolution = resolveTrackWindow(resolver, track!, shot.sessionRange)
     if (resolution.status !== 'resolved') {
       throw unresolvable(
         `shot ${shot.shotId} ${role} track ${trackId} has no source law for ${ticksToString(shot.sessionRange)}: ${resolution.status === 'uncovered' ? resolution.reason : 'no clock map'}`,
@@ -1887,39 +1944,51 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
   for (const shot of direction.shots) {
     const video = resolveOrRefuse(shot, shot.chosen.trackId, 'video')
     const part = video.resolution.part
-    const sourceInFrame = toFrames(video.resolution.sourceRange.start - part.coverage.start, part.timebase, frames)
-    const sourceOutFrame = toFrames(video.resolution.sourceRange.end - part.coverage.start, part.timebase, frames)
+    const source = framesFor(video.track.trackId)
+    const sourceInFrame = toFrames(video.resolution.sourceRange.start - part.coverage.start, part.timebase, source.timebase)
+    const sourceOutFrame = toFrames(video.resolution.sourceRange.end - part.coverage.start, part.timebase, source.timebase)
     if (sourceOutFrame <= sourceInFrame) {
+      throw unresolvable(`shot ${shot.shotId} is shorter than one frame at ${serializeRational(source.rate)} fps`, { shotId: shot.shotId, trackId: shot.chosen.trackId, cause: 'shorter-than-frame' })
+    }
+    // The timeline runs at the plan's fps, so its span is measured there — a
+    // 60 fps source contributes half as many timeline frames as source frames,
+    // and using the source span would stretch the cut. It is measured on the
+    // SOURCE duration rather than the session range because that is the
+    // material the renderer will resample; a drifting clock makes the two
+    // differ, and the plan must claim the length that will actually exist.
+    const timelineSpan = toFrames(intervalDuration(video.resolution.sourceRange), part.timebase, planFrames)
+    if (timelineSpan <= 0) {
       throw unresolvable(`shot ${shot.shotId} is shorter than one frame at ${serializeRational(input.planFps)} fps`, { shotId: shot.shotId, trackId: shot.chosen.trackId, cause: 'shorter-than-frame' })
     }
-    const span = sourceOutFrame - sourceInFrame
-    const cameraId = ctx.cameraIds.get(video.track.trackId)!
+    const cameraId = cameraIds.get(video.track.trackId)!
     sources.set(part.sourceAssetId, Object.freeze({
       sourceAssetId: part.sourceAssetId,
       trackId: video.track.trackId,
       partId: part.partId,
       cameraId,
       kind: 'video' as const,
-      durationFrames: toFrames(intervalDuration(part.coverage), part.timebase, frames),
+      frameRate: source.rate,
+      durationFrames: toFrames(intervalDuration(part.coverage), part.timebase, source.timebase),
     }))
     let audio: Pick<CompiledShotClip, 'audioSourceAssetId' | 'audioSourceInFrame' | 'audioSourceOutFrame'> = {}
     if (shot.audioTrackId !== null) {
       const bed = resolveOrRefuse(shot, shot.audioTrackId, 'audio')
       const audioPart = bed.resolution.part
-      const audioSourceInFrame = toFrames(bed.resolution.sourceRange.start - audioPart.coverage.start, audioPart.timebase, frames)
+      const audioSourceInFrame = toFrames(bed.resolution.sourceRange.start - audioPart.coverage.start, audioPart.timebase, planFrames)
       audio = {
         audioSourceAssetId: audioPart.sourceAssetId,
         audioSourceInFrame,
-        audioSourceOutFrame: audioSourceInFrame + span,
+        audioSourceOutFrame: audioSourceInFrame + timelineSpan,
       }
       if (!sources.has(audioPart.sourceAssetId)) {
         sources.set(audioPart.sourceAssetId, Object.freeze({
           sourceAssetId: audioPart.sourceAssetId,
           trackId: bed.track.trackId,
           partId: audioPart.partId,
-          cameraId: ctx.cameraIds.get(bed.track.trackId)!,
+          cameraId: cameraIds.get(bed.track.trackId)!,
           kind: 'audio' as const,
-          durationFrames: toFrames(intervalDuration(audioPart.coverage), audioPart.timebase, frames),
+          frameRate: input.planFps,
+          durationFrames: toFrames(intervalDuration(audioPart.coverage), audioPart.timebase, planFrames),
         }))
       }
     }
@@ -1931,14 +2000,15 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
       sourceAssetId: part.sourceAssetId,
       sourceInFrame,
       sourceOutFrame,
+      sourceFrameRate: source.rate,
       timelineInFrame: timeline,
-      timelineOutFrame: timeline + span,
+      timelineOutFrame: timeline + timelineSpan,
       rate: 1 as const,
       audioTrackId: shot.audioTrackId,
       ...audio,
       sessionRange: shot.sessionRange,
     }))
-    timeline += span
+    timeline += timelineSpan
   }
 
   const body = {
@@ -1957,7 +2027,12 @@ export function compileShotsToSourceRanges(direction: Readonly<MulticamDirection
     compilationHash: calculateCanonicalHash({
       ...body,
       planFps: serializeRational(body.planFps),
-      clips: body.clips.map((clip) => ({ ...clip, sessionRange: serializeTickInterval(clip.sessionRange) })),
+      clips: body.clips.map((clip) => ({
+        ...clip,
+        sessionRange: serializeTickInterval(clip.sessionRange),
+        sourceFrameRate: serializeRational(clip.sourceFrameRate),
+      })),
+      sources: body.sources.map((source) => ({ ...source, frameRate: serializeRational(source.frameRate) })),
     }),
   })
 }
