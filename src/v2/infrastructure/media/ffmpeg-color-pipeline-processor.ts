@@ -99,13 +99,43 @@ function zscale(stage: Readonly<ColorTransform>) {
   return `zscale=pin=${input.primaries}:tin=${input.transfer}:min=${input.matrix}:rin=${input.range}:p=${output.primaries}:t=${output.transfer}:m=${output.matrix}:r=${output.range}${dither}`
 }
 
+/**
+ * `apollo-match`, both provider versions (F4.013).
+ *
+ * v1 is the `eq` filter this processor has always applied. v2 adds the three
+ * per-channel white-balance gains the domain derives
+ * (`multicam-match-plan.ts:66-100`) and renders them as a `colorchannelmixer`
+ * placed BEFORE the `eq`, because a channel gain and a luma/contrast/saturation
+ * adjustment do not commute: correcting the balance after the contrast curve
+ * would balance a picture the eq had already reshaped.
+ *
+ * The two versions are kept apart by `implementation.version`, not by which
+ * keys happen to be present. A v1 transform with a stray `red-gain` is a
+ * refusal, not a silent upgrade: `parametersHash` and therefore `pipelineHash`
+ * are computed over the whole parameter object, so a compilation that hashed as
+ * v1 must keep rendering exactly what v1 rendered for ever.
+ *
+ * The stage order `technical > match > creative-lut > output` is untouched:
+ * both versions return one link of the same chain, asserted four stages long by
+ * `assertCompilation`/`assertResolvedExecution` above.
+ */
+const MATCH_V1_PARAMETERS = Object.freeze(['mode', 'brightness', 'contrast', 'saturation'])
+const MATCH_V2_GAIN_PARAMETERS = Object.freeze(['red-gain', 'green-gain', 'blue-gain'])
+const MATCH_V2_PARAMETERS = Object.freeze([...MATCH_V1_PARAMETERS, ...MATCH_V2_GAIN_PARAMETERS])
+/** Mirrors `MATCH_PARAMETER_BOUNDS.gain`; a structural test keeps the two equal. */
+const MATCH_GAIN_BOUNDS = Object.freeze([0.5, 2] as const)
+
 function match(stage: Readonly<ColorTransform>) {
   if (stage.implementation.provider !== 'apollo-match') {
     throw new DomainError('INVALID_RENDER_INPUT', 'match requires apollo-match')
   }
+  const version = stage.implementation.version
+  if (version !== 'v1' && version !== 'v2') {
+    throw new DomainError('INVALID_RENDER_INPUT', `match provider version ${version} is unsupported`)
+  }
+  const allowed = version === 'v2' ? MATCH_V2_PARAMETERS : MATCH_V1_PARAMETERS
   const parameters = stage.implementation.parameters
-  if (Object.keys(parameters).some((key) =>
-    !['mode', 'brightness', 'contrast', 'saturation'].includes(key))) {
+  if (Object.keys(parameters).some((key) => !allowed.includes(key))) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match has unsupported parameters')
   }
   if (!stage.enabled) {
@@ -127,7 +157,23 @@ function match(stage: Readonly<ColorTransform>) {
   ) {
     throw new DomainError('INVALID_RENDER_INPUT', 'match parameters are outside safe bounds')
   }
-  return `eq=brightness=${brightness.toFixed(6)}:contrast=${contrast.toFixed(6)}:saturation=${saturation.toFixed(6)}`
+  const eq = `eq=brightness=${brightness.toFixed(6)}:contrast=${contrast.toFixed(6)}:saturation=${saturation.toFixed(6)}`
+  if (version === 'v1') return eq
+  // A v2 transform that names no gain is not a white balance; it is a v1
+  // transform wearing a newer version token, and letting it through would make
+  // two different parameter objects render identically under two hashes.
+  const gains = MATCH_V2_GAIN_PARAMETERS.map((key) => {
+    const value = Number(parameters[key])
+    if (
+      parameters[key] === undefined || !Number.isFinite(value) ||
+      value < MATCH_GAIN_BOUNDS[0] || value > MATCH_GAIN_BOUNDS[1]
+    ) {
+      throw new DomainError('INVALID_RENDER_INPUT', `match ${key} is missing or outside safe bounds`)
+    }
+    return value
+  })
+  const [red, green, blue] = gains as [number, number, number]
+  return `colorchannelmixer=rr=${red.toFixed(6)}:gg=${green.toFixed(6)}:bb=${blue.toFixed(6)},${eq}`
 }
 
 function creative(
