@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -12,7 +13,13 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *
  * - **Hydration is verified by hash.** A piece edited underneath the
  *   application makes the map unreadable rather than making the compiler cut
- *   from numbers nobody derived.
+ *   from numbers nobody derived — and so does an edited `planJson`, which is
+ *   the guard that had none: the CHECKs accept a clip shifted three hundred
+ *   frames deeper into the master, and the reader does not.
+ * - **The plan names files this project can render from.** Every artifact the
+ *   compiled plan declares is resolved through the project's media-asset links
+ *   — the lookup the render path itself performs — and unlinking one refuses
+ *   the next compile instead of storing a plan nothing can open.
  * - **The refusal of a second writer is a constraint.** Two operators anchoring
  *   the same stretch from two machines both compute version 2; one of them has
  *   to lose to the database, not to a `SELECT` somebody remembered to run.
@@ -55,6 +62,12 @@ test(
     const { PrismaRenderablePlanSnapshotRepository } = await import(
       '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
     )
+    const { PrismaRenderSourceRepository } = await import(
+      '../../src/v2/infrastructure/prisma/render-source-repository.ts'
+    )
+    const { calculateRenderablePlanHash } = await import(
+      '../../src/v2/application/renderable-edit-plan.ts'
+    )
     const {
       buildReactPlaybackMapService,
       compileReactPlaybackPlanService,
@@ -76,6 +89,10 @@ test(
       ]) {
         await table.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       }
+      // Links and manifests first: both reference the artifact with RESTRICT.
+      await client.v2ProjectMediaAsset.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      await client.v2MediaArtifactManifest.deleteMany({ where: { workspaceId: { in: [A, B] } } })
+      await client.v2MediaArtifact.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       await client.v2ProjectVersion.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: { in: [A, B] } } })
       await client.v2Project.deleteMany({ where: { workspaceId: { in: [A, B] } } })
@@ -142,8 +159,62 @@ test(
     // The slice C fixture: a reaction with a pause, a commentary, a replay, a
     // seek and a stretch where the player was hidden.
     const world = buildPlaybackWorld({ workspaceId: A, projectId: PROJECT_A, sessionId: SESSION })
+
+    // The two recordings as ingested artifacts, linked to the project. The ids
+    // are the parts' own `evidence.ingestArtifactId` and the durations their own
+    // measured coverage, both read off the fixture rather than retyped: a plan
+    // that declared the capture ASSET id instead would resolve to none of these.
+    const ticksPerSecond = (part) =>
+      Number(part.timebase.secondsPerTick.den) / Number(part.timebase.secondsPerTick.num)
+    const recordings = world.session.tracks.map((track) => {
+      const part = track.parts[0]
+      return {
+        trackId: track.trackId,
+        artifactId: part.evidence.ingestArtifactId,
+        sha256: part.evidence.ingestSha256,
+        durationSeconds: Number(part.coverage.end - part.coverage.start) / ticksPerSecond(part),
+      }
+    })
+    for (const [index, recording] of recordings.entries()) {
+      const artifactKey = `workspaces/${A}/sources/${recording.trackId}.mp4`
+      await client.v2MediaArtifact.create({
+        data: {
+          id: recording.artifactId, workspaceId: A, artifactKey, sha256: recording.sha256,
+          byteSize: BigInt(4_096 * (index + 1)), mediaType: 'video', container: 'mp4',
+          status: 'available', createdAt: at(0),
+        },
+      })
+      await client.v2MediaArtifactManifest.create({
+        data: {
+          id: `manifest-${recording.artifactId}`, workspaceId: A, artifactId: recording.artifactId,
+          schemaVersion: 'media-artifact-manifest/v1', manifestHash: hash(String(index)),
+          recipeId: 'source-master', recipeVersion: '1.0.0', parametersHash: hash('b'),
+          manifestJson: JSON.stringify({
+            schemaVersion: 'media-artifact-manifest/v1',
+            artifact: {
+              artifactKey, sha256: recording.sha256, byteSize: 4_096 * (index + 1),
+              mediaType: 'video', container: 'mp4',
+            },
+            recipe: { id: 'source-master', version: '1.0.0', parametersHash: hash('b') },
+            sources: [],
+            // The measurement the compiler is not allowed to take from a caller.
+            probe: { width: 1_920, height: 1_080, duration: recording.durationSeconds, fps: 30 },
+          }),
+          createdAt: at(0),
+        },
+      })
+      await client.v2ProjectMediaAsset.create({
+        data: {
+          id: randomUUID(), workspaceId: A, projectId: PROJECT_A,
+          artifactId: recording.artifactId, role: 'source-master',
+          originalFileName: `${recording.trackId}.mp4`, createdAt: at(0),
+        },
+      })
+    }
+
     const maps = new PrismaPlaybackMapRepository(client)
     const snapshots = new PrismaRenderablePlanSnapshotRepository(client)
+    const renderSources = new PrismaRenderSourceRepository(client)
     let seconds = 0
     const clock = () => at((seconds += 1))
     const sessions = {
@@ -186,12 +257,12 @@ test(
     }
 
     const build = buildReactPlaybackMapService({
-      repository: maps, sessions, media, observations: detector, clock,
+      repository: maps, sessions, media, observations: detector, snapshots, clock,
     })
     const anchor = editReactPlaybackAnchorService({ repository: maps, snapshots, clock })
     const read = readReactPlaybackMapService({ repository: maps })
     const compile = compileReactPlaybackPlanService({
-      repository: maps, sessions, snapshots, clock,
+      repository: maps, sessions, sources: renderSources, snapshots, clock,
     })
 
     const first = await build({ actor, sessionId: SESSION, ...base })
@@ -318,6 +389,29 @@ test(
     assert.equal(snapshotRow.clipCount, compiled.plan.videoTracks[0].clips.length)
     assert.equal(snapshotRow.durationFrames, compiled.plan.durationFrames)
 
+    // Every artifact the plan declares is one this project is linked to, which
+    // is the lookup `PrismaProjectProxyRenderRepository` performs before it
+    // renders: `project.mediaAssets.find(item => item.artifactId === artifactId)`.
+    // A plan naming the capture asset ids would resolve to none of these rows.
+    const linked = new Set((await client.v2ProjectMediaAsset.findMany({
+      where: { workspaceId: A, projectId: PROJECT_A },
+      select: { artifactId: true },
+    })).map((row) => row.artifactId))
+    assert.deepEqual(
+      compiled.plan.sources.map((source) => source.artifactId).sort(),
+      recordings.map((recording) => recording.artifactId).sort(),
+    )
+    for (const clip of compiled.plan.videoTracks[0].clips) {
+      assert.ok(linked.has(clip.sourceArtifactId), `${clip.sourceArtifactId} is not a source of this project`)
+      assert.ok(linked.has(clip.audioSourceArtifactId), `${clip.audioSourceArtifactId} is not a source of this project`)
+    }
+    // And the durations are the ones the manifests carry, not the timeline's:
+    // the reaction runs forty seconds over a thirty-second reference.
+    assert.deepEqual(
+      Object.fromEntries(compiled.plan.sources.map((source) => [source.artifactId, source.durationSeconds])),
+      Object.fromEntries(recordings.map((recording) => [recording.artifactId, recording.durationSeconds])),
+    )
+
     // Recompiling is a replay: the same derivation at the same hash is one row.
     const again = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
@@ -354,10 +448,141 @@ test(
           planHash: hash('8'),
         },
       }))
+    // `projectVersionId` decides which rows replay and which cut a row belongs
+    // to, and it referenced nothing. The row below passes every CHECK — the JSON
+    // agrees with the column and the hash is recomputed over it — so only the
+    // foreign key can refuse it.
+    const absentVersionPlan = JSON.parse(snapshotRow.planJson)
+    absentVersionPlan.projectVersionId = 'pm-e2e-version-absent'
+    await refuse('renderable_plan_snapshots_projectVersionId_projectId_works_fkey', () =>
+      client.v2RenderablePlanSnapshot.create({
+        data: {
+          ...snapshotRow,
+          id: `${snapshotRow.id}-version`,
+          projectVersionId: 'pm-e2e-version-absent',
+          planJson: JSON.stringify(absentVersionPlan),
+          planHash: calculateRenderablePlanHash(absentVersionPlan),
+        },
+      }))
 
-    // Hash-verified hydration: a piece edited underneath the application makes
-    // the map unreadable rather than making the compiler cut from numbers
-    // nobody derived.
+    // Hash-verified hydration of the PLAN, which is the guard commit fc11d484
+    // is named after and which no test exercised: removing the recompute left
+    // every suite green, this journey included.
+    //
+    // The edit is chosen to pass every CHECK on the table: same plan id, same
+    // state, same schema version, same project version, same duration, same clip
+    // count — only the first clip moved three hundred frames deeper into the
+    // master, which is exactly the kind of edit a repair script makes and the
+    // kind that changes what gets rendered.
+    const storedPlan = JSON.parse(snapshotRow.planJson)
+    const movedPlan = JSON.parse(snapshotRow.planJson)
+    movedPlan.videoTracks[0].clips[0].sourceInFrame += 300
+    movedPlan.videoTracks[0].clips[0].sourceOutFrame += 300
+    await client.v2RenderablePlanSnapshot.update({
+      where: { id: snapshotRow.id },
+      data: { planJson: JSON.stringify(movedPlan) },
+    })
+    const shifted = await snapshots.readLatestForSource({
+      workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
+    }).then(() => null, (error) => error)
+    assert.equal(shifted?.code, 'PERSISTENCE_CONFLICT', 'the CHECKs accepted the edit; the reader must not')
+    assert.match(String(shifted.message), /does not match its hash/)
+    assert.equal(shifted.details.storedHash, snapshotRow.planHash)
+
+    // A tamperer who recomputes the hash — the algorithm is in the repository —
+    // still cannot store a document the domain refuses: nine clips with no
+    // transitions between them is not a plan, and every CHECK still passes.
+    const unrenderable = JSON.parse(snapshotRow.planJson)
+    unrenderable.transitions = []
+    await client.v2RenderablePlanSnapshot.update({
+      where: { id: snapshotRow.id },
+      data: {
+        planJson: JSON.stringify(unrenderable),
+        planHash: calculateRenderablePlanHash(unrenderable),
+      },
+    })
+    const invalid = await snapshots.readLatestForSource({
+      workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
+    }).then(() => null, (error) => error)
+    assert.equal(invalid?.code, 'PERSISTENCE_CONFLICT')
+    assert.match(String(invalid.message), /not a renderable plan any more/)
+
+    // The other two refusals in `hydrate` need the table's own CHECKs out of the
+    // way — which is the point: they are the reader's defence for the day a
+    // repair script drops a constraint, and the constraint definition is read
+    // back from the catalogue so restoring it cannot drift from the migration.
+    const withoutConstraint = async (name, run) => {
+      const [{ def }] = await client.$queryRawUnsafe(
+        'SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint ' +
+        `WHERE conrelid = 'renderable_plan_snapshots'::regclass AND conname = $1`,
+        name,
+      )
+      await client.$executeRawUnsafe(`ALTER TABLE "renderable_plan_snapshots" DROP CONSTRAINT "${name}"`)
+      try {
+        await run()
+      } finally {
+        await client.v2RenderablePlanSnapshot.update({
+          where: { id: snapshotRow.id },
+          data: {
+            planJson: snapshotRow.planJson,
+            planHash: snapshotRow.planHash,
+            origin: snapshotRow.origin,
+          },
+        })
+        await client.$executeRawUnsafe(
+          `ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "${name}" ${def}`,
+        )
+      }
+    }
+
+    await withoutConstraint('renderable_plan_snapshots_plan_check', async () => {
+      await client.v2RenderablePlanSnapshot.update({
+        where: { id: snapshotRow.id },
+        data: { planJson: 'this is not a plan' },
+      })
+      const broken = await snapshots.listForProject({ workspaceId: A, projectId: PROJECT_A })
+        .then(() => null, (error) => error)
+      assert.equal(broken?.code, 'PERSISTENCE_CONFLICT')
+      assert.match(String(broken.message), /is not valid JSON/)
+    })
+    await withoutConstraint('renderable_plan_snapshots_origin_check', async () => {
+      await client.v2RenderablePlanSnapshot.update({
+        where: { id: snapshotRow.id },
+        data: { origin: 'hand-made' },
+      })
+      const foreign = await snapshots.listForProject({ workspaceId: A, projectId: PROJECT_A })
+        .then(() => null, (error) => error)
+      assert.equal(foreign?.code, 'PERSISTENCE_CONFLICT')
+      assert.match(String(foreign.message), /names an unknown origin/)
+    })
+
+    // Restored, and readable again — so the refusals above were the tampering
+    // and not a repository that cannot read its own rows.
+    const restored = await snapshots.readLatestForSource({
+      workspaceId: A, origin: 'react-playback', sourceId: resolved.map.mapId,
+    })
+    assert.equal(restored.planHash, compiled.planHash)
+    assert.deepEqual(restored.plan.videoTracks[0].clips[0], storedPlan.videoTracks[0].clips[0])
+
+    // Unlinking a recording refuses the next compile instead of storing a plan
+    // whose sources the renderer cannot resolve. A different project version, so
+    // the refusal cannot be the idempotency key answering for it.
+    const referenceLink = await client.v2ProjectMediaAsset.findFirstOrThrow({
+      where: { workspaceId: A, artifactId: recordings[1].artifactId },
+    })
+    await client.v2ProjectMediaAsset.delete({ where: { id: referenceLink.id } })
+    const unresolvable = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    }).then(() => null, (error) => error)
+    assert.equal(unresolvable?.code, 'MEDIA_ARTIFACT_NOT_FOUND')
+    assert.equal(unresolvable.details.artifactId, recordings[1].artifactId)
+    await client.v2ProjectMediaAsset.create({ data: { ...referenceLink } })
+
+    // Hash-verified hydration of the MAP: a piece edited underneath the
+    // application makes it unreadable rather than making the compiler cut from
+    // numbers nobody derived.
     await client.v2PlaybackPiece.updateMany({
       where: { workspaceId: A, ordinal: 0 },
       data: { confidence: 0.11 },
@@ -372,7 +597,11 @@ test(
       `${first.map.uncovered.length} uncovered -> v2 ${resolved.map.status}, ` +
       `plan ${compiled.plan.durationFrames} frames over ` +
       `${compiled.plan.videoTracks[0].clips.length} clips, 1 snapshot row, ` +
-      `second writer refused by ${lost.code} at the service and ${rejected.code} at the database`,
+      `second writer refused by ${lost.code} at the service and ${rejected.code} at the database; ` +
+      `sources ${compiled.plan.sources.map((source) => `${source.artifactId}@${source.durationSeconds}s`).join(' + ')} ` +
+      `all linked to ${PROJECT_A}; stored plan refused after a CHECK-passing clip shift ` +
+      `(${shifted.code}), after a rehashed unrenderable document (${invalid.code}) ` +
+      `and after unlinking the reference (${unresolvable.code})`,
     )
   },
 )

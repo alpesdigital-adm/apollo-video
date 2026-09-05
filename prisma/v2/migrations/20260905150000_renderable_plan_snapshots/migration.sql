@@ -99,4 +99,4 @@ ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshot
 -- director_runs, edit_commands and a hundred others), and it buys the second
 -- check for free: the version has to belong to the project the row names.
 -- AddForeignKey
-ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshots_projectVersionId_fkey" FOREIGN KEY ("projectVersionId", "projectId", "workspaceId") REFERENCES "project_versions"("id", "projectId", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "renderable_plan_snapshots" ADD CONSTRAINT "renderable_plan_snapshots_projectVersionId_projectId_works_fkey" FOREIGN KEY ("projectVersionId", "projectId", "workspaceId") REFERENCES "project_versions"("id", "projectId", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
