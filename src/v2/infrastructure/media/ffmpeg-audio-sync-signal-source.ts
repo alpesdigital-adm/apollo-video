@@ -167,6 +167,25 @@ export interface AudioSyncSignalSourceOptions {
   readonly maximumAnalysisSeconds?: number
 }
 
+/**
+ * The separation a set of agreeing windows showed, in a number the cascade can
+ * persist and compare.
+ *
+ * A runner-up of zero is PERFECT separation, not an undefined one. Reported as
+ * `Infinity` it went straight into `confidenceFromPeakRatio`, whose first guard
+ * is `!Number.isFinite(ratio) → 0` (`ffmpeg-playback-fingerprint.ts:339`), so
+ * the strongest measurement this adapter can make came back at zero confidence
+ * — below the 0.35 admission floor — and was discarded by the cascade as
+ * `confidence-below-floor`, while a runner-up at a sixty-fourth of the peak
+ * scored 0.9855. The clamp is the correlator's own convention for the same case
+ * (`ffmpeg-playback-fingerprint.ts:563-565`).
+ */
+export function reportablePeakRatio(bestPeak: number, secondBestPeak: number): number {
+  if (!(bestPeak > 0)) return 0
+  if (!(secondBestPeak > 0)) return MAXIMUM_REPORTABLE_PEAK_RATIO
+  return Math.min(MAXIMUM_REPORTABLE_PEAK_RATIO, bestPeak / secondBestPeak)
+}
+
 function byOrdinal<T extends Readonly<{ ordinal: number }>>(entries: readonly T[]): readonly T[] {
   return [...entries].sort((left, right) => left.ordinal - right.ordinal)
 }
@@ -451,18 +470,7 @@ export class FfmpegAudioSyncSignalSource {
 
     const bestPeak = median(agreeing.map((entry) => entry.correlation.peak))
     const secondBestPeak = median(agreeing.map((entry) => entry.correlation.secondPeak))
-    // Clamped the way the correlator itself clamps it
-    // (`ffmpeg-playback-fingerprint.ts:563-565`), and for the reason
-    // `MAXIMUM_REPORTABLE_PEAK_RATIO` exists: a runner-up of zero is perfect
-    // separation, not an infinite one. Reported as `Infinity` it went through
-    // `confidenceFromPeakRatio`, whose guard rejects every non-finite ratio,
-    // and came back 0 — below the cascade's admission floor. The single
-    // strongest measurement this adapter can make was discarded as
-    // `confidence-below-floor`, while a runner-up at 1/64 of the peak scored
-    // 0.9855.
-    const peakRatio = secondBestPeak > 0
-      ? Math.min(MAXIMUM_REPORTABLE_PEAK_RATIO, bestPeak / secondBestPeak)
-      : bestPeak > 0 ? MAXIMUM_REPORTABLE_PEAK_RATIO : 0
+    const peakRatio = reportablePeakRatio(bestPeak, secondBestPeak)
 
     return Object.freeze({
       signalId,
