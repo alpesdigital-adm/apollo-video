@@ -122,19 +122,40 @@ test('T-F4.012 a multicam direction and its evidence come back as they were writ
   assert.equal(first.replayed, false)
   identical(kit.stringifyWithTicks, first.stored.direction, worldA.direction, 'direction version 1')
 
-  // ADR-118 in this schema: the angle that lost is inspectable as a
-  // multicam_shot_alternatives row naming the track and, in words, why. The
-  // candidates table holds only the angle each shot CHOSE — which is why it no
-  // longer carries eligible/rejectionReasons columns that could hold one value
-  // apiece — so this is the row that has to survive the round trip.
+  // ADR-118 in this schema, as the aggregate now implements it: the angle that
+  // lost is inspectable twice over. A multicam_shot_alternatives row names the
+  // track and, in words, why it lost; and — since `ShotDecision.evaluated`
+  // retains every candidate derived over the shot's own range — a
+  // multicam_angle_candidates row carries its eligibility and its machine
+  // reasons. This assertion used to say the opposite ("a candidate row must not
+  // carry a column that can hold one value"), which was true of the schema
+  // before `20260905140000_multicam_evaluated_candidates` brought the three
+  // columns back with rows on both sides of their CHECK, and had been failing
+  // ever since.
   const alternatives = client.rows('V2MulticamShotAlternative').filter((row) => row.workspaceId === A)
   assert.ok(alternatives.length >= 1, 'the fixture must reject at least one angle')
   for (const row of alternatives) {
     assert.ok(row.rejectedBecause.trim().length >= 1, `alternative ${row.candidateId} lost for no stated reason`)
   }
-  for (const row of client.rows('V2MulticamAngleCandidate').filter((entry) => entry.workspaceId === A)) {
-    assert.equal(row.eligible, undefined, 'a candidate row must not carry a column that can hold one value')
+  const candidateRows = client.rows('V2MulticamAngleCandidate').filter((entry) => entry.workspaceId === A)
+  assert.ok(candidateRows.length > alternatives.length, 'every evaluated angle is a row, not only the ones cited as alternatives')
+  for (const row of candidateRows) {
+    assert.equal(typeof row.eligible, 'boolean', 'a candidate row states whether it could have been cut to')
+    assert.equal(
+      row.eligible,
+      row.rejectionCount === 0,
+      `candidate ${row.candidateId} claims an eligibility its rejection count contradicts`,
+    )
+    assert.equal(
+      row.rejectionCount,
+      JSON.parse(row.rejectionReasonsJson).length,
+      `candidate ${row.candidateId} counts a different number of reasons than it stores`,
+    )
   }
+  assert.ok(
+    candidateRows.some((row) => !row.eligible && row.rejectionCount >= 1),
+    'the fixture stores at least one angle a reviewer can ask "why not this one?" about',
+  )
   assert.equal(
     (await directions.appendVersion({ direction: worldA.direction, base: null, occurredAt: at(4) })).replayed,
     true,
