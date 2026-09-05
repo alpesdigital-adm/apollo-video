@@ -234,6 +234,9 @@ jobs:
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
+      - name: Run Wave 20 multi-range synthesis render against ffprobe
+        run: npm run test:integration:synthesis-render
+
       - name: Run Wave 20 repository round trip against the schema
         run: npm run test:e2e:wave20-journey
       - name: Run Wave 20 capture sync worker against generated audio
