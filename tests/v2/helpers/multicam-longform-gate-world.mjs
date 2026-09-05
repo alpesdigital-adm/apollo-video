@@ -405,6 +405,21 @@ export async function buildGateWorld({
   await publishAndEvaluate({
     protocols, workspaceId, protocol: podcastProtocol, session: podcast.session, second: 60,
   })
+  // One session may hold evaluations against protocols of different scenarios
+  // — the key is [workspace, session, sessionVersion, protocol, version] — and
+  // this one does, deliberately. It is what separates "the evaluation whose
+  // protocol says podcast" from "this session's newest evaluation": criteria 1
+  // and 2 were both satisfied by whichever happened to be newer, so one row
+  // answered two conditions ADR-135 asks to see independently. It is dated
+  // BEFORE the teacher session's own evaluation, so the teacher criterion
+  // still resolves to the teacher session.
+  await publishAndEvaluate({
+    protocols,
+    workspaceId,
+    protocol: currentProtocolForScenario('teacher-and-screen'),
+    session: podcast.session,
+    second: 61,
+  })
 
   const evidenceSet = createMulticamEvidenceSet({
     session: podcast.session,
@@ -445,7 +460,7 @@ export async function buildGateWorld({
   await storeCaptureWorld({ sessions, diagnostics, workspaceId, world: teacher })
   const teacherProtocol = currentProtocolForScenario('teacher-and-screen')
   await publishAndEvaluate({
-    protocols, workspaceId, protocol: teacherProtocol, session: teacher.session, second: 61,
+    protocols, workspaceId, protocol: teacherProtocol, session: teacher.session, second: 62,
   })
 
   // ---- criterion 3: evidence that cannot resolve, and says so -------------
@@ -513,7 +528,7 @@ export async function buildGateWorld({
     workspaceId,
     protocol: currentProtocolForScenario('multicam'),
     session: insufficientSession,
-    second: 62,
+    second: 63,
   })
 
   // ---- criterion 4: a react session cut through a piecewise map ----------
