@@ -102,7 +102,13 @@ test(
       })
     }
 
-    const world = buildDirectableMulticamWorld({ workspaceId, sessionId, projectId, endSecond: 60 })
+    // Camera B starts twelve seconds into the session, so the opening of the
+    // directed range has no camera-B picture at all. Without it the ONLY
+    // rejection this fixture can produce is `not-a-video-source` — the whole
+    // coverage gate and the whole sync gate could be deleted with every lane-E
+    // test green, and the ADR-118 record this suite exists to prove would only
+    // ever say "this track is a microphone".
+    const world = buildDirectableMulticamWorld({ workspaceId, sessionId, projectId, endSecond: 60, cameraBOffsetSeconds: 12 })
     const speaks = (trackId, [from, to], speakerKey) => ({
       observationId: `obs-${trackId}-${from}`,
       trackId,
@@ -174,6 +180,30 @@ test(
     }
     const audioOnly = rejected.find((candidate) => candidate.rejectionReasons.includes('not-a-video-source'))
     assert.ok(audioOnly, 'the recorder is stored as a rejected candidate, saying it is not a picture')
+    // The reason a reviewer actually opens this table for. "This track is a
+    // microphone" is a fact about the session that never changes; "camera B has
+    // no picture here" is a fact about THIS stretch, and it is the one that
+    // answers "why could I not cut to camera B there?".
+    const notYetRecording = rejected.find((candidate) => candidate.rejectionReasons.some((reason) => reason.startsWith('sync-') || reason.startsWith('coverage-')))
+    assert.ok(notYetRecording, 'a camera rejected for its own coverage, not for being audio, survived the round trip')
+    assert.equal(notYetRecording.trackId, 'track-camera-b')
+    assert.deepEqual([...notYetRecording.rejectionReasons], ['sync-uncovered'])
+    // And the same camera is eligible once it starts recording, so the record
+    // is per shot rather than a property of the track.
+    const laterShot = head.direction.shots.find((entry) => entry.ordinal === 1)
+    const laterCameraB = laterShot.evaluated.find((candidate) => candidate.trackId === 'track-camera-b')
+    assert.equal(laterCameraB.eligible, true, 'camera B is eligible in the shot where it was recording')
+    assert.deepEqual([...laterCameraB.rejectionReasons], [])
+    const cameraBRows = await client.v2MulticamAngleCandidate.findMany({
+      where: { workspaceId, trackId: 'track-camera-b' },
+      select: { eligible: true, rejectionCount: true, rejectionReasonsJson: true },
+      orderBy: { eligible: 'asc' },
+    })
+    assert.deepEqual(
+      cameraBRows.map((row) => [row.eligible, row.rejectionCount, row.rejectionReasonsJson]),
+      [[false, 1, JSON.stringify(['sync-uncovered'])], [true, 0, '[]']],
+      'both halves of the fact are rows the database can be asked about',
+    )
     assert.equal(head.direction.shots[0].chosen.eligible, true)
     assert.deepEqual([...head.direction.shots[0].chosen.rejectionReasons], [])
 
@@ -320,8 +350,9 @@ test(
     const { PrismaCaptureProtocolRepository } = await import('../../src/v2/infrastructure/prisma/capture-protocol-repository.ts')
     const { PrismaMulticamDirectionRepository } = await import('../../src/v2/infrastructure/prisma/multicam-direction-repository.ts')
     const { PrismaMulticamDirectionCommandRepository } = await import('../../src/v2/infrastructure/prisma/multicam-direction-command-repository.ts')
+    const { PrismaProjectProxyRenderRepository } = await import('../../src/v2/infrastructure/prisma/project-proxy-render-repository.ts')
     const { deriveMulticamEvidenceService, directMulticamSessionService } = await import('../../src/v2/application/multicam-direction.ts')
-    const { createExternalAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
+    const { createExternalAuditContext, materializeActorAuditContext } = await import('../../src/v2/application/authenticate-api-client.ts')
     const { calculateVersionHash, stableSerialize } = await import('../../src/v2/application/version-hash.ts')
     const { createDesiredAction, createDesiredActionReference } = await import('../../src/v2/domain/desired-action.ts')
     const { createEditorialAudioTimelineHash } = await import('../../src/v2/domain/production-modes.ts')
@@ -622,6 +653,209 @@ test(
       () => execute({ ...request, idempotency: { clientId, key: 'md-journey-idem-2' } }),
       (error) => error.code === 'VERSION_CONFLICT' && error.details.currentVersionId === result.version.id,
     )
+
+    // ---------------------------------------------------------------------
+    // The plan the direction produced is one a renderer can actually be given
+    // ---------------------------------------------------------------------
+    // BRIEF item 5, and the one thing the render integration cannot prove
+    // because it hand-writes the renderer's `sources[]`. `hydrateSource` is the
+    // runtime path: it re-verifies the snapshot hash, derives the render
+    // sources from the union of every clip's video AND audio artifact, and
+    // refuses when the project's `source-master` link is not among them
+    // (`project-proxy-render-repository.ts:143-149`). A multicam plan is the
+    // first plan that puts more than one picture through it.
+    const renders = new PrismaProjectProxyRenderRepository(client)
+    const hydrated = await renders.readCurrentSource({ workspaceId, projectId })
+    assert.ok(hydrated, 'the stored multi-source plan hydrates into a render source')
+    assert.equal(hydrated.projectVersionId, result.version.id, 'at the version this direction created')
+    assert.equal(hydrated.editPlanHash, storedVersion.editPlanSnapshot.contentHash)
+    assert.deepEqual(
+      hydrated.renderSources.map((source) => source.artifactId).toSorted(),
+      [...referenced].sort(),
+      "the render sources are exactly the union of the clips' video and audio artifacts",
+    )
+    assert.ok(
+      hydrated.renderSources.filter((source) => source.mediaType === 'video').length >= 2,
+      'more than one picture, which is what makes it a multicam render',
+    )
+    assert.ok(
+      hydrated.renderSources.some((source) => source.role === 'source-master'),
+      "and the project's source master is among them, or the render would be refused",
+    )
+    console.log(`hydrateSource sources=${hydrated.renderSources.length} video=${hydrated.renderSources.filter((source) => source.mediaType === 'video').length} master=${hydrated.sourceArtifactId} version=${hydrated.projectVersionId}`)
+
+    // ---------------------------------------------------------------------
+    // The fences INSIDE the commit transaction, which the service check hides
+    // ---------------------------------------------------------------------
+    // Every predicate in `commitOrReplay` could be deleted with this suite
+    // green, because the only fence it exercised is the service-level one at
+    // `multicam-direction.ts:980` — which fires first and stops the request
+    // from ever reaching the transaction. These call the repository directly
+    // with a bundle whose world moved underneath it, which is the state a
+    // concurrent writer actually leaves. Each refusal happens before the
+    // transaction writes anything, and the row counts at the end prove it.
+    const bundleFor = async () => {
+      const context = await commands.readContext({ workspaceId, projectId })
+      const nextVersionId = 'project-version-md-fence'
+      return {
+        command: {
+          ...result.command,
+          id: 'edit-command-md-fence',
+          idempotencyKey: 'md-journey-fence',
+          baseVersionId: context.currentVersion.id,
+          baseHash: context.currentVersion.baseHash,
+        },
+        authenticationAudit: materializeActorAuditContext(actor),
+        requestFingerprint: 'f'.repeat(64),
+        snapshot: {
+          id: 'project-snapshot-md-fence', workspaceId, projectId, kind: 'edit-plan',
+          contentSchemaVersion: 2, contentJson: storedVersion.editPlanSnapshot.contentJson,
+          contentHash: storedVersion.editPlanSnapshot.contentHash, createdAt: at(50).toISOString(),
+        },
+        version: {
+          ...result.version,
+          id: nextVersionId,
+          sequence: context.currentVersion.sequence + 1,
+          parentVersionId: context.currentVersion.id,
+          snapshotRefs: { ...result.version.snapshotRefs, editPlan: 'project-snapshot-md-fence' },
+        },
+        editPlan: { ...result.editPlan, id: `edit-plan-${nextVersionId}`, projectVersionId: nextVersionId },
+        event: {
+          id: randomUUID(), type: 'project.version.created', version: '1.0.0', workspaceId,
+          occurredAt: at(50).toISOString(), sequence: context.currentVersion.sequence + 1,
+          actor: { clientId },
+          resource: { type: 'project-version', id: nextVersionId },
+          data: { projectId, sessionId },
+        },
+        directionEvidence: {
+          sessionId,
+          sessionVersion: result.direction.sessionVersion,
+          directionVersion: result.directionVersion,
+          directionHash: result.direction.directionHash,
+        },
+      }
+    }
+
+    // (a) the Command names a direction that is not the one stored. The
+    //     direction lives in its own chain, so it can be replaced between the
+    //     service deriving it and this transaction opening.
+    const wrongDirection = await bundleFor()
+    await assert.rejects(
+      () => commands.commitOrReplay({
+        ...wrongDirection,
+        directionEvidence: { ...wrongDirection.directionEvidence, directionHash: 'e'.repeat(64) },
+      }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT'
+        && /not the one stored/.test(error.message)
+        && error.details.expectedDirectionHash === 'e'.repeat(64),
+      'a Command compiled from a direction that is no longer stored is refused inside the transaction',
+    )
+
+    // (b) the project's head hash moved while the bundle was in flight. Its id
+    //     did not, so the `updateMany` predicate at the end would still fire;
+    //     only the version predicate at the top of the transaction sees this.
+    const movedHash = await bundleFor()
+    await client.v2ProjectVersion.update({
+      where: { id: result.version.id },
+      data: { baseHash: 'd'.repeat(64) },
+    })
+    await assert.rejects(
+      () => commands.commitOrReplay(movedHash),
+      (error) => error.code === 'VERSION_CONFLICT'
+        && error.details.currentVersionId === result.version.id
+        && error.details.currentBaseHash === 'd'.repeat(64),
+      'a head whose hash moved is refused, and the refusal says what is current',
+    )
+    await client.v2ProjectVersion.update({
+      where: { id: result.version.id },
+      data: { baseHash: result.version.baseHash },
+    })
+
+    // (c) the render outputs of the base version are no longer the ones the
+    //     Command's impact was computed against, so the invalidations it
+    //     carries would name artifacts nobody has to invalidate — or miss ones
+    //     somebody does.
+    const staleOutputs = await bundleFor()
+    await assert.rejects(
+      () => commands.commitOrReplay({
+        ...staleOutputs,
+        command: {
+          ...staleOutputs.command,
+          payload: {
+            ...staleOutputs.command.payload,
+            impact: {
+              ...staleOutputs.command.payload.impact,
+              affectedArtifacts: [{
+                artifactId: 'md-journey-vanished-proxy', kind: 'proxy',
+                sourceVersionId: staleOutputs.command.baseVersionId, variantId: '16:9',
+              }],
+            },
+          },
+        },
+      }),
+      (error) => error.code === 'VERSION_CONFLICT' && /render outputs changed/.test(error.message),
+      'a Command whose impact describes outputs the project no longer has is refused',
+    )
+
+    // (d) and the fence the service saw first is still a fence here: a bundle
+    //     built against a version that is not the head at all.
+    const staleBase = await bundleFor()
+    await assert.rejects(
+      () => commands.commitOrReplay({
+        ...staleBase,
+        command: { ...staleBase.command, baseVersionId: versionId, baseHash },
+        version: { ...staleBase.version, parentVersionId: versionId, sequence: 2 },
+      }),
+      (error) => error.code === 'VERSION_CONFLICT' && error.details.currentVersionId === result.version.id,
+      'and a bundle built on a version the project has moved past never reaches a write',
+    )
+
+    // Nothing above committed: the project is still on the version the journey
+    // produced, and no third version or second Command appeared.
+    assert.equal(await client.v2ProjectVersion.count({ where: { workspaceId } }), 2)
+    assert.equal(await client.v2EditCommand.count({ where: { workspaceId } }), 1)
+    assert.equal(await client.v2ProjectSnapshot.count({ where: { workspaceId, id: 'project-snapshot-md-fence' } }), 0)
+    assert.equal(
+      (await client.v2Project.findUniqueOrThrow({ where: { id: projectId } })).currentVersionId,
+      result.version.id,
+    )
+
+    // ---------------------------------------------------------------------
+    // The EditPlan the direction is derived on top of is verified by hash
+    // ---------------------------------------------------------------------
+    // `readContext` returns the plan the whole direction is built from. One
+    // byte of it, edited under the `contentHash` stored beside it, must not be
+    // the thing the next direction re-cuts — nor what a retry hands back.
+    const snapshotRow = await client.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: result.version.snapshotRefs.editPlan },
+    })
+    const edited = JSON.parse(snapshotRow.contentJson)
+    edited.durationFrames = edited.durationFrames + 1
+    await client.v2ProjectSnapshot.update({
+      where: { id: snapshotRow.id },
+      data: { contentJson: stableSerialize(edited) },
+    })
+    await assert.rejects(
+      () => commands.readContext({ workspaceId, projectId }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT' && /contentHash stored beside it/.test(error.message),
+      'a plan edited under its own hash is refused before a direction is derived on it',
+    )
+    await assert.rejects(
+      () => commands.findIdempotentResult({
+        workspaceId,
+        projectId,
+        idempotencyKey: 'md-journey-idem-1',
+        actorContextHash: materializeActorAuditContext(actor).contextHash,
+      }),
+      (error) => error.code === 'PERSISTENCE_CONFLICT',
+      'and a retry will not hand those bytes back either',
+    )
+    await client.v2ProjectSnapshot.update({
+      where: { id: snapshotRow.id },
+      data: { contentJson: snapshotRow.contentJson },
+    })
+    assert.ok(await commands.readContext({ workspaceId, projectId }), 'and both accept it again once it is back')
+
     console.log(`multicam journey version=${result.version.sequence} clips=${storedClips.length} sources=${storedPlan.sources.length} decisions=${storedPlan.director.decisions.length} events=${events.length}`)
   },
 )

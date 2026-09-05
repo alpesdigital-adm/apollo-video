@@ -502,6 +502,14 @@ export class PrismaMulticamDirectionCommandRepository implements MulticamDirecti
             })),
           })
         }
+        // The `currentVersionId` predicate is defence in depth and, under
+        // SERIALIZABLE, provably unreachable: the project was read inside this
+        // same transaction and a concurrent move would abort the transaction
+        // (P2034, retried above) rather than slip between the read and this
+        // UPDATE. It is kept because the isolation level is a line of
+        // configuration and this is a line of the write itself, but no test
+        // reaches it — deleting it leaves the E2E green, which is a statement
+        // about the isolation level and not about the fence.
         const updated = await transaction.v2Project.updateMany({
           where: {
             id: bundle.command.projectId,
