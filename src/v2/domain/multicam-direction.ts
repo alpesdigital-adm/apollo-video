@@ -1070,7 +1070,18 @@ export interface ShotDecision {
   readonly alternatives: readonly Readonly<ShotAlternative>[]
   readonly rule: DirectionRule
   readonly reason: string
+  /**
+   * What this shot cites, capped at 32 (`decision-confidence.ts:41-43`). The
+   * two gate refs — the sync diagnostic and the track coverage that made the
+   * shot legal — are always present; observations fill what is left.
+   */
   readonly evidenceRefs: readonly string[]
+  /**
+   * How many refs the cap dropped, so a reader can tell a complete citation
+   * from a clipped one. Zero means the list above is everything the shot
+   * cited; the count is part of the hashed body, so it cannot be lost.
+   */
+  readonly evidenceRefsTruncated: number
   readonly confidence: number
   readonly confidenceBand: DirectionConfidenceBand
   readonly decisionHash: string
@@ -1424,20 +1435,40 @@ function alternativesOf(decisions: readonly WindowDecision[], chosenTrackId: str
     .map(({ eligible: _eligible, ...alternative }) => Object.freeze(alternative)))
 }
 
-function shotEvidenceRefs(ctx: DirectionContext, chosen: Readonly<AngleCandidate>): readonly string[] {
-  const refs = new Set<string>([
+const SHOT_EVIDENCE_REF_CAP = 32
+
+/**
+ * What a shot cites, and what the citation had to drop.
+ *
+ * Thirty-two is not a round number chosen here: `createDecisionConfidence`
+ * (`decision-confidence.ts:41-43`) refuses a decision with more than 32
+ * evidence refs, and every ref must match its REF grammar (`:29`). A shot that
+ * cited more would be unpersistable as a Director decision.
+ *
+ * Which 32, though, is a decision. Sorting the whole set and taking the first
+ * 32 dropped the two refs that matter most, because `observation:` sorts before
+ * `sync-diagnostic:` and `track-coverage:` — a busy shot lost the citation of
+ * the gates that made it legal and kept 32 interchangeable observations. The
+ * two gate refs are therefore reserved, the observations fill the rest, and the
+ * number dropped is returned so the shot can record it instead of leaving a
+ * clipped list indistinguishable from a complete one.
+ */
+function shotEvidenceRefs(ctx: DirectionContext, chosen: Readonly<AngleCandidate>): Readonly<{ refs: readonly string[]; truncated: number }> {
+  const gates = [
     `sync-diagnostic:${ctx.diagnostic.sessionId}:v${ctx.diagnostic.version}`,
     `track-coverage:${chosen.trackId}`,
-  ])
+  ]
+  const rest = new Set<string>()
   for (const entry of Object.values(chosen.scoreComponents)) {
     if (typeof entry === 'number') continue
-    for (const ref of entry.evidenceRefs) refs.add(ref)
+    for (const ref of entry.evidenceRefs) if (!gates.includes(ref)) rest.add(ref)
   }
-  // Thirty-two is not a round number chosen here: `createDecisionConfidence`
-  // (`decision-confidence.ts:41-43`) refuses a decision with more than 32
-  // evidence refs, and every ref must match its REF grammar (`:29`). A shot that
-  // cited more would be unpersistable as a Director decision.
-  return Object.freeze([...refs].sort().slice(0, 32))
+  const budget = SHOT_EVIDENCE_REF_CAP - gates.length
+  const kept = [...rest].sort().slice(0, budget)
+  return Object.freeze({
+    refs: Object.freeze([...gates, ...kept].sort()),
+    truncated: rest.size - kept.length,
+  })
 }
 
 function sealShot(ctx: DirectionContext, run: Run, ordinal: number): Readonly<{ shot: Readonly<ShotDecision>; warnings: readonly Readonly<DirectionWarning>[] }> {
@@ -1472,6 +1503,7 @@ function sealShot(ctx: DirectionContext, run: Run, ordinal: number): Readonly<{ 
     for (const warning of decision.warnings) warnings.push(Object.freeze({ ...warning, shotId }))
   }
   const confidence = Number(Math.min(...run.decisions.map((decision) => decision.confidence)).toFixed(6))
+  const cited = shotEvidenceRefs(ctx, chosen)
   const body = {
     schemaVersion: SHOT_DECISION_SCHEMA_VERSION,
     shotId,
@@ -1482,7 +1514,8 @@ function sealShot(ctx: DirectionContext, run: Run, ordinal: number): Readonly<{ 
     alternatives: alternativesOf(run.decisions, run.trackId),
     rule: run.rule,
     reason: run.reason,
-    evidenceRefs: shotEvidenceRefs(ctx, chosen),
+    evidenceRefs: cited.refs,
+    evidenceRefsTruncated: cited.truncated,
     confidence,
     confidenceBand: directionConfidenceBand(confidence),
   }
@@ -1747,6 +1780,15 @@ export function assertMulticamDirectionIntegrity(direction: Readonly<MulticamDir
       shot.chosen.eligible && shot.chosen.rejectionReasons.length === 0,
       'PERSISTENCE_CONFLICT',
       `shot ${shot.shotId} was cut to an ineligible candidate`,
+    )
+    assertDomain(
+      shot.evidenceRefs.length >= 1
+        && shot.evidenceRefs.length <= SHOT_EVIDENCE_REF_CAP
+        && Number.isSafeInteger(shot.evidenceRefsTruncated)
+        && shot.evidenceRefsTruncated >= 0
+        && (shot.evidenceRefsTruncated === 0 || shot.evidenceRefs.length === SHOT_EVIDENCE_REF_CAP),
+      'PERSISTENCE_CONFLICT',
+      `shot ${shot.shotId} cites ${shot.evidenceRefs.length} refs and claims ${shot.evidenceRefsTruncated} dropped, which no citation can be`,
     )
     assertDomain(
       shot.chosen.sessionRange.start === shot.sessionRange.start && shot.chosen.sessionRange.end === shot.sessionRange.end,

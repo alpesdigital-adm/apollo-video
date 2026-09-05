@@ -1064,6 +1064,32 @@ test('T-FR-150 a shot maps to the Director decision shape with evidence, alterna
   assert.deepEqual(['high', 'medium', 'low', 'insufficient'].map((band) => band), [0.85, 0.65, 0.4, 0.39].map(directionConfidenceBand))
 })
 
+test('T-FR-150 a densely evidenced shot keeps the refs that made it legal and records how many it dropped', () => {
+  // Forty-one observations inside one shot: more than the 32 a Director decision
+  // may carry (`decision-confidence.ts:41-43`). Sorting the whole set and taking
+  // the first 32 dropped exactly the two gate refs, because `observation:` sorts
+  // before `sync-diagnostic:` and `track-coverage:`.
+  const dense = Array.from({ length: 41 }, (_, index) => speaks('track-mic-a', [1 + index * 5, 6 + index * 5]))
+  const direction = podcastWorld({ observations: dense }).direct()
+  const shot = direction.shots[0]
+  assert.equal(shot.chosen.trackId, 'track-camera-a')
+  assert.equal(shot.evidenceRefs.length, 32)
+  assert.ok(shot.evidenceRefs.includes(`sync-diagnostic:${SESSION}:v1`), 'the shot still cites the diagnostic that let it be cut')
+  assert.ok(shot.evidenceRefs.includes('track-coverage:track-camera-a'), 'the shot still cites the coverage that let it be cut')
+  const observations = shot.evidenceRefs.filter((ref) => ref.startsWith('observation:'))
+  assert.equal(observations.length, 30, 'the observations fill exactly what the two reserved gate refs leave')
+  assert.ok(shot.evidenceRefsTruncated > 0, 'the drop is recorded, not inferred')
+  assert.equal(observations.length + shot.evidenceRefsTruncated, shot.chosen.scoreComponents.speaker.evidenceRefs.length)
+  assert.ok(shot.evidenceRefs.every((ref) => /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(ref)))
+  assert.equal(toAngleDecision(shot).evidenceRefs.length, 32, 'the Director decision boundary is satisfied by construction')
+  // A shot that cited everything says so with a zero, and a stored shot whose
+  // two numbers contradict each other is refused on read.
+  for (const honest of podcastWorld().direct().shots) assert.equal(honest.evidenceRefsTruncated, 0)
+  const lying = { ...direction, shots: [{ ...shot, evidenceRefs: shot.evidenceRefs.slice(0, 5), evidenceRefsTruncated: 27 }] }
+  assert.throws(() => assertMulticamDirectionIntegrity(lying), (error) => error.code === 'PERSISTENCE_CONFLICT')
+  console.log(`refs shot=${shot.shotId} cited=${shot.evidenceRefs.length} dropped=${shot.evidenceRefsTruncated}`)
+})
+
 // ---------------------------------------------------------------------------
 // Evidence set.
 // ---------------------------------------------------------------------------
