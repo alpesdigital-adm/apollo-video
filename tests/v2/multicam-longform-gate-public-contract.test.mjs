@@ -26,6 +26,11 @@ import {
   presentMulticamLongformGateArtifacts,
 } from '../../src/v2/public-api/multicam-longform-gate-contract.ts'
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
+import {
+  MULTICAM_LONGFORM_ARTIFACT_ADDRESSES,
+  multicamLongformArtifactHref,
+} from '../../src/v2/ui/multicam-longform-gate-addresses.ts'
+import { stripSourceComments } from './helpers/strip-source-comments.mjs'
 
 /**
  * T-F4.016 — what the published phase gate refuses, and what it copies.
@@ -67,10 +72,16 @@ function routeFileFor(entry) {
 }
 
 function handlerSource(source, method) {
-  const start = source.indexOf(`export async function ${method}(`)
+  // Comments first: every assertion below asks whether the handler DOES
+  // something, and a plain `includes("requireScope(actor, 'projects:read')")`
+  // was satisfied by that same line commented out — deleting the call failed,
+  // commenting it out passed, which is the wrong way round for a check whose
+  // whole subject is what the code does.
+  const code = stripSourceComments(source)
+  const start = code.indexOf(`export async function ${method}(`)
   assert.ok(start >= 0, `handler ${method} not found`)
-  const next = source.indexOf('\nexport async function ', start + 1)
-  return next === -1 ? source.slice(start) : source.slice(start, next)
+  const next = code.indexOf('\nexport async function ', start + 1)
+  return next === -1 ? code.slice(start) : code.slice(start, next)
 }
 
 function refuses(fn, fragment) {
@@ -370,6 +381,119 @@ test('T-F4.016 the artifact listing deduplicates and says what it removed', () =
   const truncated = presentMulticamLongformGateArtifacts(gate, { limit: 1 })
   assert.equal(truncated.artifacts.length, 1)
   assert.equal(truncated.omittedArtifacts, all.artifacts.length - 1)
+
+  // The two counters are about the evaluation, never about the page. They were
+  // computed over the kept slice, so `limit=1` — or the route's default of 100
+  // on an evaluation citing more than that — answered "nothing was tampered
+  // with" for a record that had recorded tampering. A caller who did not choose
+  // the limit must not be told a different truth by it.
+  assert.equal(
+    truncated.unverifiedCount,
+    all.unverifiedCount,
+    'a truncated page reported fewer tampered references than the evaluation has',
+  )
+  assert.equal(
+    truncated.unhashedCount,
+    all.unhashedCount,
+    'a truncated page hid a reference that carries no hash of its own',
+  )
+  // The type filter is the caller's own narrowing, so the counters follow it.
+  assert.equal(filtered.unhashedCount, 1)
+  assert.equal(filtered.unverifiedCount, 0)
+})
+
+test('T-F4.016 every address the screen offers is one a capability declares', () => {
+  // The page turns four evidence kinds into links. `bindUiNetworkActionsToCapabilities`
+  // only walks `fetch` call sites, so an `<a href>` is invisible to the parity
+  // report: retargeting `capture-session` at a path nothing serves left the
+  // whole suite, the parity report and the browser E2E green, because the
+  // browser asserts exactly one of the four. This pins the map, not one entry.
+  const exposed = new Map(
+    FOUNDATION_CAPABILITIES
+      .filter((entry) => entry.exposure !== 'internal-only' && entry.endpoint)
+      .map((entry) => [
+        `${entry.endpoint.method} ${entry.endpoint.path.replaceAll(/\{[^}]+\}/g, '{}')}`,
+        entry.id,
+      ]),
+  )
+  const addresses = Object.entries(MULTICAM_LONGFORM_ARTIFACT_ADDRESSES)
+  assert.ok(addresses.length >= 4, 'the address map lost an entry')
+  for (const [type, template] of addresses) {
+    assert.ok(
+      MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES.includes(type),
+      `${type} is not an evidence resource type the gate can cite`,
+    )
+    const shape = `GET ${template.replaceAll(/\{[^}]+\}/g, '{}')}`
+    assert.ok(
+      exposed.has(shape),
+      `${type} links to ${template}, which no exposed capability serves`,
+    )
+    // And the route that answers it exists, the way routeFileFor proves it for
+    // the seven fetched endpoints.
+    const file = path.resolve(
+      'src/app',
+      `.${template.replaceAll(/\{([^}]+)\}/g, '[$1]')}`,
+      'route.ts',
+    )
+    assert.ok(existsSync(file), `${type} links to ${template}, which has no route file at ${file}`)
+  }
+
+  // Built hrefs are the templates filled in, with both ids encoded: an evidence
+  // id is a composite the server built and may carry `:` and `/`.
+  assert.equal(
+    multicamLongformArtifactHref('project a', { type: 'media-artifact', id: 'artifact/1' }),
+    '/v1/artifacts/artifact%2F1',
+  )
+  assert.equal(
+    multicamLongformArtifactHref('project a', {
+      type: 'capture-session',
+      id: 'session:1',
+    }),
+    '/v1/projects/project%20a/capture-sessions/session%3A1',
+  )
+  assert.equal(
+    multicamLongformArtifactHref('p', { type: 'clock-map', id: 'c1' }),
+    null,
+    'a kind with no published address was turned into a link anyway',
+  )
+})
+
+test('T-F4.016 the published request schema accepts exactly what the route accepts', () => {
+  const sessionId = getPublicSchema('apollo://schemas/evaluate-multicam-longform-gate-request/v1')
+    .schema.properties.sessionId
+  // Not the 200-character evidence-id schema, which exists for the composite
+  // ids the server builds on the way OUT. Published at 200 with no pattern, an
+  // agent tool generated from this schema could emit a schema-valid request
+  // that the parser and the application service both answer with 400.
+  assert.equal(sessionId.maxLength, 128)
+  assert.ok(sessionId.pattern, 'the one caller-supplied field is published without a charset')
+  const pattern = new RegExp(sessionId.pattern)
+  for (const value of [
+    'capture-session-1',
+    'a-b',
+    'a/b:c.d_x',
+    'ab',
+    '-leading',
+    'capture session one',
+    'sessão-com-acento',
+    `capture-session-${'a'.repeat(150)}`,
+    `capture-session-${'a'.repeat(120)}`,
+  ]) {
+    const bySchema = pattern.test(value) &&
+      value.length >= sessionId.minLength &&
+      value.length <= sessionId.maxLength
+    let byParser = true
+    try {
+      parseEvaluateMulticamLongformGateBody({ sessionId: value })
+    } catch {
+      byParser = false
+    }
+    assert.equal(
+      bySchema,
+      byParser,
+      `schema and parser disagree about ${JSON.stringify(value.slice(0, 40))} (${value.length} chars)`,
+    )
+  }
 })
 
 test('T-F4.016 each gate endpoint resolves to exactly one capability before the handler runs', () => {
