@@ -83,6 +83,13 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    asserted, so the ceiling is a measurement in the record rather than a step
  *    that was skipped.
  *
+ * Two reads in this file do NOT go through a published route, and both are
+ * labelled where they happen: `v2MediaArtifact` for the delivered file's
+ * STORAGE key — `presentMediaArtifactV4` replaces it with a public reference on
+ * purpose, so there is no published way to find the bytes on disk — and
+ * `v2ProjectVersion` for the `baseHash` the next command has to fence against,
+ * which the version reader does not publish either.
+ *
  * Nothing is committed: both recordings live in an `mkdtemp` artifact root
  * removed in `t.after`, and every row is deleted before and after the run.
  */
