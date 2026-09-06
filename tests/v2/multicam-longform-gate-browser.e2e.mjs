@@ -145,6 +145,7 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
     const auditContent = {
       schemaVersion: 'legacy-runtime-audit/v1',
       entryModules: ['src/v2/application/multicam-longform-gate.ts'],
+      unreadableEntryModules: [],
       scannedModuleCount: 118,
       violations: [],
       scannedAt: seededAt.toISOString(),

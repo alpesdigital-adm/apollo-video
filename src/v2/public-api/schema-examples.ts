@@ -6991,6 +6991,7 @@ const w20GateAuditContent = {
     'src/v2/application/multicam-longform-gate.ts',
     'src/v2/infrastructure/repository-factory.ts',
   ],
+  unreadableEntryModules: [],
   scannedModuleCount: 412,
   violations: [],
   scannedAt: w20GateAt,

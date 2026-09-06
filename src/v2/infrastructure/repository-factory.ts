@@ -2390,8 +2390,16 @@ export function createMulticamLongformGateRepository(): MulticamLongformGateRepo
  * rather than PostgreSQL, and because a caller that wants to scan a different
  * entry set — a worker, say — should be able to say so without a database.
  */
-export function createLegacyRuntimeAudit(): LegacyRuntimeAuditPort {
-  return new ModuleGraphLegacyRuntimeAudit()
+export function createLegacyRuntimeAudit(
+  repositoryRoot: string = process.cwd(),
+): LegacyRuntimeAuditPort {
+  // The root is passed, not baked in. Inside `next build` webpack replaces
+  // `import.meta.url` with the build machine's absolute source path, so a
+  // scanner that resolved its own location froze the build directory into the
+  // bundle and accused ten pure-V2 modules the moment the app ran anywhere
+  // else. `process.cwd()` is the directory `next start`, `npm test` and the
+  // scripts all run from.
+  return new ModuleGraphLegacyRuntimeAudit({ repositoryRoot })
 }
 
 /**

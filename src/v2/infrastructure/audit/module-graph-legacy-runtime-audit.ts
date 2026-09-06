@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import type { LegacyRuntimeAuditPort } from '../../application/ports/multicam-longform-gate-repository.ts'
 import {
@@ -26,20 +25,27 @@ import {
  */
 
 /**
- * The repository root, resolved from this file rather than from `cwd`.
+ * The root the scan reads its sources from.
  *
- * Not `new URL('../../../../', import.meta.url)`, which is what this was: that
- * exact pattern is the one webpack treats as an asset reference, so it tried to
- * resolve the repository root as a module and `next build` failed with
- * "Can't resolve '../../../../'" for every `/v1` route, because they all reach
- * this module through `repository-factory`. `createRequire(import.meta.url)`
- * elsewhere in `infrastructure/` builds fine; it is `new URL` plus a literal
- * that webpack intercepts. Splitting the two keeps the same path at runtime and
- * leaves webpack nothing to resolve.
+ * Resolved when the audit runs, never when it is compiled. It used to be
+ * `resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')`, and inside
+ * `next build` webpack replaces `import.meta.url` with the absolute path of the
+ * source file **on the build machine**. The bundled server therefore carried a
+ * frozen root: run the built app from any other directory and all ten entry
+ * modules were unreadable, which the scanner then published as ten
+ * `legacy-runtime-import` violations naming pure-V2 modules — an accusation it
+ * never measured. `process.cwd()` is what a Next server, `npm test` and the
+ * scripts all run from, and a caller that knows better passes `repositoryRoot`.
+ *
+ * (The earlier `new URL('../../../../', import.meta.url)` failed differently
+ * and even louder: webpack treats that exact pattern as an asset reference and
+ * `next build` broke with "Can't resolve '../../../../'" for every `/v1` route.
+ * Neither spelling of `import.meta.url` belongs in this module.)
  */
-const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
-const V2_ROOT = join(REPOSITORY_ROOT, 'src', 'v2')
-const LEGACY_RUNTIME_ROOT = join(REPOSITORY_ROOT, 'src', 'lib')
+function defaultRepositoryRoot(): string {
+  return process.cwd()
+}
+
 const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.js'] as const
 const MAX_MODULES = 4000
 const SELF_MODULE =
@@ -74,9 +80,13 @@ function isRelative(specifier: string): boolean {
  * explicit `.ts` extensions, so a resolver that guesses is only needed for the
  * `.mjs` helpers a few modules pull in.
  */
-async function resolveModule(from: string, specifier: string): Promise<string | null> {
+async function resolveModule(
+  root: string,
+  from: string,
+  specifier: string,
+): Promise<string | null> {
   const base = specifier.startsWith('@/')
-    ? join(REPOSITORY_ROOT, 'src', specifier.slice(2))
+    ? join(root, 'src', specifier.slice(2))
     : resolve(dirname(from), specifier)
   for (const candidate of [base, ...EXTENSIONS.map((extension) => `${base}${extension}`)]) {
     try {
@@ -90,6 +100,7 @@ async function resolveModule(from: string, specifier: string): Promise<string | 
 }
 
 function classify(
+  root: string,
   from: string,
   specifier: string,
 ): LegacyRuntimeAuditViolation['marker'] | null {
@@ -97,8 +108,9 @@ function classify(
     return 'legacy-runtime-import'
   }
   if (isRelative(specifier)) {
+    const legacyRoot = join(root, 'src', 'lib')
     const target = resolve(dirname(from), specifier)
-    if (target === LEGACY_RUNTIME_ROOT || target.startsWith(`${LEGACY_RUNTIME_ROOT}${sep}`)) {
+    if (target === legacyRoot || target.startsWith(`${legacyRoot}${sep}`)) {
       return 'legacy-runtime-import'
     }
   }
@@ -150,24 +162,30 @@ const TEXT_MARKERS: readonly Readonly<{
 
 export class ModuleGraphLegacyRuntimeAudit implements LegacyRuntimeAuditPort {
   private readonly entryModules: readonly string[]
+  private readonly repositoryRoot: string
   private readonly clock: () => Date
 
   constructor(options?: {
     entryModules?: readonly string[]
+    /** Where the sources are, resolved by the caller at run time. */
+    repositoryRoot?: string
     clock?: () => Date
   }) {
     this.entryModules = options?.entryModules ?? GATE_RUNTIME_ENTRY_MODULES
+    this.repositoryRoot = resolve(options?.repositoryRoot ?? defaultRepositoryRoot())
     this.clock = options?.clock ?? (() => new Date())
   }
 
   async audit(): Promise<Readonly<LegacyRuntimeAuditResult>> {
+    const root = this.repositoryRoot
+    const v2Root = join(root, 'src', 'v2')
     const queue: string[] = []
     const seen = new Set<string>()
     const violations: LegacyRuntimeAuditViolation[] = []
-    const missingEntries: string[] = []
+    const unreadableEntryModules: string[] = []
 
     for (const entry of this.entryModules) {
-      const absolute = join(REPOSITORY_ROOT, entry)
+      const absolute = join(root, entry)
       try {
         await readFile(absolute, 'utf8')
         if (!seen.has(absolute)) {
@@ -175,7 +193,7 @@ export class ModuleGraphLegacyRuntimeAudit implements LegacyRuntimeAuditPort {
           queue.push(absolute)
         }
       } catch {
-        missingEntries.push(entry)
+        unreadableEntryModules.push(entry)
       }
     }
 
@@ -188,7 +206,7 @@ export class ModuleGraphLegacyRuntimeAudit implements LegacyRuntimeAuditPort {
       } catch {
         continue
       }
-      const modulePath = normalize(relative(REPOSITORY_ROOT, current))
+      const modulePath = normalize(relative(root, current))
       // This module spells every marker out in order to look for them, so
       // scanning it would report itself. Excluding it by path is honest;
       // obfuscating the patterns so they miss their own source would not be.
@@ -200,35 +218,32 @@ export class ModuleGraphLegacyRuntimeAudit implements LegacyRuntimeAuditPort {
       for (const match of source.matchAll(STATIC_IMPORT)) {
         const specifier = match[2]
         if (!specifier) continue
-        const marker = classify(current, specifier)
+        const marker = classify(root, current, specifier)
         if (marker) violations.push({ marker, module: modulePath, specifier })
         if (!isRelative(specifier) && !specifier.startsWith('@/')) continue
-        const resolved = await resolveModule(current, specifier)
+        const resolved = await resolveModule(root, current, specifier)
         // Only the product's own V2 tree is walked. The graph beyond it is
         // node_modules and generated clients, whose contents are not what
         // "no legacy runtime" is about, and following them would turn a gate
         // criterion into a dependency audit.
         if (!resolved || seen.has(resolved)) continue
-        if (resolved !== V2_ROOT && !resolved.startsWith(`${V2_ROOT}${sep}`)) continue
+        if (resolved !== v2Root && !resolved.startsWith(`${v2Root}${sep}`)) continue
         seen.add(resolved)
         queue.push(resolved)
       }
     }
 
-    // A named entry module that does not exist is not a clean scan: the check
-    // that was meant to cover it never ran. It is reported as a violation of
-    // the marker whose absence it can no longer prove.
-    for (const entry of missingEntries) {
-      violations.push({
-        marker: 'legacy-runtime-import',
-        module: entry,
-        specifier: null,
-      })
-    }
-
+    // A named entry module the scanner could not read is reported as exactly
+    // that, and never as a legacy import. It used to be pushed in as a
+    // `legacy-runtime-import` violation, which made a root the process cannot
+    // read — a relocated build, a standalone bundle with no sources beside it —
+    // publish ten accusations against modules nobody looked at. Not reading a
+    // file is missing evidence for the whole criterion; the domain turns this
+    // list into `evidence-missing` on all three checks.
     const body = {
       schemaVersion: 'legacy-runtime-audit/v1' as const,
       entryModules: Object.freeze([...this.entryModules]),
+      unreadableEntryModules: Object.freeze([...unreadableEntryModules].sort()),
       scannedModuleCount: seen.size,
       violations: Object.freeze(
         violations

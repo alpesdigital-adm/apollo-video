@@ -93,6 +93,7 @@ const digest = (seed) => seed.repeat(64).slice(0, 64)
 const auditContent = {
   schemaVersion: 'legacy-runtime-audit/v1',
   entryModules: ['src/v2/application/multicam-longform-gate.ts'],
+  unreadableEntryModules: [],
   scannedModuleCount: 120,
   violations: [],
   scannedAt: evaluatedAt,

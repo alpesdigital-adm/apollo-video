@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -426,6 +429,7 @@ test('T-F4.016 the legacy-runtime criterion reports the scan, not a promise', ()
   const clean = {
     schemaVersion: 'legacy-runtime-audit/v1',
     entryModules: ['src/v2/application/multicam-longform-gate.ts'],
+    unreadableEntryModules: [],
     scannedModuleCount: 42,
     violations: [],
     scannedAt: AT,
@@ -461,10 +465,81 @@ test('T-F4.016 the legacy-runtime criterion reports the scan, not a promise', ()
   assert.ok(unverified.checks.every((check) => check.failureReason === 'evidence-unverified'))
   assert.ok(unverified.checks.every((check) => check.references[0].verified === false))
 
+  // An entry module the scanner could not open is missing evidence for the
+  // whole criterion, never an import it "found". Reported as a violation — as
+  // it was — a root without the sources published ten `legacy-runtime-import`
+  // accusations against modules nobody read, and `no-legacy-runtime-import`
+  // would otherwise pass on zero violations counted over zero files.
+  const unread = {
+    ...clean,
+    unreadableEntryModules: ['src/v2/application/multicam-longform-gate.ts'],
+  }
+  unread.auditHash = calculateLegacyRuntimeAuditHash(unread)
+  assertLegacyRuntimeAudit(unread)
+  const unreadable = buildLegacyRuntimeCriterion(unread)
+  assert.equal(unreadable.checks.length, 3)
+  assert.ok(unreadable.checks.every((check) => check.passed === false))
+  assert.ok(unreadable.checks.every((check) => check.failureReason === 'evidence-missing'))
+  assert.match(unreadable.checks[0].detail, /unreadable/)
+
+  // The list is part of the hashed body, so an audit that quietly drops it
+  // does not verify.
+  const stripped = { ...unread, unreadableEntryModules: [] }
+  assert.throws(
+    () => assertLegacyRuntimeAudit(stripped),
+    (error) => error.code === 'INVALID_ARGUMENT',
+  )
+
   // No audit at all leaves the criterion with nothing recorded, which the
   // evaluation turns into `evidence-missing` for all three checks.
   assert.deepEqual(buildLegacyRuntimeCriterion(null).checks, [])
   assert.equal(LEGACY_RUNTIME_MARKERS.length, 5)
+})
+
+test('T-F4.016 the scanner resolves its root when it runs, never when it is compiled', async () => {
+  // The defect: the root came from `import.meta.url`, which webpack replaces
+  // with the BUILD machine's absolute source path, so the bundled server
+  // carried a frozen root and every entry module was unreadable the moment the
+  // app ran from anywhere else. This process cannot open a webpack bundle, so
+  // the assertion is behavioural and catches the cause rather than the
+  // spelling: a root derived from the module survives `chdir` and would keep
+  // reading the real tree here, while one derived at run time does not.
+  const elsewhere = await mkdtemp(join(tmpdir(), 'apollo-gate-root-'))
+  const original = process.cwd()
+  try {
+    process.chdir(elsewhere)
+    const relocated = await new ModuleGraphLegacyRuntimeAudit({
+      clock: () => new Date(AT),
+    }).audit()
+    assert.equal(relocated.scannedModuleCount, 0, 'a root without sources scanned something')
+    assert.deepEqual(
+      [...relocated.unreadableEntryModules],
+      [...GATE_RUNTIME_ENTRY_MODULES].sort(),
+    )
+    assert.deepEqual(
+      relocated.violations,
+      [],
+      'modules nobody could read were published as legacy runtime imports',
+    )
+    const criterion = buildLegacyRuntimeCriterion(relocated)
+    assert.ok(
+      criterion.checks.every((check) => check.failureReason === 'evidence-missing'),
+      'a scan that read nothing answered the criterion anyway',
+    )
+  } finally {
+    process.chdir(original)
+    await rm(elsewhere, { recursive: true, force: true })
+  }
+
+  // And with the real root back, the same scanner reads the real tree: the
+  // assertion above must fail for the right reason, not because the walk is
+  // broken everywhere.
+  const here = await new ModuleGraphLegacyRuntimeAudit({
+    repositoryRoot: process.cwd(),
+    clock: () => new Date(AT),
+  }).audit()
+  assert.deepEqual([...here.unreadableEntryModules], [])
+  assert.ok(here.scannedModuleCount > GATE_RUNTIME_ENTRY_MODULES.length)
 })
 
 test('T-F4.016 the real module graph behind the gate carries no legacy runtime', async () => {
