@@ -119,6 +119,36 @@ const MANUAL_ACTIONS = new Set<string>(
 const INTERRUPTED_MODES = new Set<string>(
   PLAYBACK_MODES.filter((mode) => mode !== 'playing'),
 )
+/**
+ * The three interruptions ADR-135 names, each as the set of modes that can
+ * stand for it.
+ *
+ * "At least one piece that is not `playing`" is not the sentence the criterion
+ * makes: a map with five `commentary-only` stretches satisfied it while a
+ * linearised rewind — the reference resuming behind where it stopped, no
+ * longer classified as `rewind`/`replay` — went unseen, because the count
+ * never dropped to zero. Each interruption is asked for by name so the one
+ * that disappeared is the one the detail reports.
+ */
+const REQUIRED_INTERRUPTIONS = Object.freeze([
+  Object.freeze({
+    name: 'pause',
+    modes: Object.freeze(PLAYBACK_MODES.filter((mode) => mode === 'paused')),
+  }),
+  Object.freeze({
+    name: 'rewind',
+    modes: Object.freeze(
+      PLAYBACK_MODES.filter((mode) => mode === 'rewind' || mode === 'replay'),
+    ),
+  }),
+  Object.freeze({
+    name: 'seek',
+    modes: Object.freeze(PLAYBACK_MODES.filter((mode) => mode === 'seek')),
+  }),
+])
+const REQUIRED_INTERRUPTION_MODES = new Set<string>(
+  REQUIRED_INTERRUPTIONS.flatMap((group) => [...group.modes]),
+)
 const BLOCKING_CEILINGS = new Set<string>(
   SYNC_CEILINGS.filter(
     (ceiling) =>
@@ -151,6 +181,7 @@ export const GATE_READER_VOCABULARIES = Object.freeze({
   syncedStatuses: Object.freeze([...SYNCED_STATUSES]),
   manualActions: Object.freeze([...MANUAL_ACTIONS]),
   interruptedModes: Object.freeze([...INTERRUPTED_MODES]),
+  requiredInterruptionModes: Object.freeze([...REQUIRED_INTERRUPTION_MODES]),
   blockingCeilings: Object.freeze([...BLOCKING_CEILINGS]),
   resolvedCriticActions: Object.freeze([...RESOLVED_CRITIC_ACTIONS]),
   participantRoles: Object.freeze([...PARTICIPANT_ROLES]),
@@ -281,6 +312,40 @@ function planClipCount(
 
 function seconds(ticks: bigint, secondsPerTick: Rational): number {
   return Number(ticks) * (Number(secondsPerTick.num) / Number(secondsPerTick.den))
+}
+
+/**
+ * The layers of a stored colour plan that declare the creative LUT ahead of
+ * the match, named so the report can say which one.
+ *
+ * Only the layers that resolution for `cameraId` actually consults are read —
+ * the global layer and that camera's override — because a segment override
+ * nobody resolves is not this criterion's business. A layer that declares only
+ * one of the two stages cannot be out of order and is not counted.
+ */
+function authoredMisorderedLayers(
+  plan: Readonly<{
+    global: readonly Readonly<{ kind: string }>[]
+    cameras: Readonly<Record<string, readonly Readonly<{ kind: string }>[]>>
+  }>,
+  cameraId: string,
+): readonly string[] {
+  // Indexed with a caller-supplied camera id, so only an own array counts:
+  // `cameras['constructor']` is a function on the prototype, not a layer.
+  const camera = Object.prototype.hasOwnProperty.call(plan.cameras, cameraId)
+    ? plan.cameras[cameraId]
+    : undefined
+  const layers: readonly (readonly [string, readonly Readonly<{ kind: string }>[]])[] = [
+    ['global', plan.global],
+    ...(Array.isArray(camera) ? [[`cameras.${cameraId}`, camera] as const] : []),
+  ]
+  return layers
+    .filter(([, transforms]) => {
+      const matchIndex = transforms.findIndex((transform) => transform.kind === 'match')
+      const lutIndex = transforms.findIndex((transform) => transform.kind === 'creative-lut')
+      return matchIndex >= 0 && lutIndex >= 0 && matchIndex > lutIndex
+    })
+    .map(([name]) => name)
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -1114,6 +1179,10 @@ implements MulticamLongformGateRepository {
     }
     const mapRef = ref('playback-map', map.mapId, map.mapHash, true)
     const interrupted = map.pieces.filter((piece) => INTERRUPTED_MODES.has(piece.mode))
+    const interruptedModes = new Set(interrupted.map((piece) => piece.mode))
+    const missingInterruptions = REQUIRED_INTERRUPTIONS
+      .filter((group) => !group.modes.some((mode) => interruptedModes.has(mode)))
+      .map((group) => group.name)
     // The snapshot read re-derives the stored plan and raises
     // PERSISTENCE_CONFLICT when it does not recompute. It used to sit outside
     // every try/catch, so one edited `renderable_plan_snapshots` row threw out
@@ -1145,11 +1214,12 @@ implements MulticamLongformGateRepository {
           ),
           check(
             'interrupted-piece-present',
-            interrupted.length >= 1,
+            missingInterruptions.length === 0,
             'requirement-unmet',
-            interrupted.length >= 1
-              ? `${interrupted.length} interrupted pieces: ${[...new Set(interrupted.map((piece) => piece.mode))].join(', ')}`
-              : `every piece of map ${map.mapId} is ${[...new Set(map.pieces.map((piece) => piece.mode))].join(', ')}`,
+            missingInterruptions.length === 0
+              ? `${interrupted.length} interrupted pieces: ${[...interruptedModes].join(', ')}`
+              : `map ${map.mapId} carries no ${missingInterruptions.join(' and no ')}; `
+                + `its ${map.pieces.length} pieces are ${[...new Set(map.pieces.map((piece) => piece.mode))].join(', ')}`,
             // The pieces have no hash of their own — the map's hash covers them
             // — so they are cited hash-less and counted as unhashed, not as
             // evidence that failed to verify.
@@ -1579,10 +1649,22 @@ implements MulticamLongformGateRepository {
     const kinds = transforms.map((transform) => transform.kind)
     const matchIndex = kinds.indexOf('match')
     const lutIndex = kinds.indexOf('creative-lut')
+    // `resolveColorPlan` emits the stages in COLOR_TRANSFORM_ORDER, so reading
+    // the RESOLVED list back can only catch a rewrite of that constant — the
+    // resolver has already sorted whatever the plan said. The plan AS STORED
+    // can disagree: `normalizeLayer` keeps a layer in the order it was
+    // written, so a plan whose global layer declares the creative LUT ahead of
+    // the match reads as ordered once resolved. Both are checked, and the
+    // detail names the layer that put them the wrong way round.
+    const misordered = authoredMisorderedLayers(plan.plan, cameraId)
     return {
-      ordered: matchIndex >= 0 && lutIndex >= 0 && matchIndex < lutIndex,
+      ordered: matchIndex >= 0 && lutIndex >= 0 && matchIndex < lutIndex &&
+        misordered.length === 0,
       reason: 'requirement-unmet',
-      detail: `resolved order for ${cameraId}: [${kinds.join(', ')}] against COLOR_TRANSFORM_ORDER [${COLOR_TRANSFORM_ORDER.join(', ')}]`,
+      detail: misordered.length === 0
+        ? `resolved order for ${cameraId}: [${kinds.join(', ')}] against COLOR_TRANSFORM_ORDER [${COLOR_TRANSFORM_ORDER.join(', ')}]`
+        : `colour plan ${row.id} declares creative-lut before match in [${misordered.join(', ')}], `
+          + `which resolves to [${kinds.join(', ')}] only because the resolver sorts it`,
       reference: verified,
     }
   }

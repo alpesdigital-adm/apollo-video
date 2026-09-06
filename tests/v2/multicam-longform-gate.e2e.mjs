@@ -1449,6 +1449,7 @@ test('E2E-F4.016 the reader narrows the domain vocabularies rather than retyping
     syncedStatuses: DIAGNOSTIC_STATUSES,
     manualActions: RECOMMENDED_ACTIONS,
     interruptedModes: PLAYBACK_MODES,
+    requiredInterruptionModes: PLAYBACK_MODES,
     blockingCeilings: SYNC_CEILINGS,
     resolvedCriticActions: COLOR_CRITIC_ACTIONS,
     participantRoles: PODCAST_PARTICIPANT_ROLES,
@@ -1481,6 +1482,14 @@ test('E2E-F4.016 the reader narrows the domain vocabularies rather than retyping
     [...GATE_READER_VOCABULARIES.renderablePlanOrigins],
     ['react-playback', 'multi-range-synthesis'],
     'the two plan origins are no longer the ones criteria 4 and 6 look for',
+  )
+  // Criterion 4 asks for the three interruptions ADR-135 names, not for "any
+  // mode that is not playing". A `rewind` dropped from this list is a
+  // linearised rewind the gate would stop seeing.
+  assert.deepEqual(
+    [...GATE_READER_VOCABULARIES.requiredInterruptionModes].sort(),
+    ['paused', 'replay', 'rewind', 'seek'],
+    'criterion 4 no longer demands a pause, a backwards piece and a seek',
   )
   console.log(
     `[E2E-F4.016] ${Object.keys(GATE_READER_VOCABULARIES).length} reader vocabularies ` +
