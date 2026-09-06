@@ -32,17 +32,31 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   shot after the busy window is the teacher's camera again, and the seam
  *   lands where the measured activity stops — at the file's busy stretch
  *   shifted by the offset the WORKER measured, not at a constant typed here.
- * - **The minimum shot duration holds.** Every shot is at least
+ * - **The offset the worker measured is the lag the fixture applied.** The
+ *   screen recorder started `SCREEN_LAG_SECONDS` late in the audio both files
+ *   carry, and the clock map read back over `/v1` has to say so to within one
+ *   session tick. Everything else in this journey is DERIVED from that offset —
+ *   the demonstration window, the sample instants — so without this one
+ *   comparison against ground truth the journey would be self-consistent for
+ *   any measurement whatsoever, including a wrong one.
+ * - **No shot is shorter than the minimum.** Every shot is at least
  *   `DEFAULT_DIRECTION_POLICY.minimumShotMs` long, measured in session ticks
  *   and converted with the session's own timebase, and the direction carries no
- *   `minimum-shot-violated` warning.
+ *   `minimum-shot-violated` warning. This fixture does not EXERCISE the policy
+ *   and the journey says so where it asserts it: screen activity is measured in
+ *   30 s windows, so the shortest shot here is 27.4 s. The falsifiable version
+ *   of the claim lives in the podcast journey, whose evidence has millisecond
+ *   boundaries.
  * - **The decision reaches an MP4, and the screen is IN it.** The LUT decision
  *   enqueues a render of the directed cut, the render worker drains it in its
  *   own process, and the delivered file is read back with `ffprobe
- *   -count_frames` and sampled at three instants. The teacher's room is a blue
- *   field and the demonstration is achromatic `life`, so "the screen went to
- *   air at 30 s and the camera came back at 60 s" is a colour measurement on
- *   the delivered bytes rather than a row in a shot table.
+ *   -count_frames` and sampled at three instants. What the file IS — its
+ *   `sha256` and `byteSize` — comes back through `GET /v1/artifacts/{id}`; only
+ *   the storage key, which that reader deliberately does not publish, is read
+ *   from the row. The teacher's room is a blue field and the demonstration is
+ *   achromatic `life`, so "the screen went to air at 30 s and the camera came
+ *   back at 60 s" is a colour measurement on the delivered bytes rather than a
+ *   row in a shot table.
  *
  * Two gaps in the shipped code are MEASURED here rather than worked around,
  * because a journey that quietly routed past them would report a product that
@@ -102,13 +116,6 @@ const WIDTH = 320
 const HEIGHT = 180
 
 /**
- * The fence a capture-session command names: the version id AND its hash.
- *
- * The id is `<sessionId>:v<version>` — the shape every capture service compares
- * against — and the reason the pair travels together is that a version number
- * alone can be reused after a failed write.
- */
-/**
  * What ffprobe reported for both recordings, in the tokens the render path
  * consumes. `colorMetadataFromStream` refuses anything it did not measure, so
  * this is the shape those measurements take, not a plausible default.
@@ -122,6 +129,13 @@ const COLOR_METADATA = Object.freeze({
   bitDepth: 8,
 })
 
+/**
+ * The fence a capture-session command names: the version id AND its hash.
+ *
+ * The id is `<sessionId>:v<version>` — the shape every capture service compares
+ * against — and the reason the pair travels together is that a version number
+ * alone can be reused after a failed write.
+ */
 const sessionVersionRef = (session) => `${session.sessionId}:v${session.version}`
 const diagnosticVersionRef = (diagnostic) => `${diagnostic.sessionId}:diagnostic:v${diagnostic.version}`
 
@@ -153,6 +167,7 @@ test(
     const compilationsRoute = await import('../../src/app/v1/projects/[projectId]/color-pipeline-compilations/route.ts')
     const lutSelectionRoute = await import('../../src/app/v1/projects/[projectId]/lut-selection/route.ts')
     const operationRoute = await import('../../src/app/v1/operations/[operationId]/route.ts')
+    const artifactRoute = await import('../../src/app/v1/artifacts/[artifactId]/route.ts')
 
     const prisma = new PrismaClient()
     const workspaceId = 'teacher-screen-e2e-workspace'
@@ -503,6 +518,18 @@ test(
     assert.ok(screenSync.map, 'and a clock map, so a millisecond on its file lands on the session clock')
     const piece = screenSync.map.pieces[0]
     const screenOffsetTicks = Number(piece.offsetTicks)
+    // The measurement against the ground truth, which is the only assertion in
+    // this journey that can tell a correlator from a random number generator.
+    // Everything downstream — the demonstration window, the sample instants —
+    // is DERIVED from `screenOffsetTicks`, so the journey is self-consistent for
+    // any offset whatsoever unless the offset itself is checked against the lag
+    // the fixture applied. One tick of tolerance, because the correlator works
+    // on 2 s windows of 16 kHz audio and reports in session ticks: a lag that is
+    // an exact number of frames may still land on either side of a rounding.
+    assert.ok(
+      Math.abs(screenOffsetTicks - SCREEN_LAG_SECONDS * FPS) <= 1,
+      `the worker measured ${screenOffsetTicks} ticks where the fixture delayed the screen by ${SCREEN_LAG_SECONDS}s (${SCREEN_LAG_SECONDS * FPS} ticks)`,
+    )
     const screenCoverage = screenSync.coverage
     assert.ok(screenCoverage, 'and measured coverage')
     assert.equal(screenCoverage.gapTicks, '0')
@@ -700,7 +727,18 @@ test(
       `the return lands ${(lastOnScreen - demonstrationEndTick) / FPS}s from where the activity stopped`,
     )
 
-    // ---- claim 3: the minimum shot duration holds -------------------------
+    // ---- claim 3: no shot is shorter than the minimum ---------------------
+    // Said exactly, because this fixture cannot exercise the policy that
+    // enforces it. Every cut here is driven by `screen-activity`, and the
+    // evidence sweep measures screen activity in 30 s windows
+    // (`deriveMulticamEvidenceService`'s `evidenceWindowMs` default, which
+    // nothing configures), so the finest boundary this session can produce is
+    // 30 s: the shortest shot comes out at 27.4 s, 22 times the 1 200 ms
+    // minimum. Deleting rule 8 would leave both assertions below green HERE.
+    // The falsifiable version of the claim is in the podcast journey, whose
+    // evidence is diarization segments and therefore has millisecond
+    // boundaries: it carries a 700 ms interjection that becomes a sub-minimum
+    // shot the moment the minimum-shot hold stops holding.
     const shotDurationsMs = shots.map((shot) =>
       ((Number(shot.sessionRange.end) - Number(shot.sessionRange.start)) * 1_000) / FPS)
     const shortestMs = Math.min(...shotDurationsMs)
@@ -713,6 +751,9 @@ test(
       [],
       'and the direction says so itself',
     )
+    // The margin is reported rather than asserted: a number nobody can read
+    // cannot be recognised as an unexercised policy by the next reader.
+    const minimumShotMargin = shortestMs / DEFAULT_DIRECTION_POLICY.minimumShotMs
 
     // ---- claim 4: the decision becomes an MP4, and the screen is IN it ----
     // Everything above is a decision the server recorded. This is the file the
@@ -758,10 +799,24 @@ test(
           ],
         },
       }, [201])
+      const kinds = compiled.data.compilation.pipeline.stages.map((entry) => entry.kind)
+      // The literal, not the constant under test. `[...COLOR_TRANSFORM_ORDER]`
+      // compares the server's answer with the very array that defines it, so no
+      // reordering of the colour pipeline could make it fail; the two positional
+      // assertions below are what actually holds the order in place.
       assert.deepEqual(
-        compiled.data.compilation.pipeline.stages.map((entry) => entry.kind),
-        [...COLOR_TRANSFORM_ORDER],
+        kinds,
+        ['technical', 'match', 'creative-lut', 'output'],
         'the compiled pipeline is ordered by the domain',
+      )
+      assert.deepEqual(kinds, [...COLOR_TRANSFORM_ORDER], 'and the domain still publishes that order')
+      assert.ok(
+        kinds.indexOf('technical') < kinds.indexOf('match'),
+        `the technical conversion precedes the camera match: ${kinds.join('>')}`,
+      )
+      assert.ok(
+        kinds.indexOf('match') < kinds.indexOf('creative-lut'),
+        `the camera match precedes the creative LUT: ${kinds.join('>')}`,
       )
     }
 
@@ -794,13 +849,32 @@ test(
     }, [200])
     assert.equal(operation.data.operation.status, 'succeeded', JSON.stringify(operation.data.operation))
 
+    // What the delivered file IS comes back over `/v1`, not out of a row: the
+    // client that asked for the render is scoped for `artifacts:read` and the
+    // reader publishes `sha256` and `byteSize`, so the comparison against the
+    // bytes on disk is a comparison against the published answer. The Prisma
+    // read that remains is for `artifactKey` alone — the STORAGE key, which
+    // `presentMediaArtifactV4` deliberately replaces with a public reference,
+    // so there is no published way to find the file on disk.
+    const outputArtifactId = operation.data.operation.target.id
+    const publishedArtifact = await helpers.callRouteOk(artifactRoute.GET, {
+      path: `/v1/artifacts/${outputArtifactId}`,
+      token,
+      params: { artifactId: outputArtifactId },
+    }, [200])
     const outputArtifact = await prisma.v2MediaArtifact.findFirstOrThrow({
-      where: { workspaceId, id: operation.data.operation.target.id },
+      where: { workspaceId, id: outputArtifactId },
+      select: { artifactKey: true },
     })
     const outputPath = helpers.artifactPath(artifactRoot, outputArtifact.artifactKey)
     const outputSha256 = helpers.sha256Of(await readFile(outputPath))
-    assert.equal(outputSha256, outputArtifact.sha256, 'the bytes on disk are the bytes the row claims')
-    assert.equal((await stat(outputPath)).size, Number(outputArtifact.byteSize))
+    const outputByteSize = Number(publishedArtifact.data.artifact.byteSize)
+    assert.equal(
+      outputSha256,
+      publishedArtifact.data.artifact.sha256,
+      'the bytes on disk are the bytes `GET /v1/artifacts/{id}` claims',
+    )
+    assert.equal((await stat(outputPath)).size, outputByteSize)
     const outputStreams = await helpers.probeStreams(ffprobePath, outputPath)
     const outputVideo = outputStreams.find((stream) => stream.codec_type === 'video')
     const outputAudio = outputStreams.find((stream) => stream.codec_type === 'audio')
@@ -867,7 +941,7 @@ test(
         renderedThrough: 'POST /v1/projects/{projectId}/lut-selection + run-v2-render-worker-once.mjs',
         file: 'teacher-screen-journey.mp4',
         sha256: outputSha256,
-        byteSize: Number(outputArtifact.byteSize),
+        byteSize: outputByteSize,
         width: Number(outputVideo.width),
         height: Number(outputVideo.height),
         videoCodec: outputVideo.codec_name,
@@ -915,12 +989,12 @@ test(
       `anchored+regenerated v${diagnostic.version} status=${afterAnchor.status} confidence=${afterAnchor.confidence} autoEdit=${diagnostic.autoEdit.allowed} ` +
       `shots=${shots.length} onScreen=${onScreen.length} activityScore=${screenActivityScores.map((score) => score.toFixed(3)).join(',')} ` +
       `return=${afterDemonstration[0].chosen.trackId}@${(Number(afterDemonstration[0].sessionRange.start) / FPS).toFixed(2)}s ` +
-      `shortestShot=${shortestMs.toFixed(0)}ms minimum=${DEFAULT_DIRECTION_POLICY.minimumShotMs}ms ` +
+      `shortestShot=${shortestMs.toFixed(0)}ms minimum=${DEFAULT_DIRECTION_POLICY.minimumShotMs}ms margin=${minimumShotMargin.toFixed(1)}x(policy not exercised here) ` +
       `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')} ` +
       `sha256=camera:${cameraBytes.sha256.slice(0, 16)} screen:${screenBytes.sha256.slice(0, 16)} ` +
       `render=${operation.data.operation.status} frames=${outputFrames}/${plannedFrames} ` +
       `duration=${Number(outputVideo.duration).toFixed(3)}s ${outputVideo.width}x${outputVideo.height} ` +
-      `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputArtifact.byteSize} ` +
+      `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputByteSize} ` +
       `mp4sha256=${outputSha256.slice(0, 16)} ` +
       `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}]` +
       `${retainedPath ? ` retained=${retainedPath}` : ''}`,
