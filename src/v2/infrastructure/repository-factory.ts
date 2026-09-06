@@ -971,8 +971,12 @@ export function createSyntheticBlockAudioCompilationService(environment: NodeJS.
   // with files that are not on disk. This composition root knew that and said
   // so only for itself; the resolver says it for every spawn site.
   const ffmpegPath = resolveFfmpegBinary(undefined, environment)
+  // `null` for the fallback: this composition root refused an unresolvable
+  // ffprobe before the shared resolver existed, and it keeps refusing. The
+  // resolver's bare-name last resort belongs to the callers that were written
+  // against a probe which never threw; this is not one of them.
   const ffprobePath = resolveFfprobeBinaryPath(
-    (audioToolsRequire('ffprobe-static') as { path?: string }).path, undefined, environment,
+    (audioToolsRequire('ffprobe-static') as { path?: string }).path, undefined, environment, undefined, null,
   )
   const artifacts = new PrismaMediaArtifactRepository(resolveV2Client())
   const plans = createSyntheticScriptPlanRepository()

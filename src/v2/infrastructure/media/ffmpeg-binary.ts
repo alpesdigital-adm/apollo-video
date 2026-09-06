@@ -264,6 +264,14 @@ export function resolveFfprobeBinaryPath(
   configured: string | undefined,
   environment: NodeJS.ProcessEnv = process.env,
   roots?: readonly string[],
+  /**
+   * `undefined` keeps the historical bare-name last resort; `null` refuses.
+   *
+   * Composition roots that used to refuse an unresolvable ffprobe themselves
+   * pass `null`, so the repair does not quietly turn one of their refusals into
+   * a guess that fails later as somebody else's error.
+   */
+  fallback?: string | null,
 ): string {
   return resolveMediaBinary({
     binaryName: 'ffprobe',
@@ -276,6 +284,6 @@ export function resolveFfprobeBinaryPath(
     // The bare name, still, and only here: every caller of this function was
     // written against a resolver that never threw, and turning a probe into a
     // refusal is a behaviour change this fix did not measure.
-    fallback: bundledPath?.trim() || 'ffprobe',
+    fallback: fallback === undefined ? bundledPath?.trim() || 'ffprobe' : fallback,
   })
 }
