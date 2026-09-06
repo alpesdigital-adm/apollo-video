@@ -19,10 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     # Raised from 20 to 35 when the long-form synthesis journey started
     # RENDERING the brief's two-hour master instead of stopping at its plan.
-    # What that step added, measured on an 8-core developer machine over three
-    # runs: 125.6 s, 159.3 s and 194.5 s of FFmpeg, the spread being other work
-    # on the same CPU. The whole suite measured 412.8 s and 559.1 s on its two
-    # full runs, against ~213 s before. The 15 minutes added here are a BUDGET,
+    # What that step added, measured on an 8-core developer machine over four
+    # runs: 122.8 s, 125.6 s, 159.3 s and 194.5 s of FFmpeg, the spread being
+    # other work on the same CPU. The whole suite measured 361.4 s, 412.8 s and
+    # 559.1 s over three full runs, against ~213 s before the render was added.
+    # The 15 minutes added here are a BUDGET,
     # not that measurement: a GitHub runner has fewer cores than the machine
     # those seconds came from, and how much of the old 20 minutes this job was
     # already using is not observable from a developer machine. If a real run

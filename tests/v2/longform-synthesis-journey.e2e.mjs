@@ -27,17 +27,17 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * - **The ten-minute control** (`CONTROL`, 600 s), one twelfth of the source.
  *
  * **What this costs: the wall clock varies by machine and by load, so it is
- * given as a range with its N and never as one figure.** Three runs on one
+ * given as a range with its N and never as one figure.** Four runs on one
  * developer machine (8 cores, ffmpeg 6.1.1; the spread is other work sharing
- * the CPU) measured, for the two-hour case, 131.9 / 188.1 / 304.6 s of
- * encode and 125.6 / 159.3 / 194.5 s of render; for the control, 10.8 / 15.0 /
- * 15.6 s of encode and 17.5 / 20.7 / 25.2 s of render. The whole suite was
- * 412.8 s and 559.1 s on the two full runs. Earlier single runs on other
- * machines reported the two-hour encode at 122.3 s and 138.8 s. An older
- * version of this header claimed "190 s of encode", which no run produced; it
- * is gone, and nothing here should be read as a fixed cost — **every run prints
- * the seconds it actually spent**, and those printed numbers are the
- * measurement.
+ * the CPU) measured, for the two-hour case, 131.9 / 187.8 / 188.1 / 304.6 s of
+ * encode and 122.8 / 125.6 / 159.3 / 194.5 s of render; for the control,
+ * 10.8 / 13.4 / 15.0 / 15.6 s of encode and 17.5 / 17.5 / 20.7 / 25.2 s of
+ * render. The whole suite was 361.4 / 412.8 / 559.1 s over three full runs.
+ * Earlier single runs on other machines reported the two-hour encode at
+ * 122.3 s and 138.8 s. An older version of this header claimed "190 s of
+ * encode", which no run produced; it is gone, and nothing here should be read
+ * as a fixed cost — **every run prints the seconds it actually spent**, and
+ * those printed numbers are the measurement.
  *
  * What does NOT vary, and is worth more than the seconds: the bytes. Across
  * runs the two-hour master is 550 503 937 bytes / sha256 `471e17c1…` and its
@@ -53,7 +53,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * { killed: true, signal: 'SIGTERM' }` after 1856.5 s. Each clip now reads its
  * own span through an `-ss`/`-t` input, which writes the same bytes for the
  * control (sha256 `8f11166c…` on the isolated renderer probe, before and after
- * the change) and brings the two-hour render to the 125.6-194.5 s above, its
+ * the change) and brings the two-hour render to the 122.8-194.5 s above, its
  * FFmpeg peaking at 3.0 GB of private bytes in the run that was sampled.
  *
  * **What is new against `synthesis-render.integration.mjs`.** That suite
