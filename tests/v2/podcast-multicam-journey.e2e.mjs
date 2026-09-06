@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile, mkdtemp, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -114,6 +114,9 @@ test(
     process.env.APOLLO_API_ENVIRONMENT = 'production'
 
     const { COLOR_TRANSFORM_ORDER, resolveColorPlan } = await import('../../src/v2/domain/color-and-export.ts')
+    // Spread from the domain, never typed: on Wave 19 every enum written from
+    // memory was wrong.
+    const { COLOR_CRITIC_ACTIONS, COLOR_CRITIC_CAUSES } = await import('../../src/v2/domain/color-critic-report.ts')
     const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const sessionsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/route.ts')
     const tracksRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/tracks/route.ts')
@@ -170,6 +173,16 @@ test(
     process.env.APOLLO_UI_USERNAME = uiUsername
     process.env.APOLLO_UI_SESSION_SECRET = 'podcast-multicam-session-secret-at-least-32'
     process.env.APOLLO_UI_API_CLIENT_ID = clientId
+    // A whole episode's worth of `/v1` calls arrives in one burst from a
+    // workspace that was created seconds earlier, and the request-anomaly
+    // detector compares a burst against a BASELINE this workspace does not
+    // have: `requestMinimum` 20 with a 3x multiplier
+    // (`admit-governed-capability.ts:45-46`) refused the render enqueue with
+    // `GOVERNANCE_LIMIT_EXCEEDED` around the thirtieth call. The floor is
+    // raised, not the limits — `requestsPerMinute` and the quotas stay at
+    // their shipped defaults, so a journey that genuinely exceeded them would
+    // still be refused. Same value the four synthetic journeys use.
+    process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
 
     const clean = async () => {
       await prisma.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
@@ -826,12 +839,20 @@ test(
       },
     }, [200, 201])
     const lutVersionId = lutSet.data.version.id
+    // Drained IMMEDIATELY, before the next command advances the project.
+    // `set-project-lut-selection` and `set-project-color-plan` are both
+    // `renderPolicy: 'full-timeline'` (`edit-command-registry.ts:109,119`), so
+    // each queues a render of the version it created — and a render whose
+    // version the project has since moved past cannot file its proxy review:
+    // `proxy-review-repository.ts:256` refuses it with `VERSION_CONFLICT`,
+    // "Proxy review no longer belongs to the current project version", after
+    // ffmpeg has already written the file. Batching the two drains, which is
+    // what the draft did, therefore threw away the first render every time.
+    const lutRenders = await drainProxyRenders(1)
 
     // The project's own colour pipeline, which a camera match is a LAYER inside
     // rather than a pipeline of its own: without it the match is refused with
-    // `PRECONDITION_REQUIRED`. Setting it also queues a proxy render, so the
-    // queue is drained here — the cut before any camera correction — and the
-    // measured render below is the one taken after the match.
+    // `PRECONDITION_REQUIRED`.
     const planLayer = (id, kind, provider, enabled, parameters) => ({
       id,
       kind,
@@ -861,7 +882,19 @@ test(
           outputMetadata: COLOR_METADATA,
           global: [
             planLayer('technical-rec709', 'technical', 'ffmpeg-zscale', true, { mode: 'identity' }),
-            planLayer('match-bypass', 'match', 'apollo-match', false, { mode: 'bypass' }),
+            // A mild room-wide lift, and it has to be a real one. `set-project
+            // -lut-selection` and `set-project-color-plan` are both
+            // `full-timeline` (`edit-command-registry.ts:109,119`) and each
+            // renders the cut as it stands; a colour plan that changed nothing
+            // would produce a file byte-identical to the LUT selection's, and
+            // media artifacts are content-addressed — the second render finds
+            // the first one's row under the same `artifactKey`, gets its id
+            // back, and dies on `Project render artifact identity did not
+            // converge`. Two renders of one timeline are only distinguishable
+            // if they look different.
+            planLayer('match-room', 'match', 'apollo-match', true, {
+              mode: 'adjust', brightness: 0.04, contrast: 1.06, saturation: 1,
+            }),
             planLayer('creative-none', 'creative-lut', 'apollo-lut', false, { mode: 'none' }),
             planLayer('output-rec709', 'output', 'ffmpeg-zscale', true, { mode: 'identity' }),
           ],
@@ -880,10 +913,8 @@ test(
       },
     }, [200, 201])
     const planVersionId = planSet.data.version.id
-    // Both `lut-selection` and `color-plan` queue a proxy render of their own.
-    // They are drained here — the cut before any camera correction — so the
-    // measured render below is unambiguously the one taken after the match.
-    const preMatchRenders = await drainProxyRenders(2)
+    // The cut as it stands before any camera correction.
+    const preMatchRenders = await drainProxyRenders(1)
 
     const currentAfterDirection = await prisma.v2ProjectVersion.findUniqueOrThrow({
       where: { id: planVersionId },
@@ -953,6 +984,11 @@ test(
     )
 
     // ---- the render, through the queue and the worker an operator runs ----
+    // The colour match queues nothing of its own: `lut-selection` and
+    // `color-plan` each call `enqueueProjectProxyRenderService` in their route
+    // handler and the match route does not, so the version the correction
+    // created has no proxy until an operator asks for one. That request is the
+    // next call, and the file it produces is the one measured below.
     // The version the render is taken from: the colour match wrote a ColorPlan
     // and therefore advanced the project past the direction's own version.
     const renderVersionId = (await prisma.v2Project.findUniqueOrThrow({
@@ -1033,6 +1069,58 @@ test(
       'the two sampled instants are genuinely different pictures',
     )
 
+    // ---- claim 4: the master recorder is the audio bed --------------------
+    // A podcast on a master recorder has three recordings and exactly one of
+    // them goes to air as sound. The compiled plan the renderer consumed is
+    // read back from the snapshot the render named — inspection of what was
+    // stored, not a second derivation — and every clip has to carry the
+    // recorder as its audio whichever camera it shows. `sync-only` on both
+    // cameras is what says so upstream; this is what the cut did with it.
+    const renderedVersionRow = await prisma.v2ProjectVersion.findUniqueOrThrow({
+      where: { id: renderVersionId },
+    })
+    const renderedPlan = JSON.parse((await prisma.v2ProjectSnapshot.findUniqueOrThrow({
+      where: { id: renderedVersionRow.editPlanSnapshotId },
+    })).contentJson)
+    const renderedClips = renderedPlan.videoTracks.find((track) => track.kind === 'base-video').clips
+    assert.ok(renderedClips.length >= 2, `the rendered cut has ${renderedClips.length} clip(s)`)
+    assert.deepEqual(
+      [...new Set(renderedClips.map((clip) => clip.audioSourceArtifactId ?? clip.sourceArtifactId))],
+      [masterArtifactId],
+      'every clip takes its sound from the master recorder, not from the camera it shows',
+    )
+
+    // ---- claim 2, again, over the CLIPS rather than the shots -------------
+    // A shot is a decision; a clip is what the renderer was handed. The brief
+    // asks that no CLIP lie outside measured coverage, so the frames the
+    // renderer actually decoded are checked against the same bounds the worker
+    // derived — including the master recorder's, which no shot ever names.
+    const trackByArtifactId = new Map([
+      [cameraArtifactIds.a, cameraTrackIds.a],
+      [cameraArtifactIds.b, cameraTrackIds.b],
+    ])
+    const clipsOutsideCoverage = []
+    for (const clip of renderedClips) {
+      const trackId = trackByArtifactId.get(clip.sourceArtifactId)
+      assert.ok(trackId, `clip ${clip.id} cuts ${clip.sourceArtifactId}, which is not one of the cameras`)
+      for (const [label, boundedTrackId, from, to] of [
+        ['picture', trackId, clip.sourceInFrame, clip.sourceOutFrame],
+        ['sound', masterTrackId, clip.audioSourceInFrame ?? clip.sourceInFrame, clip.audioSourceOutFrame ?? clip.sourceOutFrame],
+      ]) {
+        const coverage = syncByTrack.get(boundedTrackId)?.coverage
+        assert.ok(coverage, `${boundedTrackId} has measured coverage`)
+        if (from < Number(coverage.bounds.start) || to > Number(coverage.bounds.end) || coverage.gapTicks !== '0') {
+          clipsOutsideCoverage.push(
+            `${clip.id}:${label}:${from}-${to} vs ${coverage.bounds.start}-${coverage.bounds.end} gaps=${coverage.gapTicks}`,
+          )
+        }
+      }
+    }
+    assert.deepEqual(
+      clipsOutsideCoverage, [],
+      'every rendered clip decodes frames the worker measured as covered',
+    )
+
     // ---- the critic, on the bytes the render just wrote -------------------
     const reports = await helpers.callRouteOk(criticReportsRoute.GET, {
       path: `/v1/projects/${projectId}/color-critic-reports?projectVersionId=${encodeURIComponent(renderVersionId)}`,
@@ -1040,6 +1128,46 @@ test(
       params: { projectId },
     }, [200])
     const report = reports.data.reports[0] ?? null
+    assert.ok(report, 'the proxy render filed a colour critic report on the bytes it wrote')
+    // The verdict is about THIS cut, corrected towards THIS reference, under
+    // THIS plan — a report that named another version or another reference
+    // camera would be a verdict on frames nobody rendered here.
+    assert.equal(report.projectVersionId, renderVersionId)
+    assert.equal(report.referenceCameraId, cameraTrackIds.a)
+    assert.equal(report.matchPlanId, matchPlan.planId)
+    assert.ok(COLOR_CRITIC_ACTIONS.includes(report.action), `unknown critic action ${report.action}`)
+    assert.ok(COLOR_CRITIC_CAUSES.includes(report.cause), `unknown critic cause ${report.cause}`)
+    assert.match(report.reportHash, /^[a-f0-9]{64}$/)
+
+    // The file itself, kept only when a run asks for it. `t.after` removes the
+    // artifact root, so a CI run that wants to look at the MP4 afterwards has
+    // to be handed a copy while it exists. Unset locally, so nothing piles up
+    // on a laptop.
+    const retentionRoot = process.env.APOLLO_PODCAST_MULTICAM_OUTPUT?.trim()
+    let retainedPath = null
+    if (retentionRoot) {
+      await mkdir(retentionRoot, { recursive: true })
+      retainedPath = join(retentionRoot, 'podcast-multicam-journey.mp4')
+      await copyFile(outputPath, retainedPath)
+      await writeFile(join(retentionRoot, 'manifest.json'), `${JSON.stringify({
+        schemaVersion: 'podcast-multicam-journey-evidence/v1',
+        renderedThrough: 'POST /v1/projects/{projectId}/proxy-renders + run-v2-render-worker-once.mjs',
+        file: 'podcast-multicam-journey.mp4',
+        sha256: outputSha256,
+        byteSize: Number(outputArtifact.byteSize),
+        width: Number(outputVideo.width),
+        height: Number(outputVideo.height),
+        videoCodec: outputVideo.codec_name,
+        audioCodec: outputAudio.codec_name,
+        durationInFrames: outputFrames,
+        durationSeconds: Number(outputVideo.duration),
+        plannedFrames: expectedFrames,
+        measuredOffsetTicks: offsetTicks,
+        appliedLagSeconds: { a: CAMERA_A_LAG_SECONDS, b: CAMERA_B_LAG_SECONDS },
+        sampledMeanRgb: sampled,
+        sampleSeconds,
+      }, null, 2)}\n`)
+    }
 
     // ---- gap 2, measured: what the protocol says about this session -------
     const evaluation = await helpers.callRouteOk(protocolEvaluationsRoute.POST, {
@@ -1065,16 +1193,18 @@ test(
       `diagnostic v${firstDiagnostic.data.diagnostic.version} autoEdit=${firstDiagnostic.data.diagnostic.autoEdit.allowed} ` +
       `anchored+regenerated v${diagnostic.version} autoEdit=${diagnostic.autoEdit.allowed} ` +
       `shots=${shots.length} follows=[${followed.join(' ')}] outsideCoverage=${outsideCoverage.length} ` +
+      `clips=${renderedClips.length} outsideClipCoverage=${clipsOutsideCoverage.length} audioBed=${masterArtifactId} ` +
+      `renders=lut:${lutRenders.length}+plan:${preMatchRenders.length}+operator:${renderOutcomes.length} ` +
       `match=${matchPlan.cameraTransforms.map((entry) => `${entry.cameraId}:ev${entry.deltas.exposureEv === null ? 'null' : entry.deltas.exposureEv.toFixed(3)}`).join(',')} ` +
       `confidence=${matchPlan.confidence} humanReview=${matchPlan.humanReviewRequired} ` +
       `pipeline=${resolvedKinds.join('>')} compiled=${compilations.b.pipeline.stages.map((entry) => entry.kind).join('>')} ` +
       `render=${operation.data.operation.status} frames=${outputFrames}/${expectedFrames} duration=${Number(outputVideo.duration).toFixed(3)}s ` +
       `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputArtifact.byteSize} sha256=${outputSha256.slice(0, 16)} ` +
       `pixels=a@${sampleSeconds.a.toFixed(2)}s(r${sampled.a.red.toFixed(0)},b${sampled.a.blue.toFixed(0)}) b@${sampleSeconds.b.toFixed(2)}s(r${sampled.b.red.toFixed(0)},b${sampled.b.blue.toFixed(0)}) ` +
-      `critic=${report ? `${report.reportId}:${report.action}:${report.cause}:hard${report.hardIssues}/warn${report.warningIssues}` : 'none'} ` +
-      `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')}`,
+      `critic=${report.reportId}:${report.action}:${report.cause}:hard${report.hardIssues}/warn${report.warningIssues} ` +
+      `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')}` +
+      `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
-    assert.ok(report, 'the proxy render filed a colour critic report on the bytes it wrote')
     assert.deepEqual(unmet, ['end-marker', 'start-marker'], 'no marker was filmed, and only that is unmet')
   },
 )
