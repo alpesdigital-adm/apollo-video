@@ -1,6 +1,7 @@
 import {
   MULTICAM_LONGFORM_CRITERION_CHECKS,
   MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES,
+  MULTICAM_LONGFORM_GATE_ID,
   type MulticamLongformCriterion,
   type MulticamLongformEvidenceResourceType,
   type MulticamLongformGateReport,
@@ -198,7 +199,11 @@ export function presentMulticamLongformGateCriteria(
   criteria: ReturnType<typeof listMulticamLongformGateCriteria>,
 ) {
   return Object.freeze({
-    gate: 'multicam-longform/v1' as const,
+    // The domain's constant, not a copy of its value: the schema that
+    // validates this response is built from the same one, so a gate renamed
+    // in the domain fails to compile here instead of publishing a catalogue
+    // that names a gate nothing answers.
+    gate: MULTICAM_LONGFORM_GATE_ID,
     total: criteria.length,
     criteria: criteria.map((entry) =>
       Object.freeze({
@@ -265,6 +270,12 @@ export function resourceTypeParameter(
  * `filteredOut` and `omittedArtifacts` travel with the list, because a narrowed
  * or truncated set of artifacts that reads as complete is an argument that the
  * gate looked at less than it did.
+ *
+ * For the same reason `unverifiedCount` and `unhashedCount` are counted over
+ * everything the filter matched, not over the page that was kept. They used to
+ * be counted over `kept`, so `limit=1` on an evaluation with a tampered row
+ * answered "nothing was tampered with" — the one number a reader must never
+ * get wrong hidden by a pagination default the caller did not choose.
  */
 export function presentMulticamLongformGateArtifacts(
   gate: Readonly<PersistedMulticamLongformGate>,
@@ -331,9 +342,11 @@ export function presentMulticamLongformGateArtifacts(
       })),
     // A reference whose hash was recomputed and disagreed. Counted apart from
     // the ones that carry no hash at all: the first forbids a check from
-    // passing, the second only says nothing could be recomputed.
-    unverifiedCount: kept.filter((entry) => entry.hash !== null && !entry.verified).length,
-    unhashedCount: kept.filter((entry) => entry.hash === null).length,
+    // passing, the second only says nothing could be recomputed. Both are
+    // counted over `matching` — the whole filtered set — so a truncated page
+    // never reads as an untampered evaluation.
+    unverifiedCount: matching.filter((entry) => entry.hash !== null && !entry.verified).length,
+    unhashedCount: matching.filter((entry) => entry.hash === null).length,
     filteredOut: all.length - matching.length,
     omittedArtifacts: matching.length - kept.length,
   })

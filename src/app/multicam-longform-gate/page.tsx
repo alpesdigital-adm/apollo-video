@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
+import { multicamLongformArtifactHref } from '@/v2/ui/multicam-longform-gate-addresses'
 
 /**
  * The operable surface of the multicamera and long-form phase gate (F4.016).
@@ -102,6 +103,26 @@ interface OutstandingEntry {
   blocking: { check: string; reason: string | null; detail: string }[]
 }
 
+interface ArtifactListing {
+  artifacts: GateArtifact[]
+  /** Tampered and unhashed references in the whole evaluation, not on this page. */
+  unverifiedCount: number
+  unhashedCount: number
+  filteredOut: number
+  omittedArtifacts: number
+}
+
+interface ArtifactTotals {
+  omitted: number
+  filteredOut: number
+  unverified: number
+  unhashed: number
+}
+
+const NO_ARTIFACTS: ArtifactTotals = {
+  omitted: 0, filteredOut: 0, unverified: 0, unhashed: 0,
+}
+
 interface GateArtifact {
   type: string
   id: string
@@ -119,23 +140,35 @@ const REASON_LABEL: Record<string, string> = {
 }
 
 /**
- * Where a reference of each kind can actually be opened.
+ * How many cited artifacts to ask for, and the route's maximum.
  *
- * Only the four kinds whose reference id IS the resource id of a published
- * endpoint. Everything else is shown as an id and a kind: inventing an address
- * for a row that has none would hand an operator a link that 404s and teach
- * them the gate is unreliable.
+ * The listing is paginated and the route defaults to 100. Asking for the
+ * maximum makes truncation rare; `omittedArtifacts` below makes it visible when
+ * it happens, because an evidence list that reads as complete is an argument
+ * the gate looked at less than it did.
  */
-function artifactHref(projectId: string, artifact: GateArtifact): string | null {
-  const id = encodeURIComponent(artifact.id)
-  const project = encodeURIComponent(projectId)
-  if (artifact.type === 'media-artifact') return `/v1/artifacts/${id}`
-  if (artifact.type === 'final-export') return `/v1/operations/${id}`
-  if (artifact.type === 'capture-session') return `/v1/projects/${project}/capture-sessions/${id}`
-  if (artifact.type === 'colour-critic-report') {
-    return `/v1/projects/${project}/color-critic-reports/${id}`
+const ARTIFACT_LIMIT = 200
+
+/**
+ * The idempotency key for one evaluation of one project, in one minute.
+ *
+ * Not `gate-${projectId}-${minute}`, which is what this was: the server bounds
+ * the key at `/^[!-~]{8,128}$/`, and a project id is allowed 128
+ * characters of its own, so a long id produced a 150-character key and the
+ * operator was told the gate could not be evaluated when the truth was that
+ * the key was refused. A digest of the id is bounded, printable, and still the
+ * same string for the same project inside the same minute, so a double click
+ * still rejoins the evaluation it already asked for. Two different projects
+ * that collide here are still two different rows: the server's uniqueness is
+ * (workspace, project, key).
+ */
+function evaluationIdempotencyKey(projectId: string, minute: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < projectId.length; index += 1) {
+    hash ^= projectId.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
   }
-  return null
+  return `gate-${hash.toString(36)}-${minute}`
 }
 
 export default function MulticamLongformGatePage() {
@@ -147,6 +180,7 @@ export default function MulticamLongformGatePage() {
   const [latestGateId, setLatestGateId] = useState<string | null>(null)
   const [outstanding, setOutstanding] = useState<OutstandingEntry[]>([])
   const [artifacts, setArtifacts] = useState<GateArtifact[]>([])
+  const [artifactTotals, setArtifactTotals] = useState<ArtifactTotals>(NO_ARTIFACTS)
   const [history, setHistory] = useState<GateRecord[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -168,11 +202,25 @@ export default function MulticamLongformGatePage() {
 
   const loadArtifacts = useCallback(async (project: string, gateId: string) => {
     const response = await fetch(
-      `/v1/projects/${encodeURIComponent(project)}/multicam-longform-gate/evaluations/${encodeURIComponent(gateId)}/artifacts`,
+      `/v1/projects/${encodeURIComponent(project)}/multicam-longform-gate/evaluations/${encodeURIComponent(gateId)}/artifacts?limit=${ARTIFACT_LIMIT}`,
       { headers: { accept: 'application/json' }, cache: 'no-store' },
     )
-    const body = (await response.json()) as ApiEnvelope<{ artifacts: GateArtifact[] }>
+    const body = (await response.json()) as ApiEnvelope<ArtifactListing>
+    // `omittedArtifacts` and `filteredOut` are read, not dropped. The API ships
+    // them precisely so a narrowed or truncated list cannot read as the whole
+    // evidence of the evaluation, and the two counters beside them are counted
+    // over the evaluation rather than over this page.
     setArtifacts(response.ok && body.data ? body.data.artifacts : [])
+    setArtifactTotals(
+      response.ok && body.data
+        ? {
+            omitted: body.data.omittedArtifacts,
+            filteredOut: body.data.filteredOut,
+            unverified: body.data.unverifiedCount,
+            unhashed: body.data.unhashedCount,
+          }
+        : NO_ARTIFACTS,
+    )
   }, [])
 
   const loadHistory = useCallback(async (project: string) => {
@@ -201,7 +249,6 @@ export default function MulticamLongformGatePage() {
     setState('loading')
     setMessage(null)
     try {
-      await loadCatalogue()
       const response = await fetch(
         `/v1/projects/${encodeURIComponent(project.trim())}/multicam-longform-gate`,
         { headers: { accept: 'application/json' }, cache: 'no-store' },
@@ -214,6 +261,7 @@ export default function MulticamLongformGatePage() {
         setLatestGateId(null)
         setOutstanding([])
         setArtifacts([])
+        setArtifactTotals(NO_ARTIFACTS)
         setHistory([])
         setState('never-run')
         return
@@ -233,7 +281,7 @@ export default function MulticamLongformGatePage() {
       setMessage('A rede falhou ao ler o gate.')
       setState('failed')
     }
-  }, [loadCatalogue, loadOutstanding, loadArtifacts, loadHistory])
+  }, [loadOutstanding, loadArtifacts, loadHistory])
 
   const evaluate = useCallback(async () => {
     setBusy(true)
@@ -249,7 +297,10 @@ export default function MulticamLongformGatePage() {
             // Bound to the project and to this minute: a double click rejoins
             // the evaluation it already asked for instead of writing a second
             // record of the same evidence.
-            'idempotency-key': `gate-${projectId.trim()}-${new Date().toISOString().slice(0, 16)}`,
+            'idempotency-key': evaluationIdempotencyKey(
+              projectId.trim(),
+              new Date().toISOString().slice(0, 16),
+            ),
           },
           // The whole body. No measurement, no criterion, no approval — the
           // server reads every one of those itself.
@@ -293,10 +344,37 @@ export default function MulticamLongformGatePage() {
       setGate(body.data.gate)
       await loadArtifacts(projectId.trim(), body.data.gate.id)
       setMessage(`Mostrando a avaliação de ${body.data.gate.report.evaluatedAt}.`)
+    } catch {
+      // The same answer the other two handlers give. Without it the promise
+      // `void openEvaluation(...)` created rejected unhandled, the screen kept
+      // the previous evaluation on it and nothing said why the click did
+      // nothing.
+      setMessage('A rede falhou ao abrir esta avaliação.')
     } finally {
       setBusy(false)
     }
   }, [projectId, loadArtifacts])
+
+  // The catalogue is project-independent and is read on mount, whatever the
+  // URL carries. It used to be fetched inside `loadGate`, after the early
+  // return for an empty project: arriving here with no `projeto` — which the
+  // link on the captures screen does whenever nothing is typed yet — rendered
+  // the heading "As dez condições" above an empty list. A screen headed "ten
+  // conditions" showing zero is the aggregated nothing this page exists to
+  // refuse.
+  useEffect(() => {
+    void (async () => {
+      try {
+        await loadCatalogue()
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível ler os critérios do gate.',
+        )
+      }
+    })()
+  }, [loadCatalogue])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -375,6 +453,14 @@ export default function MulticamLongformGatePage() {
             Tentar de novo
           </button>
         </section>
+      )}
+
+      {state === 'idle' && (
+        <p data-testid="state-idle" role="status">
+          Nenhum projeto informado. Abaixo estão as dez condições que este gate
+          exige, ainda sem nenhuma resposta: informe um projeto para ver o que
+          já foi lido sobre cada uma.
+        </p>
       )}
 
       {state === 'never-run' && (
@@ -477,7 +563,10 @@ export default function MulticamLongformGatePage() {
                 {cited.length > 0 && (
                   <ul data-testid={`criterion-artifacts-${entry.criterion}`}>
                     {cited.map((artifact) => {
-                      const href = artifactHref(gate?.projectId ?? projectId.trim(), artifact)
+                      const href = multicamLongformArtifactHref(
+                        gate?.projectId ?? projectId.trim(),
+                        artifact,
+                      )
                       return (
                         <li
                           key={`${artifact.type}:${artifact.id}`}
@@ -504,6 +593,16 @@ export default function MulticamLongformGatePage() {
             )
           })}
         </ol>
+        {gate && (artifactTotals.omitted > 0 || artifactTotals.filteredOut > 0) && (
+          <p data-testid="artifacts-omitted" role="status">
+            {artifactTotals.omitted} evidência(s) desta avaliação não aparecem
+            acima: a listagem devolve no máximo {ARTIFACT_LIMIT} referências por
+            página. No registro inteiro há {artifactTotals.unverified} com hash
+            que não confere e {artifactTotals.unhashed} sem hash próprio — os
+            dois números são da avaliação, não desta página, para que um corte
+            de página não possa dizer que nada foi adulterado.
+          </p>
+        )}
       </section>
 
       {gate && !viewingLatest && (

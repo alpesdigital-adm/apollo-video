@@ -16019,6 +16019,23 @@ const strandedPlanSchema = {
  */
 const gateEvidenceIdSchema = { type: 'string', minLength: 3, maxLength: 200 }
 const gateSessionIdSchema = { oneOf: [gateEvidenceIdSchema, { type: 'null' }] }
+/**
+ * The one value a caller of this gate may supply, published as the parser
+ * bounds it.
+ *
+ * Not `gateEvidenceIdSchema`, which is deliberately wide because the server
+ * builds composite evidence ids of its own (`<sessionId>:playback:<trackId>`,
+ * a scan named by its instant). Reusing it here advertised a 200-character
+ * free-form session id that the contract parser and the application service
+ * both refuse at 128 with a restricted charset, so an agent tool generated
+ * from this schema could emit a schema-valid request and get a 400 back.
+ */
+const gateSessionIdRequestSchema = {
+  type: 'string',
+  minLength: 3,
+  maxLength: 128,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{2,127}$',
+}
 const gateCriterionSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CRITERIA] }
 const gateCheckCodeSchema = { type: 'string', enum: [...MULTICAM_LONGFORM_CHECK_CODES] }
 const gateFailureReasonSchema = {
@@ -27254,7 +27271,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       // There is no field here for a measurement, a criterion result, an
       // evidence ref or an approval, because the evaluation reads every one of
       // those from PostgreSQL and the module graph.
-      properties: { sessionId: gateEvidenceIdSchema },
+      properties: { sessionId: gateSessionIdRequestSchema },
     },
   ),
   defineSchema(
@@ -27366,6 +27383,10 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         evaluatedAt: dateTimeSchema,
         approved: { type: 'boolean' },
         artifacts: { type: 'array', items: gateArtifactSchema },
+        // Counted over everything the type filter matched, not over the page
+        // this response carries: a `limit` the caller never chose must not be
+        // able to answer "nothing was tampered with" for an evaluation that
+        // recorded tampering.
         unverifiedCount: { type: 'integer', minimum: 0 },
         unhashedCount: { type: 'integer', minimum: 0 },
         // What the type filter and the limit removed. A narrowed list that
