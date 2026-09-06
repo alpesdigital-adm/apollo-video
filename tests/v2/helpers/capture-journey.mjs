@@ -716,12 +716,15 @@ export async function storeDiarizationRun({
  * live here. `params` is handed in as the promise Next hands it.
  */
 export async function callRoute(handler, {
-  method = 'GET', path, token, body, idempotencyKey, params = {},
+  method = 'GET', path, token, cookie, body, idempotencyKey, params = {},
 }) {
   const request = new NextRequest(`http://localhost${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${token}`,
+      // A bearer token OR a UI session cookie. Both, and the authenticator
+      // would take the header and the human decision the cookie carries would
+      // silently become an unattended one.
+      ...(cookie ? { cookie } : { authorization: `Bearer ${token}` }),
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
       ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
     },
@@ -729,7 +732,32 @@ export async function callRoute(handler, {
   })
   const response = await handler(request, { params: Promise.resolve(params) })
   const payload = await response.json()
-  return { status: response.status, payload, data: payload.data }
+  return { status: response.status, payload, data: payload.data, response }
+}
+
+/**
+ * Log in as a person, and hand back the cookie that says so.
+ *
+ * Some decisions are refused to an unattended credential by name — choosing the
+ * colour reference camera is one: "the reference camera is a human decision; an
+ * unattended credential cannot make it" (`multicam-color-match.ts:166`). The
+ * bootstrap login is how the operator pages obtain that actor, so a journey
+ * that needs it uses the same route rather than fabricating an actor.
+ */
+export async function loginUiSession(sessionRoute, { username, password }) {
+  const request = new NextRequest('http://localhost/v1/session', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const response = await sessionRoute.POST(request)
+  assert.ok(
+    response.status >= 200 && response.status < 300,
+    `POST /v1/session answered ${response.status}: ${JSON.stringify(await response.json())}`,
+  )
+  const cookie = response.cookies.get('apollo_session')
+  assert.ok(cookie?.value, 'the login set a session cookie')
+  return `apollo_session=${cookie.value}`
 }
 
 /** `callRoute`, but a status outside `expected` fails with the envelope in the message. */
@@ -759,6 +787,34 @@ export function runNpmScriptOnce(script, args, environment) {
         env: { ...process.env, ...environment },
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: process.platform === 'win32',
+      },
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => { stdout += String(chunk) })
+    child.stderr.on('data', (chunk) => { stderr += String(chunk) })
+    child.once('error', reject)
+    child.once('close', (code) => resolve({ code, stdout, stderr }))
+  })
+}
+
+/**
+ * A one-shot driver that has no npm script, run the way CI runs it.
+ *
+ * `scripts/run-v2-render-worker-once.mjs` is invoked directly by
+ * `mvp-core-full-journey.e2e.mjs` too: it is the file, under tsx, with the kind
+ * in the environment. Named here rather than inlined so the two journeys cannot
+ * drift apart on how the worker is started.
+ */
+export function runNodeScriptOnce(script, environment) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ['node_modules/tsx/dist/cli.mjs', script],
+      {
+        cwd: REPOSITORY_ROOT,
+        env: { ...process.env, ...environment },
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
     let stdout = ''
