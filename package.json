@@ -67,6 +67,8 @@
     "test:e2e:multicam-longform-gate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-longform-gate.e2e.mjs",
     "test:e2e:phase-gate-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/phase-gate-journey.e2e.mjs",
     "test:e2e:longform-synthesis": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/longform-synthesis-journey.e2e.mjs",
+    "test:e2e:podcast-multicam-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/podcast-multicam-journey.e2e.mjs",
+    "test:e2e:teacher-screen-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/teacher-screen-journey.e2e.mjs",
     "test:e2e:wave20-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-persistence-journey.e2e.mjs",
     "test:e2e:sync-diagnostic-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-browser.e2e.mjs",
     "test:e2e:multicam-longform-gate-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-longform-gate-browser.e2e.mjs",

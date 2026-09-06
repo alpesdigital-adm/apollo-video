@@ -367,6 +367,59 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-longform-synthesis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_LONGFORM_SYNTHESIS_E2E: "1"
+      # Both capture journeys refuse a database whose name does not say `e2e`
+      # (`assertIsolatedDatabase`, tests/v2/helpers/capture-journey.mjs): each
+      # deletes every row of its own workspace before and after the run, and
+      # that guard is what keeps a misconfigured environment from doing the same
+      # to a shared server. The service container is disposable, so they get
+      # their own database inside it instead of the guard being relaxed — the
+      # shape the long-form workflow step already uses on the Compose cluster.
+      #
+      # The database is created THROUGH the service container, the way the
+      # orphan check above already does it (`docker exec ... psql`), and not
+      # with a `psql` on the runner: a bare `psql` would be the only invocation
+      # in this workflow that depends on the runner image shipping a PostgreSQL
+      # client, and the day it stops shipping one this step fails before the
+      # journeys have a chance to say anything.
+      - name: Create the disposable capture journey database
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+            psql -U apollo -d postgres -c 'create database apollo_v2_e2e_capture'
+          npm run db:v2:migrate:deploy
+
+      - name: Run Wave 20 podcast multicam product journey against PostgreSQL
+        run: npm run test:e2e:podcast-multicam-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-podcast-multicam-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PODCAST_MULTICAM_E2E: "1"
+          APOLLO_PODCAST_MULTICAM_OUTPUT: ${{ runner.temp }}/podcast-multicam-journey
+
+      - name: Run Wave 20 teacher and screen product journey against PostgreSQL
+        run: npm run test:e2e:teacher-screen-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-teacher-screen-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_TEACHER_SCREEN_E2E: "1"
+          APOLLO_TEACHER_SCREEN_OUTPUT: ${{ runner.temp }}/teacher-screen-journey
+
+      # Each suite reads its own MP4 back with ffprobe and samples its pixels
+      # before this runs, so the upload is for a person, not for the assertion.
+      # `warn` rather than `error`: a journey that failed before the render must
+      # show its own failure, not a second one about a missing file.
+      - name: Publish the capture journey MP4s
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-capture-journeys-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/podcast-multicam-journey
+            ${{ runner.temp }}/teacher-screen-journey
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Run Wave 19 capture protocol and diagnostic browser journey
         run: npm run test:e2e:sync-diagnostic-browser
