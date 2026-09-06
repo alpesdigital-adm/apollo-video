@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 
 import { calculateCanonicalHash } from '../../src/v2/domain/canonical-hash.ts'
 import { captureSessionDerivationRef } from '../../src/v2/domain/capture-session.ts'
-import { COLOR_TRANSFORM_ORDER, createColorPlan, resolveColorPlan } from '../../src/v2/domain/color-and-export.ts'
+import {
+  COLOR_TRANSFORM_ORDER,
+  createColorPlan,
+  createMediaColorProbe,
+  resolveColorPlan,
+} from '../../src/v2/domain/color-and-export.ts'
+import { createColorPipelineCompilation } from '../../src/v2/domain/color-pipeline-compilation.ts'
 import {
   COLOR_CRITIC_IRREVERSIBLE_DIMENSIONS,
   DEFAULT_COLOR_CRITIC_POLICY,
@@ -33,6 +40,9 @@ import { createPlaybackMap } from '../../src/v2/domain/playback-map.ts'
 import { createTickInterval, rational } from '../../src/v2/domain/session-time.ts'
 import { AUTO_EDIT_MINIMUM_CONFIDENCE_BPS, createTrackCoverage } from '../../src/v2/domain/track-coverage.ts'
 import { resolveFfmpegBinary } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
+import { FfmpegColorMeasurement } from '../../src/v2/infrastructure/media/ffmpeg-color-measurement.ts'
+import { buildFfmpegColorPipelineFilter } from '../../src/v2/infrastructure/media/ffmpeg-color-pipeline-processor.ts'
+import { probeVideo } from '../../src/v2/infrastructure/media/video-probe.ts'
 import {
   buildDirectionWorld,
   buildMeasurement,
@@ -63,6 +73,35 @@ import { request, wire } from './helpers/multicam-direction-wiring.mjs'
  * gate, the active speaker, match before the creative LUT, clipping against a
  * declared intent, the piecewise playback map, the two recordings' durations,
  * caller-supplied derivations, the hash on read, and the phase gate's evidence.
+ *
+ * ## What this file is, and what it is not
+ *
+ * It is a DOMAIN-level suite, deliberately, and it is registered as one
+ * (`test:unit:wave20-falsification`) so nothing about its name suggests
+ * otherwise. BRIEF-E2E asks that its journeys run through the published `/v1`
+ * routes against PostgreSQL; these cases are not journeys. A falsification has
+ * to vary one fact and hold everything else identical — one camera's
+ * confidence, which microphone carried the speech, the position of one stage —
+ * and a route hands back an answer produced from a whole world it also
+ * assembled, which is the wrong instrument for that.
+ *
+ * So the two halves live in two places, and this comment names both:
+ *
+ * - the DECISION is falsified here, on the function that makes it;
+ * - the SAME protection is exercised through the routes and the database by
+ *   `wave20-persistence.e2e.mjs`, `multicam-direction.e2e.mjs`,
+ *   `color-critic.e2e.mjs`, `playback-map.e2e.mjs`,
+ *   `multicam-longform-gate.e2e.mjs` and the operator journey in
+ *   `wave20-operator-browser.e2e.mjs`, each behind its own `APOLLO_*_E2E` gate.
+ *
+ * Where a protection's product boundary is somewhere other than the function
+ * this file calls — the hydration of a stored direction, the gate's row reader
+ * — the boundary is pinned structurally here as well, because a check deleted
+ * at the boundary used to leave this suite and the whole repository suite green
+ * and be caught only by a database E2E that neither `npm test` nor this lane's
+ * CI steps run. Case 3 goes further and renders: the stage order it refuses is
+ * measured on the pixels of two real MP4s, read back with ffprobe and judged by
+ * the colour critic.
  */
 
 const WORKSPACE = 'workspace-falsify'
@@ -71,6 +110,28 @@ const PROJECT = 'project-falsify'
 const HZ = 90_000
 const seconds = (ticks) => Number(ticks) / HZ
 const root = resolve(import.meta.dirname, '../..')
+
+/**
+ * A source with its comments removed.
+ *
+ * Every structural assertion below reads this rather than the file, because the
+ * first version of case 1 counted a doc comment among the coverage gate's call
+ * sites: `assertCoverageSelectable(` appears four times in
+ * `multicam-direction.ts` and one of them is prose, so with a floor of three
+ * one real gate could be deleted with this suite, `npm test` and `tsc` all
+ * green. Measured, before this was written: deleting the gate in `audioForShot`
+ * left 9/9 here and 2145/2145 in the repository suite.
+ */
+function codeOf(relativePath) {
+  return readFileSync(join(root, relativePath), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+}
+
+/** Executable calls of `name(` in that source, comments already gone. */
+function callSitesOf(relativePath, name) {
+  return codeOf(relativePath).match(new RegExp(String.raw`\b${name}\(`, 'g')) ?? []
+}
 
 /** The same coverage the fixture derives, at a confidence this test chooses. */
 function coverageAt(session, trackId, confidenceBps) {
@@ -224,18 +285,61 @@ test('T-FR-150 falsification 1: without the coverage gate the same cameras would
   assert.equal(atCompile.code, 'DIRECTION_RANGE_UNRESOLVABLE')
   assert.equal(atCompile.details.cause, 'coverage-below-floor', 'the compile refused for some other reason')
 
-  // Structural: the two call sites and the floor itself. Deleting either one
-  // is the mutation this case exists for, and it is caught here rather than by
-  // a test that rewrote the file.
-  const source = readFileSync(join(root, 'src/v2/domain/multicam-direction.ts'), 'utf8')
-  const callSites = source.match(/assertCoverageSelectable\(/g) ?? []
-  assert.ok(callSites.length >= 3, `only ${callSites.length} coverage gate call sites remain`)
+  // The third gate, behaviourally: doubt ONLY the final-mix audio and every
+  // camera keeps the confidence that was measured, so the cut is identical and
+  // the one thing that changes is whether a shot may be given an audio track
+  // whose coverage nobody verified. This is the gate a call-site count let be
+  // deleted, and it is the one that decides what a viewer hears.
+  const audioDoubted = world.coverages.map((coverage) => (
+    coverage.trackId === 'track-master-audio'
+      ? coverageAt(world.session, coverage.trackId, belowFloor)
+      : coverage
+  ))
+  const mute = direct(world, { coverages: audioDoubted })
+  assert.deepEqual(
+    mute.shots.map((shot) => [shot.shotId, shot.chosen.trackId]),
+    accepted.shots.map((shot) => [shot.shotId, shot.chosen.trackId]),
+    'doubting the audio changed which cameras were cut, so this measures more than the audio gate',
+  )
+  assert.ok(accepted.shots.length > 0)
+  for (const shot of accepted.shots) {
+    assert.equal(shot.audioTrackId, 'track-master-audio', `${shot.shotId} had no audio bed when the coverage held`)
+  }
+  for (const shot of mute.shots) {
+    assert.equal(shot.audioTrackId, null, `${shot.shotId} was given audio whose coverage was never verified`)
+  }
+  const muteWarning = mute.warnings.find((warning) => warning.code === 'audio-master-unavailable')
+  assert.ok(muteWarning, 'the direction dropped the audio bed and said nothing')
+  assert.match(muteWarning.detail, /coverage-below-floor/)
+  assert.deepEqual([...accepted.warnings.filter((warning) => warning.code === 'audio-master-unavailable')], [])
+
+  // Structural: the three call sites and the floor itself. Deleting any one of
+  // them is the mutation this case exists for. The count is exact and read off
+  // a source with its comments stripped, because a doc comment used to be
+  // counted as a fourth site and let one real gate go.
+  const callSites = callSitesOf('src/v2/domain/multicam-direction.ts', 'assertCoverageSelectable')
+  assert.equal(
+    callSites.length, 3,
+    `the coverage gate has ${callSites.length} executable call sites, not the three this case names: `
+    + 'deriveCandidate (which angle is eligible), audioForShot (which track a shot is heard on) '
+    + 'and compileShotsToSourceRanges (which frames are cut)',
+  )
+  for (const enclosing of ['function deriveCandidate(', 'function audioForShot(', 'const resolveOrRefuse = (']) {
+    const body = codeOf('src/v2/domain/multicam-direction.ts')
+    const from = body.indexOf(enclosing)
+    assert.ok(from > 0, `${enclosing} is gone; the case names a gate that no longer exists`)
+    assert.ok(
+      body.slice(from, from + 4_000).includes('assertCoverageSelectable('),
+      `${enclosing} no longer asks the coverage gate`,
+    )
+  }
   assert.equal(AUTO_EDIT_MINIMUM_CONFIDENCE_BPS, 7_000)
 
   console.log(
     `falsification-1 coverage: ${accepted.shots.length} shots at ${9_800} bps, `
     + `${refused.shots.length} at ${belowFloor} bps; the compile of ${compiled.clips.length} clips refused with `
-    + `${atCompile.code}/${atCompile.details.cause}`,
+    + `${atCompile.code}/${atCompile.details.cause}; doubting only the audio kept ${mute.shots.length} shots `
+    + `and left every one of them without an audio track (${muteWarning.detail})`,
   )
 })
 
@@ -307,7 +411,40 @@ function colorTransform(kind, id, parameters) {
   }
 }
 
-test('T-FR-183 falsification 3: a match after the creative LUT is refused, and would otherwise be silently reordered', () => {
+/**
+ * A shoulder LUT: identity to mid-grey, then compressed so nothing it produces
+ * can reach white. It is the ordinary shape of a film look, and it is why the
+ * order matters — a match applied before it is rolled off by it, and a match
+ * applied after it walks straight out the top.
+ */
+function shoulderCube() {
+  const curve = [0, 0.5, 0.75]
+  const lines = ['LUT_3D_SIZE 3']
+  for (let blue = 0; blue < 3; blue += 1) {
+    for (let green = 0; green < 3; green += 1) {
+      for (let red = 0; red < 3; red += 1) {
+        lines.push(`${curve[red].toFixed(6)} ${curve[green].toFixed(6)} ${curve[blue].toFixed(6)}`)
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`
+}
+
+const RENDER_COLOR = Object.freeze({
+  colorSpace: 'rec709', transfer: 'bt709', primaries: 'bt709', matrix: 'bt709', range: 'limited', bitDepth: 8,
+})
+
+function pipelineStage(id, kind, provider, parameters, extra = {}) {
+  return {
+    id, kind, version: 'v1', enabled: true, input: RENDER_COLOR, output: RENDER_COLOR,
+    implementation: {
+      provider, version: 'v1', parameters: Object.freeze(parameters), parametersHash: calculateCanonicalHash(parameters),
+    },
+    ...extra,
+  }
+}
+
+test('T-FR-183 falsification 3: a match after the creative LUT is refused, and clips the delivered frame when it is not', async (t) => {
   const technical = colorTransform('technical', 'technical-1', { mode: 'identity' })
   const match = colorTransform('match', 'match-1', { brightness: 0.1, contrast: 1, saturation: 1 })
   const creative = {
@@ -326,10 +463,10 @@ test('T-FR-183 falsification 3: a match after the creative LUT is refused, and w
   // Accepted: the same four transforms in the order the pipeline declares.
   assert.equal(assertMatchStagePosition([technical, match, creative, output]), undefined)
 
-  // Why the position check has to exist at all: the plan resolver keys layers
-  // by stage, so the wrong order resolves to the right one and the mistake
-  // leaves no trace downstream. Without this refusal the plan is accepted and
-  // the render applies a pipeline the plan did not describe.
+  // And the plan constructor applies the same rule to every layer it stores.
+  // It used to apply it to none of them: `resolveColorPlan` keys layers by
+  // stage, so a plan declaring `[technical, creative-lut, match, output]` was
+  // accepted, silently re-sorted, and rendered in an order it did not describe.
   const plan = {
     schemaVersion: 'color-plan/v1',
     metadata: COLOR_METADATA,
@@ -339,42 +476,165 @@ test('T-FR-183 falsification 3: a match after the creative LUT is refused, and w
     cameras: {},
     segments: {},
   }
-  assert.equal(createColorPlan(plan).planHash.length, 64, 'the misordered layer was refused by the plan constructor')
-  const resolved = resolveColorPlan(plan, {})
-  assert.deepEqual(resolved.stages.map((stage) => stage.kind), [...COLOR_TRANSFORM_ORDER])
+  const planRefusal = refusalOf(() => createColorPlan(plan))
+  assert.ok(planRefusal, 'a ColorPlan whose global layer applies the match after the LUT was stored')
+  assert.equal(planRefusal.code, 'COLOR_STAGE_VIOLATION')
+  assert.equal(planRefusal.details.after, 'creative-lut')
+  assert.ok(refusalOf(() => resolveColorPlan(plan, {})), 'the resolver still re-sorted the layer it should refuse')
 
-  // And that the order is not cosmetic, measured on pixels rather than argued.
-  // Two stages that do not commute, applied both ways to one mid-grey frame by
-  // the real ffmpeg this repository ships. This is not the match/LUT chain —
-  // that chain is proved in `ffmpeg-color-pipeline.integration.mjs`; what is
-  // measured here is that stage order changes the bytes at all, which is what
-  // makes an accepted misordering a defect rather than a formality.
+  // The accepted twin, resolved: the stages come back in the pipeline's order,
+  // compared against the four names written out rather than against the
+  // constant the resolver itself maps over.
+  const ordered = { ...plan, global: [technical, match, creative, output] }
+  assert.equal(createColorPlan(ordered).planHash.length, 64)
+  assert.deepEqual(
+    resolveColorPlan(ordered, {}).stages.map((stage) => stage.kind),
+    ['technical', 'match', 'creative-lut', 'output'],
+  )
+  assert.deepEqual([...COLOR_TRANSFORM_ORDER], ['technical', 'match', 'creative-lut', 'output'])
+
+  // ---- and on pixels, with the product's own filter -----------------------
+  // Two renders of one recording that differ in nothing but the position of the
+  // match. Both filters are the ones `buildFfmpegColorPipelineFilter` emits for
+  // the same compilation; the second is that filter with its two middle links
+  // swapped, which is the pipeline the misordered plan above would have been
+  // resolved into. What the critic then reads is the delivered frame.
   const ffmpeg = resolveFfmpegBinary()
   const workRoot = mkdtempSync(join(tmpdir(), 'apollo-falsify-color-'))
-  try {
-    const sample = (filters) => {
-      const out = join(workRoot, `${filters.replace(/[^a-z0-9]/gi, '')}.rgb`)
-      execFileSync(ffmpeg, [
-        '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
-        '-f', 'lavfi', '-i', 'color=c=0x808080:s=2x2:r=1:d=1',
-        '-vf', `${filters},scale=1:1`,
-        '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', out,
-      ], { timeout: 60_000 })
-      return [...readFileSync(out)]
-    }
-    const brightThenContrast = sample('eq=brightness=0.2,eq=contrast=2.0')
-    const contrastThenBright = sample('eq=contrast=2.0,eq=brightness=0.2')
-    assert.notDeepEqual(
-      brightThenContrast, contrastThenBright,
-      'two orders of the same two stages produced identical pixels, so nothing here measures order',
-    )
-    console.log(
-      `falsification-3 stage order: refused ${refusal.code} after ${refusal.details.after}; `
-      + `pixels rgb(${brightThenContrast.join(',')}) vs rgb(${contrastThenBright.join(',')})`,
-    )
-  } finally {
-    rmSync(workRoot, { recursive: true, force: true })
+  t.after(() => rmSync(workRoot, { recursive: true, force: true }))
+
+  const sourcePath = join(workRoot, 'ramp.mp4')
+  execFileSync(ffmpeg, [
+    '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+    '-f', 'lavfi', '-i', "nullsrc=s=320x180:r=24:d=1,geq=lum='16+219*X/W':cb=128:cr=128",
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
+    sourcePath,
+  ], { timeout: 120_000 })
+  const lutPath = join(workRoot, 'shoulder.cube')
+  writeFileSync(lutPath, shoulderCube(), 'utf8')
+
+  const compilation = createColorPipelineCompilation({
+    id: 'compilation-falsify-order',
+    workspaceId: WORKSPACE,
+    projectId: PROJECT,
+    sourceArtifactId: 'artifact-ramp',
+    sourceManifestId: 'manifest-ramp',
+    probe: createMediaColorProbe({
+      id: 'probe-falsify-order',
+      workspaceId: WORKSPACE,
+      artifactId: 'artifact-ramp',
+      manifestId: 'manifest-ramp',
+      detection: { state: 'ready', metadata: RENDER_COLOR, pixelFormat: 'yuv420p', hdrMode: 'sdr' },
+      producer: { provider: 'ffprobe', version: 'json-v1', binaryDigest: sha('9') },
+      createdAt: at(0),
+    }),
+    outputMetadata: RENDER_COLOR,
+    stages: [
+      pipelineStage('technical-render', 'technical', 'ffmpeg-zscale', { mode: 'identity' }),
+      pipelineStage('match-render', 'match', 'apollo-match', { mode: 'adjust', brightness: 0.35, contrast: 1, saturation: 1 }),
+      pipelineStage('creative-render', 'creative-lut', 'apollo-lut', { mode: 'lut3d', intensity: 1 },
+        { lut: { artifactId: 'lut-shoulder', sha256: sha('f') } }),
+      pipelineStage('output-render', 'output', 'ffmpeg-zscale', { dither: true }),
+    ],
+    createdByClientId: 'client-falsify',
+    createdAt: at(0),
+  })
+  const compiled = buildFfmpegColorPipelineFilter({ compilation, lutPaths: { 'lut-shoulder': lutPath } })
+  const links = compiled.filter.split(',')
+  assert.equal(links.length, 5, `the product filter is not four stages and a format: ${compiled.filter}`)
+  assert.match(links[1], /^eq=brightness=0\.350000/, 'the second link is not the match the compilation declared')
+  assert.match(links[2], /^lut3d=file=/, 'the third link is not the creative LUT')
+  const swapped = [links[0], links[2], links[1], ...links.slice(3)].join(',')
+
+  const render = (name, filter) => {
+    const path = join(workRoot, `${name}.mp4`)
+    execFileSync(ffmpeg, [
+      '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', sourcePath, '-vf', filter,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-pix_fmt', compiled.pixelFormat,
+      '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv',
+      path,
+    ], { timeout: 180_000 })
+    return path
   }
+  const declaredPath = render('match-before-lut', compiled.filter)
+  const misorderedPath = render('match-after-lut', swapped)
+
+  // Both files read back with the real ffprobe before anything is claimed
+  // about them, and reported with their numbers.
+  const [declaredProbe, misorderedProbe] = await Promise.all([
+    probeVideo(declaredPath, { requireAudio: false }),
+    probeVideo(misorderedPath, { requireAudio: false }),
+  ])
+  for (const [name, probed] of [['declared', declaredProbe], ['misordered', misorderedProbe]]) {
+    assert.equal(probed.color.state, 'ready', `${name} render carries no colour metadata`)
+    assert.equal(probed.color.hdrMode, 'sdr')
+    assert.ok(probed.duration > 0, `${name} render has no duration`)
+    assert.equal(probed.width, 320)
+    assert.equal(probed.height, 180)
+  }
+
+  const measurement = new FfmpegColorMeasurement({ ffmpegPath: ffmpeg })
+  const measure = async (path, measurementId, sourceAssetId) => {
+    const [one] = await measurement.measureCameraColor({
+      mediaPath: path,
+      cameraId: 'camera-a',
+      sourceAssetId,
+      sourceSha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+      ranges: [{
+        sessionRange: createTickInterval(0n, BigInt(HZ)),
+        sourceStartFrame: 0, sourceEndFrame: 24, measurementId,
+      }],
+    })
+    return one
+  }
+  const declaredMeasured = await measure(declaredPath, 'falsify-order-declared', 'artifact-declared')
+  const misorderedMeasured = await measure(misorderedPath, 'falsify-order-misordered', 'artifact-misordered')
+
+  const clipping = DEFAULT_COLOR_CRITIC_THRESHOLDS.values.clipping
+  assert.ok(
+    declaredMeasured.dimensions.highlights.value < clipping.warn,
+    `the declared order clipped ${declaredMeasured.dimensions.highlights.value} of the frame`,
+  )
+  assert.ok(
+    misorderedMeasured.dimensions.highlights.value > clipping.hard,
+    'swapping the two stages changed nothing the critic can read, so nothing here measures order',
+  )
+
+  // The visual evaluation itself, on the delivered bytes: the same recording,
+  // the same two stages, the same declared look — and the misordered render is
+  // rejected for highlights that no grade can bring back.
+  const criticFor = (delivered, previous, reportId, artifactId) => evaluateColorCritic({
+    reportId,
+    workspaceId: WORKSPACE,
+    projectId: PROJECT,
+    projectVersionId: 'project-version-falsify',
+    subject: { kind: 'output', artifactId },
+    before: [previous],
+    after: [delivered],
+    creativeIntent: { declared: true, castAllowedDelta: 0.15, lutId: 'lut-shoulder' },
+    evaluatedAt: at(100),
+  })
+  const rejected = criticFor(misorderedMeasured, declaredMeasured, 'falsify-order-after', 'artifact-misordered')
+  const accepted = criticFor(declaredMeasured, misorderedMeasured, 'falsify-order-before', 'artifact-declared')
+  const clippingIssues = (report) => report.issues.filter((entry) => entry.dimension === 'clipping')
+
+  assert.equal(rejected.action, 'reject', 'the misordered render was not refused by the critic')
+  assert.equal(clippingIssues(rejected).length, 1)
+  assert.equal(clippingIssues(rejected)[0].severity, 'hard')
+  assert.equal(clippingIssues(rejected)[0].cause, 'irreversible-technical-defect')
+  assert.deepEqual(clippingIssues(accepted), [], 'the declared order was also charged with clipping')
+  assert.notEqual(accepted.action, 'reject')
+  assert.ok(COLOR_CRITIC_IRREVERSIBLE_DIMENSIONS.includes('clipping'))
+
+  console.log(
+    `falsification-3 stage order: refused ${refusal.code} after ${refusal.details.after}, `
+    + `plan refused ${planRefusal.code}; two ${declaredProbe.duration.toFixed(3)}s `
+    + `${misorderedProbe.width}x${misorderedProbe.height} @${misorderedProbe.fps}fps renders clipped `
+    + `${declaredMeasured.dimensions.highlights.value} of the frame with the match before the LUT and `
+    + `${misorderedMeasured.dimensions.highlights.value} after it (critic hard band ${clipping.hard}), `
+    + `so the critic answers ${accepted.action} and ${rejected.action}`,
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -704,6 +964,24 @@ test('T-F4.012 falsification 8: an edited row is refused on read, and the same e
   assert.equal(assertMulticamDirectionIntegrity(resealed).manualReviewRequired, tampered.manualReviewRequired)
   assert.notEqual(resealed.directionHash, stored.directionHash)
 
+  // The check is proved above against the domain function. This pins it to the
+  // boundary the protection is NAMED after: the row-to-aggregate reader. With
+  // the assertion deleted there, `assertMulticamDirectionIntegrity` still
+  // refuses everything it is handed and nothing hands it anything — measured,
+  // that mutation left this suite 9/9 and the repository suite 2145/2145, and
+  // was caught only by the gated database E2E.
+  const hydration = codeOf('src/v2/infrastructure/prisma/multicam-direction-repository.ts')
+  const reader = hydration.indexOf('function hydrateDirection(')
+  assert.ok(reader > 0, 'the direction repository no longer has the row reader this case pins')
+  assert.match(
+    hydration.slice(reader, reader + 12_000), /assertMulticamDirectionIntegrity\(/,
+    'hydrateDirection turns a row into an aggregate without recomputing its hash',
+  )
+  assert.equal(
+    callSitesOf('src/v2/infrastructure/prisma/multicam-direction-repository.ts', 'assertMulticamDirectionIntegrity').length,
+    1, 'the direction repository verifies the hash somewhere other than where it hydrates',
+  )
+
   console.log(
     `falsification-8 hydration: manualReviewRequired ${stored.manualReviewRequired} -> ${tampered.manualReviewRequired} `
     + `refused as ${refusal.code}; resealed under ${resealed.directionHash.slice(0, 12)} it is accepted, which is why the `
@@ -788,6 +1066,24 @@ test('T-F4.016 falsification 9: deleting one row of evidence fails the gate, and
   assert.equal(unverified.approved, false)
   assert.equal(unverified.blocking[0].reason, 'evidence-unverified')
   assert.equal(unverified.criteria.find((entry) => entry.criterion === first).unverifiedReferenceCount, 1)
+
+  // Where the protection actually stands in the product: the gate's row
+  // reader. The case above filters an in-memory array; deleting the checks in
+  // `hydrateGate` would leave that green while a doctored row was handed back
+  // as an approval, so the reader is pinned here too — the report's own
+  // integrity, the cross-check that ties the ordering column to the signed
+  // report, and the record hash.
+  const gateReader = codeOf('src/v2/infrastructure/prisma/multicam-longform-gate-repository.ts')
+  const reader = gateReader.indexOf('function hydrateGate(')
+  assert.ok(reader > 0, 'the gate repository no longer has the row reader this case pins')
+  const body = gateReader.slice(reader, reader + 12_000)
+  for (const required of [
+    'assertMulticamLongformGateReportIntegrity(',
+    'report.evaluatedAt !== row.evaluatedAt.toISOString()',
+    'calculateMulticamLongformGateRecordHash(content) !== row.recordHash',
+  ]) {
+    assert.ok(body.includes(required), `hydrateGate no longer checks: ${required}`)
+  }
 
   console.log(
     `falsification-9 gate: ${approved.satisfied}/${approved.total} approved; each of the `

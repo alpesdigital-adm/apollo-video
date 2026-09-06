@@ -1,5 +1,6 @@
 import { calculateCanonicalHash } from './canonical-hash.ts'
 import {
+  assertMatchStagePosition,
   COLOR_TRANSFORM_ORDER,
   type ColorMetadata,
   type ColorTransform,
@@ -496,24 +497,13 @@ export function assertMatchStageTransform(transform: Readonly<ColorTransform>): 
  * A layer, in application order, may not apply a match after the creative LUT
  * or the output transform. `resolveColorPlan` re-orders by kind and would hide
  * the mistake; this refuses it where it was made.
+ *
+ * The rule itself moved to `color-and-export.ts`, where `createColorPlan`
+ * applies it to every layer of a plan — its single call site here could never
+ * refuse anything, because each layer it inspects is built one transform long.
+ * It is re-exported so callers keep the import they had.
  */
-export function assertMatchStagePosition(transforms: readonly Readonly<ColorTransform>[]): void {
-  const matchIndex = COLOR_TRANSFORM_ORDER.indexOf(MATCH_PIPELINE_STAGE)
-  let latestStageSeen = -1
-  for (const [index, transform] of transforms.entries()) {
-    const stage = COLOR_TRANSFORM_ORDER.indexOf(transform.kind)
-    assertDomain(stage >= 0, 'INVALID_ARGUMENT', `transform ${index} has an unknown stage kind`)
-    if (transform.kind === MATCH_PIPELINE_STAGE) {
-      assertDomain(
-        latestStageSeen <= matchIndex,
-        'COLOR_STAGE_VIOLATION',
-        `match transform ${transform.id} is positioned after ${COLOR_TRANSFORM_ORDER[latestStageSeen]}; camera matching must precede the creative LUT`,
-        { position: index, after: COLOR_TRANSFORM_ORDER[latestStageSeen] },
-      )
-    }
-    latestStageSeen = Math.max(latestStageSeen, stage)
-  }
-}
+export { assertMatchStagePosition }
 
 // ---------------------------------------------------------------------------
 // Plan construction and integrity
