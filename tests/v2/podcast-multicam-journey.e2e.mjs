@@ -25,9 +25,14 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   time is computed from the offset the sync worker measured — read back over
  *   `/v1` from the clock map — and at the middle of every such stretch the shot
  *   on air is that speaker's camera.
- * - **No clip lies outside measured coverage.** Every shot's source range sits
- *   inside the coverage bounds the worker derived for that track, the coverage
- *   has no gaps, and the direction leaves no uncovered stretch.
+ * - **No clip lies outside measured coverage.** Twice over: every shot's source
+ *   range sits inside the coverage bounds the worker derived for that track,
+ *   and so does every CLIP of the plan the renderer was actually handed — a
+ *   shot is a decision, a clip is what got decoded. The coverage has no gaps
+ *   and the direction leaves no uncovered stretch.
+ * - **The master recorder is the audio bed.** Three recordings, one of which
+ *   goes to air as sound: every clip of the rendered cut names the recorder as
+ *   its audio, whichever camera it shows.
  * - **The colour match is a match-stage transform, before the creative LUT.**
  *   The plan the server derived from the pixels declares `pipelineStage:
  *   'match'` and every camera transform is a `match` transform. The compilation
@@ -45,8 +50,10 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   render over the file it just wrote, and its report is read back through
  *   `GET /v1/projects/{id}/color-critic-reports`.
  *
- * Two shipped gaps are measured here rather than routed around, as in the
- * teacher-and-screen journey:
+ * Four shipped gaps are measured here rather than routed around, as in the
+ * teacher-and-screen journey. The first two the journey works around in the
+ * open; the last two it can only report, because they bound what the journey
+ * is able to do at all:
  *
  * 1. `POST .../sync-diagnostic` ignores what the sync worker measured — it
  *    builds anchors from marker detections only
@@ -62,6 +69,20 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    asserted rather than skipped: `manual-anchors-required`, which is one
  *    step better than the teacher-and-screen journey's `not-synchronizable`
  *    precisely because the manual anchors above exist by then.
+ * 3. Two renders of one project that produce IDENTICAL bytes cannot both be
+ *    stored. Media artifacts are content-addressed by `(workspaceId,
+ *    artifactKey)`, so the second render finds the first one's row, gets that
+ *    row's id back from `persistOrReplay`, and the worker fails with `Project
+ *    render artifact identity did not converge` — after ffmpeg has written the
+ *    file and the verify pass has passed it. Re-rendering an unchanged version
+ *    therefore fails rather than replaying. The journey has to give its colour
+ *    plan a visible effect for that reason and says so at the plan.
+ * 4. The reference track's measured coverage has no published reader.
+ *    `GET .../sync` builds its listing from sync EVIDENCE records and the
+ *    reference track has none — there is nothing to synchronize it against —
+ *    even though the worker derives coverage for it like any other track. The
+ *    recorder's bounds are read from the projection here, and that read is
+ *    labelled where it happens.
  */
 
 const require = createRequire(import.meta.url)

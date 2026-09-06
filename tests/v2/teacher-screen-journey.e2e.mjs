@@ -87,6 +87,17 @@ const DEMONSTRATION_START_SECOND = 30
 const DEMONSTRATION_END_SECOND = 60
 /** How late the screen recorder started, in the audio both files carry. */
 const SCREEN_LAG_SECONDS = 1.6
+/**
+ * The initial grid of the demonstration, pinned.
+ *
+ * `life` seeds itself from the clock by default (`random_seed` -1), so without
+ * this the screen recording is a different file on every run: three executions
+ * of this journey produced 8396665, 8676309 and 8569470 bytes and three
+ * different sha256s, which makes a golden hash of the delivered MP4 a number
+ * nobody can check. Everything ELSE about the run was identical across those
+ * three, so the only thing this pins is the fixture.
+ */
+const LIFE_SEED = 20_260_203
 const WIDTH = 320
 const HEIGHT = 180
 
@@ -276,7 +287,7 @@ test(
       height: HEIGHT,
       videoInputs: [
         `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS}`,
-        `life=s=${WIDTH}x${HEIGHT}:r=${FPS}:mold=10`,
+        `life=s=${WIDTH}x${HEIGHT}:r=${FPS}:mold=10:random_seed=${LIFE_SEED}`,
         `color=c=0xf0f0f0:s=${WIDTH}x${HEIGHT}:r=${FPS}`,
       ],
       // `life` has no duration option and never ends, so each leg is trimmed in
