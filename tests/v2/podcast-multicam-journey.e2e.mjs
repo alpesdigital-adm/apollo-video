@@ -1822,7 +1822,7 @@ test(
       .sort()
 
     console.log(
-      `E2E-F4.012 podcast 3 cameras + master: master=${Number(masterAudio.duration).toFixed(2)}s/${masterBytes.byteSize}B ` +
+      `E2E-F4.012 podcast 2 cameras (3 cards) + master: master=${Number(masterAudio.duration).toFixed(2)}s/${masterBytes.byteSize}B ` +
       `cameras=${CAMERAS.map((camera) => `${camera}:${cameraVideo[camera].nb_read_frames}f`).join('+')} ` +
       `offsets=${CAMERAS.map((camera) => `${camera}:${offsetTicks[camera]}ticks(${(offsetTicks[camera] / FPS).toFixed(2)}s applied ${CAMERA_LAG_SECONDS[camera]}s)`).join(' ')} ` +
       `diagnostic v${firstDiagnostic.data.diagnostic.version} autoEdit=${firstDiagnostic.data.diagnostic.autoEdit.allowed} ` +
