@@ -146,7 +146,14 @@ test(
     const cameraTrackIds = Object.freeze({ a: 'track-camera-a', b: 'track-camera-b' })
     const masterArtifactId = 'artifact-master-audio'
     const cameraArtifactIds = Object.freeze({ a: 'artifact-camera-a', b: 'artifact-camera-b' })
-    const at = (second) => new Date(Date.parse('2029-10-01T09:00:00.000Z') + second * 1_000)
+    // The episode was recorded in the PAST, and that is load-bearing rather
+    // than decorative: `evaluateRenderedProxy` refuses a proxy whose completion
+    // predates the upload it was rendered from (`render-workflow.ts:221`), and
+    // the render worker stamps its completion from the real clock. A fixture
+    // dated in the future — which is what the teacher-and-screen journey uses,
+    // and gets away with because it never renders — makes every render of it
+    // fail with `INVALID_RENDER_INPUT`.
+    const at = (second) => new Date(Date.parse('2026-02-10T09:00:00.000Z') + second * 1_000)
     const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-podcast-multicam-e2e-'))
     // The direction route and the render worker both build FFmpeg providers and
     // a media materializer from the environment, so this process needs the
@@ -196,6 +203,10 @@ test(
         prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
         prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
         prisma.v2ProjectMediaAsset, prisma.v2PublicOperation,
+        // The render's own manifest records what it was derived from, and the
+        // lineage row outlives the operation that wrote it: deleting manifests
+        // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
+        prisma.v2MediaArtifactLineage,
         prisma.v2MediaArtifactManifest, prisma.v2MediaArtifact,
         prisma.v2Project, prisma.v2UiSession, prisma.v2WorkspaceUiPrincipal,
         prisma.v2WorkspaceMember, prisma.v2ApiCredential, prisma.v2ApiClient,
@@ -468,24 +479,57 @@ test(
     }
     /**
      * Empty the proxy render queue, one claim at a time, and say what each one
-     * did. `--once` claims at most one operation, so a queue holding three
-     * needs three passes; an empty queue prints an outcome with no operation
-     * and is the only way "the queue is empty" is observable.
+     * did.
+     *
+     * The queue is COUNTED before it is drained, and the count is asserted,
+     * for two reasons the first run of this journey demonstrated. `--once`
+     * claims at most one operation, so a queue holding two needs three passes
+     * — two claims and the empty one that ends it — and an unbounded loop
+     * would hide a worker that never claims anything. And `runNext` answers a
+     * literal `null` when `claimNext` finds no candidate, which is
+     * indistinguishable from "the driver could not see the queue at all"
+     * unless something independent says how many operations were waiting.
      */
-    const drainProxyRenders = async () => {
+    const queuedProxyRenders = () => prisma.v2PublicOperation.count({
+      where: { workspaceId, type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying'] } },
+    })
+    /** What the operation row says about a render that did not succeed. */
+    const renderFailure = async (operationId) => {
+      const row = await prisma.v2PublicOperation.findUnique({
+        where: { id: operationId },
+        select: { status: true, phase: true, attempt: true, errorCode: true, errorMessage: true },
+      })
+      return JSON.stringify(row)
+    }
+    const drainProxyRenders = async (expected) => {
       const outcomes = []
-      for (let pass = 0; pass < 6; pass += 1) {
+      const waiting = await queuedProxyRenders()
+      assert.equal(waiting, expected, `the queue was holding ${waiting} renders, not ${expected}`)
+      for (let pass = 0; pass <= waiting; pass += 1) {
         const run = await helpers.runNodeScriptOnce(
           'scripts/run-v2-render-worker-once.mjs',
           { ...workerEnvironment, APOLLO_V2_WORKER_ONCE_KIND: 'proxy' },
         )
         assert.equal(run.code, 0, `render worker exited ${run.code}: ${run.stderr}`)
+        assert.ok(
+          run.stdout.includes('APOLLO_WORKER_OUTCOME='),
+          `render worker printed no outcome line: ${run.stdout}\n${run.stderr}`,
+        )
         const outcome = helpers.outcomeLine(run.stdout, 'APOLLO_WORKER_OUTCOME=')
-        assert.ok(outcome, `render worker printed no outcome: ${run.stdout}`)
-        if (!outcome.operationId) return outcomes
+        if (outcome === null) {
+          assert.equal(
+            outcomes.length, waiting,
+            `the driver claimed ${outcomes.length} of the ${waiting} renders the queue was holding`,
+          )
+          return outcomes
+        }
+        assert.equal(
+          outcome.status, 'succeeded',
+          `render ${outcome.operationId} ended ${outcome.status}: ${await renderFailure(outcome.operationId)}\n${run.stdout}\n${run.stderr}`,
+        )
         outcomes.push(outcome)
       }
-      throw new Error('the proxy render queue never emptied')
+      throw new Error(`the proxy render queue never emptied: ${JSON.stringify(outcomes)}`)
     }
 
     const drained = await helpers.runNpmScriptOnce('worker:v2:capture-sync', ['--once'], workerEnvironment)
@@ -839,10 +883,7 @@ test(
     // Both `lut-selection` and `color-plan` queue a proxy render of their own.
     // They are drained here — the cut before any camera correction — so the
     // measured render below is unambiguously the one taken after the match.
-    const preMatchRenders = await drainProxyRenders()
-    for (const outcome of preMatchRenders) {
-      assert.equal(outcome.status, 'succeeded', JSON.stringify(outcome))
-    }
+    const preMatchRenders = await drainProxyRenders(2)
 
     const currentAfterDirection = await prisma.v2ProjectVersion.findUniqueOrThrow({
       where: { id: planVersionId },
@@ -927,7 +968,7 @@ test(
       body: {},
     }, [202])
     const operationId = enqueued.data.operation.id
-    const renderOutcomes = await drainProxyRenders()
+    const renderOutcomes = await drainProxyRenders(1)
     assert.equal(renderOutcomes.length, 1, 'exactly one render was queued by the request above')
     assert.equal(renderOutcomes[0].operationId, operationId)
 
