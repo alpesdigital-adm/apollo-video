@@ -1,6 +1,6 @@
 # Apollo Video v2 — Backlog executável
 
-> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.1  
+> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.2  
 > **Rastreabilidade:** [`docs/REQUIREMENTS-TRACEABILITY.md`](./docs/REQUIREMENTS-TRACEABILITY.md)  
 > **Especificações:** [`docs/specs`](./docs/specs)  
 > **Estado:** backlog inicial; nenhuma caixa marcada sem evidência verificável  
@@ -1819,15 +1819,15 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.009 — Capture Protocol [FR-147]
 
 - [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
-- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
-- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
-- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
+- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência telas `/capture-protocols` e `/sync-diagnostic`.
+- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture-protocols`.
+- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachCaptureProtocolService` (`src/v2/application/capture-protocol.ts`).
 - [ ] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
 
 ### F4.010 — Apollo Sync Marker [FR-148]
 
 - [ ] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
-- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
+- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência capabilities `apollo.projects.capture-sessions.sync-markers.generate` e tela `/capture-protocols`.
 - [ ] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
 - [ ] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
 - [ ] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
@@ -1835,7 +1835,7 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.011 — SyncDiagnostic [FR-149]
 
 - [ ] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
-- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
+- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e tela `/sync-diagnostic`.
 - [ ] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
 - [ ] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
 - [ ] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
@@ -2427,10 +2427,20 @@ Para cada decisão:
 
 ### J.007 — Multicâmera, tela e react
 
-- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
-- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
-- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
-- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
+> **Ponteiro de evidência corrigido em 2026-09-06.** As quatro linhas abaixo
+> citavam `T-J.007`. Esse id nunca existiu como teste: ele era gerado por
+> `src/v2/application/mandatory-journeys.ts` a partir de
+> `completeJourneyFixture`, que construía toda etapa com `passed: true` e em
+> seguida afirmava que ela passara. O arquivo terminava em `.test.mjs`, então
+> rodava dentro do `npm test` e do CI sem nunca poder falhar. Foi removido no
+> commit `e8ba18e6`; hoje `grep -rn "T-J.007" tests/` devolve zero linhas. Os
+> ids abaixo são os testes que de fato exercem cada item, e nenhum deles fecha a
+> jornada — as caixas seguem desmarcadas.
+
+- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: `E2E-FR-140` em `capture-heterogeneous-session.e2e.mjs` e ADR-130.
+- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: `E2E-FR-142`/`E2E-FR-144`/`E2E-FR-145` em `capture-heterogeneous-session.e2e.mjs` e `E2E-F4.012` em `capture-sync-worker-persistence.e2e.mjs`.
+- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: `E2E-FR-142` em `capture-insufficient-evidence.e2e.mjs` e `E2E-F4.012` em `insufficient-evidence-journey.e2e.mjs`.
+- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs` e `teacher-screen-journey.e2e.mjs`, `E2E-F4.015` em `react-playback-journey.e2e.mjs`.
 
 ### J.008 — Localização
 
