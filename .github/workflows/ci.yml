@@ -17,7 +17,17 @@ jobs:
   quality:
     name: Quality and security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20 to 35 when the long-form synthesis journey started
+    # RENDERING the brief's two-hour master instead of stopping at its plan.
+    # What that step added, measured on an 8-core developer machine over three
+    # runs: 125.6 s, 159.3 s and 194.5 s of FFmpeg, the spread being other work
+    # on the same CPU. The whole suite measured 412.8 s and 559.1 s on its two
+    # full runs, against ~213 s before. The 15 minutes added here are a BUDGET,
+    # not that measurement: a GitHub runner has fewer cores than the machine
+    # those seconds came from, and how much of the old 20 minutes this job was
+    # already using is not observable from a developer machine. If a real run
+    # reports the job finishing well inside this, bring it back down.
+    timeout-minutes: 35
 
     env:
       CI: true
@@ -309,7 +319,7 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_PHASE_GATE_E2E: "1"
 
-      - name: Run Wave 20 two-hour plan and rendered two-minute cut against ffprobe and PostgreSQL
+      - name: Run Wave 20 two-hour and ten-minute masters to rendered two-minute cuts against ffprobe and PostgreSQL
         run: npm run test:e2e:longform-synthesis
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-longform-synthesis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10

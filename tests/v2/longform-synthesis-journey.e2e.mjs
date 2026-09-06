@@ -10,37 +10,51 @@ import test from 'node:test'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
- * Journey 6 — a long source becomes a two-minute cut, in two runs.
+ * Journey 6 — a long source becomes a two-minute cut, over two sources.
  *
- * **Two tests, because the product can only carry the brief's source part of
- * the way.** The brief asks for a two-hour master. Both tests build a real
- * synthetic master with `lavfi`, probe it and assert the MEASURED duration;
- * neither ever calls a shorter file something it is not.
+ * **Two tests running the SAME journey end to end, differing only in how long
+ * the master is.** The brief's Journey 6 is "extrair um conteúdo de dois
+ * minutos de uma live de duas horas" (`docs/PRD-APOLLO-V2.md:117`), so the
+ * headline case is the two-hour one; the ten-minute one is the fast control
+ * that says whether a failure is about the source's length or about the
+ * journey. Both build a real synthetic master with `lavfi`, probe it and assert
+ * the MEASURED duration; neither ever calls a shorter file something it is not.
  *
- * - **The brief's two hours** (`BRIEF`, 7200 s) is driven all the way to the
- *   persisted renderable plan: ingest, StoryPlan, synthesis, read-back,
- *   compile, snapshot, and a pixel probe of the MASTER at the six windows the
- *   plan points at. Its delivered ratio is `compressionBps: 167`, the number
- *   the published API example carries (`schema-examples.ts:6237`) — which it
- *   can only be if the source really is 7200 s. Cost: 190 s of encode and
- *   550 MB, measured.
- * - **The rendered cut** (`RENDERED`, 600 s) is the same journey with the last
- *   step: `FfmpegEditorialProxyRenderer` produces the MP4 and it is read back
- *   with ffprobe and sampled pixel by pixel.
+ * - **The brief's two hours** (`BRIEF`, 7200 s). Its delivered ratio is
+ *   `compressionBps: 167`, the number the published API example carries
+ *   (`schema-examples.ts:6237`) — which it can only be if the source really is
+ *   7200 s.
+ * - **The ten-minute control** (`CONTROL`, 600 s), one twelfth of the source.
  *
- * **Why the two-hour case stops before the render, measured rather than
- * assumed.** It was written at 7200 s and RUN. `FfmpegEditorialProxyRenderer`
- * first transcodes the WHOLE source through the colour pipeline (a 447 MB
- * intermediate, ~90 s), then builds ONE `filter_complex` in which every clip is
- * a `trim` over that full-length stream — six branches off `[0:v:0]`, each
- * walking all 216 000 frames. That second pass was still running when the
- * renderer's own 30-minute ffmpeg timeout killed it
- * (`ffmpeg-editorial-proxy-renderer.ts:904`), and the journey failed with
- * `RENDER_EXECUTION_FAILED { killed: true, signal: 'SIGTERM' }` after
- * 2 046 900 ms. So a six-range cut from a two-hour master is not something the
- * renderer does today, and no length of CI budget changes that: the fix is a
- * seek-per-clip render, not a bigger timeout. Reported as a product finding;
- * the suite refuses to hide it behind a source it can serve.
+ * **What this costs: the wall clock varies by machine and by load, so it is
+ * given as a range with its N and never as one figure.** Three runs on one
+ * developer machine (8 cores, ffmpeg 6.1.1; the spread is other work sharing
+ * the CPU) measured, for the two-hour case, 131.9 / 188.1 / 304.6 s of
+ * encode and 125.6 / 159.3 / 194.5 s of render; for the control, 10.8 / 15.0 /
+ * 15.6 s of encode and 17.5 / 20.7 / 25.2 s of render. The whole suite was
+ * 412.8 s and 559.1 s on the two full runs. Earlier single runs on other
+ * machines reported the two-hour encode at 122.3 s and 138.8 s. An older
+ * version of this header claimed "190 s of encode", which no run produced; it
+ * is gone, and nothing here should be read as a fixed cost — **every run prints
+ * the seconds it actually spent**, and those printed numbers are the
+ * measurement.
+ *
+ * What does NOT vary, and is worth more than the seconds: the bytes. Across
+ * runs the two-hour master is 550 503 937 bytes / sha256 `471e17c1…` and its
+ * cut is 5 930 393 bytes / sha256 `d9282ba0…`; the control's master is
+ * 45 873 293 bytes / sha256 `c7230ab0…` and its cut 5 908 494 bytes / sha256
+ * `3ab3bdb5…`. Both are 3600 frames of 120.000 s.
+ *
+ * **Why the two-hour render is possible at all.** It was not, until the commit
+ * that added it: `FfmpegEditorialProxyRenderer` gave every clip a
+ * `trim=start_frame=…` over one full-length input, so FFmpeg walked all
+ * 216 000 frames, reached 11.9 GB of private bytes and was killed by the
+ * renderer's own 30-minute timeout — `RENDER_EXECUTION_FAILED
+ * { killed: true, signal: 'SIGTERM' }` after 1856.5 s. Each clip now reads its
+ * own span through an `-ss`/`-t` input, which writes the same bytes for the
+ * control (sha256 `8f11166c…` on the isolated renderer probe, before and after
+ * the change) and brings the two-hour render to the 125.6-194.5 s above, its
+ * FFmpeg peaking at 3.0 GB of private bytes in the run that was sampled.
  *
  * **What is new against `synthesis-render.integration.mjs`.** That suite
  * proves the BRIDGE over real pixels: `createEditorialSynthesis` in memory,
@@ -67,8 +81,8 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    audio codecs, sample rate, byte size, sha256, and a pixel probe at the
  *    middle of every clip.
  *
- * Steps 1 to 5 run for both sources. Step 6-7 only for the one the renderer
- * can serve; the two-hour test stops after 5 and says so in its own line.
+ * All seven steps run for both sources; the two tests differ in nothing but
+ * the length of the master and the six minutes the cut selects out of it.
  *
  * **What no object store holds.** The bytes reach the renderer from the local
  * fixture path — `sources: [{ path: masterPath }]`, a file inside this suite's
@@ -176,8 +190,9 @@ const OFFSETS = Object.freeze([[30, 55], [30, 48], [10, 32], [10, 25], [20, 45],
 /**
  * The brief's source: two hours, six far-apart minutes.
  *
- * Everything the product can do with it is driven; the render is not, and the
- * header says why with the number.
+ * The minutes are spread across five of the twelve decade bands on purpose, so
+ * the decade half of the marker is exercised as well as the unit half; a cut
+ * that landed 60 minutes away would read the right unit and the wrong decade.
  */
 const BRIEF = Object.freeze({
   masterSeconds: 7_200,
@@ -185,12 +200,13 @@ const BRIEF = Object.freeze({
 })
 
 /**
- * The source the renderer can serve: ten minutes, six non-consecutive minutes.
+ * The fast control: ten minutes, six non-consecutive minutes.
  *
- * A render that ran straight through the master, or that lost `sourceInFrame`,
- * lands on the wrong marker at the first clip either way.
+ * Same journey, same assertions, one twelfth of the encode. It is what says
+ * whether a failure in the two-hour case is about the length of the source or
+ * about the journey, and it is the one a hurried reader can re-run.
  */
-const RENDERED = Object.freeze({
+const CONTROL = Object.freeze({
   masterSeconds: 600,
   windows: windowsOver([0, 2, 4, 5, 7, 9], OFFSETS),
 })
@@ -209,8 +225,9 @@ const COLOR_METADATA = Object.freeze({
  *
  * Twenty-two `drawbox` filters, not 240: the decade band needs one span of ten
  * minutes each, and the unit band repeats every ten minutes, so `mod(t,600)`
- * gives one filter per unit colour instead of one per minute. Measured: 190 s
- * of wall clock for the whole encode.
+ * gives one filter per unit colour instead of one per minute. What this costs
+ * is machine-dependent and is printed by each run rather than asserted here;
+ * the header carries the spread that has been measured for it.
  */
 function buildMaster(path, masterSeconds) {
   const decades = DECADES
@@ -306,15 +323,15 @@ async function callRoute(NextRequest, module, {
 /**
  * The whole product path over one synthetic master.
  *
- * `render` decides whether the last step runs. Both cases drive ingest, the
- * StoryPlan, the synthesis, the read-back, the compile and the persisted
- * snapshot identically, so the only thing that separates them is the source
- * length and whether the renderer is asked to serve it.
+ * There is one body for both tests on purpose: ingest, the StoryPlan, the
+ * synthesis, the read-back, the compile, the persisted snapshot and the render
+ * are the same code for the two-hour master and for the ten-minute control, so
+ * the only thing that separates them is the source and the minutes selected
+ * from it. A step that only worked for short sources could not hide here.
  */
 async function driveJourney(t, {
   masterSeconds: MASTER_SECONDS,
   windows: WINDOWS,
-  render,
   label,
 }) {
     const MINUTES = MASTER_SECONDS / 60
@@ -722,21 +739,6 @@ async function driveJourney(t, {
       'the master does not carry the declared minutes at the declared spans',
     )
 
-    if (!render) {
-      console.log(
-        `E2E-F4.016 long-form synthesis journey (${label}): master ${masterSeconds.toFixed(2)}s `
-        + `(${masterVideo.codec_name}/${masterAudio.codec_name} ${masterVideo.width}x${masterVideo.height} `
-        + `${masterByteSize} bytes sha256 ${masterSha256.slice(0, 16)}, encoded in ${encodeSeconds.toFixed(1)}s) `
-        + `-> synthesis ${synthesisId} ${summary.rangeCount} ranges ${summary.droppedMs}ms dropped `
-        + `compression ${summary.compressionBps}bps hash ${summary.synthesisHash.slice(0, 12)} `
-        + `-> plan ${plan.id} ${plan.durationFrames} frames hash ${compiled.planHash.slice(0, 12)}; `
-        + `source minutes [${sourceMinutes.map((entry) => entry.minute).join(',')}] `
-        + `max colour distance ${Math.max(...sourceMinutes.map((entry) => entry.distance)).toFixed(1)}; `
-        + 'NOT RENDERED — see the suite header',
-      )
-      return
-    }
-
     // ---- the render, and the file it wrote -------------------------------
     const implementation = (provider, parameters) => ({
       provider, version: 'v1', parameters, parametersHash: calculateCanonicalHash(parameters),
@@ -863,13 +865,11 @@ async function driveJourney(t, {
 test(
   'E2E-F4.016 a ten-minute master becomes a persisted two-minute cut whose MP4 carries the minutes it selected',
   { skip: SKIP, timeout: 45 * 60_000 },
-  (t) => driveJourney(t, { ...RENDERED, render: true, label: 'rendered' }),
+  (t) => driveJourney(t, { ...CONTROL, label: 'ten-minute control' }),
 )
 
 test(
-  'E2E-F4.016 a two-hour master reaches a persisted renderable plan through /v1',
-  // The two-hour encode is the long pole here: 190 s wall measured locally,
-  // 550 MB in the work root. No render, so no 34-minute ffmpeg pass.
+  "E2E-F4.016 the brief's two-hour master becomes a persisted two-minute cut whose MP4 carries the minutes it selected",
   { skip: SKIP, timeout: 45 * 60_000 },
-  (t) => driveJourney(t, { ...BRIEF, render: false, label: 'brief two-hour source' }),
+  (t) => driveJourney(t, { ...BRIEF, label: 'brief two-hour source' }),
 )
