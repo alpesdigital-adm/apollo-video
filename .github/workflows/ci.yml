@@ -17,7 +17,14 @@ jobs:
   quality:
     name: Quality and security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20 with the two Wave 20 capture journeys. They add, on top of
+    # a job that already runs the whole unit suite, ~30 integration and E2E
+    # steps, `npm run build` and two browser journeys: a database creation plus
+    # a full `prisma migrate deploy` (~35 s locally), the podcast journey (48 s
+    # locally, warm) and the teacher journey (50 s locally, warm). A cap the
+    # delivery's own numbers say is too small is a red build waiting for a
+    # slower runner.
+    timeout-minutes: 30
 
     env:
       CI: true
@@ -296,13 +303,22 @@ jobs:
       # to a shared server. The service container is disposable, so they get
       # their own database inside it instead of the guard being relaxed — the
       # shape the long-form workflow step already uses on the Compose cluster.
+      #
+      # The database is created THROUGH the service container, the way the
+      # orphan check above already does it (`docker exec ... psql`), and not
+      # with a `psql` on the runner: a bare `psql` would be the only invocation
+      # in this workflow that depends on the runner image shipping a PostgreSQL
+      # client, and the day it stops shipping one this step fails before the
+      # journeys have a chance to say anything.
       - name: Create the disposable capture journey database
         env:
-          PGPASSWORD: apollo-ci
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2_e2e_capture?schema=public
         run: |
           set -euo pipefail
-          psql -h 127.0.0.1 -p 5432 -U apollo -d apollo_v2 -c 'create database apollo_v2_e2e_capture'
+          postgres_container="$(docker ps --filter 'ancestor=pgvector/pgvector:0.8.5-pg16-trixie' --format '{{.ID}}')"
+          test -n "$postgres_container"
+          docker exec -e PGPASSWORD=apollo-ci "$postgres_container" \
+            psql -U apollo -d postgres -c 'create database apollo_v2_e2e_capture'
           npm run db:v2:migrate:deploy
 
       - name: Run Wave 20 podcast multicam product journey against PostgreSQL
