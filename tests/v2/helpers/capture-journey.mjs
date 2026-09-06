@@ -129,15 +129,48 @@ export function sweepSamples({ seconds, sampleRate = SAMPLE_RATE }) {
  * A little noise on top so the two files are not byte-identical: a correlator
  * that only ever sees a shifted copy of its own reference is not being asked
  * the question a second microphone asks.
+ *
+ * `gain` is what makes a microphone a POSITION in the room rather than a second
+ * copy of the mix. It is called with the ROOM instant — the reference's own
+ * clock, not this recorder's — and its value scales that instant, so a camera
+ * whose microphone sits next to the host hears the host loud and the guest
+ * faint, and the two cameras' files stop being the same signal twice. Without
+ * it a diarization run that puts one voice on one camera and the other voice on
+ * the other camera is describing audio neither file contains.
  */
-export function laggedSamples(reference, { seconds, sampleRate = SAMPLE_RATE, lagSeconds, seed }) {
-  const samples = new Float64Array(seconds * sampleRate)
+export function laggedSamples(reference, { seconds, sampleRate = SAMPLE_RATE, lagSeconds, seed, gain = null }) {
+  const samples = new Float64Array(Math.round(seconds * sampleRate))
   const noise = lcg(seed)
   const shift = Math.round(lagSeconds * sampleRate)
   for (let index = 0; index < samples.length; index += 1) {
-    samples[index] = (reference[index + shift] ?? 0) + 0.08 * noise()
+    const level = gain === null ? 1 : gain((index + shift) / sampleRate)
+    samples[index] = level * (reference[index + shift] ?? 0) + 0.08 * noise()
   }
   return samples
+}
+
+/**
+ * A gain that rises and falls with the turns, with the edges ramped.
+ *
+ * `windows` are `{ startSeconds, endSeconds, level }` in ROOM time; anything
+ * outside them sits at `ambient`. The `rampSeconds` cross-fade at each edge is
+ * not cosmetic: an instantaneous gain step is a click, and a click is a
+ * broadband transient that a cross-correlator locks onto far more readily than
+ * the speech around it — which would make the fixture's own seams, rather than
+ * the room, the thing the sync worker measured.
+ */
+export function turnGain({ windows, ambient, rampSeconds = 0.15 }) {
+  return (roomSeconds) => {
+    let level = ambient
+    for (const window of windows) {
+      if (roomSeconds < window.startSeconds - rampSeconds || roomSeconds >= window.endSeconds + rampSeconds) continue
+      const rise = Math.min(1, Math.max(0, (roomSeconds - (window.startSeconds - rampSeconds)) / (2 * rampSeconds)))
+      const fall = Math.min(1, Math.max(0, ((window.endSeconds + rampSeconds) - roomSeconds) / (2 * rampSeconds)))
+      const weight = Math.min(rise, fall)
+      level = Math.max(level, ambient + weight * (window.level - ambient))
+    }
+    return level
+  }
 }
 
 export function pcmBuffer(samples) {
@@ -237,6 +270,37 @@ export async function meanRgbAt(ffmpegPath, path, second) {
   }
   const pixels = Math.max(1, Math.floor(raw.length / 3))
   return { red: red / pixels, green: green / pixels, blue: blue / pixels }
+}
+
+/**
+ * The mean luma of each of `columns` vertical slices of one decoded frame.
+ *
+ * What it is for: a constant colour field carries no time, so a frame sampled
+ * from it proves which ANGLE is on air and never which MOMENT. A picture with a
+ * marker whose column advances with the source clock does carry time, and the
+ * brightest column of the delivered frame is then a reading of the source
+ * second the renderer actually decoded. Column means survive the colour
+ * pipeline because every stage of it is a monotone per-pixel map: a correction
+ * can move the marker's brightness, it cannot move the marker.
+ */
+export async function columnLumaAt(ffmpegPath, path, second, columns = 8) {
+  const { stdout } = await execFileAsync(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error', '-ss', String(second), '-i', path,
+    '-frames:v', '1', '-vf', `scale=${columns}:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-',
+  ], { encoding: 'buffer', maxBuffer: 8 * 1024 * 1024, windowsHide: true })
+  const raw = Buffer.from(stdout)
+  assert.ok(raw.length >= columns * 3, `no frame decoded at ${second}s of ${path}`)
+  const luma = []
+  for (let column = 0; column < columns; column += 1) {
+    const at = column * 3
+    luma.push(0.299 * raw[at] + 0.587 * raw[at + 1] + 0.114 * raw[at + 2])
+  }
+  return luma
+}
+
+/** Rec.709 luma of a mean RGB reading, so two pictures can be compared as brightness. */
+export function lumaOf(pixel) {
+  return 0.299 * pixel.red + 0.587 * pixel.green + 0.114 * pixel.blue
 }
 
 export async function binaryDigest(path) {
