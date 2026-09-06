@@ -183,7 +183,7 @@ test(
         prisma.v2MulticamDirectionHead, prisma.v2MulticamDirection,
         prisma.v2MulticamObservation, prisma.v2MulticamEvidenceSet,
         prisma.v2SpeakerDiarizationSegment, prisma.v2SpeakerDiarizationRun,
-        prisma.v2LongFormIndexWorkflow, prisma.v2MediaTranscript, prisma.v2PublicOperation,
+        prisma.v2LongFormIndexWorkflow, prisma.v2MediaTranscript,
         prisma.v2SyncDiagnosticHead, prisma.v2SyncDiagnostic,
         prisma.v2CaptureSessionProtocol, prisma.v2CaptureProtocolEvaluation,
         prisma.v2CaptureTrackCoverage, prisma.v2CaptureClockMapPiece, prisma.v2CaptureClockMap,
@@ -192,13 +192,21 @@ test(
         prisma.v2ColorCriticProposedDelta, prisma.v2ColorCriticIssue,
         prisma.v2ColorCriticDimensionResult, prisma.v2ColorCriticReportMeasurement,
         prisma.v2ColorCriticReport,
+        // The critic measures the cameras it judged, and those rows outlive the
+        // report: `camera_color_measurements_workspaceId_fkey` otherwise blocks
+        // the workspace delete at the very end of the teardown.
+        prisma.v2ColorMeasurementComponent, prisma.v2ColorMeasurementDimension,
+        prisma.v2CameraColorMeasurement,
         prisma.v2ProxyReviewDecision, prisma.v2ProxyReview, prisma.v2RenderElementMap,
         prisma.v2ProjectProxyRenderOperation,
         prisma.v2ProjectLutSelectionHead, prisma.v2ProjectLutSelection,
         prisma.v2CommandArtifactInvalidation, prisma.v2PublicEventOutbox,
         prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
         prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
-        prisma.v2ProjectMediaAsset,
+        // After the review and the render operation that point at it: an
+        // operation deleted first violates
+        // `proxy_reviews_operationId_projectId_workspaceId_fkey`.
+        prisma.v2ProjectMediaAsset, prisma.v2PublicOperation,
         // The render's manifest records what it was derived from, and the
         // lineage row outlives the operation that wrote it: deleting manifests
         // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
@@ -297,7 +305,10 @@ test(
       clientId,
       name: 'Teacher and screen journey',
       createdAt: at(0),
-      scopes: ['projects:read', 'projects:write', 'artifacts:read'],
+      // `operations:read` is what `GET /v1/operations/{id}` requires; without
+      // it the render's own outcome is unreadable to the client that asked
+      // for it, which is a 403 rather than anything about the file.
+      scopes: ['projects:read', 'projects:write', 'artifacts:read', 'operations:read'],
     })
     const token = issued.token
     await helpers.createProjectRow({
