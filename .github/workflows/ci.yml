@@ -242,6 +242,20 @@ jobs:
 
       - name: Run Wave 20 multicam colour match against real pixels
         run: npm run test:integration:color-match
+
+      - name: Run Wave 20 colour visual evaluations and keep the artifacts
+        run: npm run test:integration:color-visual-evaluations
+        env:
+          APOLLO_COLOR_VISUAL_EVAL_OUTPUT: ${{ runner.temp }}/color-visual-evaluations
+
+      - name: Publish Wave 20 colour visual evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-color-visual-evaluations-${{ github.sha }}
+          path: ${{ runner.temp }}/color-visual-evaluations
+          if-no-files-found: error
+          retention-days: 30
       - name: Run Wave 20 multi-range synthesis render against ffprobe
         run: npm run test:integration:synthesis-render
 
