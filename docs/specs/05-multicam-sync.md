@@ -1226,8 +1226,11 @@ reportados à parte das violações.
 
 ### 33.3 Superfície
 
-Seis capabilities `/v1` publicam o gate — executar, ler o último, ler um pelo
-id, listar o histórico, ler o que falta e listar os artifacts — e a tela em
+Seis capabilities `/v1` por projeto publicam o gate — executar, ler o último,
+ler um pelo id, listar o histórico, ler o que falta e listar os artifacts — mais
+uma sétima independente de projeto, `apollo.multicam-longform-gate.criteria.list`
+em `GET /v1/multicam-longform-gate/criteria`, que publica o catálogo dos dez
+critérios antes de qualquer avaliação. A tela em
 `src/app/multicam-longform-gate/page.tsx`, alcançável a partir de
 `/capture-sessions`, mostra os dez critérios um a um. O registro de por que essa
 tela chegou depois das outras três está em
