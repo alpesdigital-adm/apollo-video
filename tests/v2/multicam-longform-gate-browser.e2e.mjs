@@ -510,6 +510,28 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
     // 110-character project id.
     assert.match(written[0].idempotencyKey, /^[\x21-\x7E]{8,128}$/)
 
+    // 6. A network failure while opening a historical evaluation says so.
+    //    `openEvaluation` was the one fetch on the page with no catch: the
+    //    promise `void openEvaluation(...)` created rejected unhandled, `busy`
+    //    cleared, and the screen simply stopped answering the click. The read
+    //    is aborted at the network, which is the failure the missing catch
+    //    swallowed — the POST and the artifact listing are left alone so only
+    //    the handler under test is exercised.
+    await page.route('**/multicam-longform-gate/evaluations/**', (route) => {
+      const request = route.request()
+      const isEvaluationRead = request.method() === 'GET' &&
+        !request.url().includes('/artifacts')
+      return isEvaluationRead ? route.abort('failed') : route.continue()
+    })
+    await page.getByTestId(`open-evaluation-${seededGate.id}`).click()
+    await page.getByTestId('message').waitFor({ state: 'visible' })
+    assert.equal(
+      (await page.getByTestId('message').textContent())?.trim(),
+      'A rede falhou ao abrir esta avaliação.',
+      'a failed read of a historical evaluation left the screen silent',
+    )
+    await page.unroute('**/multicam-longform-gate/evaluations/**')
+
     const body = (await page.locator('body').textContent()) ?? ''
     assert.doesNotMatch(body, /\b\d{1,3}%/, 'the gate was summarised as a percentage')
 
