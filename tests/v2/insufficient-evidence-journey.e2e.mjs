@@ -21,20 +21,30 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * about the refusal and its reasons; the recovery at the end exists only to
  * show that the refusal was a gate and not a wall.
  *
- * Three recordings, all generated here: a master audio recorder carrying a
+ * FOUR recordings, all generated here: a master audio recorder carrying a
  * distinct sweep every second, a camera in another room whose microphone heard
- * none of it (deterministic broadband noise), and a second camera nobody
- * pointed a microphone at, which has no audio stream at all. Those are the two
- * ways the audio adapter reaches "nothing": a correlation that never clears the
- * peak floor, and a file with no audio to correlate.
+ * none of it (deterministic broadband noise), a second camera nobody pointed a
+ * microphone at, which has no audio stream at all, and — the control — a
+ * scratch recorder in the master's own room, which heard exactly the same
+ * sweeps three seconds ahead of it. The first two are the two ways the audio
+ * adapter reaches "nothing": a correlation that never clears the peak floor,
+ * and a file with no audio to correlate. The fourth is the reason those two
+ * are a VERDICT: the same worker, the same pass, the same adapter finds the
+ * scratch recorder's offset and writes its clock map. Without it, "insufficient
+ * for everything" and "this adapter never resolves anything" are the same
+ * observation.
  *
  * What is asserted, in order:
  *
- * 1. **Nothing is auto-selected.** The real worker drains the run through
- *    `npm run worker:v2:capture-sync -- --once`, and for BOTH cameras the
- *    stored evidence says `insufficient-evidence` with `selectedMethod: null`
- *    and `clockMap: null`. There are zero rows in `capture_clock_maps`. An
- *    offset of zero would have been the easy lie, and it is not there.
+ * 1. **Nothing is auto-selected for the two cameras, and the recorder that DID
+ *    share the room is aligned.** The real worker drains the run through
+ *    `npm run worker:v2:capture-sync -- --once`, and for both cameras the
+ *    stored evidence says `insufficient-evidence` with `selectedMethod: null`,
+ *    `clockMap: null` and the reason the domain writes for a track no signal
+ *    was observed on. The only row in `capture_clock_maps` belongs to the
+ *    scratch recorder, and it carries the three-second offset the fixture
+ *    built — measured, not declared. An offset of zero would have been the easy
+ *    lie for the cameras, and it is not there.
  * 2. **The server demands a person.** The diagnostic derived through
  *    `POST /v1/.../sync-diagnostic` comes back `needs-input`, `manualRequired`,
  *    warning `insufficient-evidence`, and `recommendedActions` containing
@@ -59,10 +69,19 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * `reshoot-with-marker` recommendation is only derived when a capture protocol
  * evaluation caps the session at `not-synchronizable`
  * (`sync-diagnostic.ts:386-389`), and that ceiling then rejects EVERY angle
- * permanently (`multicam-direction.ts:963`), so a journey that took it could
+ * permanently (`multicam-direction.ts:962`), so a journey that took it could
  * not also show the recovery. What this suite proves about markers is narrower
  * and true: the published vocabulary carries the remedy, and the anchor path is
  * the one it exercises end to end.
+ *
+ * A second stated omission, of the same shape. This session carries no
+ * active-speaker evidence at all — no diarization run is persisted for any of
+ * its files, and the assertion below measures that rather than assuming it — so
+ * the recovery at the end proves that an angle became ELIGIBLE, not that the
+ * right angle was chosen. Angle choice from speaker evidence is covered by
+ * `multicam-direction.e2e.mjs`, `multicam-direction-render.integration.mjs` and
+ * `multicam-longform-gate.e2e.mjs`; nothing in this journey should be read as
+ * evidence about it.
  *
  * The domain arrives through `await import` inside the test: tsx resolves a
  * static `.ts` specifier before it transforms the target and the file dies at
@@ -85,6 +104,8 @@ const VERSION = 'insufficient-evidence-version-1'
 const MASTER_TRACK = 'track-master-audio'
 const CAMERA_A_TRACK = 'track-camera-a'
 const CAMERA_B_TRACK = 'track-camera-b'
+/** The control: a second recorder in the master's room, started early. */
+const SCRATCH_TRACK = 'track-scratch-audio'
 
 const SAMPLE_RATE = 16_000
 const TICKS_PER_SECOND = 90_000
@@ -92,6 +113,19 @@ const FPS = 30
 const SESSION_SECONDS = 20
 /** Where the operator places the three anchors, in seconds of session time. */
 const ANCHOR_SECONDS = Object.freeze([2, 10, 18])
+/**
+ * The same three for the scratch recorder, pulled in so its own file still
+ * holds them: session second 18 is source second 21 of a twenty-second file.
+ */
+const SCRATCH_ANCHOR_SECONDS = Object.freeze([2, 10, 16])
+/**
+ * How long before the master the scratch recorder was rolling.
+ *
+ * Not zero on purpose. A correlator that returns zero for everything would pass
+ * a control built on an identical copy, and "the offset came out zero" is the
+ * exact lie this whole journey exists to refuse elsewhere.
+ */
+const SCRATCH_LEAD_SECONDS = 3
 
 const seconds = (value) => BigInt(Math.round(value * TICKS_PER_SECOND))
 const at = (second) => new Date(Date.parse('2029-09-01T09:00:00.000Z') + second * 1_000)
@@ -128,6 +162,24 @@ function masterSamples() {
       samples[second * SAMPLE_RATE + sample] =
         0.55 * Math.sin(2 * Math.PI * (start * t + (span * t * t) / 2))
     }
+  }
+  return samples
+}
+
+/**
+ * The scratch recorder in room A: the master's own sound, heard early.
+ *
+ * Its file starts `SCRATCH_LEAD_SECONDS` before the master's, so second `t` of
+ * this file is second `t - 3` of the session, and the lead-in is room tone —
+ * the recorder was already rolling while nothing had happened yet. That number
+ * is what the cascade has to come back with.
+ */
+function scratchSamples(master) {
+  const samples = new Float64Array(SESSION_SECONDS * SAMPLE_RATE)
+  const noise = lcg(20_260_913)
+  const lead = SCRATCH_LEAD_SECONDS * SAMPLE_RATE
+  for (let index = 0; index < samples.length; index += 1) {
+    samples[index] = index < lead ? 0.02 * noise() : (master[index - lead] ?? 0)
   }
   return samples
 }
@@ -305,11 +357,19 @@ test(
     // ---- the three recordings ---------------------------------------------
     const captureDirectory = join(artifactRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
-    await writeFile(join(captureDirectory, 'master.pcm'), toPcm(masterSamples()))
+    const master = masterSamples()
+    await writeFile(join(captureDirectory, 'master.pcm'), toPcm(master))
     await writeFile(join(captureDirectory, 'camera-a.pcm'), toPcm(roomToneSamples(20_260_911)))
+    await writeFile(join(captureDirectory, 'scratch.pcm'), toPcm(scratchSamples(master)))
     const masterFile = await encodeAudioOnly(
       join(captureDirectory, 'master.pcm'),
       join(captureDirectory, 'master.m4a'),
+    )
+    // The control, encoded exactly like the master so the only difference
+    // between the two files is when the recorder was rolling.
+    const scratchFile = await encodeAudioOnly(
+      join(captureDirectory, 'scratch.pcm'),
+      join(captureDirectory, 'scratch.m4a'),
     )
     const cameraAFile = await encodeCamera({
       colour: 'red',
@@ -357,6 +417,7 @@ test(
       { assetId: 'ie-asset-master', key: 'capture/master.m4a', file: masterFile, mediaType: 'audio', container: 'm4a', role: 'source-master' },
       { assetId: 'ie-asset-cam-a', key: 'capture/camera-a.mp4', file: cameraAFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
       { assetId: 'ie-asset-cam-b', key: 'capture/camera-b.mp4', file: cameraBFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
+      { assetId: 'ie-asset-scratch', key: 'capture/scratch.m4a', file: scratchFile, mediaType: 'audio', container: 'm4a', role: 'selected-insert' },
     ]
     for (const recording of recordings) {
       await client.v2MediaArtifact.create({
@@ -501,6 +562,15 @@ test(
           assetId: 'ie-asset-cam-b', sha256: cameraBFile.sha256,
           syncAudioPolicy: 'none', includeInFinalMix: false,
         }),
+        // The control. `scratch-audio` is never a video angle
+        // (`multicam-direction.ts:150`), so aligning it cannot rescue the
+        // direction — which is what makes it safe to put in the same session as
+        // the refusal it is a control for.
+        track({
+          trackId: SCRATCH_TRACK, role: 'scratch-audio', deviceId: 'dev-scratch',
+          assetId: 'ie-asset-scratch', sha256: scratchFile.sha256,
+          syncAudioPolicy: 'sync-only', includeInFinalMix: false,
+        }),
       ],
       lineage: {
         commandId: 'command-create-session', operation: 'create-session',
@@ -593,7 +663,11 @@ test(
     // the same thing, and collapsing them would lose the reference recorder's
     // perfectly good material along with the answer.
     assert.equal(firstOutcome.insufficient, 2, JSON.stringify(firstOutcome))
-    assert.equal(firstOutcome.resolved, 0, JSON.stringify(firstOutcome))
+    // The control, in the SAME pass through the SAME adapter: one track did
+    // resolve. `insufficient: 2` beside `resolved: 0` is equally consistent with
+    // an adapter that resolves nothing at all, and that reading is what this
+    // number closes off.
+    assert.equal(firstOutcome.resolved, 1, JSON.stringify(firstOutcome))
     assert.equal(firstOutcome.review, 0, JSON.stringify(firstOutcome))
 
     const beforeSync = await callRoute(syncRoute.GET, `${basePath}/sync`, {
@@ -601,21 +675,58 @@ test(
     })
     assert.equal(beforeSync.status, 200, JSON.stringify(beforeSync.payload))
     const beforeTracks = beforeSync.payload.data.tracks
-    assert.equal(beforeTracks.length, 2, 'one verdict per non-reference track')
-    for (const entry of beforeTracks) {
+    assert.equal(beforeTracks.length, 3, 'one verdict per non-reference track')
+    const beforeByTrack = new Map(beforeTracks.map((entry) => [entry.trackId, entry]))
+    for (const trackId of [CAMERA_A_TRACK, CAMERA_B_TRACK]) {
+      const entry = beforeByTrack.get(trackId)
+      assert.ok(entry, `no verdict at all for ${trackId}`)
       assert.equal(entry.outcome, 'insufficient-evidence', `${entry.trackId}: ${entry.outcome}`)
       assert.equal(entry.selectedMethod, null, `${entry.trackId} elected a method anyway`)
       assert.equal(entry.map, null, `${entry.trackId} was given a clock map anyway`)
       assert.equal(entry.manualRequired, true)
-      assert.ok(entry.outcomeReasons.length > 0, `${entry.trackId} refused without saying why`)
+      // The REASON, not its length. This is the one the domain writes when the
+      // cascade had nothing to admit (`sync-evidence.ts:922-925`); the other
+      // string there — "every observed signal failed admission" — is a
+      // different verdict about a different world, and a suite that accepted
+      // either could not tell the two apart.
+      assert.deepEqual(
+        entry.outcomeReasons,
+        ['no synchronization signal was observed for this track'],
+        `${entry.trackId} refused for a reason this journey does not claim: ${entry.outcomeReasons.join(' | ')}`,
+      )
       // Coverage was still measured: "we could not align it" is not "we did not
       // look at it", and an operator needs the second fact to keep the footage.
       assert.notEqual(entry.coverage, null, `${entry.trackId} lost its coverage with its offset`)
     }
-    assert.equal(
-      await client.v2CaptureClockMap.count({ where: { workspaceId: WORKSPACE } }),
-      0,
-      'a clock map was written for a track nothing could align',
+
+    // The control's verdict, and the number that proves the bytes were read.
+    const scratchVerdict = beforeByTrack.get(SCRATCH_TRACK)
+    assert.ok(scratchVerdict, 'the scratch recorder got no verdict at all')
+    assert.equal(scratchVerdict.outcome, 'auto-apply', JSON.stringify(scratchVerdict.outcomeReasons))
+    assert.equal(scratchVerdict.selectedMethod, 'audio-fingerprint')
+    assert.equal(scratchVerdict.manualRequired, false)
+    assert.notEqual(scratchVerdict.map, null, 'the resolved track was given no clock map')
+    const scratchOffsetSeconds =
+      Number(BigInt(scratchVerdict.map.pieces[0].offsetTicks)) / TICKS_PER_SECOND
+    // MEASURED against the fixture's own lead, within a frame: the recorder
+    // rolled three seconds early, so session time is its source time minus
+    // three. A cascade that answered zero — the failure this whole journey is
+    // about — fails here rather than in a comment.
+    const scratchOffsetErrorFrames =
+      Math.abs(Math.abs(scratchOffsetSeconds) - SCRATCH_LEAD_SECONDS) * FPS
+    assert.ok(
+      scratchOffsetErrorFrames <= 1,
+      `the scratch recorder came back at ${scratchOffsetSeconds.toFixed(3)}s against a built-in ` +
+      `${SCRATCH_LEAD_SECONDS}s lead (${scratchOffsetErrorFrames.toFixed(2)} frames out)`,
+    )
+
+    const clockMapSources = (await client.v2CaptureClockMap.findMany({
+      where: { workspaceId: WORKSPACE }, select: { sourceId: true },
+    })).map((row) => row.sourceId).sort()
+    assert.deepEqual(
+      clockMapSources,
+      ['ie-asset-scratch'],
+      'a clock map was written for a track nothing could align, or withheld from the one that aligned',
     )
 
     // =====================================================================
@@ -695,11 +806,16 @@ test(
     assert.equal(bribed.status, 422, JSON.stringify(bribed.payload))
     assert.equal(bribed.payload.error.code, 'DIRECTION_RANGE_UNRESOLVABLE')
 
-    // And the caller cannot declare the verdict instead of earning it. The two
-    // refusals are DIFFERENT: the same body without `manualReviewRequired` is
-    // refused 422 by the policy above, and with it the contract refuses it 400
-    // before the command runs — so the extra field is demonstrably what the
-    // second refusal is about, even though the envelope does not repeat it.
+    // And the caller cannot declare the verdict instead of earning it — though
+    // what is proved here is narrower than "the server defends
+    // `manualReviewRequired` by name". The direction body is a CLOSED schema
+    // (`multicam-direction-contract.ts:397-401` lists its six fields), so no
+    // caller-supplied verdict field is representable at all: this is refused
+    // 422 INVALID_ARGUMENT by validation before the command runs, where the
+    // refusal above is 422 DIRECTION_RANGE_UNRESOLVABLE by policy after it. The
+    // distinction the assertions make is code and category, not status — and
+    // the control below shows the refusal is the schema and not this field's
+    // name, which is exactly why the envelope does not repeat it.
     const declared = await callRoute(directionRoute.POST, `${basePath}/direction`, {
       method: 'POST',
       token,
@@ -712,6 +828,15 @@ test(
     assert.equal(declared.payload.error.category, 'validation')
     assert.notEqual(declared.payload.error.code, refused.payload.error.code)
     assert.notEqual(declared.payload.error.category, refused.payload.error.category)
+    const invented = await callRoute(directionRoute.POST, `${basePath}/direction`, {
+      method: 'POST',
+      token,
+      params,
+      idempotencyKey: 'ie-direction-invented',
+      body: { ...directionBody, shotCount: 99 },
+    })
+    assert.equal(invented.status, declared.status, JSON.stringify(invented.payload))
+    assert.equal(invented.payload.error.code, declared.payload.error.code)
 
     // Nothing was half-committed by any of the three.
     assert.equal(
@@ -751,15 +876,44 @@ test(
         || warning.detail.includes('sync-below-threshold')),
       `the stored reasons never mention the sync: ${noAngle[0].detail}`,
     )
+    // The control lost for a DIFFERENT reason, and the stored record says which.
+    // An audio recorder is not a video angle (`multicam-direction.ts:150`), so
+    // aligning one cannot rescue a direction: it is rejected as
+    // `not-a-video-source` where the cameras are rejected for their sync. If
+    // those two ever collapsed into one sentence, an operator reading this
+    // record would go looking for the wrong remedy.
+    const scratchRejection = noAngle.find((warning) => warning.detail.includes(`${SCRATCH_TRACK}[`))
+    assert.ok(
+      scratchRejection,
+      `the stored record never says why the scratch recorder was not cut to: ${noAngle.map((warning) => warning.detail).join(' | ')}`,
+    )
+    assert.ok(
+      scratchRejection.detail.includes(`${SCRATCH_TRACK}[not-a-video-source`),
+      `the aligned audio recorder was weighed as an angle: ${scratchRejection.detail}`,
+    )
 
     // =====================================================================
     // 4. After a manual anchor through the API, the direction exists
     // =====================================================================
+    //
+    // Every non-reference track gets anchors, not just the two cameras: the
+    // diagnostic is derived from markers and manual anchors, this session was
+    // shot without markers, and so a track the AUDIO cascade aligned on its own
+    // still has nothing for the diagnostic to read. The scratch recorder's
+    // clapper sits three seconds further into ITS file, and its anchors say so
+    // — an anchor typed in session time would contradict the offset the
+    // correlator measured, and the cascade would refuse the contradicting pair
+    // rather than average them.
     let diagnosticVersion = blocked.version
     let diagnosticHash = blocked.diagnosticHash
     let anchorsPlaced = 0
-    for (const trackId of [CAMERA_A_TRACK, CAMERA_B_TRACK]) {
-      for (const second of ANCHOR_SECONDS) {
+    const anchorPlan = [
+      { trackId: CAMERA_A_TRACK, leadSeconds: 0, atSeconds: ANCHOR_SECONDS },
+      { trackId: CAMERA_B_TRACK, leadSeconds: 0, atSeconds: ANCHOR_SECONDS },
+      { trackId: SCRATCH_TRACK, leadSeconds: SCRATCH_LEAD_SECONDS, atSeconds: SCRATCH_ANCHOR_SECONDS },
+    ]
+    for (const plan of anchorPlan) {
+      for (const second of plan.atSeconds) {
         const placed = await callRoute(anchorsRoute.POST, `${basePath}/sync-diagnostic/anchors`, {
           method: 'POST',
           token,
@@ -767,10 +921,10 @@ test(
           body: {
             baseVersionId: `${SESSION}:diagnostic:v${diagnosticVersion}`,
             baseHash: diagnosticHash,
-            trackId,
+            trackId: plan.trackId,
             action: 'add',
-            anchorId: `ie-anchor-${trackId}-${second}`,
-            sourceMs: second * 1_000,
+            anchorId: `ie-anchor-${plan.trackId}-${second}`,
+            sourceMs: (second + plan.leadSeconds) * 1_000,
             sessionMs: second * 1_000,
             evidenceRef: `operator-read-the-clapper-at-${second}s`,
           },
@@ -781,7 +935,7 @@ test(
         anchorsPlaced += 1
       }
     }
-    assert.equal(anchorsPlaced, 6)
+    assert.equal(anchorsPlaced, 9)
 
     // The second pass now has something to elect. The anchors are read from the
     // diagnostic head by the signal source — the operator's word became a
@@ -805,10 +959,18 @@ test(
     })
     assert.equal(afterSync.status, 200, JSON.stringify(afterSync.payload))
     const afterTracks = afterSync.payload.data.tracks
-    for (const entry of afterTracks) {
+    const afterByTrack = new Map(afterTracks.map((entry) => [entry.trackId, entry]))
+    for (const trackId of [CAMERA_A_TRACK, CAMERA_B_TRACK]) {
+      const entry = afterByTrack.get(trackId)
       assert.equal(entry.selectedMethod, 'manual-anchor', `${entry.trackId}: ${entry.selectedMethod}`)
       assert.notEqual(entry.map, null, `${entry.trackId} still has no clock map`)
     }
+    // The control kept its map through all of it. Which method now carries it is
+    // the cascade's precedence to decide, and this journey does not legislate
+    // that; what it asserts is that the track the correlator aligned before any
+    // anchor existed was not left behind by the recovery.
+    assert.notEqual(afterByTrack.get(SCRATCH_TRACK).map, null, 'the control lost its clock map')
+    assert.notEqual(afterByTrack.get(SCRATCH_TRACK).selectedMethod, null, 'the control lost its method')
 
     // Regenerated, so the diagnostic is derived from the anchors that now exist
     // rather than refitted around the warning it was born with.
@@ -839,6 +1001,18 @@ test(
     const cut = directed.payload.data.directed
     assert.ok(cut.direction.shotCount > 0, 'the direction still selected nothing')
     assert.equal(cut.direction.uncovered.length, 0, JSON.stringify(cut.direction.uncovered))
+    // The stated omission, MEASURED rather than assumed: this session carries no
+    // active-speaker evidence at all — no diarization run is persisted for any
+    // of its files — so what the shot above proves is that an angle became
+    // ELIGIBLE. Which angle wins against a competitor is decided by evidence
+    // that is not here, and is covered by the suites the header names.
+    assert.equal(
+      await client.v2MulticamObservation.count({
+        where: { workspaceId: WORKSPACE, kind: 'active-speaker' },
+      }),
+      0,
+      'this journey has speaker evidence after all, so the header must stop disclaiming angle choice',
+    )
     assert.equal(
       await client.v2ProjectVersion.count({ where: { workspaceId: WORKSPACE } }),
       2,
@@ -847,17 +1021,23 @@ test(
 
     console.log(
       `E2E-F4.012 insufficient evidence: master ${masterFile.byteSize} bytes of sweeps vs ` +
-      `camera-a ${cameraAFile.byteSize} bytes of room tone and camera-b ${cameraBFile.byteSize} bytes with no audio; ` +
+      `camera-a ${cameraAFile.byteSize} bytes of room tone and camera-b ${cameraBFile.byteSize} bytes with no audio, ` +
+      `plus a ${scratchFile.byteSize}-byte scratch recorder holding the master's sweeps ${SCRATCH_LEAD_SECONDS}s early; ` +
       `pass 1 status=${firstOutcome.status} insufficient=${firstOutcome.insufficient} resolved=${firstOutcome.resolved} ` +
-      `review=${firstOutcome.review} clockMaps=0 selectedMethod=[${beforeTracks.map((entry) => String(entry.selectedMethod)).join(',')}]; ` +
+      `review=${firstOutcome.review} clockMaps=[${clockMapSources.join(',')}] ` +
+      `control offset ${scratchOffsetSeconds.toFixed(3)}s vs built-in ${SCRATCH_LEAD_SECONDS}s ` +
+      `(erro ${scratchOffsetErrorFrames.toFixed(2)} frames) via ${scratchVerdict.selectedMethod}; ` +
+      `selectedMethod=[${beforeTracks.map((entry) => String(entry.selectedMethod)).join(',')}]; ` +
       `diagnostic v${blocked.version} status=${blocked.status} confidence=${blocked.globalConfidence} ` +
       `warnings=[${blocked.warnings.join(',')}] actions=[${blocked.recommendedActions.join(',')}] ` +
       `autoEdit=${blocked.autoEdit.allowed} blockedBy=${blocked.autoEdit.blockedBy.length}; ` +
       `direction refused ${refused.status}/${refused.payload.error.code} (${refused.payload.error.category}, ` +
       `retryable=${refused.payload.error.retryable}), permissive policy ${bribed.status}/${bribed.payload.error.code}, ` +
-      `declared verdict ${declared.status}/${declared.payload.error.code}; stored direction shots=${refusedDirection.shotCount} ` +
+      `declared verdict ${declared.status}/${declared.payload.error.code} ` +
+      `(any unknown field: ${invented.status}/${invented.payload.error.code}); ` +
+      `stored direction shots=${refusedDirection.shotCount} ` +
       `uncovered=${refusedDirection.uncovered.length} warnings=${refusedDirection.warnings.length}; ` +
-      `${anchorsPlaced} anchors -> pass 2 insufficient=${secondOutcome.insufficient} ` +
+      `${anchorsPlaced} anchors over ${anchorPlan.length} tracks -> pass 2 insufficient=${secondOutcome.insufficient} ` +
       `method=[${afterTracks.map((entry) => entry.selectedMethod).join(',')}] ` +
       `diagnostic v${cleared.version} status=${cleared.status} confidence=${cleared.globalConfidence} ` +
       `autoEdit=${cleared.autoEdit.allowed}; direction ${directed.status} shots=${cut.direction.shotCount} uncovered=0`,
