@@ -49,7 +49,10 @@ import { FfmpegColorPipelineProcessor } from '../../src/v2/infrastructure/media/
  * 3. **two-creative-luts** — the same matched camera under two DIFFERENT
  *    looks, each a real 3D LUT the renderer materialises, measured apart.
  * 4. **clipped-source** — frames that really clip, declared as creative
- *    intent, still rejected.
+ *    intent, still rejected. Kept with the FULL list of hard issues the report
+ *    carries and with a control — the same flat base without the white bar —
+ *    so the artifact shows that the rejection is the clipping's rather than
+ *    implying it.
  * 5. **preserved-creative-cast** — one file, two verdicts: the same measured
  *    cast is a `technical-defect` undeclared and `documented-intent`
  *    declared. The number does not move; the classification does.
@@ -399,6 +402,10 @@ before(async () => {
     `drawbox=x=0:y=0:w=${WIDTH}:h=${HEIGHT / 2}:color=black:t=fill`,
     FLAT,
   )
+  // The same flat base WITHOUT the white bar. It is the control for the
+  // clipping evaluation: everything else about the comparison is identical, so
+  // the difference between the two verdicts is the clipping and nothing else.
+  await encode('flat-unclipped', 'null', FLAT)
 })
 
 after(async () => {
@@ -710,6 +717,50 @@ test('T-F4.014 a clipped source is rejected even when the clipping is declared a
   assert.equal(issue.severity, 'hard')
   assert.equal(report.action, 'reject')
 
+  // Every hard issue this report carries, not only the one the test is named
+  // after. A reader of the manifest who sees `reject` next to a note about
+  // clipping is entitled to know that three other dimensions were vetoing
+  // too — the fixture is a flat grey with half the frame pinned to white, so
+  // its saturation and its match against testsrc2 are both wrong on purpose.
+  // Recording only the interesting one is how an artifact starts to argue.
+  const hardDimensions = report.issues
+    .filter((entry) => entry.severity === 'hard')
+    .map((entry) => entry.dimension)
+  assert.deepEqual(
+    hardDimensions,
+    ['clipping', 'saturationDeficit', 'matchRegression', 'matchRegression'],
+    `the clipped report's hard issues moved: ${
+      report.issues.map((entry) => `${entry.dimension}/${entry.severity}`).join(', ')}`,
+  )
+
+  // The control: the same flat grey, the same declared intent, the same
+  // comparison against the same reference — WITHOUT the white bar. It still
+  // fails, because a flat grey is not a match for testsrc2, but it fails
+  // differently. That difference is the clipping, and it is what makes the
+  // attribution above defensible rather than asserted.
+  const control_ = await measure('flat-unclipped', 'cam-a', 'artifact-flat-unclipped')
+  const controlReport = critique(before_, control_, {
+    creativeIntent: {
+      declared: true,
+      castAllowedDelta: DEFAULT_COLOR_CRITIC_POLICY.maxDeclaredCastAllowance,
+      lutId: 'lut-highkey-1',
+      note: 'high key by design',
+    },
+  })
+  const controlClipping = controlReport.dimensions.find((entry) => entry.dimension === 'clipping')
+  assert.equal(controlClipping.value, 0, 'the control fixture clips')
+  assert.equal(
+    controlReport.issues.filter((entry) => entry.dimension === 'clipping').length,
+    0,
+    'the control raised a clipping issue with nothing clipped',
+  )
+  assert.equal(controlReport.action, 'human-review')
+  assert.notEqual(
+    controlReport.action,
+    report.action,
+    'the white bar changed nothing about the verdict, so the rejection is not the clipping\'s',
+  )
+
   const highlights = mean(after_.map((entry) => measuredValue(entry, 'highlights')))
   await record({
     id: 'clipping/clipped', evaluation: 'clipped-source', role: 'after',
@@ -722,20 +773,49 @@ test('T-F4.014 a clipped source is rejected even when the clipping is declared a
       issueSeverity: issue.severity,
       action: report.action,
       cause: report.cause,
+      declaredHardIssueDimensions: hardDimensions,
+      controlAction: controlReport.action,
+      controlCause: controlReport.cause,
+      controlClippingValue: round(controlClipping.value),
       calibrationVersion: report.thresholds.calibrationVersion,
     },
-    note: 'declared as creative intent and refused anyway: an intent bounds a colour shift, it cannot excuse a destroyed sample',
+    note: 'declared as creative intent and refused anyway: an intent bounds a colour shift, it cannot excuse a destroyed sample. '
+      + 'The report carries four hard issues, listed above; the same fixture WITHOUT the white bar '
+      + `answers ${controlReport.action}/${controlReport.cause}, which is what makes the rejection the clipping's`,
+  })
+  await record({
+    id: 'clipping/flat-unclipped', evaluation: 'clipped-source', role: 'control',
+    path: files.get('flat-unclipped').path,
+    label: 'the same flat mid grey with nothing pinned to white',
+    metrics: {
+      clippingValue: round(controlClipping.value),
+      classification: controlClipping.classification,
+      action: controlReport.action,
+      cause: controlReport.cause,
+      hardIssueDimensions: controlReport.issues
+        .filter((entry) => entry.severity === 'hard')
+        .map((entry) => entry.dimension),
+      calibrationVersion: controlReport.thresholds.calibrationVersion,
+    },
+    note: 'the control for the clipping evaluation: same base, same declared intent, no clipping',
   })
   evaluations.push({
     id: 'clipped-source',
     metric: 'clipping',
     n: 1,
     value: round(clipping.value),
-    acceptedRange: { verdict: 'reject', severity: 'hard' },
+    controlValue: round(controlClipping.value),
+    hardIssueDimensions: hardDimensions,
+    controlHardIssueDimensions: controlReport.issues
+      .filter((entry) => entry.severity === 'hard')
+      .map((entry) => entry.dimension),
+    acceptedRange: { verdict: 'reject', severity: 'hard', control: { verdict: 'human-review' } },
   })
   console.log(
     `T-F4.014 clipping value=${clipping.value} highlights=${highlights.toFixed(6)} `
-    + `severity=${issue.severity} action=${report.action}/${report.cause}`,
+    + `severity=${issue.severity} action=${report.action}/${report.cause} `
+    + `hard=[${hardDimensions.join(', ')}] `
+    + `| control value=${controlClipping.value} action=${controlReport.action}/${controlReport.cause}`,
   )
 })
 
