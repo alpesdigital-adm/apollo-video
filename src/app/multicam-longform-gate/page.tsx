@@ -4,7 +4,10 @@ import { useCallback, useEffect, useState } from 'react'
 
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
-import { multicamLongformArtifactHref } from '@/v2/ui/multicam-longform-gate-addresses'
+import {
+  MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT,
+  multicamLongformArtifactHref,
+} from '@/v2/ui/multicam-longform-gate-addresses'
 
 /**
  * The operable surface of the multicamera and long-form phase gate (F4.016).
@@ -140,16 +143,6 @@ const REASON_LABEL: Record<string, string> = {
 }
 
 /**
- * How many cited artifacts to ask for, and the route's maximum.
- *
- * The listing is paginated and the route defaults to 100. Asking for the
- * maximum makes truncation rare; `omittedArtifacts` below makes it visible when
- * it happens, because an evidence list that reads as complete is an argument
- * the gate looked at less than it did.
- */
-const ARTIFACT_LIMIT = 200
-
-/**
  * The idempotency key for one evaluation of one project, in one minute.
  *
  * Not `gate-${projectId}-${minute}`, which is what this was: the server bounds
@@ -202,7 +195,7 @@ export default function MulticamLongformGatePage() {
 
   const loadArtifacts = useCallback(async (project: string, gateId: string) => {
     const response = await fetch(
-      `/v1/projects/${encodeURIComponent(project)}/multicam-longform-gate/evaluations/${encodeURIComponent(gateId)}/artifacts?limit=${ARTIFACT_LIMIT}`,
+      `/v1/projects/${encodeURIComponent(project)}/multicam-longform-gate/evaluations/${encodeURIComponent(gateId)}/artifacts?limit=${MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT}`,
       { headers: { accept: 'application/json' }, cache: 'no-store' },
     )
     const body = (await response.json()) as ApiEnvelope<ArtifactListing>
@@ -608,7 +601,7 @@ export default function MulticamLongformGatePage() {
         {gate && (artifactTotals.omitted > 0 || artifactTotals.filteredOut > 0) && (
           <p data-testid="artifacts-omitted" role="status">
             {artifactTotals.omitted} evidência(s) desta avaliação não aparecem
-            acima: a listagem devolve no máximo {ARTIFACT_LIMIT} referências por
+            acima: a listagem devolve no máximo {MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT} referências por
             página. No registro inteiro há {artifactTotals.unverified} com hash
             que não confere e {artifactTotals.unhashed} sem hash próprio — os
             dois números são da avaliação, não desta página, para que um corte

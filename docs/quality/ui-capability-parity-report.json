@@ -680,7 +680,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:192",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:185",
       "capabilityId": "apollo.multicam-longform-gate.criteria.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/multicam-longform-gate/criteria",
@@ -700,7 +700,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:204",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:197",
       "capabilityId": "apollo.projects.multicam-longform-gate.artifacts.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts",
@@ -724,7 +724,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:227",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:220",
       "capabilityId": "apollo.projects.multicam-longform-gate.list",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations",
@@ -748,7 +748,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:236",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:229",
       "capabilityId": "apollo.projects.multicam-longform-gate.outstanding.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/outstanding",
@@ -772,7 +772,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:252",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:257",
       "capabilityId": "apollo.projects.multicam-longform-gate.latest.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate",
@@ -796,7 +796,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:290",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:295",
       "capabilityId": "apollo.projects.multicam-longform-gate.evaluate",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/projects/{projectId}/multicam-longform-gate/evaluations",
@@ -820,7 +820,7 @@
       ]
     },
     {
-      "uiAction": "src/app/multicam-longform-gate/page.tsx:335",
+      "uiAction": "src/app/multicam-longform-gate/page.tsx:340",
       "capabilityId": "apollo.projects.multicam-longform-gate.read",
       "capabilityVersion": "1.0.0",
       "endpoint": "GET /v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}",

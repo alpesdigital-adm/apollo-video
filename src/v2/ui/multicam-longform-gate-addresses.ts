@@ -31,6 +31,19 @@ export const MULTICAM_LONGFORM_ARTIFACT_ADDRESSES = Object.freeze({
 export type AddressableGateArtifactType =
   keyof typeof MULTICAM_LONGFORM_ARTIFACT_ADDRESSES
 
+/**
+ * How many cited artifacts the gate page asks for.
+ *
+ * The listing is paginated and the route defaults to 100, so an evaluation
+ * citing more than that arrived truncated with nobody saying so. Asking for the
+ * capability's declared maximum makes truncation rare and `omittedArtifacts`
+ * makes it visible when it still happens. Here rather than in the page so the
+ * contract suite can hold it against the `limit` parameter the capability
+ * publishes: asking for more than the route allows is a 400, and this page
+ * swallows a failed artifact listing into an empty one.
+ */
+export const MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT = 200
+
 const ADDRESSABLE = new Set<string>(Object.keys(MULTICAM_LONGFORM_ARTIFACT_ADDRESSES))
 
 /**

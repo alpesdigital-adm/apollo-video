@@ -28,6 +28,7 @@ import {
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 import {
   MULTICAM_LONGFORM_ARTIFACT_ADDRESSES,
+  MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT,
   multicamLongformArtifactHref,
 } from '../../src/v2/ui/multicam-longform-gate-addresses.ts'
 import { stripSourceComments } from './helpers/strip-source-comments.mjs'
@@ -455,6 +456,18 @@ test('T-F4.016 every address the screen offers is one a capability declares', ()
     multicamLongformArtifactHref('p', { type: 'clock-map', id: 'c1' }),
     null,
     'a kind with no published address was turned into a link anyway',
+  )
+
+  // And the page asks for a page size the listing capability declares. Over
+  // the maximum the route answers 400, which the page turns into an empty
+  // artifact list — evidence that silently disappears rather than an error.
+  const limit = capability('apollo.projects.multicam-longform-gate.artifacts.list')
+    .queryParameters.find((parameter) => parameter.name === 'limit')
+  assert.ok(
+    MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT >= limit.schema.minimum &&
+      MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT <= limit.schema.maximum,
+    `the page asks for ${MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT} artifacts, outside the published ` +
+    `${limit.schema.minimum}..${limit.schema.maximum}`,
   )
 })
 
