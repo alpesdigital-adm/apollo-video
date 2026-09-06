@@ -95,6 +95,13 @@ function ancestors(from: string): readonly string[] {
  * worker started somewhere else is loaded from `src` but may run from
  * anywhere. Under a bundler `import.meta.url` may not be a file URL at all,
  * which is why it is read defensively.
+ *
+ * The working directory leads, and that ordering is measured rather than
+ * assumed: in this repository's own `next build` output webpack froze
+ * `import.meta.url` into the chunk as the build machine's source path
+ * (`file:///…/src/v2/infrastructure/media/ffmpeg-binary.ts`), which on a
+ * deployed machine names a directory that does not exist. `process.cwd()` is
+ * the one root that is still true wherever the server is running.
  */
 function searchRoots(): readonly string[] {
   const roots: string[] = [process.cwd()]
