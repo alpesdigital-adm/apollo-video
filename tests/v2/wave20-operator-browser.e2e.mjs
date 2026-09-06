@@ -441,8 +441,43 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await new PrismaColorCriticReportRepository(client).persist({ report, createdAt: at(8).toISOString() })
 
     // ---- F4.015: a reaction with a pause, a commentary, a replay, a seek --
+    // Two real recordings, because `build-map` really opens both: it resolves
+    // the reference and the reaction through the media port and the storage
+    // re-hashes the bytes, so a part naming a file that does not exist stops
+    // the command before the fingerprinter is ever asked anything.
+    //
+    // They are deliberately unalignable. The reference carries a 1 000 Hz tone
+    // for thirty seconds, the reaction a 300 Hz tone for forty, and neither
+    // contains the other: the reaction never played this reference. That is the
+    // material the operator page has to be honest about — the detector finds no
+    // window it can compare, and the answer must be that a person has to place
+    // the first anchor, not a map built out of nothing.
+    const reactMedia = async (name, seconds, hz, pattern) => {
+      const artifactId = `${trackPrefix}${name}`
+      const filePath = join(artifactRoot, 'artifacts', `${artifactId}.mp4`)
+      execFileSync(ffmpegPath, [
+        '-y', '-loglevel', 'error',
+        '-f', 'lavfi', '-i', `${pattern}=size=64x64:rate=5:duration=${seconds}`,
+        '-f', 'lavfi', '-i', `sine=frequency=${hz}:sample_rate=48000:duration=${seconds}`,
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-shortest', filePath,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      const digest = createHash('sha256').update(readFileSync(filePath)).digest('hex')
+      await client.v2MediaArtifact.create({
+        data: {
+          id: artifactId, workspaceId, artifactKey: `artifacts/${artifactId}.mp4`,
+          sha256: digest, byteSize: BigInt(statSync(filePath).size),
+          mediaType: 'video', container: 'mp4', status: 'available', createdAt,
+        },
+      })
+      return { artifactId, sha256: digest }
+    }
+    const playbackIngest = {
+      reference: await reactMedia('reference-media', 30, 1_000, 'testsrc'),
+      reaction: await reactMedia('reaction-media', 40, 300, 'smptebars'),
+    }
     const playback = fixtures.buildPlaybackWorld({
-      workspaceId, sessionId: reactSessionId, projectId,
+      workspaceId, sessionId: reactSessionId, projectId, ingest: playbackIngest,
     })
     assert.equal(playback.map.status, 'needs-input', 'the playback fixture must need a person')
     await sessions.appendVersion({ session: playback.session, occurredAt: at(9).toISOString() })
@@ -469,18 +504,17 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
         APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
         APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
         APOLLO_V2_RENDER_WORK_ROOT: join(artifactRoot, 'work'),
-        // Where ffmpeg actually is, said out loud, because a production build
-        // cannot work it out. `ffmpeg-static` resolves its binary as
-        // `path.join(__dirname, 'ffmpeg.exe')`, and webpack rewrites
-        // `__dirname` to the chunk's own folder — so inside `next start` the
-        // module points at `.next/server/chunks/ffmpeg.exe`, which does not
-        // exist. Every ffmpeg provider then fails to spawn and the direction
-        // answers 422 RENDER_EXECUTION_FAILED, with nothing on the wire saying
-        // the binary was simply not there. `FFMPEG_BIN` is ffmpeg-static's own
-        // override, so this repairs the resolution itself rather than patching
-        // one provider; a deployment has to set this or APOLLO_V2_FFMPEG_PATH
-        // for the same reason.
-        FFMPEG_BIN: ffmpegPath,
+        // Nothing here says where ffmpeg is, and that absence is the assertion.
+        // `ffmpeg-static` resolves its binary as `path.join(__dirname,
+        // 'ffmpeg.exe')`, and webpack rewrites `__dirname` to the chunk's own
+        // folder — so inside `next start` the module used to point at
+        // `.next/server/chunks/ffmpeg.exe`, which does not exist; every
+        // provider failed to spawn and the direction answered 422
+        // RENDER_EXECUTION_FAILED with nothing on the wire saying the binary
+        // was simply not there. This suite got past it by naming `FFMPEG_BIN`,
+        // which fixed one test and no deployment. `resolveFfmpegBinary` now
+        // resolves it inside the server, and the direction reaching 201 below
+        // is the only end-to-end proof of that there can be.
         // Without these the login page resolves to 'unavailable' and renders no
         // password form: the system fails closed when no auth mode is declared,
         // which is correct, and which a test has to opt into.
@@ -873,7 +907,34 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     assert.equal(derived.body.projectBaseVersionId, projectVersionId)
     assert.equal(derived.body.projectBaseHash, sha('2'))
     const deriveAnswer = await waitForAnswer(operator, '/color-match', fromDerive, 'the derivation')
-    assert.ok(deriveAnswer.status > 0, 'the derivation command was never answered')
+    // The answer, by its real shape rather than "something came back". On this
+    // project no source carries a trusted colour compilation, so the ColorPlan
+    // context refuses to be read at all — `project-color-plan-repository.ts:311`
+    // — and the derivation cannot write the layer it exists to write.
+    //
+    // Worth naming, because the code is doing double duty: PERSISTENCE_CONFLICT
+    // means both "the head moved" and "the stored projections cannot support
+    // this", and `_operator/refusal.ts` lists it among the stale-fence codes.
+    // The operator is therefore told to reload, and a reload cannot fix a
+    // missing compilation. Asserted as it is rather than as it should be.
+    assert.equal(
+      deriveAnswer.status, 409,
+      `the derivation answered ${deriveAnswer.status} ${deriveAnswer.code ?? ''}: `
+      + `${deriveAnswer.text.slice(0, 400)}
+${serverLogs.slice(-2_000)}`,
+    )
+    assert.equal(
+      deriveAnswer.code, 'PERSISTENCE_CONFLICT',
+      `the derivation was refused as ${deriveAnswer.code} rather than for the compilation it needs`,
+    )
+    // The refusal reaches the operator as a sentence, and the plan on screen is
+    // still the one that was stored: a refused derivation writes nothing.
+    await waitForText(
+      page, 'color-message', /Recarregue antes de repetir/,
+      'the refused derivation said nothing on screen',
+    )
+    const afterDerive = await read(`/v1/projects/${project}/capture-sessions/${session}/color-match`)
+    assert.equal(afterDerive.versionRef, matchRead.versionRef, 'a refused derivation moved the plan')
 
     // The scope the page could not carry at all until now: an override without
     // a range grades the whole camera, and the copy used to promise otherwise.
@@ -897,17 +958,43 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     assert.equal(override.body.baseHash, matchRead.plan.planHash)
     assert.equal(override.body.projectBaseVersionId, projectVersionId)
     const overrideAnswer = await waitForAnswer(operator, '/color-match/overrides', fromOverride, 'the override')
-    if (overrideAnswer.status < 400) {
-      // If it ever does land on this fixture, the scope has to be in the plan
-      // the API hands back — not only in the request that carried it.
-      const amended = await read(`/v1/projects/${project}/capture-sessions/${session}/color-match`)
-      const scoped = amended.plan.rangeOverrides.find((entry) => entry.overrideId === override.body.override.overrideId)
-      assert.ok(scoped, 'the override was accepted and the plan does not carry it')
-      assert.deepEqual(
-        scoped.range, { start: '90000', end: '180000' },
-        'the override was accepted and the plan says it covers the whole camera',
-      )
-    }
+    assert.equal(
+      overrideAnswer.status, 409,
+      `the override answered ${overrideAnswer.status} ${overrideAnswer.code ?? ''}: `
+      + `${overrideAnswer.text.slice(0, 400)}
+${serverLogs.slice(-2_000)}`,
+    )
+    assert.equal(
+      overrideAnswer.code, 'PERSISTENCE_CONFLICT',
+      `the override was refused as ${overrideAnswer.code} rather than for the compilation it needs`,
+    )
+    // And what the refusal left behind, which is not nothing.
+    //
+    // DEFECT, reported and not repaired here: `addMulticamMatchRangeOverride`
+    // appends the new match-plan version and only then reads the ColorPlan
+    // context (`multicam-color-match.ts:884-890`), so this 409 arrives after
+    // the chain has already advanced. The derivation gets the same precondition
+    // right — it reads the context first (`:531`) and refuses before writing
+    // anything, which is why the plan was still v1 above. The remedy is to read
+    // the context before the append, and the assertion below will fail when
+    // somebody does, which is the point of writing down what is true now.
+    const afterOverride = await read(`/v1/projects/${project}/capture-sessions/${session}/color-match`)
+    assert.equal(
+      afterOverride.versionRef, `${sessionId}:match:v2`,
+      'the override was answered 409 and the match plan chain did not advance, which would mean the defect is fixed',
+    )
+    // The half this suite could never assert while the outcome sat inside an
+    // `if (status < 400)`: the trecho the operator typed reached the stored
+    // plan, rather than a correction that graded the whole camera.
+    const scoped = afterOverride.plan.rangeOverrides.find(
+      (entry) => entry.overrideId === override.body.override.overrideId,
+    )
+    assert.ok(scoped, 'the override reached the plan without the range the operator typed')
+    assert.deepEqual(
+      scoped.range, { start: '90000', end: '180000' },
+      'the stored override says it covers the whole camera',
+    )
+    assert.equal(scoped.cameraId, gradedCamera)
 
     // Half a range is refused on screen rather than shipped as a 400. The
     // message stays up because the page never got as far as reloading.
@@ -1022,6 +1109,57 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId(`anchor-${manualAnchor.anchorId}`).waitFor({ state: 'visible' })
 
     mark('anchor command')
+    // ---- the build-map command, end to end -------------------------------
+    // The measurement itself, which no test in this repository had ever
+    // issued. It is the only command on this page that opens the recordings,
+    // and the two staged for it were never played one into the other — so the
+    // honest answer is that nothing could be compared and a person has to place
+    // the first anchor. What is asserted is that answer: the fence the page
+    // carried, the code the server named, the sentence the operator was given,
+    // and that the map a person had just anchored did not move.
+    const reactorInput = await page.getByTestId('reactor-input').inputValue()
+    assert.equal(
+      reactorInput, playback.map.reactionTrackId,
+      'the page did not name the reactor it had read, so the build would have asked about nothing',
+    )
+    const fromBuild = operator.requests.length
+    await page.getByTestId('build-map').click()
+    const buildRequest = await waitForPost(operator, '/playback-map', fromBuild)
+    assert.equal(
+      buildRequest.body.baseVersionId, `${reactSessionId}:v${playback.session.version}`,
+      'the build named a session fence the page did not read',
+    )
+    assert.equal(
+      buildRequest.body.baseHash, playback.session.sessionHash,
+      'the build named a session hash the page did not read',
+    )
+    assert.equal(buildRequest.body.reactionTrackId, playback.map.reactionTrackId)
+    assert.deepEqual(
+      Object.keys(buildRequest.body).sort(), ['baseHash', 'baseVersionId', 'reactionTrackId'],
+      'the build sent more than the session and the reactor, which is the whole of what it may send',
+    )
+    const buildAnswer = await waitForAnswer(operator, '/playback-map', fromBuild, 'the build')
+    assert.equal(
+      buildAnswer.status, 422,
+      `the build answered ${buildAnswer.status} ${buildAnswer.code ?? ''}: `
+      + `${buildAnswer.text.slice(0, 400)}
+${serverLogs.slice(-2_000)}`,
+    )
+    assert.equal(
+      buildAnswer.code, 'PLAYBACK_EVIDENCE_INSUFFICIENT',
+      `the build was refused as ${buildAnswer.code} rather than for the evidence it could not find`,
+    )
+    await waitForText(page, 'playback-message', /.+/, 'the refused build said nothing on screen')
+    const afterBuild = await read(
+      `/v1/projects/${project}/capture-sessions/${reactSession}/playback-map?reactionTrackId=${reactor}`,
+    )
+    assert.equal(
+      afterBuild.map.version, anchored.map.version,
+      'a refused measurement replaced the map a person had answered',
+    )
+    assert.equal(afterBuild.map.mapHash, anchored.map.mapHash)
+
+    mark('build-map command')
     // Cross navigation: each page carries its siblings, because the shell will
     // not carry them.
     for (const testId of ['link-capture-sessions', 'link-multicam-direction', 'link-color-match', 'link-sync-diagnostic']) {
@@ -1225,6 +1363,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       + `${unratedPieces.length} pieces with no rate and no reference interval; `
       + `${uncoveredBefore} uncovered stretch(es), ${uncoveredBefore - anchored.map.uncovered.length} answered `
       + `by an anchor driven through the page (map v${mapRead.map.version} -> v${anchored.map.version}); `
+      + `the build-map command answered ${buildAnswer.status} ${buildAnswer.code} and left the map where it was; `
+      + `the two colour commands answered ${deriveAnswer.status} ${deriveAnswer.code} and `
+      + `${overrideAnswer.status} ${overrideAnswer.code}; `
       + `direction v1 -> v2 and project version ${projectVersionId} -> ${advanced.version.id}, `
       + 'with the replay, the stale fence and the repeated request each answered differently',
     )

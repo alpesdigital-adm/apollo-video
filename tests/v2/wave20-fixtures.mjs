@@ -512,7 +512,18 @@ const PLAYBACK_POLICY = createPlaybackPolicy({
   continuityToleranceMs: 400,
 })
 
-function playbackTrack({ trackId, role, assetId, deviceId, endSecond, syncAudioPolicy, includeInFinalMix }) {
+/**
+ * `ingest` names the file this track was actually cut from, when there is one.
+ *
+ * Absent — the default — it keeps the artifact id and checksum every suite here
+ * has always used, which name nothing on disk and are right for a suite that
+ * never opens a recording. A suite that drives `build-map` needs the opposite:
+ * the service resolves both recordings through the media port and the storage
+ * re-hashes the bytes, so the parts have to name a real file's real sha256.
+ */
+function playbackTrack({
+  trackId, role, assetId, deviceId, endSecond, syncAudioPolicy, includeInFinalMix, ingest = null,
+}) {
   return {
     trackId,
     role,
@@ -527,8 +538,8 @@ function playbackTrack({ trackId, role, assetId, deviceId, endSecond, syncAudioP
       sourceAssetId: assetId,
       coverage: createTickInterval(tick(0), sec(endSecond)),
       evidence: {
-        ingestArtifactId: `artifact-${trackId}`,
-        ingestSha256: sha(assetId === 'asset-reaction-1' ? 'a' : 'c'),
+        ingestArtifactId: ingest ? ingest.artifactId : `artifact-${trackId}`,
+        ingestSha256: ingest ? ingest.sha256 : sha(assetId === 'asset-reaction-1' ? 'a' : 'c'),
         probeHash: sha('b'),
         probeSource: 'packet-scan',
         observedAt: at(1),
@@ -544,7 +555,9 @@ function playbackTrack({ trackId, role, assetId, deviceId, endSecond, syncAudioP
  *   longer in tick order. Anything that re-derives the order on read hands
  *   back a different map than the one that was stored.
  */
-export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncoveredStretches = 1 }) {
+export function buildPlaybackWorld({
+  workspaceId, sessionId, projectId, uncoveredStretches = 1, ingest = null,
+}) {
   const reaction = playbackTrack({
     trackId: 'track-reaction',
     role: 'reaction',
@@ -553,6 +566,7 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncovere
     endSecond: 40,
     syncAudioPolicy: 'final-candidate',
     includeInFinalMix: true,
+    ingest: ingest?.reaction ?? null,
   })
   const reference = playbackTrack({
     trackId: 'track-reference',
@@ -562,6 +576,7 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncovere
     endSecond: 30,
     syncAudioPolicy: 'sync-only',
     includeInFinalMix: false,
+    ingest: ingest?.reference ?? null,
   })
   const session = createCaptureSession({
     workspaceId,
@@ -574,15 +589,17 @@ export function buildPlaybackWorld({ workspaceId, sessionId, projectId, uncovere
     createdAt: at(0),
   })
 
+  // The map's media digests are the parts' own, so a world staged against real
+  // files and the map stored for it agree about which bytes were read.
   const referenceMedia = Object.freeze({
     assetId: 'asset-reference-1',
-    sha256: sha('c'),
+    sha256: ingest?.reference?.sha256 ?? sha('c'),
     durationTicks: sec(30),
     timebase: TB,
   })
   const reactionMedia = Object.freeze({
     assetId: 'asset-reaction-1',
-    sha256: sha('a'),
+    sha256: ingest?.reaction?.sha256 ?? sha('a'),
     durationTicks: sec(40),
   })
 
