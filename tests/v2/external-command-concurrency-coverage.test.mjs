@@ -76,6 +76,10 @@ const coverage = Object.freeze({
     mode: 'durable-covered',
     evidence: 'Wave20 puts the version and hash the operator read into the append predicate, so an anchor computed against a map somebody else has already answered is refused with the current pair rather than silently overwriting their answer; the anchor list only grows and an automatic anchor is never touched',
   },
+  'apollo.projects.multicam-longform-gate.evaluate': {
+    mode: 'durable-covered',
+    evidence: 'F4.016 writes the gate record, its ten criteria, their checks and every evidence reference in one transaction under the unique index multicam_longform_gates_project_idempotency_key on (workspaceId, projectId, idempotencyKey), so two concurrent evaluations under one key cannot both persist and a retry returns the first record without re-reading a row; the stored actorContextHash is compared on that read, so the same key presented by another credential, environment or delegated user and the same key carrying a different session filter are both refused as IDEMPOTENCY_PAYLOAD_MISMATCH — one saying the key belongs to another authenticated actor context, the other that it answered a different request — rather than answering about another session; one code, two messages, both asserted against a real PostgreSQL in tests/v2/multicam-longform-gate.e2e.mjs',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'durable-covered',
     evidence: 'Wave18 writes the cut, its ranges and its joins in one transaction; a duplicate id with the same hash replays and a duplicate id with different content is refused, so reviewed splice justifications are never overwritten',
@@ -561,7 +565,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    160,
+    161,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,

@@ -5,6 +5,7 @@ import { API_ENVIRONMENTS, isApiScope, type ApiEnvironment, type ApiScope } from
 // filter, and it is the one place the published contract can drift from the
 // system without anything raising.
 import { COLOR_CRITIC_DIMENSIONS, COLOR_CRITIC_SEVERITIES } from '../domain/color-critic-report.ts'
+import { MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES } from '../domain/multicam-longform-gate.ts'
 import { PLAYBACK_MODES } from '../domain/playback-map.ts'
 import { assertAllowlistedPublicQuery } from './conventions.ts'
 
@@ -7320,6 +7321,165 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     successStatuses: [201, 200],
     idempotency: 'natural',
     requestBodyRequired: true,
+  },
+  // ---------------------------------------------------------------------------
+  // Wave 20 — F4.016 the multicamera and long-form phase gate.
+  //
+  // Seven capabilities, one of them a command. ADR-135's sentence that outranks
+  // its own six conditions is "every condition is independently visible before
+  // the phase is approved", and a surface that published only `approved: true`
+  // would be the aggregated boolean of 18/07/2026 with a REST envelope on it.
+  // So the criteria are a catalogue of their own, the newest evaluation has its
+  // own address, what is still missing has its own address, and the artifacts a
+  // run read can be listed and opened one by one.
+  //
+  // The evaluation is the only command, and it is the one place in this whole
+  // wave where a caller's request carries no fence at all — not an oversight:
+  // there is no aggregate to fence against. A gate reads whatever the project
+  // is now and records the version it read. The caller cannot narrow that to a
+  // version it prefers, cannot supply a measurement, and cannot approve
+  // anything; the entire request body is an optional session filter. What it
+  // does carry is an `Idempotency-Key`, read in the route and bound by the
+  // service to the whole actor context, because two clicks on "run the gate"
+  // must produce one record rather than two evaluations of the same evidence.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'apollo.projects.multicam-longform-gate.evaluate',
+    version: '1.0.0',
+    title: 'Run the multicamera and long-form phase gate',
+    description: 'Evaluates the ten conditions of ADR-135 for one project from server-read evidence alone and persists one immutable record naming, per criterion, every check it ran, the rows it read, whether each row hash recomputed, and the exact reason any check said no. Missing evidence reproves its own criterion and the gate, and leaves the other nine visible. The request carries a project and at most a session: no measurement, no evidence ref and no approval can be sent.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/evaluate-multicam-longform-gate-request/v1',
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-evaluated/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations' },
+    toolName: 'apollo.projects.multicam-longform-gate.evaluate',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'required',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.latest.read',
+    version: '1.0.0',
+    title: 'Read the newest phase-gate evaluation of a project',
+    description: 'Reads the most recent multicamera and long-form gate record: all ten criteria with their checks, the evidence each check read and whether it verified, the project version it was judged against, and the record hash. Fails with MULTICAM_LONGFORM_GATE_NOT_FOUND when the gate has never been run, which is a different answer from a gate that ran and refused.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate' },
+    toolName: 'apollo.projects.multicam-longform-gate.latest.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.read',
+    version: '1.0.0',
+    title: 'Read one phase-gate evaluation',
+    description: 'Reads one immutable gate record by id, re-derived and hash-verified on read, so a record edited in the database is refused rather than displayed as an approval nobody evaluated. Reading an older evaluation is how a claim made last week is checked against what the evidence said at the time.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-read/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}' },
+    toolName: 'apollo.projects.multicam-longform-gate.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.list',
+    version: '1.0.0',
+    title: 'List the phase-gate history of a project',
+    description: 'Lists the gate evaluations of one project, newest first, each with its own ten criteria. The history is the answer to "what changed": a criterion that passed in March and fails now names the evidence that moved.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations' },
+    toolName: 'apollo.projects.multicam-longform-gate.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      { name: 'limit', description: 'Maximum evaluations to return, newest first.', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+    ],
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.outstanding.read',
+    version: '1.0.0',
+    title: 'Read what the phase gate is still missing',
+    description: 'Reads the newest evaluation and returns only the criteria that did not pass, ordered so the criteria nothing has ever answered come before the criteria that answered and refused. Each one carries the sentence it stands for and every failing check with its reason, so the next action is readable without diffing two reports.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-outstanding/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/outstanding' },
+    toolName: 'apollo.projects.multicam-longform-gate.outstanding.read',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+  },
+  {
+    id: 'apollo.projects.multicam-longform-gate.artifacts.list',
+    version: '1.0.0',
+    title: 'List the artifacts one phase-gate evaluation read',
+    description: 'Lists the evidence rows one evaluation cited, deduplicated across the checks that read them, each with its resource kind, its stored hash or null when the table keeps none, whether that hash recomputed, and the criteria and checks it answered. This is how a reader gets from "criterion 9 failed" to the exact artifact to open.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-artifact-list/v1',
+    endpoint: { method: 'GET', path: '/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}/artifacts' },
+    toolName: 'apollo.projects.multicam-longform-gate.artifacts.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
+    queryParameters: [
+      // Spread from the domain constant that owns the closed set of row kinds a
+      // check may have read. Typed by hand it would publish a filter for a
+      // table the evaluator never names.
+      { name: 'type', description: 'Keep only the artifacts of one evidence resource kind. How many the filter removed travels with the answer.', required: false, schema: { type: 'string', enum: [...MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES] } },
+      { name: 'limit', description: 'Maximum artifacts to return. What the limit left out is reported beside them.', required: false, schema: { type: 'integer', minimum: 1, maximum: 200, default: 100 } },
+    ],
+  },
+  {
+    id: 'apollo.multicam-longform-gate.criteria.list',
+    version: '1.0.0',
+    title: 'List the criteria of the multicamera and long-form phase gate',
+    description: 'Lists the ten conditions the phase gate judges and the named checks each one is made of, in the words ADR-135 uses. Project-independent on purpose: these are what the gate checks, readable before any project has been evaluated, so an operator can see what the phase demands before running anything.',
+    exposure: 'public',
+    operationKind: 'query',
+    authMode: 'required',
+    requiredScopes: ['projects:read'],
+    outputSchemaRef: 'apollo://schemas/multicam-longform-gate-criteria/v1',
+    endpoint: { method: 'GET', path: '/v1/multicam-longform-gate/criteria' },
+    toolName: 'apollo.multicam-longform-gate.criteria.list',
+    supportsDryRun: false,
+    costClass: 'free',
+    confirmation: 'none',
+    successStatuses: [200],
+    idempotency: 'not-applicable',
   },
   {
     id: 'apollo.provider-callbacks.receive', version: '1.0.0', title: 'Receive a provider callback',

@@ -77,6 +77,10 @@ const coverage = Object.freeze({
     mode: 'fenced-natural-idempotent-action',
     evidence: 'Wave20 requires the map version id as <sessionId>:playback:<trackId>:v<n> plus the map hash and enforces the fence inside the append; an anchor is refused unless its instant falls inside a stretch the detector left uncovered, so answering an absence can never become overruling a measurement. No caller key: the append is the fence, and a repeat under a spent pair is refused with the current one rather than duplicated',
   },
+  'apollo.projects.multicam-longform-gate.evaluate': {
+    mode: 'idempotent-create',
+    evidence: 'F4.016 is the one Wave 20 command with no fence, because there is no aggregate to fence against: a gate reads whatever the project is now and RECORDS the version and hash it read, so a caller who could name a base version could aim the gate at the evidence it preferred. What the caller does supply is the Idempotency-Key, read in the route and bound by the service to the whole actor context (workspace, client, credential, authentication kind, delegated user) before any evidence is read; the same key with a different session filter is refused as IDEMPOTENCY_PAYLOAD_MISMATCH, and no measurement, criterion result, evidence ref or approval has any shape in the request at all',
+  },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'idempotent-create',
     evidence: 'Wave18 persists one immutable content-addressed cut; a replayed key converges on the identical synthesis hash and a different body under the same id is refused',
@@ -766,7 +770,7 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 68,
+    'idempotent-create': 69,
     'natural-idempotent-create': 10,
     'state-machine-action': 16,
     'single-flight-action': 4,

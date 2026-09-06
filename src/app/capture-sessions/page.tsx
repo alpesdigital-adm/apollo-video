@@ -362,6 +362,15 @@ export default function CaptureSessionsPage() {
         <a href="/capture-protocols">Ver as exigências antes de gravar</a>
       </p>
 
+      {/* The phase gate is not a shell destination either. It is reached from
+          here because the question it answers — can this phase be closed? —
+          is asked about the material on this screen. */}
+      <p data-testid="open-multicam-longform-gate">
+        <a href={`/multicam-longform-gate?projeto=${encodeURIComponent(projectId.trim())}`}>
+          Ver o gate de fase multicâmera e formato longo
+        </a>
+      </p>
+
       {selected && (
         <p data-testid="open-diagnostic">
           <a

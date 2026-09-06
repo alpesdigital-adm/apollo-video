@@ -99,6 +99,8 @@ test(
     const PROJECT_B = 'f4016-project-b'
     const SESSION = 'f4016-session'
     const CLIENT_A = 'f4016-client-a'
+    /** A second credential in workspace A, for the idempotency actor check. */
+    const CLIENT_A2 = 'f4016-client-a2'
     const CLIENT_B = 'f4016-client-b'
     const VERSION_A = 'f4016-version-a'
     const CHECK_TOTAL = MULTICAM_LONGFORM_CRITERIA.reduce(
@@ -141,7 +143,7 @@ test(
         }),
       )
     }
-    for (const [id, workspaceId] of [[CLIENT_A, A], [CLIENT_B, B]]) {
+    for (const [id, workspaceId] of [[CLIENT_A, A], [CLIENT_A2, A], [CLIENT_B, B]]) {
       await client.v2ApiClient.create({
         data: {
           id,
@@ -444,6 +446,23 @@ test(
         return true
       },
       'one key answered two different requests',
+    )
+
+    // The other half of the same refusal, and the one the concurrency audit
+    // got wrong: a key replayed by a different credential in the same
+    // workspace is IDEMPOTENCY_PAYLOAD_MISMATCH, not AUTH_INVALID. AUTH_INVALID
+    // is the workspace mismatch, asserted in the isolation test below. The two
+    // are different work for the caller — one is "that key is not yours", the
+    // other "you are not in this workspace" — so the audit of record has to
+    // name each correctly, and this is what pins it.
+    await assert.rejects(
+      run('f4016-key-replica', { actor: await makeActor(CLIENT_A2, A) }),
+      (error) => {
+        assert.equal(error.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH')
+        assert.match(error.message, /another authenticated actor context/)
+        return true
+      },
+      'one key answered two different credentials',
     )
 
     // A session this project does not have resolves to nothing, rather than

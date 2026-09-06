@@ -46,6 +46,27 @@ import { SUBTITLE_STYLE_REGISTRY_V1 } from './subtitle-style-contract.ts'
 // uses, so a published example cannot describe a response the code does not
 // produce.
 import { buildDirectMulticamSessionCommand } from '../application/direct-multicam-session.ts'
+import {
+  calculateMulticamLongformGateRecordHash,
+  listMulticamLongformGateCriteria,
+} from '../application/multicam-longform-gate.ts'
+import {
+  buildLegacyRuntimeCriterion,
+  calculateLegacyRuntimeAuditHash,
+  evaluateMulticamLongformGate,
+  explainMulticamLongformGate,
+  MULTICAM_LONGFORM_CRITERION_CHECKS,
+  type MulticamLongformCriterion,
+  type MulticamLongformEvidenceResourceType,
+} from '../domain/multicam-longform-gate.ts'
+import {
+  presentMulticamLongformGateArtifacts,
+  presentMulticamLongformGateCriteria,
+  presentMulticamLongformGateEvaluated,
+  presentMulticamLongformGateHistory,
+  presentMulticamLongformGateOutstanding,
+  presentMulticamLongformGateRead,
+} from './multicam-longform-gate-contract.ts'
 import { directionVersionRef, toAngleCandidateWindow } from '../application/multicam-direction.ts'
 import { matchPlanVersionRef } from '../application/multicam-color-match.ts'
 import { captureSessionDerivationRef } from '../domain/capture-session.ts'
@@ -6908,6 +6929,230 @@ const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample,
     createdAt: w20At(400),
   },
 })
+
+/**
+ * Wave 20 fixture (F4.016) — a phase gate that has not been passed.
+ *
+ * Built by the evaluator itself: `evaluateMulticamLongformGate` derives the
+ * counts, the fingerprint and the ordering, `buildLegacyRuntimeCriterion` turns
+ * a real module-graph scan into criterion 10, and
+ * `calculateMulticamLongformGateRecordHash` hashes the record the repository
+ * would store. Nothing below is a literal shape written to match the schema.
+ *
+ * The published state is deliberately the unhappy one, because the happy one
+ * teaches a client nothing. Seven criteria pass; one has never been evaluated
+ * at all; one read a row whose hash did not recompute; one read rows and found
+ * the requirement unmet. Those three failures are three different next actions,
+ * and a client that renders them identically has lost the point of the gate.
+ *
+ * It also carries the reference state that is easy to get wrong: the delivered
+ * MP4 is cited with `hash: null` — the artifact table stores no digest of its
+ * own, so nothing could be recomputed — and that is NOT the same as the colour
+ * verdict, whose digest was recomputed and disagreed.
+ */
+const w20GateAt = '2026-09-04T18:30:00.000Z'
+const w20GateDigest = (seed: string) => seed.repeat(64).slice(0, 64)
+
+function w20GateReference(
+  type: MulticamLongformEvidenceResourceType,
+  id: string,
+  hash: string | null,
+  verified = hash !== null,
+) {
+  return { type, id, hash, verified }
+}
+
+function w20GatePassingChecks(
+  criterion: MulticamLongformCriterion,
+  detail: (code: string) => string,
+  references: readonly ReturnType<typeof w20GateReference>[],
+) {
+  return {
+    criterion,
+    checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) => ({
+      code,
+      passed: true,
+      failureReason: null,
+      detail: detail(code),
+      references: [...references],
+    })),
+  }
+}
+
+const w20GateSessionId = 'capture-session-multicam-panel'
+const w20GateDiagnostic = w20GateReference('sync-diagnostic', `${w20GateSessionId}:diagnostic:v3`, w20GateDigest('1'))
+const w20GateCoverage = w20GateReference('track-coverage', `${w20GateSessionId}:coverage:track-camera-a`, w20GateDigest('2'))
+const w20GateClockMap = w20GateReference('clock-map', `${w20GateSessionId}:clock:asset-camera-a`, w20GateDigest('3'))
+
+/** A scan that found nothing, hashed by the same function that verifies it. */
+const w20GateAuditContent = {
+  schemaVersion: 'legacy-runtime-audit/v1' as const,
+  entryModules: [
+    'src/v2/application/multicam-longform-gate.ts',
+    'src/v2/infrastructure/repository-factory.ts',
+  ],
+  unreadableEntryModules: [],
+  scannedModuleCount: 412,
+  violations: [],
+  scannedAt: w20GateAt,
+}
+const w20GateAudit = {
+  ...w20GateAuditContent,
+  auditHash: calculateLegacyRuntimeAuditHash(w20GateAuditContent),
+}
+
+const w20GateReport = evaluateMulticamLongformGate({
+  workspaceId,
+  projectId,
+  sessionId: w20GateSessionId,
+  evaluatedAt: w20GateAt,
+  evidence: [
+    w20GatePassingChecks(
+      'podcast-multicam-synchronised',
+      (code) => `${code}: two participants on distinct audio, synced-high at 600 s of derived coverage`,
+      [w20GateDiagnostic, w20GateCoverage, w20GateClockMap],
+    ),
+    w20GatePassingChecks(
+      'teacher-and-screen-synchronised',
+      (code) => `${code}: the screen recording runs 42 s longer than the camera and neither was stretched`,
+      [w20GateReference('sync-diagnostic', 'capture-session-teacher:diagnostic:v2', w20GateDigest('4'))],
+    ),
+    w20GatePassingChecks(
+      'insufficient-evidence-requires-manual',
+      (code) => `${code}: the protocol ceiling is manual-anchors-required and auto-edit is refused`,
+      [w20GateReference('capture-protocol-evaluation', 'capture-session-lecture:protocol-evaluation:v1', w20GateDigest('5'))],
+    ),
+    {
+      // Read, and found wanting: the map exists, the pieces are there, the
+      // durations differ — and nothing compiled it into a renderable plan.
+      criterion: 'react-edited-with-piecewise-map' as const,
+      checks: [
+        {
+          code: 'playback-map-persisted' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'playback map v4 of track-reaction, 6 pieces, status needs-input',
+          references: [w20GateReference('playback-map', `${w20GateSessionId}:playback:track-reaction:v4`, w20GateDigest('6'))],
+        },
+        {
+          code: 'interrupted-piece-present' as const,
+          passed: true,
+          failureReason: null,
+          detail: '2 paused pieces and 1 rewind piece between 120 s and 210 s',
+          references: [w20GateReference('playback-piece', `${w20GateSessionId}:playback:track-reaction:piece-3`, null)],
+        },
+        {
+          code: 'reaction-duration-differs' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'reaction runs 612 s against a 540 s reference',
+          references: [w20GateReference('playback-map', `${w20GateSessionId}:playback:track-reaction:v4`, w20GateDigest('6'))],
+        },
+        {
+          code: 'map-compiled-into-plan' as const,
+          passed: false,
+          failureReason: 'requirement-unmet' as const,
+          detail: 'the newest renderable plan snapshot was compiled from map v3 and the map is now v4',
+          references: [w20GateReference('renderable-plan-snapshot', 'plan-snapshot-reaction-9', w20GateDigest('7'))],
+        },
+      ],
+    },
+    w20GatePassingChecks(
+      'active-speaker-and-demonstration-directed',
+      (code) => `${code}: 41 shots, rules active-speaker and demonstration both fired, every shot justified`,
+      [w20GateReference('multicam-direction', `${w20GateSessionId}:direction:v2`, w20GateDigest('8'))],
+    ),
+    // Criterion 6 is absent from this list entirely: nobody has run a
+    // multi-range synthesis for this project. It still appears in the report
+    // with all five checks missing, which is the difference between "not done"
+    // and "not shown".
+    w20GatePassingChecks(
+      'colour-match-precedes-creative-lut',
+      (code) => `${code}: 3 match-stage transforms resolve before the creative LUT in the resolved ColorPlan`,
+      [w20GateReference('match-plan', `${w20GateSessionId}:match:v2`, w20GateDigest('9'))],
+    ),
+    {
+      // The case the gate exists for: a row edited underneath the product. The
+      // digest was recomputed and disagreed, so every check of this criterion
+      // reproves — and none of them may claim a pass beside it.
+      criterion: 'colour-critic-resolved' as const,
+      checks: MULTICAM_LONGFORM_CRITERION_CHECKS['colour-critic-resolved'].map((code) => ({
+        code,
+        passed: false,
+        failureReason: 'evidence-unverified' as const,
+        detail: 'the stored colour critic report does not recompute from its own content',
+        references: [w20GateReference('colour-critic-report', 'color-critic-report-panel-3', w20GateDigest('a'), false)],
+      })),
+    },
+    {
+      criterion: 'final-mp4-inspectable' as const,
+      checks: [
+        {
+          code: 'final-export-promoted' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'final export attempt 2 promoted the delivered master',
+          references: [w20GateReference('final-export', 'final-export-attempt-2', w20GateDigest('b'))],
+        },
+        {
+          code: 'output-codec-recorded' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'h264 / aac, 1920x1080, 30/1',
+          references: [w20GateReference('media-manifest', 'manifest-final-master', w20GateDigest('c'))],
+        },
+        {
+          code: 'output-probe-measured' as const,
+          passed: true,
+          failureReason: null,
+          // The artifact table stores no digest of its own, so the reference
+          // carries `hash: null`. That is "nothing to recompute", never "the
+          // hash was wrong" — and a check may pass beside it.
+          detail: 'ffprobe measured 3 600 frames over 120,000 s',
+          references: [w20GateReference('media-artifact', 'artifact-final-master', null, false)],
+        },
+        {
+          code: 'artifact-hash-matches-attempt' as const,
+          passed: true,
+          failureReason: null,
+          detail: 'the manifest sha256 equals the sha256 the export attempt recorded',
+          references: [
+            w20GateReference('media-manifest', 'manifest-final-master', w20GateDigest('c')),
+            w20GateReference('final-export', 'final-export-attempt-2', w20GateDigest('b')),
+          ],
+        },
+      ],
+    },
+    buildLegacyRuntimeCriterion(w20GateAudit),
+  ],
+})
+
+const w20GateRecordContent = {
+  schemaVersion: 'multicam-longform-gate/v1' as const,
+  id: 'multicam-longform-gate-example-1',
+  workspaceId,
+  projectId,
+  sessionId: w20GateSessionId,
+  projectVersionId: 'project-version-panel-9',
+  projectVersionHash: w20GateDigest('d'),
+  report: w20GateReport,
+  reportFingerprint: w20GateReport.fingerprint,
+  idempotencyKey: 'gate-panel-2026-09-04',
+  requestFingerprint: w20GateDigest('e'),
+  createdBy: { type: 'api-client' as const, id: clientId },
+  createdAt: w20GateAt,
+}
+const w20GateExample = {
+  ...w20GateRecordContent,
+  recordHash: calculateMulticamLongformGateRecordHash(w20GateRecordContent),
+}
+
+/** The same derivation the explain service performs, from the same report. */
+const w20GateOutstandingExample = {
+  gateId: w20GateExample.id,
+  evaluatedAt: w20GateExample.report.evaluatedAt,
+  ...explainMulticamLongformGate(w20GateExample.report),
+}
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
@@ -14163,6 +14408,46 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           filteredOut: 0,
           omittedPieces: 0,
         }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — F4.016 multicamera and long-form phase gate
+    // -----------------------------------------------------------------------
+    'apollo://schemas/evaluate-multicam-longform-gate-request/v1': [
+      // The entire request. There is no second example with more fields in it,
+      // because there is no second shape: a measurement, a criterion result or
+      // an approval sent here is refused by the name of the key.
+      { sessionId: w20GateSessionId },
+      {},
+    ],
+    'apollo://schemas/multicam-longform-gate-evaluated/v1': [
+      {
+        data: presentMulticamLongformGateEvaluated({ gate: w20GateExample, replayed: false }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-read/v1': [
+      { data: presentMulticamLongformGateRead(w20GateExample), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-longform-gate-list/v1': [
+      { data: presentMulticamLongformGateHistory([w20GateExample]), meta: { apiVersion: 'v1' } },
+    ],
+    'apollo://schemas/multicam-longform-gate-criteria/v1': [
+      {
+        data: presentMulticamLongformGateCriteria(listMulticamLongformGateCriteria()),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-outstanding/v1': [
+      {
+        data: presentMulticamLongformGateOutstanding(w20GateOutstandingExample),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    'apollo://schemas/multicam-longform-gate-artifact-list/v1': [
+      {
+        data: presentMulticamLongformGateArtifacts(w20GateExample, { limit: 100 }),
         meta: { apiVersion: 'v1' },
       },
     ],

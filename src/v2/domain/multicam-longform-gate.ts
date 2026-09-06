@@ -694,6 +694,17 @@ export interface LegacyRuntimeAuditViolation {
 export interface LegacyRuntimeAuditResult {
   readonly schemaVersion: 'legacy-runtime-audit/v1'
   readonly entryModules: readonly string[]
+  /**
+   * The entry modules the scanner asked for and could not read.
+   *
+   * Separate from `violations` on purpose. A source tree the process cannot
+   * open is evidence it never gathered, not a legacy import it found: the
+   * scanner used to report an unreadable entry as `legacy-runtime-import`, so
+   * a build run from a directory without the sources accused ten pure-V2
+   * modules of importing the retired runtime. Anything in this list makes the
+   * whole criterion `evidence-missing`.
+   */
+  readonly unreadableEntryModules: readonly string[]
   readonly scannedModuleCount: number
   readonly violations: readonly Readonly<LegacyRuntimeAuditViolation>[]
   readonly auditHash: string
@@ -709,6 +720,7 @@ export function calculateLegacyRuntimeAuditHash(
   return calculateCanonicalHash({
     schemaVersion: audit.schemaVersion,
     entryModules: [...audit.entryModules],
+    unreadableEntryModules: [...audit.unreadableEntryModules],
     scannedModuleCount: audit.scannedModuleCount,
     violations: audit.violations.map((violation) => ({
       marker: violation.marker,
@@ -732,6 +744,19 @@ export function assertLegacyRuntimeAudit(
     Array.isArray(audit.entryModules) && audit.entryModules.length >= 1,
     'INVALID_ARGUMENT',
     'legacy runtime audit must name the modules it started from',
+  )
+  // Required, not optional-with-a-default: an audit that omits the list is one
+  // written before this distinction existed, and defaulting it to empty would
+  // let it claim it read everything it was asked to.
+  assertDomain(
+    Array.isArray(audit.unreadableEntryModules) &&
+      audit.unreadableEntryModules.every(
+        (entry) => typeof entry === 'string' && entry.length >= 1,
+      ) &&
+      audit.unreadableEntryModules.every((entry) =>
+        audit.entryModules.includes(entry)),
+    'INVALID_ARGUMENT',
+    'legacy runtime audit must say which entry modules it could not read',
   )
   // The count is only required to be a count. Whether it covered the entry
   // modules is the `module-graph-scanned` check's job: a scan that reached
@@ -795,6 +820,26 @@ export function buildLegacyRuntimeCriterion(
         code,
         passed: false,
         failureReason: 'evidence-unverified' as const,
+        detail,
+        references,
+      })),
+    }
+  }
+  // A scan that could not open what it was asked to open proves nothing about
+  // the criterion, in either direction: `no-legacy-runtime-import` would
+  // otherwise pass on zero violations found in zero files read. All three
+  // checks say the evidence is missing, and name the modules, so the operator
+  // fixes where the scan runs rather than hunting an import that is not there.
+  if (audit.unreadableEntryModules.length > 0) {
+    const detail =
+      `${audit.unreadableEntryModules.length} of ${audit.entryModules.length} entry modules were unreadable ` +
+      `(${audit.unreadableEntryModules.slice(0, 3).join('; ')}): what they reach was never scanned`
+    return {
+      criterion,
+      checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) => ({
+        code,
+        passed: false,
+        failureReason: 'evidence-missing' as const,
         detail,
         references,
       })),
