@@ -833,7 +833,7 @@ export function buildLegacyRuntimeCriterion(
   if (audit.unreadableEntryModules.length > 0) {
     const detail =
       `${audit.unreadableEntryModules.length} of ${audit.entryModules.length} entry modules were unreadable ` +
-      `(${audit.unreadableEntryModules.slice(0, 3).join('; ')}): the module graph was never walked`
+      `(${audit.unreadableEntryModules.slice(0, 3).join('; ')}): what they reach was never scanned`
     return {
       criterion,
       checks: MULTICAM_LONGFORM_CRITERION_CHECKS[criterion].map((code) => ({

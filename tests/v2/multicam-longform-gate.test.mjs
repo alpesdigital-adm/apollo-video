@@ -504,6 +504,10 @@ test('T-F4.016 the scanner resolves its root when it runs, never when it is comp
   // the assertion is behavioural and catches the cause rather than the
   // spelling: a root derived from the module survives `chdir` and would keep
   // reading the real tree here, while one derived at run time does not.
+  //
+  // `process.chdir` is safe here because node:test runs the tests of one file
+  // sequentially by default and the directory is restored in `finally`; a
+  // future `{ concurrency: true }` on this file would have to revisit it.
   const elsewhere = await mkdtemp(join(tmpdir(), 'apollo-gate-root-'))
   const original = process.cwd()
   try {
