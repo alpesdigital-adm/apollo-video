@@ -18,6 +18,7 @@ import {
   type MulticamEvidenceSet,
   type MulticamObservation,
 } from './multicam-evidence.ts'
+import { OUTPUT_ASPECT_RATIOS, type OutputAspectRatio } from './multicam-output-format.ts'
 import {
   assertPiecewiseClockMapIntegrity,
   isSessionRangeResolvable,
@@ -216,8 +217,15 @@ export function directionConfidenceBand(value: number): DirectionConfidenceBand 
 export const SPATIAL_RELATIONS = Object.freeze(['same', 'adjacent', 'opposite', 'unknown'] as const)
 export type SpatialRelation = (typeof SPATIAL_RELATIONS)[number]
 
-export const OUTPUT_ASPECT_RATIOS = Object.freeze(['16:9', '9:16', '1:1', '4:5'] as const)
-export type OutputAspectRatio = (typeof OUTPUT_ASPECT_RATIOS)[number]
+/**
+ * Re-exported, not declared here.
+ *
+ * The vocabulary lives in `multicam-output-format.ts`, which imports nothing,
+ * because this module reaches `node:crypto` through `canonical-hash.ts` and the
+ * operator page that offers the format picker has to read the same constant the
+ * request schema spreads. Server callers keep importing it from here.
+ */
+export { OUTPUT_ASPECT_RATIOS, type OutputAspectRatio }
 
 // ---------------------------------------------------------------------------
 // Policy
