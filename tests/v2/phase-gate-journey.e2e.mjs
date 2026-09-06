@@ -12,10 +12,13 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * public boundary, so five things it cannot say are said here, and every one
  * of them is a property of the ROUTE rather than of the service:
  *
- * 1. **The gate approves through the API.** The request that returns
- *    `approved: true` is a `POST` whose whole body is `{}` — no evidence, no
- *    measurement, no verdict. Everything in the answer was read from
- *    PostgreSQL and from the module graph by the server.
+ * 1. **The gate approves through the API, and the input cannot carry a
+ *    verdict.** The request that returns `approved: true` is a `POST` whose
+ *    whole body is `{}` — no evidence, no measurement, no verdict — and five
+ *    bodies that try to supply one (`approved`, `satisfied`, `evidence`,
+ *    `report`, `recordHash`) are refused `422 INVALID_ARGUMENT` with no row
+ *    written. `report.serverEvidenceOnly` is a constant the domain writes and
+ *    is asserted here as a shape, not as proof; the refusals are the proof.
  * 2. **A replay is byte-identical.** The same `Idempotency-Key` from the same
  *    credential returns 200 with a `gate` object whose serialization equals
  *    the 201's, and writes no second row. The same key with a different body
@@ -30,6 +33,15 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * 4. **A deleted row fails exactly its own criterion.** The match-plan head is
  *    removed and re-created afterwards; while it is gone,
  *    `colour-match-precedes-creative-lut` is the only criterion that moves.
+ *    Four more conditions get the same treatment, because "approved 10/10" is
+ *    an assertion about one healthy world and says nothing about whether each
+ *    condition is independently visible: a desynchronised podcast diagnostic,
+ *    a session left with one derived coverage, a colour plan that AUTHORS the
+ *    creative LUT ahead of the match, and a reference recording made as long
+ *    as the reaction. Each moves exactly its criterion and exactly the checks
+ *    named, and each is put back. Before this block, the sync gate, the
+ *    colour-order gate and the reaction-duration gate could each be replaced
+ *    with `true` and nothing in the repository went red.
  * 5. **Another workspace cannot see any of it, and the old record survives.**
  *    Workspace B's credential gets `PROJECT_NOT_FOUND` from the evaluation and
  *    `MULTICAM_LONGFORM_GATE_NOT_FOUND` from the read of A's gate id, and the
@@ -112,6 +124,24 @@ function failures(report) {
   )
 }
 
+/** The failing checks of one criterion, as `[code, reason]` in catalogue order. */
+function failedChecks(report, criterion) {
+  const entry = report.criteria.find((item) => item.criterion === criterion)
+  assert.ok(entry, `the report carries no criterion named ${criterion}`)
+  return entry.checks
+    .filter((check) => !check.passed)
+    .map((check) => [check.code, check.failureReason])
+}
+
+/** The detail line of one check, so an assertion can read what was measured. */
+function detailOf(report, criterion, code) {
+  const entry = report.criteria.find((item) => item.criterion === criterion)
+  assert.ok(entry, `the report carries no criterion named ${criterion}`)
+  const check = entry.checks.find((item) => item.code === code)
+  assert.ok(check, `${criterion} carries no check named ${code}`)
+  return check.detail
+}
+
 test(
   'E2E-F4.016 the phase gate approves, refuses tampering and refuses another workspace, through /v1',
   { skip: SKIP, timeout: TIMEOUT },
@@ -132,6 +162,25 @@ test(
     const { buildGateWorld, cleanGateWorld } = await import(
       './helpers/multicam-longform-gate-world.mjs'
     )
+    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
+    // The four breakages below write real aggregates: nothing is hand-hashed,
+    // so every hash the gate re-derives afterwards is the hash the product
+    // computes over the doctored body.
+    const { createSyncDiagnostic, deriveTrackStatus } = await import(
+      '../../src/v2/domain/sync-diagnostic.ts'
+    )
+    const { createPlaybackMap } = await import('../../src/v2/domain/playback-map.ts')
+    const { createProjectColorPlan } = await import('../../src/v2/domain/project-color-plan.ts')
+    const { PrismaCaptureSessionRepository } = await import(
+      '../../src/v2/infrastructure/prisma/capture-session-repository.ts'
+    )
+    const { PrismaPlaybackMapRepository } = await import(
+      '../../src/v2/infrastructure/prisma/playback-map-repository.ts'
+    )
+    const { PrismaSyncDiagnosticRepository } = await import(
+      '../../src/v2/infrastructure/prisma/sync-diagnostic-repository.ts'
+    )
+    const { fixtureInstant } = await import('./wave20-fixtures.mjs')
 
     const criteriaRoute = await import(
       '../../src/app/v1/multicam-longform-gate/criteria/route.ts'
@@ -164,11 +213,15 @@ test(
     // and `media_artifacts.id` is unique across the whole database rather than
     // per workspace. A crashed run of THIS suite or of
     // `multicam-longform-gate.e2e.mjs` therefore blocks the next seed, so the
-    // cleanup takes back both worlds. The two never run at once: they are
-    // separate, sequential CI steps.
+    // cleanup takes back both worlds. Today the two are separate, sequential
+    // CI steps — but nothing in the workflow enforces that, and a suite that
+    // empties another suite's live fixture mid-flight fails as a domain bug.
+    // The lease below makes the second runner WAIT instead, so the sentence
+    // "they never run at once" is now true because something makes it true.
     const WORKSPACES = [A, B, 'f4016-workspace-a', 'f4016-workspace-b']
 
     const clean = () => cleanGateWorld({ client, workspaceIds: WORKSPACES })
+    const lease = await acquireGateFixtureLease()
 
     t.after(async () => {
       // Reported, not rethrown: a cleanup failure that masks the assertion
@@ -179,10 +232,11 @@ test(
         console.error('cleanup failed:', error?.message ?? error)
       }
       await client.$disconnect()
+      await lease.release()
     })
 
     await clean()
-    await buildGateWorld({
+    const world = await buildGateWorld({
       client,
       workspaceId: A,
       projectId: PROJECT_A,
@@ -256,10 +310,14 @@ test(
     assert.equal(approved.report.satisfied, 10)
     assert.equal(approved.report.total, 10)
     assert.deepEqual(approved.report.failed, [])
+    // A shape check, and nothing more: `serverEvidenceOnly` is `true as const`
+    // in the domain and `{ const: true }` in the published schema, so it would
+    // still read `true` if the caller HAD influenced the report. What the flag
+    // claims is measured further down, against the input surface itself.
     assert.equal(
       approved.report.serverEvidenceOnly,
       true,
-      'the report must declare that nothing in it came from the caller',
+      'the published shape lost the serverEvidenceOnly flag',
     )
     assert.equal(approved.createdBy.id, callerA.client.id)
     assert.equal(approved.workspaceId, A)
@@ -422,7 +480,366 @@ test(
       'restoring the tampered column did not restore approval',
     )
 
-    // ---- 6. the older version is preserved --------------------------------
+    // ---- 6. the input surface refuses to carry a verdict -------------------
+    // `serverEvidenceOnly` above is a constant the server writes; on its own it
+    // says nothing about the caller. The property it CLAIMS is this one: the
+    // evaluate body accepts `sessionId` and nothing else, so there is no field
+    // on this input a client could use to hand the gate a result or the
+    // evidence to reach one. The public envelope deliberately does not echo the
+    // offending key — a domain error's details stay internal — so what is
+    // pinned here is the refusal and the fact that nothing was written.
+    const gatesBeforeSmuggling = await client.v2MulticamLongformGate.count({
+      where: { workspaceId: A, projectId: PROJECT_A },
+    })
+    for (const smuggled of [
+      { approved: true },
+      { satisfied: 10 },
+      { evidence: [{ criterion: 'colour-critic-resolved', passed: true }] },
+      { report: { approved: true, criteria: [] } },
+      { recordHash: '0'.repeat(64) },
+    ]) {
+      const refused = await evaluate(
+        bearerA,
+        `phase-gate-journey-smuggled-${randomUUID()}`,
+        smuggled,
+      )
+      // 422, not 400: the published catalogue maps INVALID_ARGUMENT to
+      // "unprocessable", and the status is read off the answer rather than
+      // typed in from memory.
+      assert.equal(
+        refused.status,
+        422,
+        `${JSON.stringify(smuggled)} was not refused: ${refused.text}`,
+      )
+      assert.equal(refused.payload.error.code, 'INVALID_ARGUMENT', refused.text)
+    }
+    assert.equal(
+      await client.v2MulticamLongformGate.count({ where: { workspaceId: A, projectId: PROJECT_A } }),
+      gatesBeforeSmuggling,
+      'a body the contract refused still wrote a gate row',
+    )
+
+    // ---- 7. four more conditions, each made to fail on its own -------------
+    // "Approved 10/10" is an assertion about one healthy world; it says nothing
+    // about whether each condition is independently visible. Sections 4 and 5
+    // prove two of them. These four prove the rest of the ones a row can move:
+    // the sync gate, the coverage gate, the colour-order gate and the
+    // reaction-vs-reference duration gate. Every one of them could be replaced
+    // with `true` before this block existed and the suite stayed green.
+    const sessions = new PrismaCaptureSessionRepository(client)
+    const diagnostics = new PrismaSyncDiagnosticRepository(client)
+    const playbackMaps = new PrismaPlaybackMapRepository(client)
+
+    /**
+     * One condition, broken through its own rows and then put back.
+     *
+     * `apply` writes the world into a state the criterion has to refuse;
+     * exactly `criterion` must move, and inside it exactly `checks` — code and
+     * failure reason — must be the ones that failed. `restore` puts the rows
+     * back and the gate has to approve again, which is what separates a
+     * refusal from a latch.
+     */
+    const conditions = []
+    const breakAndRestore = async ({ name, criterion, checks, apply, restore, expect }) => {
+      await apply()
+      const broken = await evaluate(bearerA, `phase-gate-journey-${name}-${randomUUID()}`)
+      assert.equal(broken.status, 201, broken.text)
+      const report = broken.payload.data.gate.report
+      assert.equal(report.approved, false, `${name} left the gate approving`)
+      assert.deepEqual(
+        Object.keys(failures(report)),
+        [criterion],
+        `${name} moved a criterion other than ${criterion}`,
+      )
+      assert.equal(report.satisfied, 9, `${name} moved more than one criterion`)
+      assert.deepEqual(
+        failedChecks(report, criterion),
+        checks,
+        `${name} did not fail the checks it was aimed at`,
+      )
+      if (expect) expect(report)
+      conditions.push(`${name} -> ${checks.map(([code]) => code).join('+')}`)
+      await restore()
+      const back = await evaluate(bearerA, `phase-gate-journey-${name}-restored-${randomUUID()}`)
+      assert.equal(broken.payload.data.gate.id === back.payload.data.gate.id, false)
+      assert.equal(
+        back.payload.data.gate.report.approved,
+        true,
+        `restoring ${name} did not restore approval: ${JSON.stringify(failures(back.payload.data.gate.report))}`,
+      )
+    }
+
+    // (a) the sync gate. A new diagnostic version whose tracks are still
+    // measured — the coverage stays derived, so the criterion moves on the
+    // synchronisation alone — but whose residual walks past the ceiling that
+    // separates `synced-medium` from `partial`.
+    const podcastDiagnostic = world.podcast.diagnostic
+    const diagnosticHeadBefore = await client.v2SyncDiagnosticHead.findFirstOrThrow({
+      where: { workspaceId: A, sessionId: world.ids.podcastSession },
+    })
+    const desynced = createSyncDiagnostic({
+      workspaceId: A,
+      sessionId: podcastDiagnostic.sessionId,
+      referenceTrackId: podcastDiagnostic.referenceTrackId,
+      version: podcastDiagnostic.version + 1,
+      previousVersionHash: podcastDiagnostic.diagnosticHash,
+      sessionVersion: podcastDiagnostic.sessionVersion,
+      referenceEpoch: podcastDiagnostic.referenceEpoch,
+      tracks: podcastDiagnostic.tracks.map((track) => {
+        const drifted = { ...track, residualMs: 900 }
+        return {
+          ...drifted,
+          status: deriveTrackStatus({ ...drifted, hasContradictoryAnchors: false }),
+        }
+      }),
+      protocolCeiling: podcastDiagnostic.protocolCeiling,
+      generatedAt: fixtureInstant(500),
+    })
+    assert.equal(
+      ['synced-high', 'synced-medium'].includes(desynced.status),
+      false,
+      `the doctored diagnostic still reads as synchronised: ${desynced.status}`,
+    )
+    assert.equal(
+      desynced.tracks.every((track) => track.coverageBps !== null),
+      true,
+      'the doctored diagnostic stopped measuring coverage, which is a different failure',
+    )
+
+    await breakAndRestore({
+      name: 'desynchronised-podcast',
+      criterion: 'podcast-multicam-synchronised',
+      checks: [['diagnostic-synchronised', 'requirement-unmet']],
+      apply: () => diagnostics.appendVersion({
+        diagnostic: desynced,
+        occurredAt: fixtureInstant(501),
+      }),
+      expect: (report) => assert.match(
+        detailOf(report, 'podcast-multicam-synchronised', 'diagnostic-synchronised'),
+        new RegExp(`is ${desynced.status} over ${desynced.tracks.length} tracks`),
+        'the report does not say what the diagnostic actually read',
+      ),
+      restore: async () => {
+        await client.v2SyncDiagnostic.deleteMany({
+          where: {
+            workspaceId: A,
+            sessionId: world.ids.podcastSession,
+            version: desynced.version,
+          },
+        })
+        await client.v2SyncDiagnosticHead.update({
+          where: { id: diagnosticHeadBefore.id },
+          data: {
+            version: diagnosticHeadBefore.version,
+            diagnosticHash: diagnosticHeadBefore.diagnosticHash,
+            status: diagnosticHeadBefore.status,
+            manualRequired: diagnosticHeadBefore.manualRequired,
+            updatedAt: diagnosticHeadBefore.updatedAt,
+          },
+        })
+      },
+    })
+
+    // (b) the coverage gate. Two coverages are what makes them comparable; one
+    // is a row nobody derived, and the reason has to say so rather than
+    // announcing a measurement that was never taken.
+    const keptCoverage = world.podcast.coverages[0].trackId
+    await breakAndRestore({
+      name: 'single-coverage',
+      criterion: 'podcast-multicam-synchronised',
+      checks: [['coverage-derived', 'evidence-missing']],
+      apply: () => client.v2CaptureTrackCoverage.deleteMany({
+        where: {
+          workspaceId: A,
+          sessionId: world.ids.podcastSession,
+          trackId: { not: keptCoverage },
+        },
+      }),
+      expect: (report) => assert.match(
+        detailOf(report, 'podcast-multicam-synchronised', 'coverage-derived'),
+        /derived 1 track coverages/,
+        'one derived coverage was announced as something other than a missing row',
+      ),
+      restore: async () => {
+        for (const coverage of world.podcast.coverages) {
+          await sessions.persistCoverage({
+            coverage,
+            sessionId: world.ids.podcastSession,
+            createdAt: fixtureInstant(502),
+          })
+        }
+      },
+    })
+
+    // (c) the colour-order gate. `resolveColorPlan` emits the stages in
+    // COLOR_TRANSFORM_ORDER, so reading the RESOLVED order back can only catch
+    // a rewrite of that constant. The plan AS STORED is what a person authors,
+    // and a plan that declares the creative LUT ahead of the match resolves to
+    // the right order only because the resolver sorted it. The record is
+    // rebuilt by the domain factory, so the row still re-derives to its own
+    // hash: this is a legal plan the gate has to refuse on its content.
+    const colourPlanRow = await client.v2ProjectColorPlan.findFirstOrThrow({
+      where: { workspaceId: A, projectId: PROJECT_A },
+    })
+    const storedColourPlan = world.colourPlan
+    const swapStages = (layer) => {
+      const kinds = layer.map((transform) => transform.kind)
+      const matchIndex = kinds.indexOf('match')
+      const lutIndex = kinds.indexOf('creative-lut')
+      assert.ok(matchIndex >= 0 && lutIndex >= 0 && matchIndex < lutIndex, 'the fixture plan is already misordered')
+      const swapped = [...layer]
+      swapped[matchIndex] = layer[lutIndex]
+      swapped[lutIndex] = layer[matchIndex]
+      return swapped
+    }
+    const misorderedColourPlan = createProjectColorPlan({
+      id: storedColourPlan.id,
+      workspaceId: A,
+      projectId: PROJECT_A,
+      commandId: storedColourPlan.commandId,
+      baseVersionId: storedColourPlan.baseVersionId,
+      resultVersionId: storedColourPlan.resultVersionId,
+      plan: { ...storedColourPlan.plan, global: swapStages(storedColourPlan.plan.global) },
+      targets: [{ cameraId: world.match.plan.referenceCameraId }],
+      createdAt: storedColourPlan.createdAt,
+    })
+    const colourPlanColumns = (record) => ({
+      schemaVersion: record.schemaVersion,
+      planJson: JSON.stringify(record.plan),
+      planHash: record.plan.planHash,
+      compiledManifestJson: JSON.stringify(record.compiled),
+      compiledManifestHash: record.compiled.manifestHash,
+      recordJson: JSON.stringify(record),
+      recordHash: record.recordHash,
+    })
+    assert.notEqual(
+      misorderedColourPlan.recordHash,
+      storedColourPlan.recordHash,
+      'swapping two stages left the record byte-identical',
+    )
+    await breakAndRestore({
+      name: 'creative-lut-authored-before-match',
+      criterion: 'colour-match-precedes-creative-lut',
+      checks: [['match-precedes-creative-lut', 'requirement-unmet']],
+      apply: () => client.v2ProjectColorPlan.update({
+        where: { id: colourPlanRow.id },
+        data: colourPlanColumns(misorderedColourPlan),
+      }),
+      expect: (report) => assert.match(
+        detailOf(report, 'colour-match-precedes-creative-lut', 'match-precedes-creative-lut'),
+        /declares creative-lut before match in \[global\]/,
+        'the report does not name the layer that put the stages the wrong way round',
+      ),
+      restore: () => client.v2ProjectColorPlan.update({
+        where: { id: colourPlanRow.id },
+        data: colourPlanColumns(storedColourPlan),
+      }),
+    })
+
+    // (d) the reaction-vs-reference duration gate. A new map version whose
+    // reference recording is as long as the reaction: every piece still fits,
+    // the map is still resolved, and the one thing that changed is the fact
+    // criterion 4 stands for. The appended version carries a new map hash, so
+    // the plan compiled from the previous one goes stale with it — both moves
+    // are the same edit and both are pinned rather than one being waved past.
+    const mapHeadBefore = await client.v2PlaybackMapHead.findFirstOrThrow({
+      where: { workspaceId: A, sessionId: world.ids.reactSession },
+    })
+    const headMap = await playbackMaps.readHead({
+      workspaceId: A,
+      sessionId: world.ids.reactSession,
+      reactionTrackId: mapHeadBefore.reactionTrackId,
+    })
+    assert.ok(headMap, 'the world persisted no playback map head to lengthen')
+    assert.notEqual(
+      headMap.referenceMedia.durationTicks,
+      headMap.reactionMedia.durationTicks,
+      'the fixture reaction and reference are already the same length',
+    )
+    const equalDurations = createPlaybackMap({
+      mapId: headMap.mapId,
+      workspaceId: A,
+      sessionId: headMap.sessionId,
+      sessionVersion: headMap.sessionVersion,
+      referenceEpoch: headMap.referenceEpoch,
+      reactionTrackId: headMap.reactionTrackId,
+      referenceTrackId: headMap.referenceTrackId,
+      referenceMedia: {
+        ...headMap.referenceMedia,
+        durationTicks: headMap.reactionMedia.durationTicks,
+      },
+      reactionMedia: headMap.reactionMedia,
+      version: headMap.version + 1,
+      previousVersionHash: headMap.mapHash,
+      pieces: headMap.pieces,
+      uncovered: headMap.uncovered,
+      anchors: headMap.anchors,
+      supersedesMapId: headMap.supersedesMapId ?? null,
+    })
+    assert.equal(equalDurations.status, headMap.status, 'lengthening the reference changed the map status')
+    await breakAndRestore({
+      name: 'reaction-as-long-as-reference',
+      criterion: 'react-edited-with-piecewise-map',
+      checks: [
+        ['reaction-duration-differs', 'requirement-unmet'],
+        ['map-compiled-into-plan', 'evidence-stale'],
+      ],
+      apply: () => playbackMaps.appendVersion({
+        map: equalDurations,
+        occurredAt: fixtureInstant(503),
+      }),
+      expect: (report) => {
+        assert.match(
+          detailOf(report, 'react-edited-with-piecewise-map', 'reaction-duration-differs'),
+          /^reaction (\d+\.\d+)s vs reference \1s$/,
+          'the report does not show the two durations it compared',
+        )
+        // The interruptions ADR-135 names are still all three, so the criterion
+        // moved on the duration and not on a piece that went missing.
+        assert.match(
+          detailOf(report, 'react-edited-with-piecewise-map', 'interrupted-piece-present'),
+          /paused/,
+        )
+      },
+      restore: async () => {
+        await client.v2PlaybackMap.deleteMany({
+          where: { workspaceId: A, mapId: headMap.mapId, version: equalDurations.version },
+        })
+        await client.v2PlaybackMapHead.update({
+          where: { id: mapHeadBefore.id },
+          data: {
+            mapId: mapHeadBefore.mapId,
+            version: mapHeadBefore.version,
+            mapHash: mapHeadBefore.mapHash,
+            status: mapHeadBefore.status,
+            updatedAt: mapHeadBefore.updatedAt,
+          },
+        })
+      },
+    })
+
+    // The approved world says all three interruptions are present by name, so
+    // a production change that linearises the rewind is visible from here too.
+    const restoredReport = (await callRoute(NextRequest, latestRoute, {
+      method: 'GET',
+      path: `/v1/projects/${PROJECT_A}/multicam-longform-gate`,
+      params: { projectId: PROJECT_A },
+      authorization: bearerA,
+    })).payload.data.gate.report
+    const interruptions = detailOf(
+      restoredReport,
+      'react-edited-with-piecewise-map',
+      'interrupted-piece-present',
+    )
+    for (const mode of ['paused', 'replay', 'seek']) {
+      assert.match(
+        interruptions,
+        new RegExp(`\\b${mode}\\b`),
+        `the approved map no longer carries a ${mode} piece: ${interruptions}`,
+      )
+    }
+
+    // ---- 8. the older version is preserved --------------------------------
     const reread = await callRoute(NextRequest, evaluationRoute, {
       method: 'GET',
       path: `/v1/projects/${PROJECT_A}/multicam-longform-gate/evaluations/${approved.id}`,
@@ -433,7 +850,7 @@ test(
     assert.equal(
       JSON.stringify(reread.payload.data.gate),
       JSON.stringify(approved),
-      'the first approved evaluation changed after four later ones',
+      'the first approved evaluation changed after twelve later ones',
     )
 
     const history = await callRoute(NextRequest, evaluationsRoute, {
@@ -444,15 +861,26 @@ test(
     })
     assert.equal(history.status, 200, history.text)
     const gates = history.payload.data.gates
-    assert.equal(gates.length, 5, 'the history lost or invented an evaluation')
+    // Thirteen rows: the first approval, then six break/restore pairs. The
+    // five refused bodies and the foreign-workspace attempt wrote nothing.
+    const VERDICTS = [
+      true,
+      false, true, // the deleted match-plan head
+      false, true, // the tampered synthesis objective
+      false, true, // the desynchronised podcast diagnostic
+      false, true, // the single coverage row
+      false, true, // the creative LUT authored before the match
+      false, true, // the reference recording as long as the reaction
+    ]
+    assert.equal(gates.length, VERDICTS.length, 'the history lost or invented an evaluation')
     assert.deepEqual(
       gates.map((gate) => gate.report.approved),
-      [true, false, true, false, true].reverse(),
+      [...VERDICTS].reverse(),
       'the history is not newest-first, or an evaluation changed its verdict',
     )
     assert.equal(
       new Set(gates.map((gate) => gate.recordHash)).size,
-      5,
+      VERDICTS.length,
       'two evaluations share a record hash',
     )
 
@@ -464,7 +892,8 @@ test(
       authorization: bearerA,
     })
     assert.equal(latest.status, 200, latest.text)
-    assert.equal(latest.payload.data.gate.id, restoredSynthesis.payload.data.gate.id)
+    assert.equal(latest.payload.data.gate.id, gates[0].id)
+    assert.equal(latest.payload.data.gate.report.approved, true)
 
     const outstanding = await callRoute(NextRequest, outstandingRoute, {
       method: 'GET',
@@ -477,12 +906,14 @@ test(
     assert.deepEqual(outstanding.payload.data.outstanding, [])
 
     console.log(
-      `E2E-F4.016 phase gate journey: 5 evaluations through /v1 — approved ${approved.report.satisfied}/10 ` +
+      `E2E-F4.016 phase gate journey: ${gates.length} evaluations through /v1 — approved ${approved.report.satisfied}/10 ` +
       `(fingerprint ${approved.report.fingerprint.slice(0, 12)}, ${artifacts.payload.data.artifacts.length} artifacts cited), ` +
       `replay byte-identical ${JSON.stringify(replay.payload.data.gate).length} chars, ` +
       `deleted match head -> ${deletedReport.satisfied}/10 evidence-missing, ` +
       `tampered synthesis -> ${tamperedReport.satisfied}/10 evidence-unverified, ` +
-      `restored -> ${restoredSynthesis.payload.data.gate.report.satisfied}/10`,
+      `restored -> ${restoredSynthesis.payload.data.gate.report.satisfied}/10; ` +
+      '5 bodies carrying a verdict refused 422 INVALID_ARGUMENT with 0 rows written; ' +
+      `4 more conditions broken one at a time: ${conditions.join(', ')}`,
     )
   },
 )
