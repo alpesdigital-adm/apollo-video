@@ -57,8 +57,11 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    is the only route from "synchronized" to "auto-editable" today.
  * 2. `podcast-v1` requires a marker at the start and at the end; none was
  *    filmed, because minting a marker needs the session and the session cannot
- *    be created before the file it names exists. The evaluation runs last, and
- *    its `not-synchronizable` ceiling is asserted rather than skipped.
+ *    be created before the file it names exists. The evaluation runs last —
+ *    a stored one constrains every later direction — and its ceiling is
+ *    asserted rather than skipped: `manual-anchors-required`, which is one
+ *    step better than the teacher-and-screen journey's `not-synchronizable`
+ *    precisely because the manual anchors above exist by then.
  */
 
 const require = createRequire(import.meta.url)
@@ -490,60 +493,9 @@ test(
       APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'podcast-multicam-e2e-key',
       APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 11).toString('base64url'),
     }
-    /**
-     * Empty the proxy render queue, one claim at a time, and say what each one
-     * did.
-     *
-     * The queue is COUNTED before it is drained, and the count is asserted,
-     * for two reasons the first run of this journey demonstrated. `--once`
-     * claims at most one operation, so a queue holding two needs three passes
-     * — two claims and the empty one that ends it — and an unbounded loop
-     * would hide a worker that never claims anything. And `runNext` answers a
-     * literal `null` when `claimNext` finds no candidate, which is
-     * indistinguishable from "the driver could not see the queue at all"
-     * unless something independent says how many operations were waiting.
-     */
-    const queuedProxyRenders = () => prisma.v2PublicOperation.count({
-      where: { workspaceId, type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying'] } },
-    })
-    /** What the operation row says about a render that did not succeed. */
-    const renderFailure = async (operationId) => {
-      const row = await prisma.v2PublicOperation.findUnique({
-        where: { id: operationId },
-        select: { status: true, phase: true, attempt: true, errorCode: true, errorMessage: true },
-      })
-      return JSON.stringify(row)
-    }
-    const drainProxyRenders = async (expected) => {
-      const outcomes = []
-      const waiting = await queuedProxyRenders()
-      assert.equal(waiting, expected, `the queue was holding ${waiting} renders, not ${expected}`)
-      for (let pass = 0; pass <= waiting; pass += 1) {
-        const run = await helpers.runNodeScriptOnce(
-          'scripts/run-v2-render-worker-once.mjs',
-          { ...workerEnvironment, APOLLO_V2_WORKER_ONCE_KIND: 'proxy' },
-        )
-        assert.equal(run.code, 0, `render worker exited ${run.code}: ${run.stderr}`)
-        assert.ok(
-          run.stdout.includes('APOLLO_WORKER_OUTCOME='),
-          `render worker printed no outcome line: ${run.stdout}\n${run.stderr}`,
-        )
-        const outcome = helpers.outcomeLine(run.stdout, 'APOLLO_WORKER_OUTCOME=')
-        if (outcome === null) {
-          assert.equal(
-            outcomes.length, waiting,
-            `the driver claimed ${outcomes.length} of the ${waiting} renders the queue was holding`,
-          )
-          return outcomes
-        }
-        assert.equal(
-          outcome.status, 'succeeded',
-          `render ${outcome.operationId} ended ${outcome.status}: ${await renderFailure(outcome.operationId)}\n${run.stdout}\n${run.stderr}`,
-        )
-        outcomes.push(outcome)
-      }
-      throw new Error(`the proxy render queue never emptied: ${JSON.stringify(outcomes)}`)
-    }
+    /** The shared driver, bound to this journey's workspace and environment. */
+    const drainProxyRenders = (expected) =>
+      helpers.drainProxyRenders({ prisma, workspaceId, environment: workerEnvironment, expected })
 
     const drained = await helpers.runNpmScriptOnce('worker:v2:capture-sync', ['--once'], workerEnvironment)
     const syncOutcome = helpers.outcomeLine(drained.stdout, 'APOLLO_CAPTURE_SYNC_OUTCOME=')
@@ -1095,6 +1047,27 @@ test(
     // asks that no CLIP lie outside measured coverage, so the frames the
     // renderer actually decoded are checked against the same bounds the worker
     // derived — including the master recorder's, which no shot ever names.
+    // The recorder's own coverage has no published reader, and that is a
+    // finding rather than an oversight here: the worker derived coverage for
+    // all THREE tracks (`coverageDerived: 3`, asserted above), but
+    // `GET .../sync` builds its listing from sync EVIDENCE records and the
+    // reference track has none — there is nothing to synchronize it against.
+    // So the camera bounds come from `/v1`, and the recorder's are read from
+    // the projection the worker wrote. Read, not derived: the numbers are the
+    // worker's, this only fetches them from where the API does not show them.
+    const measuredCoverage = new Map()
+    for (const [trackId, entry] of syncByTrack) {
+      if (entry.coverage) measuredCoverage.set(trackId, [Number(entry.coverage.bounds.start), Number(entry.coverage.bounds.end), entry.coverage.gapTicks])
+    }
+    const masterCoverageRow = await prisma.v2CaptureTrackCoverage.findFirstOrThrow({
+      where: { workspaceId, sessionId, trackId: masterTrackId },
+    })
+    measuredCoverage.set(masterTrackId, [
+      Number(masterCoverageRow.boundsStart),
+      Number(masterCoverageRow.boundsEnd),
+      String(masterCoverageRow.gapTicks),
+    ])
+
     const trackByArtifactId = new Map([
       [cameraArtifactIds.a, cameraTrackIds.a],
       [cameraArtifactIds.b, cameraTrackIds.b],
@@ -1107,12 +1080,11 @@ test(
         ['picture', trackId, clip.sourceInFrame, clip.sourceOutFrame],
         ['sound', masterTrackId, clip.audioSourceInFrame ?? clip.sourceInFrame, clip.audioSourceOutFrame ?? clip.sourceOutFrame],
       ]) {
-        const coverage = syncByTrack.get(boundedTrackId)?.coverage
+        const coverage = measuredCoverage.get(boundedTrackId)
         assert.ok(coverage, `${boundedTrackId} has measured coverage`)
-        if (from < Number(coverage.bounds.start) || to > Number(coverage.bounds.end) || coverage.gapTicks !== '0') {
-          clipsOutsideCoverage.push(
-            `${clip.id}:${label}:${from}-${to} vs ${coverage.bounds.start}-${coverage.bounds.end} gaps=${coverage.gapTicks}`,
-          )
+        const [start, end, gapTicks] = coverage
+        if (from < start || to > end || gapTicks !== '0') {
+          clipsOutsideCoverage.push(`${clip.id}:${label}:${from}-${to} vs ${start}-${end} gaps=${gapTicks}`)
         }
       }
     }
@@ -1206,5 +1178,10 @@ test(
       `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
     assert.deepEqual(unmet, ['end-marker', 'start-marker'], 'no marker was filmed, and only that is unmet')
+    assert.equal(
+      evaluation.data.evaluation.ceiling,
+      'manual-anchors-required',
+      'the missing markers cap the session, and the anchors confirmed above are what keep it off the floor',
+    )
   },
 )

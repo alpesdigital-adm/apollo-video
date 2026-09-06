@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,6 +36,13 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   `DEFAULT_DIRECTION_POLICY.minimumShotMs` long, measured in session ticks
  *   and converted with the session's own timebase, and the direction carries no
  *   `minimum-shot-violated` warning.
+ * - **The decision reaches an MP4, and the screen is IN it.** The LUT decision
+ *   enqueues a render of the directed cut, the render worker drains it in its
+ *   own process, and the delivered file is read back with `ffprobe
+ *   -count_frames` and sampled at three instants. The teacher's room is a blue
+ *   field and the demonstration is achromatic `life`, so "the screen went to
+ *   air at 30 s and the camera came back at 60 s" is a colour measurement on
+ *   the delivered bytes rather than a row in a shot table.
  *
  * Two gaps in the shipped code are MEASURED here rather than worked around,
  * because a journey that quietly routed past them would report a product that
@@ -90,6 +97,20 @@ const HEIGHT = 180
  * against — and the reason the pair travels together is that a version number
  * alone can be reused after a failed write.
  */
+/**
+ * What ffprobe reported for both recordings, in the tokens the render path
+ * consumes. `colorMetadataFromStream` refuses anything it did not measure, so
+ * this is the shape those measurements take, not a plausible default.
+ */
+const COLOR_METADATA = Object.freeze({
+  colorSpace: 'rec709',
+  transfer: 'bt709',
+  primaries: 'bt709',
+  matrix: 'bt709',
+  range: 'limited',
+  bitDepth: 8,
+})
+
 const sessionVersionRef = (session) => `${session.sessionId}:v${session.version}`
 const diagnosticVersionRef = (diagnostic) => `${diagnostic.sessionId}:diagnostic:v${diagnostic.version}`
 
@@ -105,6 +126,8 @@ test(
     process.env.APOLLO_API_ENVIRONMENT = 'production'
 
     const { DEFAULT_DIRECTION_POLICY } = await import('../../src/v2/domain/multicam-direction.ts')
+    const { COLOR_TRANSFORM_ORDER } = await import('../../src/v2/domain/color-and-export.ts')
+    const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const sessionsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/route.ts')
     const tracksRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/tracks/route.ts')
     const protocolRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/protocol/route.ts')
@@ -116,6 +139,9 @@ test(
     const sessionRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/route.ts')
     const directionRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/direction/route.ts')
     const shotsRoute = await import('../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/direction/shots/route.ts')
+    const compilationsRoute = await import('../../src/app/v1/projects/[projectId]/color-pipeline-compilations/route.ts')
+    const lutSelectionRoute = await import('../../src/app/v1/projects/[projectId]/lut-selection/route.ts')
+    const operationRoute = await import('../../src/app/v1/operations/[operationId]/route.ts')
 
     const prisma = new PrismaClient()
     const workspaceId = 'teacher-screen-e2e-workspace'
@@ -127,13 +153,26 @@ test(
     const screenTrackId = 'track-screen-capture'
     const cameraArtifactId = 'artifact-teacher-camera'
     const screenArtifactId = 'artifact-screen-capture'
-    const at = (second) => new Date(Date.parse('2029-09-01T09:00:00.000Z') + second * 1_000)
+    // In the PAST, and load-bearing: `evaluateRenderedProxy` refuses a proxy
+    // whose completion predates the upload it was rendered from
+    // (`render-workflow.ts:221`), and the render worker stamps completion from
+    // the real clock. This journey renders, so a lesson filmed in 2029 could
+    // never be cut.
+    const at = (second) => new Date(Date.parse('2026-02-03T09:00:00.000Z') + second * 1_000)
     const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-teacher-screen-e2e-'))
     // The direction route builds an FFmpeg visual provider and a media
     // materializer from the environment, so this process needs the artifact
     // root too — not just the worker child.
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
     process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    // A lesson's worth of `/v1` calls arrives in one burst from a workspace
+    // created seconds earlier, and the request-anomaly detector compares a
+    // burst against a baseline that does not exist yet (`requestMinimum` 20
+    // with a 3x multiplier, `admit-governed-capability.ts:45-46`). Only the
+    // anomaly floor moves; `requestsPerMinute` and the quotas keep their
+    // shipped defaults, so a journey that genuinely exceeded them is still
+    // refused.
+    process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
 
     const clean = async () => {
       await prisma.v2Project.updateMany({ where: { workspaceId }, data: { currentVersionId: null } })
@@ -150,9 +189,20 @@ test(
         prisma.v2CaptureTrackCoverage, prisma.v2CaptureClockMapPiece, prisma.v2CaptureClockMap,
         prisma.v2CaptureSyncEvidence, prisma.v2CaptureSyncRun, prisma.v2CaptureSessionClock,
         prisma.v2CaptureSessionHead, prisma.v2CaptureSessionVersion,
+        prisma.v2ColorCriticProposedDelta, prisma.v2ColorCriticIssue,
+        prisma.v2ColorCriticDimensionResult, prisma.v2ColorCriticReportMeasurement,
+        prisma.v2ColorCriticReport,
+        prisma.v2ProxyReviewDecision, prisma.v2ProxyReview, prisma.v2RenderElementMap,
+        prisma.v2ProjectProxyRenderOperation,
+        prisma.v2ProjectLutSelectionHead, prisma.v2ProjectLutSelection,
         prisma.v2CommandArtifactInvalidation, prisma.v2PublicEventOutbox,
         prisma.v2EditCommand, prisma.v2ProjectVersion, prisma.v2ProjectSnapshot,
-        prisma.v2ProjectMediaAsset, prisma.v2MediaColorProbe,
+        prisma.v2ColorPipelineCompilation, prisma.v2MediaColorProbe,
+        prisma.v2ProjectMediaAsset,
+        // The render's manifest records what it was derived from, and the
+        // lineage row outlives the operation that wrote it: deleting manifests
+        // first violates `media_artifact_lineage_manifestId_workspaceId_fkey`.
+        prisma.v2MediaArtifactLineage,
         prisma.v2MediaArtifactManifest, prisma.v2MediaArtifact,
         prisma.v2Project, prisma.v2ApiCredential, prisma.v2ApiClient,
       ]) {
@@ -405,6 +455,11 @@ test(
     const workerEnvironment = {
       APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
       APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      // The render worker seals its recipe parameters before it writes a
+      // manifest; without a key it refuses to start rather than storing them
+      // in the clear.
+      APOLLO_PROTECTED_PAYLOAD_KEY_ID: 'teacher-screen-e2e-key',
+      APOLLO_PROTECTED_PAYLOAD_KEY: Buffer.alloc(32, 7).toString('base64url'),
     }
     const drained = await helpers.runNpmScriptOnce('worker:v2:capture-sync', ['--once'], workerEnvironment)
     const outcome = helpers.outcomeLine(drained.stdout, 'APOLLO_CAPTURE_SYNC_OUTCOME=')
@@ -637,6 +692,174 @@ test(
       'and the direction says so itself',
     )
 
+    // ---- claim 4: the decision becomes an MP4, and the screen is IN it ----
+    // Everything above is a decision the server recorded. This is the file the
+    // decision produced, and it is reached with two more published routes and
+    // nothing else: the colorimetry of each recording, then the LUT decision.
+    // `set-project-lut-selection` is `renderPolicy: 'full-timeline'`
+    // (`edit-command-registry.ts:109`) and its route enqueues the render, so
+    // choosing "no creative grade" is what puts the directed cut on the queue.
+    // The queue is drained by `scripts/run-v2-render-worker-once.mjs` in its
+    // own process, exactly as the sync queue was.
+    const stage = (id, kind, provider, enabled, parameters) => ({
+      id,
+      kind,
+      version: 'v1',
+      enabled,
+      output: COLOR_METADATA,
+      implementation: {
+        provider,
+        version: 'v1',
+        parameters,
+        parametersHash: calculateCanonicalHash(parameters),
+      },
+    })
+    for (const artifactId of [cameraArtifactId, screenArtifactId]) {
+      const compiled = await helpers.callRouteOk(compilationsRoute.POST, {
+        method: 'POST',
+        path: `/v1/projects/${projectId}/color-pipeline-compilations`,
+        token,
+        params: { projectId },
+        idempotencyKey: `teacher-screen-compilation-${artifactId}`,
+        body: {
+          sourceArtifactId: artifactId,
+          sourceManifestId: registered[artifactId].manifestId,
+          outputMetadata: COLOR_METADATA,
+          // Deliberately out of order. The compiled pipeline comes back ordered
+          // by `COLOR_TRANSFORM_ORDER`, so where the match sits is the domain's
+          // decision and not this request's.
+          stages: [
+            stage('creative-none', 'creative-lut', 'apollo-lut', false, { mode: 'none' }),
+            stage('output-rec709', 'output', 'ffmpeg-zscale', true, { mode: 'identity' }),
+            stage('technical-rec709', 'technical', 'ffmpeg-zscale', true, { mode: 'identity' }),
+            stage('match-bypass', 'match', 'apollo-match', false, { mode: 'bypass' }),
+          ],
+        },
+      }, [201])
+      assert.deepEqual(
+        compiled.data.compilation.pipeline.stages.map((entry) => entry.kind),
+        [...COLOR_TRANSFORM_ORDER],
+        'the compiled pipeline is ordered by the domain',
+      )
+    }
+
+    const directedVersionId = directed.data.directed.projectVersion.id
+    await helpers.callRouteOk(lutSelectionRoute.POST, {
+      method: 'POST',
+      path: `/v1/projects/${projectId}/lut-selection`,
+      token,
+      params: { projectId },
+      idempotencyKey: 'teacher-screen-lut-selection-1',
+      body: {
+        baseVersionId: directedVersionId,
+        baseHash: (await prisma.v2ProjectVersion.findUniqueOrThrow({
+          where: { id: directedVersionId },
+        })).baseHash,
+        // `none` is a decision like any other -- this lesson gets no creative
+        // grade -- and it is recorded as one rather than defaulted to.
+        selection: { mode: 'none' },
+        reason: 'Sem LUT criativa nesta aula.',
+      },
+    }, [200, 201])
+    const renderOutcomes = await helpers.drainProxyRenders({
+      prisma, workspaceId, environment: workerEnvironment, expected: 1,
+    })
+    const operationId = renderOutcomes[0].operationId
+    const operation = await helpers.callRouteOk(operationRoute.GET, {
+      path: `/v1/operations/${operationId}`,
+      token,
+      params: { operationId },
+    }, [200])
+    assert.equal(operation.data.operation.status, 'succeeded', JSON.stringify(operation.data.operation))
+
+    const outputArtifact = await prisma.v2MediaArtifact.findFirstOrThrow({
+      where: { workspaceId, id: operation.data.operation.target.id },
+    })
+    const outputPath = helpers.artifactPath(artifactRoot, outputArtifact.artifactKey)
+    const outputSha256 = helpers.sha256Of(await readFile(outputPath))
+    assert.equal(outputSha256, outputArtifact.sha256, 'the bytes on disk are the bytes the row claims')
+    assert.equal((await stat(outputPath)).size, Number(outputArtifact.byteSize))
+    const outputStreams = await helpers.probeStreams(ffprobePath, outputPath)
+    const outputVideo = outputStreams.find((stream) => stream.codec_type === 'video')
+    const outputAudio = outputStreams.find((stream) => stream.codec_type === 'audio')
+    assert.ok(outputVideo, 'the render wrote a picture')
+    assert.ok(outputAudio, 'and the lesson audio reached the output')
+    const outputFrames = Number(outputVideo.nb_read_frames)
+    const plannedFrames = rangeEndTicks - rangeStartTicks
+    assert.ok(
+      Math.abs(outputFrames - plannedFrames) <= 3,
+      `the file holds ${outputFrames} frames against the ${plannedFrames} the direction planned`,
+    )
+    assert.ok(Math.abs(Number(outputVideo.duration) - outputFrames / FPS) < 0.2)
+
+    // Three instants decoded to raw RGB, and the discriminator is a property of
+    // the fixtures rather than a threshold picked to make the run pass: the
+    // teacher's room is a blue field (0x204060) with one warm patch, so its
+    // blue channel sits far above its red; the demonstration is `life`, which
+    // is achromatic, so its channels agree. "The screen went to air" becomes a
+    // colour measurement on the delivered file rather than a row in a table.
+    const secondOf = (tick) => (tick - rangeStartTicks) / FPS
+    const beforeDemonstration = shots
+      .filter((shot) => Number(shot.sessionRange.end) <= demonstrationStartTick)
+      .sort((left, right) => Number(right.sessionRange.start) - Number(left.sessionRange.start))[0]
+    assert.ok(beforeDemonstration, 'the lesson opened on the teacher before the demonstration')
+    assert.equal(beforeDemonstration.chosen.trackId, cameraTrackId)
+    const middleOf = (shot) =>
+      secondOf((Number(shot.sessionRange.start) + Number(shot.sessionRange.end)) / 2)
+    const sampleSeconds = {
+      before: middleOf(beforeDemonstration),
+      screen: middleOf(onScreen[0]),
+      after: middleOf(afterDemonstration[0]),
+    }
+    const sampled = {}
+    for (const [label, second] of Object.entries(sampleSeconds)) {
+      sampled[label] = await helpers.meanRgbAt(ffmpegPath, outputPath, second)
+    }
+    const chroma = (pixel) => pixel.blue - pixel.red
+    for (const label of ['before', 'after']) {
+      assert.ok(
+        chroma(sampled[label]) > 25,
+        `the ${label} instant should be the teacher's blue room: r=${sampled[label].red.toFixed(1)} b=${sampled[label].blue.toFixed(1)}`,
+      )
+    }
+    assert.ok(
+      Math.abs(chroma(sampled.screen)) < 15,
+      `the demonstration instant should be the achromatic screen: r=${sampled.screen.red.toFixed(1)} b=${sampled.screen.blue.toFixed(1)}`,
+    )
+    assert.ok(
+      sampled.screen.red < 210,
+      `the demonstration instant is the busy stretch, not the still slide: ${sampled.screen.red.toFixed(1)}`,
+    )
+
+    // The file itself, kept only when a run asks for it. `t.after` removes the
+    // artifact root, so a CI run that wants to look at the MP4 afterwards has
+    // to be handed a copy while it exists. Unset locally, so nothing piles up.
+    const retentionRoot = process.env.APOLLO_TEACHER_SCREEN_OUTPUT?.trim()
+    let retainedPath = null
+    if (retentionRoot) {
+      await mkdir(retentionRoot, { recursive: true })
+      retainedPath = join(retentionRoot, 'teacher-screen-journey.mp4')
+      await copyFile(outputPath, retainedPath)
+      await writeFile(join(retentionRoot, 'manifest.json'), `${JSON.stringify({
+        schemaVersion: 'teacher-screen-journey-evidence/v1',
+        renderedThrough: 'POST /v1/projects/{projectId}/lut-selection + run-v2-render-worker-once.mjs',
+        file: 'teacher-screen-journey.mp4',
+        sha256: outputSha256,
+        byteSize: Number(outputArtifact.byteSize),
+        width: Number(outputVideo.width),
+        height: Number(outputVideo.height),
+        videoCodec: outputVideo.codec_name,
+        audioCodec: outputAudio.codec_name,
+        durationInFrames: outputFrames,
+        durationSeconds: Number(outputVideo.duration),
+        plannedFrames,
+        measuredOffsetTicks: screenOffsetTicks,
+        appliedLagSeconds: SCREEN_LAG_SECONDS,
+        sampleSeconds,
+        sampledMeanRgb: sampled,
+      }, null, 2)}\n`)
+    }
+
     // ---- gap 2, measured: what the protocol says about this session -------
     // Run last on purpose. A stored evaluation constrains every later direction
     // (`multicam-direction.ts:1171`), so evaluating first would have made this
@@ -672,7 +895,13 @@ test(
       `return=${afterDemonstration[0].chosen.trackId}@${(Number(afterDemonstration[0].sessionRange.start) / FPS).toFixed(2)}s ` +
       `shortestShot=${shortestMs.toFixed(0)}ms minimum=${DEFAULT_DIRECTION_POLICY.minimumShotMs}ms ` +
       `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')} ` +
-      `sha256=camera:${cameraBytes.sha256.slice(0, 16)} screen:${screenBytes.sha256.slice(0, 16)}`,
+      `sha256=camera:${cameraBytes.sha256.slice(0, 16)} screen:${screenBytes.sha256.slice(0, 16)} ` +
+      `render=${operation.data.operation.status} frames=${outputFrames}/${plannedFrames} ` +
+      `duration=${Number(outputVideo.duration).toFixed(3)}s ${outputVideo.width}x${outputVideo.height} ` +
+      `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputArtifact.byteSize} ` +
+      `mp4sha256=${outputSha256.slice(0, 16)} ` +
+      `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}]` +
+      `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
   },
 )

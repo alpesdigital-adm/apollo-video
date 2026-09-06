@@ -826,6 +826,60 @@ export function runNodeScriptOnce(script, environment) {
   })
 }
 
+/**
+ * Empty the proxy render queue with the real driver, one claim at a time.
+ *
+ * The queue is COUNTED first and the count is asserted, for two reasons the
+ * first execution of the podcast journey demonstrated. `--once` claims at most
+ * one operation, so a queue holding two needs three passes — two claims and the
+ * empty one that ends it — and an unbounded loop hides a driver that never
+ * claims anything at all. And `runNext` answers a literal `null` when
+ * `claimNext` finds no candidate, which `run-v2-render-worker-once.mjs`
+ * serializes verbatim: without an independent count, "the queue is empty" and
+ * "this process cannot see the queue" are the same line of output.
+ *
+ * A render that did not succeed is reported with its operation row's
+ * `errorCode`/`errorMessage` and the driver's stderr, because `safeFailure`
+ * replaces the message an operator would need with a generic one.
+ */
+export async function drainProxyRenders({ prisma, workspaceId, environment, expected }) {
+  const waiting = await prisma.v2PublicOperation.count({
+    where: { workspaceId, type: 'project-proxy-render', status: { in: ['queued', 'running', 'retrying'] } },
+  })
+  assert.equal(waiting, expected, `the queue was holding ${waiting} proxy renders, not ${expected}`)
+  const outcomes = []
+  for (let pass = 0; pass <= waiting; pass += 1) {
+    const run = await runNodeScriptOnce(
+      'scripts/run-v2-render-worker-once.mjs',
+      { ...environment, APOLLO_V2_WORKER_ONCE_KIND: 'proxy' },
+    )
+    assert.equal(run.code, 0, `render worker exited ${run.code}: ${run.stderr}`)
+    assert.ok(
+      run.stdout.includes('APOLLO_WORKER_OUTCOME='),
+      `render worker printed no outcome line: ${run.stdout}\n${run.stderr}`,
+    )
+    const outcome = outcomeLine(run.stdout, 'APOLLO_WORKER_OUTCOME=')
+    if (outcome === null) {
+      assert.equal(
+        outcomes.length, waiting,
+        `the driver claimed ${outcomes.length} of the ${waiting} renders the queue was holding`,
+      )
+      return outcomes
+    }
+    if (outcome.status !== 'succeeded') {
+      const row = await prisma.v2PublicOperation.findUnique({
+        where: { id: outcome.operationId },
+        select: { status: true, phase: true, attempt: true, errorCode: true, errorMessage: true },
+      })
+      assert.fail(
+        `render ${outcome.operationId} ended ${outcome.status}: ${JSON.stringify(row)}\n${run.stdout}\n${run.stderr}`,
+      )
+    }
+    outcomes.push(outcome)
+  }
+  throw new Error(`the proxy render queue never emptied: ${JSON.stringify(outcomes)}`)
+}
+
 /** The one JSON line a `--once` driver prints, or `null` when it printed none. */
 export function outcomeLine(stdout, prefix) {
   const line = stdout.split(/\r?\n/).find((candidate) => candidate.startsWith(prefix))
