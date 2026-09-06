@@ -289,6 +289,12 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-multicam-gate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_MULTICAM_GATE_E2E: "1"
 
+      - name: Run Wave 20 phase gate journey through the published /v1 routes
+        run: npm run test:e2e:phase-gate-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PHASE_GATE_E2E: "1"
+
       - name: Run Wave 19 capture protocol and diagnostic browser journey
         run: npm run test:e2e:sync-diagnostic-browser
         env:
