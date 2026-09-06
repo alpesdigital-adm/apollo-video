@@ -1149,7 +1149,19 @@ ${serverLogs.slice(-2_000)}`,
       buildAnswer.code, 'PLAYBACK_EVIDENCE_INSUFFICIENT',
       `the build was refused as ${buildAnswer.code} rather than for the evidence it could not find`,
     )
-    await waitForText(page, 'playback-message', /.+/, 'the refused build said nothing on screen')
+    // The sentence itself, not merely that a sentence exists: the step before
+    // this one leaves 'Âncora registrada…' in the same element, so `/.+/`
+    // would have passed whether the build was refused, succeeded, or said
+    // nothing at all. What the page shows for this refusal is the public
+    // message the server sent for PLAYBACK_EVIDENCE_INSUFFICIENT.
+    const refusalOnScreen = await waitForText(
+      page, 'playback-message', /Playback evidence insufficient/,
+      'the refused build did not tell the operator what was missing',
+    )
+    assert.ok(
+      !/Mapa construído|Âncora registrada/.test(refusalOnScreen),
+      `the screen still carried an earlier success sentence: ${JSON.stringify(refusalOnScreen)}`,
+    )
     const afterBuild = await read(
       `/v1/projects/${project}/capture-sessions/${reactSession}/playback-map?reactionTrackId=${reactor}`,
     )

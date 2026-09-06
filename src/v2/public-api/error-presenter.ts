@@ -121,14 +121,42 @@ function presentStalePair(details: Readonly<Record<string, unknown>>) {
   return Object.keys(presented).length > 0 ? presented : undefined
 }
 
+/**
+ * Which executable is missing, and what to set so it is not.
+ *
+ * `PERSISTENCE_NOT_CONFIGURED` is raised for every kind of deployment fault, so
+ * most of them carry no such details and this answers `undefined` — the
+ * envelope is then exactly what it was. The one that does carry them is the
+ * media binary resolver, and without them the operator was told only that the
+ * request could not be completed. The name of the binary and the variables that
+ * name it are neither secret nor guessable; the resolver's `searched` directory
+ * list is not published, because a path from the server's disk is not the
+ * caller's business.
+ */
+function presentMissingTool(details: Readonly<Record<string, unknown>>) {
+  const binary = typeof details.binary === 'string' && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(details.binary)
+    ? details.binary
+    : null
+  const variables = Array.isArray(details.variables)
+    ? details.variables.filter((name): name is string => typeof name === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(name))
+    : []
+  if (binary === null && variables.length === 0) return undefined
+  return {
+    ...(binary === null ? {} : { binary }),
+    ...(variables.length === 0 ? {} : { variables }),
+  }
+}
+
 export function presentPublicDomainError(error: DomainError, requestId: string) {
   const descriptor = PUBLIC_ERROR_CATALOG[error.code]
   const details =
     error.code === 'AUTH_SCOPE_REQUIRED'
       ? { requiredScope: error.details.requiredScope }
-      : STALE_PAIR_CODES.has(error.code)
-        ? presentStalePair(error.details)
-        : undefined
+      : error.code === 'PERSISTENCE_NOT_CONFIGURED'
+        ? presentMissingTool(error.details)
+        : STALE_PAIR_CODES.has(error.code)
+          ? presentStalePair(error.details)
+          : undefined
   const conflict =
     error.code === 'VERSION_CONFLICT'
       ? presentVersionConflict(error.details.conflict)

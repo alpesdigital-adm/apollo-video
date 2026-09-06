@@ -14,6 +14,8 @@ import {
 } from '../../src/v2/infrastructure/media/ffmpeg-binary.ts'
 import { resolveFfprobeBinary } from '../../src/v2/infrastructure/media/ffmpeg-sync-marker-renderer.ts'
 import { DomainError } from '../../src/v2/domain/errors.ts'
+import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
+import { PUBLIC_ERROR_CATALOG } from '../../src/v2/public-api/public-error-catalog.ts'
 
 /**
  * The defect this file guards is invisible until a production build runs.
@@ -524,6 +526,35 @@ test('with no binary anywhere the resolver refuses by name instead of guessing',
   assert.match(refusal.message, /APOLLO_V2_FFMPEG_PATH/)
   assert.deepEqual(refusal.details.searched, [join(empty, 'node_modules', 'ffmpeg-static')])
   assert.equal(refusal.details.bundled, join(empty, 'ffmpeg'))
+
+  // What the caller is actually told. The refusal used to reach the wire as 503
+  // "The request could not be completed" with retryable: true — a machine that
+  // has no ffmpeg installed inviting the caller to send the same request again
+  // — with the resolver's message and its `searched` list both dropped by the
+  // presenter. A binary that is missing stays missing.
+  const descriptor = PUBLIC_ERROR_CATALOG[refusal.code]
+  assert.equal(descriptor.status, 503)
+  assert.equal(descriptor.retryable, false, 'a fault in the deployment is still advertised as retryable')
+  assert.equal(descriptor.category, 'internal')
+  const envelope = presentPublicDomainError(refusal, 'req-ffmpeg-missing')
+  assert.equal(envelope.error.retryable, false)
+  assert.match(envelope.error.message, /not configured/i)
+  assert.deepEqual(envelope.error.details, {
+    binary: 'ffmpeg',
+    variables: ['APOLLO_V2_FFMPEG_PATH', 'FFMPEG_PATH', 'APOLLO_FFMPEG_PATH', 'FFMPEG_BIN'],
+  })
+  // And the directories the server searched stay in the server.
+  assert.equal(JSON.stringify(envelope).includes(empty), false)
+
+  // The same code raised for something that carries no such details is
+  // presented exactly as it was, so this is an addition and not a change.
+  assert.equal(
+    presentPublicDomainError(
+      new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires APOLLO_V2_RENDER_WORK_ROOT'),
+      'req-no-details',
+    ).error.details,
+    undefined,
+  )
 
   // The same absence with a fallback declared answers instead of refusing —
   // which is what keeps ffprobe's long-standing bare-name behaviour intact.

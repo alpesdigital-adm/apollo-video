@@ -164,8 +164,17 @@ test('public error catalog classifies every public code exactly once and fails c
     retryable: true,
     message: 'An external provider request could not be completed',
   })
+  // Not retryable, and said so: every raise site of this code is a fault in the
+  // deployment — a variable nobody set, a credential that is absent, an ffmpeg
+  // that is not installed — and the same request sent again is refused
+  // identically. AUTH_NOT_CONFIGURED keeps the retryable answer of the group it
+  // was split out of, so this is one code moving and not a whole class.
   assert.deepEqual(PUBLIC_ERROR_CATALOG.PERSISTENCE_NOT_CONFIGURED, {
-    code: 'PERSISTENCE_NOT_CONFIGURED', status: 503, category: 'internal', retryable: true,
+    code: 'PERSISTENCE_NOT_CONFIGURED', status: 503, category: 'internal', retryable: false,
+    message: 'The server is not configured to complete this request',
+  })
+  assert.deepEqual(PUBLIC_ERROR_CATALOG.AUTH_NOT_CONFIGURED, {
+    code: 'AUTH_NOT_CONFIGURED', status: 503, category: 'internal', retryable: true,
     message: 'The request could not be completed',
   })
   assert.deepEqual(PUBLIC_ERROR_CATALOG.INTERNAL_ERROR, {

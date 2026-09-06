@@ -251,7 +251,20 @@ export const PUBLIC_ERROR_CATALOG = definePublicErrorCatalog([
   {
     status: 503, category: 'internal', retryable: true,
     message: 'The request could not be completed',
-    codes: ['AUTH_NOT_CONFIGURED', 'PERSISTENCE_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
+    codes: ['AUTH_NOT_CONFIGURED', 'INVALID_CAPABILITY_POLICY'],
+  },
+  {
+    // Split out of the group above, and not retryable. Every raise site of this
+    // code is a fault in the deployment — an environment variable nobody set, a
+    // credential that is not there, an executable that is not installed — and
+    // none of them is fixed by sending the same request again. It used to
+    // answer `retryable: true`, so a server with no ffmpeg told every caller to
+    // come back and be refused identically. The presenter carries the name of
+    // the missing tool and the variables that would name it, when the refusal
+    // knows them.
+    status: 503, category: 'internal', retryable: false,
+    message: 'The server is not configured to complete this request',
+    codes: ['PERSISTENCE_NOT_CONFIGURED'],
   },
   {
     status: 429, category: 'quota', retryable: true,
