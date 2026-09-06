@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -782,6 +782,44 @@ test(
       `the render measured ${outputSeconds.toFixed(3)}s, which is the reference's ${referenceSeconds.toFixed(3)}s`,
     )
 
+    // The file itself, kept only when a run asks for it. The renderer's own
+    // cleanup removes the work directory in `t.after`, so a CI run that wants
+    // to look at the MP4 afterwards has to be handed a copy while it exists —
+    // the same shape `proof-mode-visual-goldens.integration.mjs` uses for its
+    // retained evidence. Unset locally, so nothing accumulates on a laptop.
+    const retentionRoot = process.env.APOLLO_REACT_PLAYBACK_JOURNEY_OUTPUT?.trim()
+    let retainedPath = null
+    if (retentionRoot) {
+      await mkdir(retentionRoot, { recursive: true })
+      retainedPath = join(retentionRoot, 'react-playback-journey.mp4')
+      await copyFile(rendered.outputPath, retainedPath)
+      await writeFile(
+        join(retentionRoot, 'manifest.json'),
+        `${JSON.stringify({
+          schemaVersion: 'react-playback-journey-evidence/v1',
+          renderedThrough: 'FfmpegEditorialProxyRenderer',
+          file: 'react-playback-journey.mp4',
+          sha256: outputSha256,
+          byteSize: rendered.byteSize,
+          width: video.width,
+          height: video.height,
+          videoCodec: video.codec_name,
+          audioCodec: audio.codec_name,
+          audioSampleRate: Number(audio.sample_rate),
+          durationInFrames: outputFrames,
+          durationSeconds: outputSeconds,
+          planFps: compiled.plan.fps,
+          planDurationFrames: compiled.plan.durationFrames,
+          clipCount: clips.length,
+          mapVersion: compiled.mapVersion,
+          planHash: compiled.planHash,
+          pieceModes: modes,
+          measuredSourceSeconds: { reference: referenceSeconds, reaction: reactionSeconds },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+    }
+
     console.log(
       `E2E-F4.015 react journey: reference ${referenceSeconds.toFixed(3)}s/${referenceProbe.streams.find((stream) => stream.codec_type === 'video').codec_name} ` +
       `vs reaction ${reactionSeconds.toFixed(3)}s (ratio ${(reactionSeconds / referenceSeconds).toFixed(2)}x); ` +
@@ -794,7 +832,8 @@ test(
       `plan ${compiled.plan.durationFrames} frames over ${clips.length} clips from ` +
       `${compiled.plan.sources.length} sources; ` +
       `MP4 ${outputFrames} frames / ${outputSeconds.toFixed(3)}s / ${video.codec_name}+${audio.codec_name} / ` +
-      `${video.width}x${video.height} / ${rendered.byteSize} bytes / sha256 ${outputSha256.slice(0, 16)}`,
+      `${video.width}x${video.height} / ${rendered.byteSize} bytes / sha256 ${outputSha256.slice(0, 16)}` +
+      `${retainedPath ? ` / retained at ${retainedPath}` : ''}`,
     )
   },
 )

@@ -276,6 +276,20 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-react-playback-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_REACT_PLAYBACK_JOURNEY_E2E: "1"
+          APOLLO_REACT_PLAYBACK_JOURNEY_OUTPUT: ${{ runner.temp }}/react-playback-journey
+
+      # The suite reads the MP4 back with ffprobe before this runs, so the
+      # upload is for a human, not for the assertion. `warn` rather than
+      # `error`: a journey that failed before the render must show its own
+      # failure, not a second one about a missing file.
+      - name: Publish the react playback journey MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-react-playback-journey-${{ github.sha }}
+          path: ${{ runner.temp }}/react-playback-journey
+          if-no-files-found: warn
+          retention-days: 14
       - name: Run Wave 20 insufficient evidence product journey against PostgreSQL
         run: npm run test:e2e:insufficient-evidence-journey
         env:
