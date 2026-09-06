@@ -55,15 +55,21 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    `DIRECTION_RANGE_UNRESOLVABLE` and names the session ranges no angle was
  *    eligible for. It stays refused when the caller sends the most permissive
  *    policy the contract will accept — the gate is not a tunable — and the
- *    same call carrying `manualReviewRequired: false` is refused by name, so
- *    the caller cannot declare the verdict either. No project version is
- *    created by any of it, and the stored direction that IS written names, per
- *    track, why every angle lost.
- * 4. **After a manual anchor posted through the API, the direction exists.**
- *    Three anchors per camera through `POST /v1/.../sync-diagnostic/anchors`,
- *    a second real worker pass that now elects `manual-anchor` and writes the
- *    clock maps, a regenerated diagnostic that no longer warns, and the same
- *    direction request that was refused now returns 201 with shots.
+ *    same call carrying `manualReviewRequired: false` is refused 422
+ *    INVALID_ARGUMENT by validation rather than by policy — the direction body
+ *    is a closed schema, so no caller-supplied verdict field is representable
+ *    at all, and an invented field earns the identical refusal. No project
+ *    version is created by any of it, and the stored direction that IS written
+ *    names, per track, why every angle lost — including the aligned recorder,
+ *    which loses as `not-a-video-source` and not for its sync.
+ * 4. **After manual anchors posted through the API, the direction exists.**
+ *    Three anchors for each of the three non-reference tracks through
+ *    `POST /v1/.../sync-diagnostic/anchors` — the diagnostic reads markers and
+ *    anchors, so even the track the audio cascade aligned by itself has nothing
+ *    to give it — a second real worker pass that elects `manual-anchor` for the
+ *    two cameras and writes their clock maps, a regenerated diagnostic that no
+ *    longer warns, and the same direction request that was refused now returns
+ *    201 with shots.
  *
  * The marker branch of "a marker or a manual anchor" is a stated omission: a
  * `reshoot-with-marker` recommendation is only derived when a capture protocol
@@ -354,7 +360,7 @@ test(
     })
     await clean()
 
-    // ---- the three recordings ---------------------------------------------
+    // ---- the four recordings ----------------------------------------------
     const captureDirectory = join(artifactRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
     const master = masterSamples()
@@ -838,7 +844,7 @@ test(
     assert.equal(invented.status, declared.status, JSON.stringify(invented.payload))
     assert.equal(invented.payload.error.code, declared.payload.error.code)
 
-    // Nothing was half-committed by any of the three.
+    // Nothing was half-committed by any of the four.
     assert.equal(
       await client.v2ProjectVersion.count({ where: { workspaceId: WORKSPACE } }),
       1,

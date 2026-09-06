@@ -17,7 +17,19 @@ jobs:
   quality:
     name: Quality and security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20 for the two Wave 20 product journeys, which encode their
+    # own fixtures and render a 60 s 960x540 h264+aac file rather than reading
+    # a committed one. Measured on a developer machine against a local
+    # PostgreSQL 16: the react playback journey ran 21.8-42.8 s over an
+    # uninterrupted N=10 (median 22.2 s) and 90.4 s once on a loaded box, and
+    # the insufficient evidence journey 20.3-22.0 s over N=3 and 88.2 s under
+    # the same load. So the honest figure is "twenty seconds each when the
+    # machine is idle, four times that when it is not", on sixteen cores. A
+    # 2-core hosted runner encodes and renders materially slower still and this
+    # repository has no CI history to calibrate against, so the cap is raised
+    # rather than the pair moved into a job that would repeat checkout,
+    # install, prisma generate and migrate for a couple of minutes of work.
+    timeout-minutes: 30
 
     env:
       CI: true

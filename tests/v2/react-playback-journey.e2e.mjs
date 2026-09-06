@@ -45,17 +45,18 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    and the reaction is twice the reference — the assumption ADR-135 exists to
  *    refuse, and the one a compiler reading the duration off the wrong file
  *    would break silently.
- * 2. The map the server derived carries play, a pause of a KNOWN length, a
+ * 2. The identity gate the resolver fails closed on is exercised NEGATIVELY,
+ *    before the happy path: with the registry row's sha256 edited underneath
+ *    the session, the same `POST` is refused 409
+ *    `MEDIA_ARTIFACT_IDENTITY_MISMATCH` and writes no map. Without that call
+ *    the gate could be deleted whole with this suite still green.
+ * 3. The map the server derived carries play, a pause of a KNOWN length, a
  *    commentary stretch with no reference range at all, a rewind and a seek —
  *    each read out of the `/v1` payload, not out of the domain object.
- * 3. The person's anchor names ONE reference instant, and the stretch that was
+ * 4. The person's anchor names ONE reference instant, and the stretch that was
  *    uncovered comes back covered AT THAT INSTANT — not merely `resolved`. An
  *    anchor read off a different frame used to shift the whole resolved piece,
  *    and a status flip cannot tell the two apart.
- * 4. The identity gate the resolver fails closed on is exercised NEGATIVELY:
- *    with the registry row's sha256 edited underneath the session, the same
- *    `POST` is refused 409 `MEDIA_ARTIFACT_IDENTITY_MISMATCH` and writes no map.
- *    Without that call the gate could be deleted with this suite still green.
  * 5. The compiled plan renders, and the MP4 is checked as FOOTAGE and not only
  *    as a container: the reaction's own audio is cross-correlated against the
  *    delivered track at three timeline instants (a plan that cut the right
@@ -636,7 +637,6 @@ test(
     })
     await new PrismaCaptureSessionRepository(client).appendVersion({ session, occurredAt: iso(1) })
 
-    // ---- claim 2: the server derives the map from the bytes ----------------
     const basePath = `http://localhost/v1/projects/${PROJECT}/capture-sessions/${SESSION}`
     const params = { projectId: PROJECT, sessionId: SESSION }
     const buildBody = {
@@ -645,7 +645,7 @@ test(
       reactionTrackId: REACTION_TRACK,
     }
 
-    // ---- the gate first, from the wrong side --------------------------------
+    // ---- claim 2: the gate, from the wrong side ----------------------------
     //
     // `CaptureMediaResolver` compares the session's recorded `ingestSha256`
     // against the registry's `sha256` and fails closed, because a detector
@@ -676,7 +676,24 @@ test(
       where: { id: reactionRecordingArtifactId },
       data: { sha256: reactionFile.sha256 },
     })
+    // The restore, verified. Everything after this line is meaningless if the
+    // registry stopped describing the files this test encoded, and a mismatch
+    // discovered at the route reads like a defect in the product when it would
+    // be a defect in the fixture — so the two are separated here, once.
+    const registered = await client.v2MediaArtifact.findMany({
+      where: { workspaceId: WORKSPACE },
+      select: { id: true, sha256: true },
+      orderBy: { id: 'asc' },
+    })
+    assert.deepEqual(
+      registered,
+      [...recordings]
+        .map((recording) => ({ id: recording.artifactId, sha256: recording.file.sha256 }))
+        .sort((left, right) => (left.id < right.id ? -1 : 1)),
+      'the artifact registry does not describe the files this journey encoded',
+    )
 
+    // ---- claim 3: the server derives the map from the bytes ----------------
     const startedAt = Date.now()
     const built = await callRoute(mapRoute.POST, `${basePath}/playback-map`, {
       method: 'POST',
@@ -781,7 +798,7 @@ test(
       )
     }
 
-    // ---- the person answers the one thing the audio could not --------------
+    // ---- claim 4: the person answers the one thing the audio could not -----
     const hidden = TRUTH.find((segment) => segment.mode === 'hidden')
     const uncoveredStart = BigInt(map.uncovered[0].range.start)
     const uncoveredEnd = BigInt(map.uncovered[0].range.end)
@@ -891,7 +908,7 @@ test(
     assert.equal(readV1.payload.data.map.mapHash, map.mapHash)
     assert.equal(readV1.payload.data.map.status, 'needs-input')
 
-    // ---- claim 3: the compiled plan renders --------------------------------
+    // ---- claim 5: the compiled plan renders and the footage is the plan's --
     //
     // The one hop with no published capability. `createReactPlaybackMapServices`
     // is the composition root a worker would use, and it is executed here
