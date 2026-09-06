@@ -84,7 +84,19 @@ function part(overrides = {}) {
   }
 }
 
-function track({ trackId, role, deviceId, assetId, coverage, syncAudioPolicy = 'sync-only', includeInFinalMix = false }) {
+/**
+ * `ingest` names the file each part was actually cut from.
+ *
+ * Optional, and absent it keeps the id and checksum every suite here has always
+ * used — a name that points at nothing, which is right for a suite that never
+ * opens a recording. A suite that reaches the media resolver needs the opposite:
+ * `LocalArtifactContentStorage` re-hashes the bytes on disk and refuses a
+ * mismatch, so an end-to-end direction has to name a real file's real sha256.
+ */
+function track({
+  trackId, role, deviceId, assetId, coverage,
+  syncAudioPolicy = 'sync-only', includeInFinalMix = false, ingest = null,
+}) {
   return {
     trackId,
     role,
@@ -94,7 +106,22 @@ function track({ trackId, role, deviceId, assetId, coverage, syncAudioPolicy = '
     streamIndex: 0,
     syncAudioPolicy,
     includeInFinalMix,
-    parts: [part({ partId: `part-${trackId}`, sourceAssetId: assetId, coverage })],
+    parts: [part({
+      partId: `part-${trackId}`,
+      sourceAssetId: assetId,
+      coverage,
+      ...(ingest
+        ? {
+          evidence: {
+            ingestArtifactId: ingest.artifactId,
+            ingestSha256: ingest.sha256,
+            probeHash: sha('b'),
+            probeSource: 'packet-scan',
+            observedAt: at(0),
+          },
+        }
+        : {}),
+    })],
   }
 }
 
@@ -689,6 +716,7 @@ export function buildDirectableMulticamWorld({
   cameraBOffsetSeconds = 0,
   trackPrefix = '',
   restart = null,
+  ingest = null,
 }) {
   const id = (name) => `${trackPrefix}${name}`
   const span = createTickInterval(tick(0), sec(endSecond))
@@ -701,6 +729,7 @@ export function buildDirectableMulticamWorld({
     coverage: span,
     syncAudioPolicy: 'final-candidate',
     includeInFinalMix: true,
+    ingest,
   })
   // The restarted track's FIRST file stops early; the second is appended below
   // through the aggregate, so the split reason and the version chain are the
@@ -708,11 +737,11 @@ export function buildDirectableMulticamWorld({
   const firstSpan = (trackId, whole) => (restart && restart.trackId === trackId
     ? createTickInterval(tick(0), sec(restart.stopSecond))
     : whole)
-  const cameraA = track({ trackId: id('track-camera-a'), role: 'camera-main', deviceId: 'dev-a', assetId: id('asset-cam-a'), coverage: firstSpan(id('track-camera-a'), pictureSpan) })
-  const cameraB = track({ trackId: id('track-camera-b'), role: 'camera-main', deviceId: 'dev-b', assetId: id('asset-cam-b'), coverage: firstSpan(id('track-camera-b'), pictureSpan) })
-  const screen = track({ trackId: id('track-screen'), role: 'screen', deviceId: 'dev-screen', assetId: id('asset-screen'), coverage: firstSpan(id('track-screen'), pictureSpan) })
-  const micA = track({ trackId: id('track-mic-a'), role: 'microphone', deviceId: 'dev-a', assetId: id('asset-mic-a'), coverage: firstSpan(id('track-mic-a'), span) })
-  const micB = track({ trackId: id('track-mic-b'), role: 'microphone', deviceId: 'dev-b', assetId: id('asset-mic-b'), coverage: firstSpan(id('track-mic-b'), span) })
+  const cameraA = track({ trackId: id('track-camera-a'), role: 'camera-main', deviceId: 'dev-a', assetId: id('asset-cam-a'), coverage: firstSpan(id('track-camera-a'), pictureSpan), ingest })
+  const cameraB = track({ trackId: id('track-camera-b'), role: 'camera-main', deviceId: 'dev-b', assetId: id('asset-cam-b'), coverage: firstSpan(id('track-camera-b'), pictureSpan), ingest })
+  const screen = track({ trackId: id('track-screen'), role: 'screen', deviceId: 'dev-screen', assetId: id('asset-screen'), coverage: firstSpan(id('track-screen'), pictureSpan), ingest })
+  const micA = track({ trackId: id('track-mic-a'), role: 'microphone', deviceId: 'dev-a', assetId: id('asset-mic-a'), coverage: firstSpan(id('track-mic-a'), span), ingest })
+  const micB = track({ trackId: id('track-mic-b'), role: 'microphone', deviceId: 'dev-b', assetId: id('asset-mic-b'), coverage: firstSpan(id('track-mic-b'), span), ingest })
 
   let session = createCaptureSession({
     workspaceId,

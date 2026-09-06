@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import net from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -98,6 +100,12 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const reactSessionId = `w20-ui-react-${suffix}`
   const projectVersionId = `w20-ui-version-${suffix}`
   const reportId = `w20-ui-report-${suffix}`
+  // Track and asset ids are prefixed per run. `media_artifacts.id` is unique
+  // across the whole database rather than per workspace, so two runs of this
+  // suite against one cluster — or one run that was killed before its cleanup —
+  // collide on `asset-cam-a` and the second one cannot even seed.
+  const trackPrefix = `w20-${suffix}-`
+  const masterCameraAssetId = `${trackPrefix}asset-cam-a`
   const uiUsername = `w20-ui-user-${suffix}`
   const uiPassword = `Wave20-Operator-${suffix}-secure`
   const createdAt = new Date('2029-08-01T09:00:00.000Z')
@@ -105,6 +113,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
   const sec = fixtures.fixtureSeconds
   const instant = fixtures.fixtureInstant
   const sha = fixtures.fixtureSha
+  // A scratch artifact root for the server, removed in `finally`: the commands
+  // need one to exist, and the suite is not allowed to leave it behind.
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'apollo-w20-ui-'))
   let server
   let browser
 
@@ -187,18 +198,18 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // is enabled instead of asserting what it does.
     const desiredActionRef = createDesiredActionReference(createDesiredAction({ objective: 'discovery' }))
     const baseClips = [{
-      id: 'clip-base-0001', sourceArtifactId: 'asset-cam-a',
+      id: 'clip-base-0001', sourceArtifactId: masterCameraAssetId,
       sourceInFrame: 0, sourceOutFrame: 9_000, timelineInFrame: 0, timelineOutFrame: 9_000, rate: 1,
     }]
     const basePlan = {
       schemaVersion: 2, state: 'compiled', id: `edit-plan-${projectVersionId}`, projectVersionId,
       storyPlanId: 'story-w20-ui', treatmentPlanId: 'treatment-w20-ui', directorRunId: 'director-run-w20-ui',
       fps: 30, durationFrames: 9_000,
-      sources: [{ id: 'asset-cam-a', artifactId: 'asset-cam-a', kind: 'video', durationSeconds: 300 }],
+      sources: [{ id: masterCameraAssetId, artifactId: masterCameraAssetId, kind: 'video', durationSeconds: 300 }],
       videoTracks: [{ id: 'track-primary-video', kind: 'base-video', clips: baseClips }],
       overlayTracks: [], subtitleTracks: [], audioTracks: [], effectTracks: [], transitions: [],
       markers: [], protectedElements: [], localeVariantRefs: [], formatVariantRefs: [],
-      lineageRefs: ['asset-cam-a'],
+      lineageRefs: [masterCameraAssetId],
       editorial: { commandType: 'source-ingest', exclusions: [], retainedSourceRanges: [] },
       retimedTranscript: { sourceTranscriptId: 'transcript-w20-ui', words: [] },
       movementPolicy: { automaticZoom: false, protectedOpeningFrames: 120 },
@@ -244,8 +255,52 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     })
 
     // ---- F4.012: a session directed past the end of both cameras ----------
+    // A real recording, because the direction command really opens one. Its
+    // evidence sweep resolves every video part through
+    // `LocalArtifactContentStorage`, which re-hashes the bytes on disk and
+    // refuses a mismatch — so a part naming a file that does not exist is
+    // exactly where an end-to-end direction stops, and the id and checksum the
+    // fixture uses by default name nothing.
+    //
+    // One clip serves every part: 64×64 at five frames a second, small enough
+    // that thirty decodes cost seconds, three hundred seconds long so it spans
+    // the coverage the parts claim, and with real motion, which is what the
+    // screen-activity measurement needs in order to measure anything at all.
+    //
+    // It carries a sound as well as a picture, and that is not decoration. The
+    // same clip backs the microphone parts, and the direction measures those
+    // with `-map 0:a:0`; against a video-only file ffmpeg answers "Stream map
+    // '0:a:0' matches no streams" and exits 127, which the provider reports as
+    // RENDER_EXECUTION_FAILED — a 422 whose only real cause was a fixture with
+    // no audio in it. A sine is enough: the loudness sweep needs a stream it
+    // can measure, not speech.
+    const ffmpegPath = (await import('ffmpeg-static')).default
+    const ingestArtifactId = `${trackPrefix}ingest`
+    const ingestKey = `artifacts/${ingestArtifactId}.mp4`
+    const ingestPath = join(artifactRoot, 'artifacts', `${ingestArtifactId}.mp4`)
+    mkdirSync(join(artifactRoot, 'artifacts'), { recursive: true })
+    execFileSync(ffmpegPath, [
+      '-y', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'testsrc=size=64x64:rate=5:duration=300',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      ingestPath,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    const ingest = {
+      artifactId: ingestArtifactId,
+      sha256: createHash('sha256').update(readFileSync(ingestPath)).digest('hex'),
+    }
+    await client.v2MediaArtifact.create({
+      data: {
+        id: ingestArtifactId, workspaceId, artifactKey: ingestKey,
+        sha256: ingest.sha256, byteSize: BigInt(statSync(ingestPath).size),
+        mediaType: 'video', container: 'mp4', status: 'available', createdAt,
+      },
+    })
+
     const sessions = new PrismaCaptureSessionRepository(client)
-    const world = fixtures.buildDirectableMulticamWorld({ workspaceId, sessionId, projectId })
+    const world = fixtures.buildDirectableMulticamWorld({
+      workspaceId, sessionId, projectId, trackPrefix, ingest,
+    })
     // Every recording the direction may cut has to be a linked, available
     // project asset with a probed cadence, or the command refuses before it
     // reaches the domain. The reads above need none of this; the command does.
@@ -273,8 +328,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       })
       await client.v2ProjectMediaAsset.create({
         data: {
-          id: `w20-ui-asset-${artifactId}`, workspaceId, projectId, artifactId,
-          role: artifactId === 'asset-cam-a' ? 'source-master' : 'selected-insert',
+          // A UUID column, not a readable id: the row is keyed by one.
+          id: randomUUID(), workspaceId, projectId, artifactId,
+          role: artifactId === masterCameraAssetId ? 'source-master' : 'selected-insert',
           originalFileName: `${artifactId}.mp4`, createdAt,
         },
       })
@@ -318,9 +374,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const evidence = createMulticamEvidenceSet({
       session: world.session,
       observations: [
-        speaks('track-mic-a', 1, 120),
-        speaks('track-mic-b', 120, 250),
-        speaks('track-mic-a', 250, 300),
+        speaks(`${trackPrefix}track-mic-a`, 1, 120),
+        speaks(`${trackPrefix}track-mic-b`, 120, 250),
+        speaks(`${trackPrefix}track-mic-a`, 250, 300),
       ],
       generatedAt: instant(130),
     })
@@ -405,6 +461,26 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
         NODE_ENV: 'production',
         __NEXT_PROCESSED_ENV: 'true',
         APOLLO_API_ENVIRONMENT: 'production',
+        // The write factories are composition roots: they build their media
+        // resolver before any handler runs, so without an artifact root the
+        // playback and colour commands answer 503 PERSISTENCE_NOT_CONFIGURED
+        // and never reach the domain at all. The reads do not need it, which is
+        // why a suite that only read never had to say so.
+        APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
+        APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+        APOLLO_V2_RENDER_WORK_ROOT: join(artifactRoot, 'work'),
+        // Where ffmpeg actually is, said out loud, because a production build
+        // cannot work it out. `ffmpeg-static` resolves its binary as
+        // `path.join(__dirname, 'ffmpeg.exe')`, and webpack rewrites
+        // `__dirname` to the chunk's own folder — so inside `next start` the
+        // module points at `.next/server/chunks/ffmpeg.exe`, which does not
+        // exist. Every ffmpeg provider then fails to spawn and the direction
+        // answers 422 RENDER_EXECUTION_FAILED, with nothing on the wire saying
+        // the binary was simply not there. `FFMPEG_BIN` is ffmpeg-static's own
+        // override, so this repairs the resolution itself rather than patching
+        // one provider; a deployment has to set this or APOLLO_V2_FFMPEG_PATH
+        // for the same reason.
+        FFMPEG_BIN: ffmpegPath,
         // Without these the login page resolves to 'unavailable' and renders no
         // password form: the system fails closed when no auth mode is declared,
         // which is correct, and which a test has to opt into.
@@ -427,7 +503,11 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // rendering failure rather than an ambiguous one.
     const authorization = `Bearer ${issued.token}`
     const read = async (path) => {
-      const response = await fetch(`${baseUrl}${path}`, { headers: { authorization } })
+      // With a deadline: an unbounded fetch turns a server that stopped
+      // answering into a suite that never finishes.
+      const response = await fetch(`${baseUrl}${path}`, {
+        headers: { authorization }, signal: AbortSignal.timeout(30_000),
+      })
       const payload = await response.json()
       assert.equal(
         response.status, 200,
@@ -506,10 +586,22 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const { chromium } = await import('playwright-core')
     browser = await chromium.launch({ executablePath, headless: true })
     const context = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
+    // Bounded on purpose. A journey that drives six commands has many places to
+    // wait, and a CI job that hangs says less than one that fails: the default
+    // is generous enough for a production build on a cold cache and short
+    // enough that the phase markers below still name where it stopped.
+    context.setDefaultTimeout(20_000)
+    context.setDefaultNavigationTimeout(20_000)
     const page = await context.newPage()
 
     const linkTo = (route, id) =>
       `${baseUrl}${route}?projeto=${encodeURIComponent(projectId)}&sessao=${encodeURIComponent(id)}`
+
+    // Phases, with the clock. A browser journey that drives six commands takes
+    // minutes; without this, a run that stalls is indistinguishable from a run
+    // that is working, and the CI log says nothing about which step cost what.
+    const startedAt = Date.now()
+    const mark = (phase) => console.log(`w20-browser ${String(Date.now() - startedAt).padStart(7)} ms  ${phase}`)
 
     /**
      * Every command body this page puts on the wire, as the running page built
@@ -520,49 +612,112 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
      * would still get a 201 whenever the two happened to agree, and a suite
      * that watched only the status would never see it.
      */
-    const postsFrom = (target) => {
-      const entries = []
+    /**
+     * Every command this page put on the wire, and every answer it got back.
+     *
+     * The request matters because a fence is only a fence if the page did not
+     * choose it: a page that quietly read `baseVersionId` off the query string
+     * would still get a 201 whenever the two agreed, and a suite watching only
+     * the outcome would never see it.
+     *
+     * The answer matters because these pages clear their own message the moment
+     * they reload — `load()` starts with `setMessage(null)` — so the sentence a
+     * success puts on screen is gone a few hundred milliseconds later. Waiting
+     * for it would be racing the reload the click itself triggered. The durable
+     * facts are the status the server returned, the code inside a refusal, and
+     * what the API says afterwards; those are what this suite asserts.
+     */
+    const channelFor = (target) => {
+      const channel = { requests: [], answers: [] }
       target.on('request', (request) => {
         if (request.method() !== 'POST') return
         let body = null
         try { body = request.postDataJSON() } catch { body = null }
-        entries.push({ url: request.url(), body })
+        channel.requests.push({ url: request.url(), body })
       })
-      return entries
+      target.on('response', (response) => {
+        if (response.request().method() !== 'POST') return
+        const url = response.url()
+        const status = response.status()
+        void response.text()
+          .then((text) => channel.answers.push({ url, status, text }))
+          .catch(() => channel.answers.push({ url, status, text: '' }))
+      })
+      return channel
     }
-    const posted = postsFrom(page)
+    const operator = channelFor(page)
+
+    const endsWith = (url, path) => url.split('?')[0].endsWith(path)
 
     /** The next POST to `path` after `from`, waited for rather than assumed. */
-    const waitForPost = async (entries, path, from) => {
-      for (let attempt = 0; attempt < 240; attempt += 1) {
-        const entry = entries.slice(from).find((item) => item.url.split('?')[0].endsWith(path))
+    const waitForPost = async (channel, path, from) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const entry = channel.requests.slice(from).find((item) => endsWith(item.url, path))
         if (entry) return entry
-        await new Promise((resolve) => setTimeout(resolve, 125))
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
       assert.fail(`no POST reached ${path}`)
     }
 
-    /** Wait until the screen actually says it, and hand back what it said. */
-    const waitForText = async (target, testId, pattern, what) => {
-      for (let attempt = 0; attempt < 240; attempt += 1) {
-        const shown = (await target.getByTestId(testId).textContent().catch(() => null))?.trim() ?? ''
-        if (pattern.test(shown)) return shown
-        await new Promise((resolve) => setTimeout(resolve, 125))
+    /**
+     * The answer to that POST, with its status and its envelope.
+     *
+     * `code` is the discriminator the pages branch on, so a suite that asserts
+     * a page's remedy has to know which refusal actually arrived — and a public
+     * error message is deliberately uninformative, which is why the envelope is
+     * read rather than the sentence on screen.
+     */
+    const waitForAnswer = async (channel, path, from, what) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const entry = channel.answers.slice(from).find((item) => endsWith(item.url, path))
+        if (entry) {
+          let parsed = null
+          try { parsed = JSON.parse(entry.text) } catch { parsed = null }
+          return { ...entry, code: parsed?.error?.code ?? null, data: parsed?.data ?? null }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
-      const shown = (await target.getByTestId(testId).textContent().catch(() => null))?.trim() ?? ''
-      assert.fail(`${what}; the screen said ${JSON.stringify(shown)}`)
+      assert.fail(`${what}: no answer to POST ${path}\n${serverLogs.slice(-2_000)}`)
+    }
+
+    /**
+     * What a live region says, without waiting for it to exist.
+     *
+     * `textContent()` on an absent element waits out the whole default timeout,
+     * so a poll built on it costs the timeout times the attempt count — which is
+     * how a loop that looked bounded at thirty seconds became an eighty-minute
+     * hang the first time a message was cleared before it was read.
+     */
+    const shownText = async (target, testId) => {
+      const locator = target.getByTestId(testId)
+      if (await locator.count() === 0) return ''
+      return (await locator.first().textContent())?.trim() ?? ''
+    }
+
+    /** Wait until the screen says it. Only for messages a reload does not clear. */
+    const waitForText = async (target, testId, pattern, what) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const shown = await shownText(target, testId)
+        if (pattern.test(shown)) return shown
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert.fail(
+        `${what}; the screen said ${JSON.stringify(await shownText(target, testId))}\n`
+        + serverLogs.slice(-2_000),
+      )
     }
 
     const waitForAttribute = async (target, testId, name, expected, what) => {
-      for (let attempt = 0; attempt < 240; attempt += 1) {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
         const value = await target.getByTestId(testId).getAttribute(name).catch(() => null)
         if (value === expected) return
-        await new Promise((resolve) => setTimeout(resolve, 125))
+        await new Promise((resolve) => setTimeout(resolve, 100))
       }
       const value = await target.getByTestId(testId).getAttribute(name).catch(() => null)
       assert.fail(`${what}; it was ${JSON.stringify(value)} and not ${JSON.stringify(expected)}`)
     }
 
+    mark('login')
     await page.goto(`${baseUrl}/login?next=${encodeURIComponent('/capture-sessions')}`)
     await page.locator('input[name="username"]').fill(uiUsername)
     await page.locator('input[name="password"]').fill(uiPassword)
@@ -601,6 +756,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       )
     }
 
+    mark('capture-sessions links')
     // ---- the direction page ---------------------------------------------
     await page.goto(linkTo('/multicam-direction', sessionId))
     await page.getByTestId('direction-summary').waitFor({ state: 'visible' })
@@ -646,6 +802,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       )
     }
 
+    mark('direction page read')
     // ---- the colour page -------------------------------------------------
     await page.goto(linkTo('/color-match', sessionId))
     await page.getByTestId('match-plan').waitFor({ state: 'visible' })
@@ -695,6 +852,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       )
     }
 
+    mark('colour page read')
     // ---- the two colour commands, as requests ----------------------------
     // Neither of these can be driven to a 201 on this fixture: both write a
     // ColorPlan, and that write needs one unambiguous trusted colour
@@ -704,9 +862,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // send. The outcome is deliberately not asserted, because this suite cannot
     // honestly produce one.
     await page.getByTestId('reference-camera').fill(matchRead.plan.referenceCameraId)
-    const fromDerive = posted.length
+    const fromDerive = operator.requests.length
     await page.getByTestId('derive-match').click()
-    const derived = await waitForPost(posted, '/color-match', fromDerive)
+    const derived = await waitForPost(operator, '/color-match', fromDerive)
     assert.equal(derived.body.referenceCameraId, matchRead.plan.referenceCameraId)
     assert.equal(
       derived.body.baseVersionId, `${sessionId}:v${world.session.version}`,
@@ -714,7 +872,8 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     )
     assert.equal(derived.body.projectBaseVersionId, projectVersionId)
     assert.equal(derived.body.projectBaseHash, sha('2'))
-    await waitForText(page, 'color-message', /\S/, 'the derivation command produced no answer at all')
+    const deriveAnswer = await waitForAnswer(operator, '/color-match', fromDerive, 'the derivation')
+    assert.ok(deriveAnswer.status > 0, 'the derivation command was never answered')
 
     // The scope the page could not carry at all until now: an override without
     // a range grades the whole camera, and the copy used to promise otherwise.
@@ -723,9 +882,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId('override-range-start').fill('90000')
     await page.getByTestId('override-range-end').fill('180000')
     await page.getByTestId('override-reason').fill('a produção quis esta câmera mais quente só neste trecho')
-    const fromOverride = posted.length
+    const fromOverride = operator.requests.length
     await page.getByTestId('apply-override').click()
-    const override = await waitForPost(posted, '/color-match/overrides', fromOverride)
+    const override = await waitForPost(operator, '/color-match/overrides', fromOverride)
     assert.deepEqual(
       override.body.override.range, { start: '90000', end: '180000' },
       'the trecho the operator typed never reached the request, so the correction graded the whole camera',
@@ -737,27 +896,34 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     )
     assert.equal(override.body.baseHash, matchRead.plan.planHash)
     assert.equal(override.body.projectBaseVersionId, projectVersionId)
-    const overrideAnswer = await waitForText(page, 'color-message', /\S/, 'the override command produced no answer at all')
-    if (/Correção local aplicada/.test(overrideAnswer)) {
-      assert.match(
-        overrideAnswer, /entre 90000 e 180000/,
-        'the page reported a scope other than the one it sent',
+    const overrideAnswer = await waitForAnswer(operator, '/color-match/overrides', fromOverride, 'the override')
+    if (overrideAnswer.status < 400) {
+      // If it ever does land on this fixture, the scope has to be in the plan
+      // the API hands back — not only in the request that carried it.
+      const amended = await read(`/v1/projects/${project}/capture-sessions/${session}/color-match`)
+      const scoped = amended.plan.rangeOverrides.find((entry) => entry.overrideId === override.body.override.overrideId)
+      assert.ok(scoped, 'the override was accepted and the plan does not carry it')
+      assert.deepEqual(
+        scoped.range, { start: '90000', end: '180000' },
+        'the override was accepted and the plan says it covers the whole camera',
       )
     }
 
-    // Half a range is refused on screen rather than shipped as a 400.
+    // Half a range is refused on screen rather than shipped as a 400. The
+    // message stays up because the page never got as far as reloading.
     await page.getByTestId('override-range-end').fill('')
-    const fromHalf = posted.length
+    const fromHalf = operator.requests.length
     await page.getByTestId('apply-override').click()
     await waitForText(
       page, 'color-message', /Preencha os dois instantes/,
       'half a range was accepted by the screen',
     )
     assert.equal(
-      posted.slice(fromHalf).filter((entry) => entry.url.endsWith('/overrides')).length, 0,
+      operator.requests.slice(fromHalf).filter((entry) => entry.url.endsWith('/overrides')).length, 0,
       'half a range was put on the wire',
     )
 
+    mark('colour commands')
     // ---- the playback page ----------------------------------------------
     await page.goto(linkTo('/playback-map', reactSessionId))
     await page.getByTestId('playback-summary').waitFor({ state: 'visible' })
@@ -801,6 +967,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId('uncovered-0').waitFor({ state: 'visible' })
     await page.getByTestId('anchor-editor').waitFor({ state: 'visible' })
 
+    mark('playback page read')
     // ---- the anchor command, end to end ----------------------------------
     // The button being enabled was the whole of the old assertion, which proves
     // nothing about the anchor. An anchor answers one stretch nobody could
@@ -811,9 +978,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId('answer-0').click()
     await page.getByTestId('anchor-mode').selectOption('commentary-only')
     await page.getByTestId('anchor-note').fill('o reator falou por cima com o vídeo parado')
-    const fromAnchor = posted.length
+    const fromAnchor = operator.requests.length
     await page.getByTestId('add-anchor').click()
-    const anchorRequest = await waitForPost(posted, '/playback-map/anchors', fromAnchor)
+    const anchorRequest = await waitForPost(operator, '/playback-map/anchors', fromAnchor)
     assert.equal(
       anchorRequest.body.baseVersionId, pieceListing.versionRef,
       'the anchor named a map fence the page did not read',
@@ -828,7 +995,11 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       'an absent reference instant has to be sent as null, not omitted',
     )
     assert.equal(anchorRequest.body.anchor.mode, 'commentary-only')
-    await waitForText(page, 'playback-message', /Âncora registrada/, 'the anchor command was refused')
+    const anchorAnswer = await waitForAnswer(operator, '/playback-map/anchors', fromAnchor, 'the anchor')
+    assert.equal(
+      anchorAnswer.status, 201,
+      `the anchor command was refused: ${anchorAnswer.status} ${anchorAnswer.code ?? ''} ${anchorAnswer.text.slice(0, 300)}`,
+    )
 
     const anchored = await read(
       `/v1/projects/${project}/capture-sessions/${reactSession}/playback-map?reactionTrackId=${reactor}`,
@@ -850,6 +1021,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // And the screen followed the write rather than only reporting it.
     await page.getByTestId(`anchor-${manualAnchor.anchorId}`).waitFor({ state: 'visible' })
 
+    mark('anchor command')
     // Cross navigation: each page carries its siblings, because the shell will
     // not carry them.
     for (const testId of ['link-capture-sessions', 'link-multicam-direction', 'link-color-match', 'link-sync-diagnostic']) {
@@ -881,6 +1053,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       }
     }
 
+    mark('cross navigation')
     // ---- the two direction commands, end to end --------------------------
     // Last, because directing advances the project version and the colour
     // verdicts above are listed against the version that was current when they
@@ -891,7 +1064,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // stale version and the repeated request — are both reachable only from
     // there. They arrive as the same 409 and need different answers.
     const stalePage = await context.newPage()
-    const stalePosted = postsFrom(stalePage)
+    const stale = channelFor(stalePage)
     await stalePage.goto(linkTo('/multicam-direction', sessionId))
     await stalePage.getByTestId('direction-summary').waitFor({ state: 'visible' })
 
@@ -899,9 +1072,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId('direction-summary').waitFor({ state: 'visible' })
     assert.equal(await page.getByTestId('direction-summary').getAttribute('data-version'), '1')
 
-    const fromDirect = posted.length
+    const fromDirect = operator.requests.length
     await page.getByTestId('run-direction').click()
-    const directRequest = await waitForPost(posted, '/direction', fromDirect)
+    const directRequest = await waitForPost(operator, '/direction', fromDirect)
     assert.equal(
       directRequest.body.baseVersionId, projectVersionId,
       'the direction named a project version the page did not read',
@@ -911,7 +1084,13 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       'the direction named a base hash the page did not read',
     )
     assert.deepEqual(directRequest.body.format, { aspectRatio: '16:9' })
-    await waitForText(page, 'direction-message', /Sessão dirigida/, 'the direction command was refused')
+    const directAnswer = await waitForAnswer(operator, '/direction', fromDirect, 'the direction')
+    assert.equal(
+      directAnswer.status, 201,
+      `the direction command was refused: ${directAnswer.status} ${directAnswer.code ?? ''} `
+      + `${directAnswer.text.slice(0, 400)}\n${serverLogs.slice(-3_000)}`,
+    )
+    assert.equal(directAnswer.data.replayed, false, 'a first cut was reported as a replay')
 
     await waitForAttribute(
       page, 'direction-summary', 'data-version', '2',
@@ -930,12 +1109,18 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // A stale fence. A different format gives this page a different idempotency
     // key, so what it meets is the version check rather than the stored answer.
     await stalePage.getByTestId('aspect-ratio').selectOption('9:16')
-    const fromStale = stalePosted.length
+    const fromStale = stale.requests.length
     await stalePage.getByTestId('run-direction').click()
-    const staleRequest = await waitForPost(stalePosted, '/direction', fromStale)
+    const staleRequest = await waitForPost(stale, '/direction', fromStale)
     assert.equal(
       staleRequest.body.baseVersionId, projectVersionId,
       'the stale page sent a fence it never read',
+    )
+    const staleAnswer = await waitForAnswer(stale, '/direction', fromStale, 'the stale direction')
+    assert.equal(staleAnswer.status, 409, 'a superseded project version was not refused')
+    assert.equal(
+      staleAnswer.code, 'VERSION_CONFLICT',
+      `the stale fence produced ${staleAnswer.code} rather than a version conflict`,
     )
     await waitForText(
       stalePage, 'direction-message', /Recarregue antes de dirigir/,
@@ -952,13 +1137,22 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // the exact payload the other one sent, so the server hands back the answer
     // it already gave instead of cutting the session a second time.
     await stalePage.getByTestId('aspect-ratio').selectOption('16:9')
-    const fromReplay = stalePosted.length
+    const fromReplay = stale.requests.length
     await stalePage.getByTestId('run-direction').click()
-    await waitForPost(stalePosted, '/direction', fromReplay)
-    await waitForText(
-      stalePage, 'direction-message', /nada foi cortado de novo/,
-      'the repeated direction was not replayed',
+    const replayRequest = await waitForPost(stale, '/direction', fromReplay)
+    assert.deepEqual(
+      replayRequest.body, directRequest.body,
+      'the repeat was not the same request, so a replay would prove nothing',
     )
+    const replayAnswer = await waitForAnswer(stale, '/direction', fromReplay, 'the repeated direction')
+    // 200 and `replayed: true`, not 201: the server handed back the answer it
+    // already gave. The message the page shows for this is cleared by the
+    // reload that follows it, so the status is what is asserted.
+    assert.equal(
+      replayAnswer.status, 200,
+      `the repeated direction was answered ${replayAnswer.status} rather than replayed`,
+    )
+    assert.equal(replayAnswer.data.replayed, true, 'the repeated direction cut the session again')
     const afterReplay = await read(`/v1/projects/${project}/workspace`)
     assert.equal(
       afterReplay.version.id, advanced.version.id,
@@ -975,9 +1169,9 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     await page.getByTestId('protect-shot').selectOption({ index: 1 })
     const protectedShot = await page.getByTestId('protect-shot').inputValue()
     await page.getByTestId('protect-note').fill('a produção quer este ângulo neste plano')
-    const fromProtect = posted.length
+    const fromProtect = operator.requests.length
     await page.getByTestId('submit-protect').click()
-    const protectRequest = await waitForPost(posted, '/direction/protected-selections', fromProtect)
+    const protectRequest = await waitForPost(operator, '/direction/protected-selections', fromProtect)
     assert.equal(
       protectRequest.body.baseVersionId, advanced.version.id,
       'the protected selection named a project version the page did not read',
@@ -988,7 +1182,13 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       protectRequest.body.protectedSelections[0].note, 'a produção quer este ângulo neste plano',
       'the operator\'s own words did not reach the request',
     )
-    await waitForText(page, 'direction-message', /Seleção protegida/, 'the protected selection was refused')
+    const protectAnswer = await waitForAnswer(
+      operator, '/direction/protected-selections', fromProtect, 'the protected selection',
+    )
+    assert.equal(
+      protectAnswer.status, 201,
+      `the protected selection was refused: ${protectAnswer.status} ${protectAnswer.code ?? ''} ${protectAnswer.text.slice(0, 400)}`,
+    )
 
     // The same key with different words. `protect-<shot>-<projectVersion>` does
     // not carry the note, so this collides with the request above on purpose —
@@ -996,7 +1196,16 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     // "the project moved, reload", which sends the operator round a loop.
     await stalePage.getByTestId('protect-shot').selectOption(protectedShot)
     await stalePage.getByTestId('protect-note').fill('outro motivo, inteiramente diferente')
+    const fromRepeat = stale.requests.length
     await stalePage.getByTestId('submit-protect').click()
+    const repeatAnswer = await waitForAnswer(
+      stale, '/direction/protected-selections', fromRepeat, 'the repeated protected selection',
+    )
+    assert.equal(repeatAnswer.status, 409, 'the same key with a different body was not refused')
+    assert.equal(
+      repeatAnswer.code, 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      `the repeat produced ${repeatAnswer.code} rather than a payload mismatch`,
+    )
     await waitForText(
       stalePage, 'direction-message', /já foi enviado com outro conteúdo/,
       'a repeated request with a different body was reported as a stale project version',
@@ -1005,6 +1214,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       await stalePage.getByTestId('stale-conflict').count(), 0,
       'the repeated request offered a reload, which is not what fixes it',
     )
+    mark('direction commands')
     await stalePage.close()
 
     console.log(
@@ -1032,6 +1242,11 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
       console.error('cleanup failed:', error?.message ?? error)
     } finally {
       await client.$disconnect()
+      try {
+        rmSync(artifactRoot, { recursive: true, force: true })
+      } catch (error) {
+        console.error('artifact root cleanup failed:', error?.message ?? error)
+      }
     }
   }
 })
