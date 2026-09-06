@@ -3,6 +3,11 @@ import type { CaptureSession, CaptureTrack } from './capture-session.ts'
 import { assertDomain } from './errors.ts'
 import { PIECE_BOUNDARY_CAUSES } from './piecewise-clock-map.ts'
 import {
+  NO_REFERENCE_PLAYBACK_MODES,
+  PLAYBACK_MODES,
+  type PlaybackMode,
+} from './playback-mode.ts'
+import {
   canonicalizeIntervals,
   convertTick,
   createTickInterval,
@@ -72,21 +77,15 @@ export const PLAYBACK_MAP_SCHEMA_VERSION = 'react-playback-map/v1' as const
  * the spec's type carries, and `replay` and `commentary-only` are exactly the
  * two cases a four-value vocabulary has to lie about.
  */
-export const PLAYBACK_MODES = Object.freeze([
-  'playing',
-  'paused',
-  'rewind',
-  'replay',
-  'seek',
-  'commentary-only',
-] as const)
-export type PlaybackMode = (typeof PLAYBACK_MODES)[number]
-
-/** Modes during which the reference produces no time at all. */
-export const NO_REFERENCE_PLAYBACK_MODES: ReadonlySet<PlaybackMode> = new Set<PlaybackMode>([
-  'paused',
-  'commentary-only',
-])
+/**
+ * Re-exported, not declared here.
+ *
+ * The vocabulary lives in `playback-mode.ts`, which imports nothing, because
+ * this module reaches `node:crypto` through `canonical-hash.ts` and the anchor
+ * editor — the only surface where a person records a mode — has to offer the
+ * same six the request schema spreads. Server callers keep importing from here.
+ */
+export { PLAYBACK_MODES, NO_REFERENCE_PLAYBACK_MODES, type PlaybackMode }
 
 /**
  * How a piece's reference start relates to the previous piece's reference end.

@@ -1,9 +1,9 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 135,
-    "capabilities": 123,
-    "endpoints": 123,
+    "uiActions": 155,
+    "capabilities": 138,
+    "endpoints": 138,
     "registeredCapabilities": 347,
     "operableCapabilities": 347,
     "publicContractCapabilities": 347,
@@ -634,6 +634,174 @@
       ]
     },
     {
+      "uiAction": "src/app/color-match/page.tsx:263",
+      "capabilityId": "apollo.projects.capture-sessions.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readCaptureSessionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:270",
+      "capabilityId": "apollo.projects.workspace.current.read",
+      "capabilityVersion": "10.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/workspace",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readProjectWorkspaceService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:278",
+      "capabilityId": "apollo.projects.capture-sessions.color-match.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readMulticamMatchPlanService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:296",
+      "capabilityId": "apollo.projects.color-critic-reports.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listColorCriticIssuesService",
+        "listColorCriticReportsService",
+        "readColorCriticReportService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:324",
+      "capabilityId": "apollo.projects.color-critic-reports.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports/{reportId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listColorCriticIssuesService",
+        "listColorCriticReportsService",
+        "readColorCriticReportService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:335",
+      "capabilityId": "apollo.projects.color-critic-reports.issues.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/color-critic-reports/{reportId}/issues",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listColorCriticIssuesService",
+        "listColorCriticReportsService",
+        "readColorCriticReportService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:386",
+      "capabilityId": "apollo.projects.capture-sessions.color-match.derive",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "deriveMulticamMatchPlanService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope",
+        "setProjectColorPlanService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/color-match/page.tsx:452",
+      "capabilityId": "apollo.projects.capture-sessions.color-match.overrides.add",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/color-match/overrides",
+      "applicationServices": [
+        "addMulticamMatchRangeOverrideService",
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope",
+        "setProjectColorPlanService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
       "uiAction": "src/app/login/LoginForm.tsx:31",
       "capabilityId": "apollo.sessions.login",
       "capabilityVersion": "3.0.0",
@@ -672,6 +840,154 @@
       "endpoint": "POST /v1/session/oidc/callback",
       "applicationServices": [
         "signInWithOidcService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:219",
+      "capabilityId": "apollo.projects.capture-sessions.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readCaptureSessionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:226",
+      "capabilityId": "apollo.projects.workspace.current.read",
+      "capabilityVersion": "10.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/workspace",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readProjectWorkspaceService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:233",
+      "capabilityId": "apollo.projects.capture-sessions.direction.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamAngleCandidatesService",
+        "listMulticamShotDecisionsService",
+        "readMulticamDirectionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:248",
+      "capabilityId": "apollo.projects.capture-sessions.direction.shots.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/shots",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamAngleCandidatesService",
+        "listMulticamShotDecisionsService",
+        "readMulticamDirectionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:255",
+      "capabilityId": "apollo.projects.capture-sessions.direction.candidates.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/candidates",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listMulticamAngleCandidatesService",
+        "listMulticamShotDecisionsService",
+        "readMulticamDirectionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:311",
+      "capabilityId": "apollo.projects.capture-sessions.direction.run",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/direction",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "deriveMulticamEvidenceService",
+        "directMulticamSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/multicam-direction/page.tsx:359",
+      "capabilityId": "apollo.projects.capture-sessions.direction.protected-selections.direct",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/direction/protected-selections",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "deriveMulticamEvidenceService",
+        "directMulticamSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -835,6 +1151,118 @@
         "listMulticamLongformGatesService",
         "readLatestMulticamLongformGateService",
         "readMulticamLongformGateService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/playback-map/page.tsx:186",
+      "capabilityId": "apollo.projects.capture-sessions.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readCaptureSessionService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/playback-map/page.tsx:223",
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.read",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listReactPlaybackPiecesService",
+        "readReactPlaybackMapService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/playback-map/page.tsx:234",
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.pieces.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/pieces",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listReactPlaybackPiecesService",
+        "readReactPlaybackMapService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/playback-map/page.tsx:287",
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.build",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "buildReactPlaybackMapService",
+        "compileReactPlaybackPlanService",
+        "editReactPlaybackAnchorService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listReactPlaybackMapVersionsService",
+        "listReferenceDependentsService",
+        "readReactPlaybackMapService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/playback-map/page.tsx:341",
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.anchors.add",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "buildReactPlaybackMapService",
+        "compileReactPlaybackPlanService",
+        "editReactPlaybackAnchorService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listReactPlaybackMapVersionsService",
+        "listReferenceDependentsService",
+        "readReactPlaybackMapService",
         "requireScope"
       ],
       "tests": [
