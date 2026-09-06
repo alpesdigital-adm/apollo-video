@@ -45,14 +45,14 @@ import { DomainError } from '../../domain/errors.ts'
  * variable to set and the directories that were searched — rather than handing
  * back a string that will fail later as somebody else's error.
  *
- * The refusal is `PERSISTENCE_NOT_CONFIGURED` — 503, and since this repair NOT
- * retryable, because a machine with no ffmpeg installed still has none on the
- * retry. `details.binary` and `details.variables` reach the caller through the
+ * The refusal is `PERSISTENCE_NOT_CONFIGURED`: 503, and no longer retryable,
+ * because a machine with no ffmpeg installed still has none on the retry.
+ * `details.binary` and `details.variables` reach the caller through the
  * presenter, so the answer names the executable that is missing and the
  * variable that would point at it; `details.searched` stays in the server,
- * where directory listings belong. The first version of this repair answered
- * the generic "The request could not be completed" with `retryable: true` and
- * dropped all of it.
+ * where directory listings belong. The first version of this repair answered a
+ * generic "The request could not be completed" with `retryable: true` and
+ * dropped all of that.
  */
 
 /** Every environment variable that may name the binary, in the order they win. */
