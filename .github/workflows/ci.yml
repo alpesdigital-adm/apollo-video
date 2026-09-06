@@ -231,6 +231,12 @@ jobs:
       - name: Run Wave 19 marker robustness fixtures
         run: npm run test:integration:marker-robustness
 
+      - name: Run Wave 20 falsification suite
+        run: npm run test:unit:wave20-falsification
+
+      - name: Run Wave 20 ffmpeg binary resolution guard
+        run: npm run test:unit:ffmpeg-binary
+
       - name: Run Wave 20 multicam direction render against ffprobe
         run: npm run test:integration:multicam-direction-render
 
