@@ -469,6 +469,11 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
     await page.goto(`${baseUrl}/multicam-longform-gate`)
     await page.getByTestId('multicam-longform-gate-page').waitFor({ state: 'visible' })
     await page.getByTestId('state-idle').waitFor({ state: 'visible' })
+    // The catalogue arrives from its own request, so the tenth row is waited
+    // for rather than counted the instant the page paints. A page that never
+    // loads the catalogue — the defect this covers — never produces it and
+    // fails here on the timeout.
+    await page.getByTestId('criteria-list').locator('> li').nth(9).waitFor({ state: 'visible' })
     const listedWithoutProject = await page.getByTestId('criteria-list').locator('> li').count()
     assert.equal(
       listedWithoutProject,

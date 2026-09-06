@@ -241,13 +241,25 @@ export default function MulticamLongformGatePage() {
     setOutstanding(response.ok && body.data ? body.data.outstanding : [])
   }, [])
 
-  const loadGate = useCallback(async (project: string) => {
+  /**
+   * Read everything about one project.
+   *
+   * `notice` is what the caller wants said once the screen is showing the
+   * result of what it just did. It is a parameter rather than a `setMessage`
+   * beside the call because this function clears the message on its way in:
+   * "Avaliação registrada." used to be set by `evaluate` and then wiped by the
+   * reload that followed it, so the one confirmation the page had never
+   * reached the screen. A reload that fails still replaces it with its own
+   * reason — the newest true thing wins.
+   */
+  const loadGate = useCallback(async (project: string, notice: string | null = null) => {
     if (project.trim().length === 0) {
       setState('idle')
+      setMessage(notice)
       return
     }
     setState('loading')
-    setMessage(null)
+    setMessage(notice)
     try {
       const response = await fetch(
         `/v1/projects/${encodeURIComponent(project.trim())}/multicam-longform-gate`,
@@ -315,12 +327,12 @@ export default function MulticamLongformGatePage() {
         setState('failed')
         return
       }
-      setMessage(
+      await loadGate(
+        projectId,
         body.data.replayed
           ? 'Esta avaliação já existia: a mesma chave devolveu o mesmo registro.'
           : 'Avaliação registrada.',
       )
-      await loadGate(projectId)
     } catch {
       setMessage('A rede falhou ao avaliar o gate.')
       setState('failed')
