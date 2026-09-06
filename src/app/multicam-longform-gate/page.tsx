@@ -146,10 +146,14 @@ const REASON_LABEL: Record<string, string> = {
  * The idempotency key for one evaluation of one project, in one minute.
  *
  * Not `gate-${projectId}-${minute}`, which is what this was: the server bounds
- * the key at `/^[!-~]{8,128}$/`, and a project id is allowed 128
- * characters of its own, so a long id produced a 150-character key and the
- * operator was told the gate could not be evaluated when the truth was that
- * the key was refused. A digest of the id is bounded, printable, and still the
+ * the key at the printable ASCII range, 8 to 128 characters
+ * (`IDEMPOTENCY_PATTERN` in application/multicam-longform-gate.ts), while a
+ * project id is allowed 128 characters of its own — so ids from 107 characters
+ * up produced a key past the bound, and the operator was told the gate could
+ * not be evaluated when the truth was that the key was refused. (The charset
+ * was never the problem: `ID_PATTERN` admits only printable ASCII. The length
+ * was, and only a long fixture id shows it, which is why the browser journey
+ * now uses one.) A digest of the id is bounded, printable, and still the
  * same string for the same project inside the same minute, so a double click
  * still rejoins the evaluation it already asked for. Two different projects
  * that collide here are still two different rows: the server's uniqueness is
