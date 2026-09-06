@@ -601,11 +601,13 @@ export default function MulticamLongformGatePage() {
         {gate && (artifactTotals.omitted > 0 || artifactTotals.filteredOut > 0) && (
           <p data-testid="artifacts-omitted" role="status">
             {artifactTotals.omitted} evidência(s) desta avaliação não aparecem
-            acima: a listagem devolve no máximo {MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT} referências por
-            página. No registro inteiro há {artifactTotals.unverified} com hash
-            que não confere e {artifactTotals.unhashed} sem hash próprio — os
-            dois números são da avaliação, não desta página, para que um corte
-            de página não possa dizer que nada foi adulterado.
+            acima porque a listagem devolve no máximo{' '}
+            {MULTICAM_LONGFORM_ARTIFACT_PAGE_LIMIT} referências por página, e{' '}
+            {artifactTotals.filteredOut} ficaram de fora por filtro de tipo. No
+            registro inteiro há {artifactTotals.unverified} com hash que não
+            confere e {artifactTotals.unhashed} sem hash próprio — os dois
+            números são da avaliação, não desta página, para que um corte de
+            página não possa dizer que nada foi adulterado.
           </p>
         )}
       </section>
