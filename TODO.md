@@ -2761,7 +2761,7 @@ Critério de falha:
 
 - qualquer comando retorna status diferente de zero e bloqueia o job;
 - nenhuma credencial externa é necessária: banco e credenciais de integração são efêmeros;
-- o job possui timeout de 20 minutos e não publica artifacts nem recebe permissão de escrita.
+- o job possui timeout de 35 minutos (era 20 até a jornada de síntese long-form passar a RENDERIZAR o master de duas horas do brief, +159,3 s medidos em máquina de 8 núcleos) e não publica artifacts nem recebe permissão de escrita.
 
 Evidências locais:
 

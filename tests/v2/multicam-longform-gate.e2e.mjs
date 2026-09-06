@@ -91,6 +91,7 @@ test(
     } = await import('../../src/v2/domain/multicam-longform-gate.ts')
     const { buildDirectionWorld } = await import('./wave20-fixtures.mjs')
     const { cleanGateWorld } = await import('./helpers/multicam-longform-gate-world.mjs')
+    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
 
     const client = new PrismaClient()
     const A = 'f4016-workspace-a'
@@ -110,6 +111,11 @@ test(
     )
 
     const clean = () => cleanGateWorld({ client, workspaceIds: [A, B] })
+    // `phase-gate-journey.e2e.mjs` cleans these workspaces too, because the
+    // fixture ids they share are unique across the whole database. The lease
+    // makes whichever suite starts second WAIT rather than empty a world the
+    // other is still writing.
+    const lease = await acquireGateFixtureLease()
 
     t.after(async () => {
       // Reported, not rethrown: a cleanup failure that masks the assertion
@@ -126,6 +132,7 @@ test(
         )
         await disconnectV2PostgresClient()
         await client.$disconnect()
+        await lease.release()
       }
     })
 
@@ -761,6 +768,7 @@ test(
     const { buildGateWorld, cleanGateWorld } = await import(
       './helpers/multicam-longform-gate-world.mjs'
     )
+    const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
 
     const client = new PrismaClient()
     const W = 'f4016-workspace-c'
@@ -772,6 +780,10 @@ test(
     const OTHER_CLIENT = 'f4016-client-d'
 
     let world = null
+    // `buildGateWorld` writes fixture ids that are unique across the whole
+    // database, so two suites seeding it at once destroy each other. Held for
+    // the life of this test, released in the hook below.
+    const lease = await acquireGateFixtureLease()
     t.after(async () => {
       try {
         // Through the world when it exists, because only it knows which
@@ -783,6 +795,7 @@ test(
         console.error('cleanup failed:', error?.message ?? error)
       } finally {
         await client.$disconnect()
+        await lease.release()
       }
     })
 
@@ -1449,6 +1462,7 @@ test('E2E-F4.016 the reader narrows the domain vocabularies rather than retyping
     syncedStatuses: DIAGNOSTIC_STATUSES,
     manualActions: RECOMMENDED_ACTIONS,
     interruptedModes: PLAYBACK_MODES,
+    requiredInterruptionModes: PLAYBACK_MODES,
     blockingCeilings: SYNC_CEILINGS,
     resolvedCriticActions: COLOR_CRITIC_ACTIONS,
     participantRoles: PODCAST_PARTICIPANT_ROLES,
@@ -1481,6 +1495,14 @@ test('E2E-F4.016 the reader narrows the domain vocabularies rather than retyping
     [...GATE_READER_VOCABULARIES.renderablePlanOrigins],
     ['react-playback', 'multi-range-synthesis'],
     'the two plan origins are no longer the ones criteria 4 and 6 look for',
+  )
+  // Criterion 4 asks for the three interruptions ADR-135 names, not for "any
+  // mode that is not playing". A `rewind` dropped from this list is a
+  // linearised rewind the gate would stop seeing.
+  assert.deepEqual(
+    [...GATE_READER_VOCABULARIES.requiredInterruptionModes].sort(),
+    ['paused', 'replay', 'rewind', 'seek'],
+    'criterion 4 no longer demands a pause, a backwards piece and a seek',
   )
   console.log(
     `[E2E-F4.016] ${Object.keys(GATE_READER_VOCABULARIES).length} reader vocabularies ` +

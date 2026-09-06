@@ -17,19 +17,30 @@ jobs:
   quality:
     name: Quality and security
     runs-on: ubuntu-latest
-    # Raised from 20 for the two Wave 20 product journeys, which encode their
-    # own fixtures and render a 60 s 960x540 h264+aac file rather than reading
-    # a committed one. Measured on a developer machine against a local
-    # PostgreSQL 16: the react playback journey ran 21.8-42.8 s over an
-    # uninterrupted N=10 (median 22.2 s) and 90.4 s once on a loaded box, and
-    # the insufficient evidence journey 20.3-22.0 s over N=3 and 88.2 s under
-    # the same load. So the honest figure is "twenty seconds each when the
-    # machine is idle, four times that when it is not", on sixteen cores. A
-    # 2-core hosted runner encodes and renders materially slower still and this
-    # repository has no CI history to calibrate against, so the cap is raised
-    # rather than the pair moved into a job that would repeat checkout,
-    # install, prisma generate and migrate for a couple of minutes of work.
-    timeout-minutes: 30
+    # Raised from 20 to 35 by two Wave 20 changes that landed in the same
+    # phase, so the reasons are recorded together.
+    #
+    # First, the two capture product journeys encode their own fixtures and
+    # render a 60 s 960x540 h264+aac file rather than reading a committed one.
+    # Measured on a sixteen-core developer machine against a local PostgreSQL
+    # 16: the react playback journey ran 21.8-42.8 s over an uninterrupted
+    # N=10 (median 22.2 s) and 90.4 s once on a loaded box; the insufficient
+    # evidence journey 20.3-22.0 s over N=3 and 88.2 s under the same load. So
+    # about twenty seconds each when the machine is idle, four times that when
+    # it is not.
+    #
+    # Second, the long-form synthesis journey started RENDERING the brief's
+    # two-hour master instead of stopping at its plan. On an eight-core machine
+    # that step cost 122.8, 125.6, 153.6, 159.3 and 194.5 s of FFmpeg over five
+    # runs, and the whole suite went from about 213 s to 361.4, 400.1, 412.8
+    # and 559.1 s over four runs.
+    #
+    # The 35 minutes are a BUDGET, not a measurement. A hosted runner has fewer
+    # cores than either machine those seconds came from, this repository has no
+    # CI history to calibrate against, and how much of the old cap the job was
+    # already using is not observable from a developer machine. If a real run
+    # reports the job finishing well inside this, bring it back down.
+    timeout-minutes: 35
 
     env:
       CI: true
@@ -260,6 +271,20 @@ jobs:
 
       - name: Run Wave 20 multicam colour match against real pixels
         run: npm run test:integration:color-match
+
+      - name: Run Wave 20 colour visual evaluations and keep the artifacts
+        run: npm run test:integration:color-visual-evaluations
+        env:
+          APOLLO_COLOR_VISUAL_EVAL_OUTPUT: ${{ runner.temp }}/color-visual-evaluations
+
+      - name: Publish Wave 20 colour visual evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-color-visual-evaluations-${{ github.sha }}
+          path: ${{ runner.temp }}/color-visual-evaluations
+          if-no-files-found: error
+          retention-days: 30
       - name: Run Wave 20 multi-range synthesis render against ffprobe
         run: npm run test:integration:synthesis-render
 
@@ -330,6 +355,18 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-multicam-gate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_MULTICAM_GATE_E2E: "1"
+
+      - name: Run Wave 20 phase gate journey through the published /v1 routes
+        run: npm run test:e2e:phase-gate-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_PHASE_GATE_E2E: "1"
+
+      - name: Run Wave 20 two-hour and ten-minute masters to rendered two-minute cuts against ffprobe and PostgreSQL
+        run: npm run test:e2e:longform-synthesis
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-longform-synthesis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_LONGFORM_SYNTHESIS_E2E: "1"
 
       - name: Run Wave 19 capture protocol and diagnostic browser journey
         run: npm run test:e2e:sync-diagnostic-browser
