@@ -1191,10 +1191,14 @@ test(
     // color compilation`), which is the server saying the colorimetry of each
     // recording has to be settled before anything is corrected against it.
     //
-    // Each one is built with its four stages DELIBERATELY OUT OF ORDER —
-    // creative LUT first, match last — and comes back ordered by
-    // `COLOR_TRANSFORM_ORDER`: the position of the match is a property of the
-    // domain, not of whoever wrote the request.
+    // The position of the match is a property of the domain, not of whoever
+    // wrote the request — and the domain no longer says so by silently
+    // re-sorting. `normalizeLayer` calls `assertMatchStagePosition`, so a
+    // request that declares the creative LUT ahead of the match is REFUSED
+    // `422 COLOR_STAGE_VIOLATION` instead of being accepted and quietly put
+    // back in order. That is the stronger property, and it is proved first,
+    // below, before the compilations this journey needs are written in the
+    // order `COLOR_TRANSFORM_ORDER` defines.
     const stage = (id, kind, provider, version, enabled, parameters) => ({
       id,
       kind,
@@ -1208,6 +1212,37 @@ test(
         parametersHash: calculateCanonicalHash(parameters),
       },
     })
+    const technicalStage = stage('technical-rec709', 'technical', 'ffmpeg-zscale', 'v1', true, { mode: 'identity' })
+    const matchStage = stage('match-bypass', 'match', 'apollo-match', 'v1', false, { mode: 'bypass' })
+    const creativeStage = stage('creative-none', 'creative-lut', 'apollo-lut', 'v1', false, { mode: 'none' })
+    const outputStage = stage('output-rec709', 'output', 'ffmpeg-zscale', 'v1', true, { mode: 'identity' })
+    const [firstCamera] = CAMERAS
+    const firstArtifactId = cameraArtifactIds[firstCamera]
+    const refused = await helpers.callRouteOk(compilationsRoute.POST, {
+      method: 'POST',
+      path: `/v1/projects/${projectId}/color-pipeline-compilations`,
+      token,
+      params: { projectId },
+      idempotencyKey: `podcast-compilation-${firstCamera}-misordered`,
+      body: {
+        sourceArtifactId: firstArtifactId,
+        sourceManifestId: registered[firstArtifactId].manifestId,
+        outputMetadata: COLOR_METADATA,
+        // Deliberately out of order: creative LUT first, match last.
+        stages: [creativeStage, outputStage, technicalStage, matchStage],
+      },
+    }, [422])
+    // The public envelope carries the catalogued message, not the domain's, so
+    // the code and its classification are what can be read here: a policy
+    // refusal that will not become true on a retry, rather than a 400 blaming
+    // the shape of the body.
+    assert.equal(
+      refused.payload.error.code,
+      'COLOR_STAGE_VIOLATION',
+      `a match declared after the creative LUT was refused as ${JSON.stringify(refused.payload.error)}`,
+    )
+    assert.equal(refused.payload.error.category, 'policy')
+    assert.equal(refused.payload.error.retryable, false)
     // Only the two cameras the timeline cuts to: a ColorPlan names the
     // recordings the cut uses, and camera C is never one of them.
     const compilations = {}
@@ -1223,12 +1258,7 @@ test(
           sourceArtifactId: artifactId,
           sourceManifestId: registered[artifactId].manifestId,
           outputMetadata: COLOR_METADATA,
-          stages: [
-            stage('creative-none', 'creative-lut', 'apollo-lut', 'v1', false, { mode: 'none' }),
-            stage('output-rec709', 'output', 'ffmpeg-zscale', 'v1', true, { mode: 'identity' }),
-            stage('technical-rec709', 'technical', 'ffmpeg-zscale', 'v1', true, { mode: 'identity' }),
-            stage('match-bypass', 'match', 'apollo-match', 'v1', false, { mode: 'bypass' }),
-          ],
+          stages: [technicalStage, matchStage, creativeStage, outputStage],
         },
       }, [201])
       compilations[camera] = compiled.data.compilation

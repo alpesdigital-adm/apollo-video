@@ -784,6 +784,41 @@ test(
         parametersHash: calculateCanonicalHash(parameters),
       },
     })
+    const technicalStage = stage('technical-rec709', 'technical', 'ffmpeg-zscale', true, { mode: 'identity' })
+    const matchStage = stage('match-bypass', 'match', 'apollo-match', false, { mode: 'bypass' })
+    const creativeStage = stage('creative-none', 'creative-lut', 'apollo-lut', false, { mode: 'none' })
+    const outputStage = stage('output-rec709', 'output', 'ffmpeg-zscale', true, { mode: 'identity' })
+    // Where the match sits is the domain's decision and not this request's, and
+    // the domain says so by REFUSING rather than by re-sorting: `normalizeLayer`
+    // calls `assertMatchStagePosition`, so a body that declares the creative LUT
+    // ahead of the match is answered `422 COLOR_STAGE_VIOLATION` and no
+    // compilation is written. That is proved once, here, before the two
+    // compilations this journey depends on are sent in canonical order.
+    const refused = await helpers.callRouteOk(compilationsRoute.POST, {
+      method: 'POST',
+      path: `/v1/projects/${projectId}/color-pipeline-compilations`,
+      token,
+      params: { projectId },
+      idempotencyKey: `teacher-screen-compilation-${cameraArtifactId}-misordered`,
+      body: {
+        sourceArtifactId: cameraArtifactId,
+        sourceManifestId: registered[cameraArtifactId].manifestId,
+        outputMetadata: COLOR_METADATA,
+        // Deliberately out of order: creative LUT first, match last.
+        stages: [creativeStage, outputStage, technicalStage, matchStage],
+      },
+    }, [422])
+    // The public envelope carries the catalogued message, not the domain's, so
+    // the code and its classification are what can be read here: a policy
+    // refusal that will not become true on a retry, rather than a 400 blaming
+    // the shape of the body.
+    assert.equal(
+      refused.payload.error.code,
+      'COLOR_STAGE_VIOLATION',
+      `a match declared after the creative LUT was refused as ${JSON.stringify(refused.payload.error)}`,
+    )
+    assert.equal(refused.payload.error.category, 'policy')
+    assert.equal(refused.payload.error.retryable, false)
     for (const artifactId of [cameraArtifactId, screenArtifactId]) {
       const compiled = await helpers.callRouteOk(compilationsRoute.POST, {
         method: 'POST',
@@ -795,15 +830,7 @@ test(
           sourceArtifactId: artifactId,
           sourceManifestId: registered[artifactId].manifestId,
           outputMetadata: COLOR_METADATA,
-          // Deliberately out of order. The compiled pipeline comes back ordered
-          // by `COLOR_TRANSFORM_ORDER`, so where the match sits is the domain's
-          // decision and not this request's.
-          stages: [
-            stage('creative-none', 'creative-lut', 'apollo-lut', false, { mode: 'none' }),
-            stage('output-rec709', 'output', 'ffmpeg-zscale', true, { mode: 'identity' }),
-            stage('technical-rec709', 'technical', 'ffmpeg-zscale', true, { mode: 'identity' }),
-            stage('match-bypass', 'match', 'apollo-match', false, { mode: 'bypass' }),
-          ],
+          stages: [technicalStage, matchStage, creativeStage, outputStage],
         },
       }, [201])
       const kinds = compiled.data.compilation.pipeline.stages.map((entry) => entry.kind)

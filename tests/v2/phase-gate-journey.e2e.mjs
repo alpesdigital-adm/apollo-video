@@ -163,14 +163,18 @@ test(
       './helpers/multicam-longform-gate-world.mjs'
     )
     const { acquireGateFixtureLease } = await import('./helpers/gate-fixture-lease.mjs')
-    // The four breakages below write real aggregates: nothing is hand-hashed,
-    // so every hash the gate re-derives afterwards is the hash the product
-    // computes over the doctored body.
+    // The four breakages below write real aggregates: no hash is invented, so
+    // every hash the gate re-derives afterwards is the hash the product
+    // computes over the doctored body. Three go through their domain factory.
+    // The colour one cannot — `assertMatchStagePosition` refuses the very row
+    // it has to store — so it is assembled from the stored record and sealed
+    // with `calculateCanonicalHash`, the function those factories call, over
+    // the same content they hash. See the block itself.
     const { createSyncDiagnostic, deriveTrackStatus } = await import(
       '../../src/v2/domain/sync-diagnostic.ts'
     )
     const { createPlaybackMap } = await import('../../src/v2/domain/playback-map.ts')
-    const { createProjectColorPlan } = await import('../../src/v2/domain/project-color-plan.ts')
+    const { calculateCanonicalHash } = await import('../../src/v2/domain/canonical-hash.ts')
     const { PrismaCaptureSessionRepository } = await import(
       '../../src/v2/infrastructure/prisma/capture-session-repository.ts'
     )
@@ -675,9 +679,10 @@ test(
     // COLOR_TRANSFORM_ORDER, so reading the RESOLVED order back can only catch
     // a rewrite of that constant. The plan AS STORED is what a person authors,
     // and a plan that declares the creative LUT ahead of the match resolves to
-    // the right order only because the resolver sorted it. The record is
-    // rebuilt by the domain factory, so the row still re-derives to its own
-    // hash: this is a legal plan the gate has to refuse on its content.
+    // the right order only because the resolver sorted it. Every hash on the
+    // row is the hash of the misordered body, so the row re-derives to its own
+    // hash: this is a plan the gate has to refuse on its content, not on
+    // arithmetic that stopped adding up.
     const colourPlanRow = await client.v2ProjectColorPlan.findFirstOrThrow({
       where: { workspaceId: A, projectId: PROJECT_A },
     })
@@ -692,17 +697,47 @@ test(
       swapped[lutIndex] = layer[matchIndex]
       return swapped
     }
-    const misorderedColourPlan = createProjectColorPlan({
-      id: storedColourPlan.id,
-      workspaceId: A,
-      projectId: PROJECT_A,
-      commandId: storedColourPlan.commandId,
-      baseVersionId: storedColourPlan.baseVersionId,
-      resultVersionId: storedColourPlan.resultVersionId,
-      plan: { ...storedColourPlan.plan, global: swapStages(storedColourPlan.plan.global) },
-      targets: [{ cameraId: world.match.plan.referenceCameraId }],
-      createdAt: storedColourPlan.createdAt,
+    // The tamper cannot be built by `createProjectColorPlan`. `normalizeLayer`
+    // calls `assertMatchStagePosition`, which refuses a layer whose match sits
+    // after the creative LUT with `COLOR_STAGE_VIOLATION` — that guard is the
+    // point of the domain and the misordered plan is exactly what it refuses,
+    // so the factory can no longer produce the row this block has to store.
+    // Nothing exported lets a caller skip it, so the record is assembled here
+    // and re-hashed with the domain's own `calculateCanonicalHash`, over the
+    // same content each factory hashes: `createColorPlan` hashes the plan
+    // without `planHash`, `compileColorPlanTargets` hashes `{schemaVersion,
+    // colorPlanHash, targets}` without `manifestHash`, and
+    // `createProjectColorPlan` hashes the record without `recordHash`. The row
+    // is therefore internally consistent — every hash is the hash of the
+    // misordered content — and the gate has to refuse it on the ORDER, not on
+    // a hash that stopped matching its body.
+    //
+    // The compiled targets are carried over untouched on purpose:
+    // `resolveColorPlan` keys stages by kind and emits them in
+    // COLOR_TRANSFORM_ORDER, so swapping two declarations leaves every
+    // resolved pipeline byte-identical. Only `colorPlanHash` moves, which is
+    // the same reason the resolved order cannot catch this and the AUTHORED
+    // order has to.
+    const contentOf = (record, hashField) => Object.fromEntries(
+      Object.entries(record).filter(([key]) => key !== hashField),
+    )
+    const sealed = (content, hashField) => ({
+      ...content,
+      [hashField]: calculateCanonicalHash(content),
     })
+    const misorderedPlan = sealed({
+      ...contentOf(storedColourPlan.plan, 'planHash'),
+      global: swapStages(storedColourPlan.plan.global),
+    }, 'planHash')
+    const misorderedCompiled = sealed({
+      ...contentOf(storedColourPlan.compiled, 'manifestHash'),
+      colorPlanHash: misorderedPlan.planHash,
+    }, 'manifestHash')
+    const misorderedColourPlan = sealed({
+      ...contentOf(storedColourPlan, 'recordHash'),
+      plan: misorderedPlan,
+      compiled: misorderedCompiled,
+    }, 'recordHash')
     const colourPlanColumns = (record) => ({
       schemaVersion: record.schemaVersion,
       planJson: JSON.stringify(record.plan),

@@ -204,6 +204,10 @@ function isPersistenceConflict(error: unknown): boolean {
   return error instanceof DomainError && error.code === 'PERSISTENCE_CONFLICT'
 }
 
+function isColorStageViolation(error: unknown): error is DomainError {
+  return error instanceof DomainError && error.code === 'COLOR_STAGE_VIOLATION'
+}
+
 function truncate(value: string): string {
   return value.length <= 512 ? value : `${value.slice(0, 509)}...`
 }
@@ -346,6 +350,41 @@ function authoredMisorderedLayers(
       return matchIndex >= 0 && lutIndex >= 0 && matchIndex > lutIndex
     })
     .map(([name]) => name)
+}
+
+/**
+ * The same reading, taken off a colour-plan row that could NOT be parsed.
+ *
+ * `createColorPlan` refuses a layer whose match sits after the creative LUT, so
+ * the aggregate a row like that describes can never be rebuilt — there is no
+ * `ProjectColorPlan` to hand the reader above. The order is still the fact the
+ * criterion stands for, so it is read straight off the stored JSON. Nothing has
+ * validated that body, hence every shape is checked before it is believed and
+ * anything unrecognisable simply contributes no layer.
+ */
+function authoredMisorderedLayersOfBody(
+  body: unknown,
+  cameraId: string,
+): readonly string[] {
+  const plan = record(record(body)?.plan)
+  if (!plan) return []
+  const layer = (value: unknown): readonly Readonly<{ kind: string }>[] =>
+    Array.isArray(value)
+      ? value.flatMap((item) => {
+        const kind = record(item)?.kind
+        return typeof kind === 'string' ? [{ kind }] : []
+      })
+      : []
+  const cameras = record(plan.cameras) ?? {}
+  return authoredMisorderedLayers(
+    {
+      global: layer(plan.global),
+      cameras: Object.fromEntries(
+        Object.entries(cameras).map(([key, value]) => [key, layer(value)]),
+      ),
+    },
+    cameraId,
+  )
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -1615,16 +1654,43 @@ implements MulticamLongformGateRepository {
     }
     const row = head.colorPlan
     const reference = ref('colour-plan', row.id, row.recordHash, false)
+    const unverified = {
+      ordered: false,
+      reason: 'evidence-unverified' as const,
+      detail: `colour plan ${row.id} did not re-derive to its stored record`,
+      reference,
+    }
+    let body
+    try {
+      body = parseJson(row.recordJson, 'project colour plan')
+    } catch {
+      return unverified
+    }
     let plan
     try {
-      plan = parseProjectColorPlan(parseJson(row.recordJson, 'project colour plan'))
-    } catch {
-      return {
-        ordered: false,
-        reason: 'evidence-unverified',
-        detail: `colour plan ${row.id} did not re-derive to its stored record`,
-        reference,
+      plan = parseProjectColorPlan(body)
+    } catch (error) {
+      // `createColorPlan` refuses a layer that declares the creative LUT ahead
+      // of the match, so a plan authored that way cannot be rebuilt at all:
+      // the aggregate never parses, and the resolved order can never be read.
+      // That is not "the hash disagreed" — the row can be perfectly
+      // self-consistent and still illegal — so the authored layers are read
+      // off the stored body and the criterion is refused on the ORDER. Saying
+      // `evidence-unverified` here would blame arithmetic for an order and
+      // point whoever reads the report at the wrong column.
+      if (isColorStageViolation(error)) {
+        const misordered = authoredMisorderedLayersOfBody(body, cameraId)
+        if (misordered.length > 0) {
+          return {
+            ordered: false,
+            reason: 'requirement-unmet',
+            detail: `colour plan ${row.id} declares creative-lut before match in [${misordered.join(', ')}], `
+              + `which COLOR_TRANSFORM_ORDER [${COLOR_TRANSFORM_ORDER.join(', ')}] forbids: ${error.message}`,
+            reference,
+          }
+        }
       }
+      return unverified
     }
     if (plan.recordHash !== row.recordHash) {
       return {
@@ -1651,20 +1717,16 @@ implements MulticamLongformGateRepository {
     const lutIndex = kinds.indexOf('creative-lut')
     // `resolveColorPlan` emits the stages in COLOR_TRANSFORM_ORDER, so reading
     // the RESOLVED list back can only catch a rewrite of that constant — the
-    // resolver has already sorted whatever the plan said. The plan AS STORED
-    // can disagree: `normalizeLayer` keeps a layer in the order it was
-    // written, so a plan whose global layer declares the creative LUT ahead of
-    // the match reads as ordered once resolved. Both are checked, and the
-    // detail names the layer that put them the wrong way round.
-    const misordered = authoredMisorderedLayers(plan.plan, cameraId)
+    // resolver has already sorted whatever the plan said. The AUTHORED order
+    // is the other half, and it cannot reach this line: `normalizeLayer`
+    // refuses a layer that puts the match after the creative LUT, so a plan
+    // that authors them the wrong way round fails to parse above and is
+    // refused there, by layer name. Reaching here means the authored order is
+    // legal, and what is left to measure is the constant itself.
     return {
-      ordered: matchIndex >= 0 && lutIndex >= 0 && matchIndex < lutIndex &&
-        misordered.length === 0,
+      ordered: matchIndex >= 0 && lutIndex >= 0 && matchIndex < lutIndex,
       reason: 'requirement-unmet',
-      detail: misordered.length === 0
-        ? `resolved order for ${cameraId}: [${kinds.join(', ')}] against COLOR_TRANSFORM_ORDER [${COLOR_TRANSFORM_ORDER.join(', ')}]`
-        : `colour plan ${row.id} declares creative-lut before match in [${misordered.join(', ')}], `
-          + `which resolves to [${kinds.join(', ')}] only because the resolver sorts it`,
+      detail: `resolved order for ${cameraId}: [${kinds.join(', ')}] against COLOR_TRANSFORM_ORDER [${COLOR_TRANSFORM_ORDER.join(', ')}]`,
       reference: verified,
     }
   }
