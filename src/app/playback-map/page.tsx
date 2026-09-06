@@ -2,8 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  classifyConflict,
+  conflictingVersionFrom,
+  REPEATED_REQUEST_MESSAGE,
+  UNKNOWN_CONFLICT_MESSAGE,
+} from '@/app/_operator/refusal'
+import { formatTicks, tickRateFrom } from '@/app/_operator/tick-format'
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
+import { PLAYBACK_MODES } from '@/v2/domain/playback-mode'
 
 /**
  * The react playback map surface (F4.015).
@@ -111,37 +119,6 @@ interface SessionRead {
   tracks: { trackId: string; role: string }[]
 }
 
-function ticksPerSecondFrom(secondsPerTick: string | undefined): bigint | null {
-  if (!secondsPerTick) return null
-  const [num, den] = secondsPerTick.split('/')
-  try {
-    const numerator = BigInt(num ?? '')
-    const denominator = BigInt(den ?? '')
-    if (numerator <= BigInt(0) || denominator <= BigInt(0)) return null
-    return denominator / numerator
-  } catch {
-    return null
-  }
-}
-
-/**
- * Ticks divided exactly. A tick is 64-bit; `Number` would round it invisibly,
- * which is the whole reason it crosses the boundary as a decimal string.
- */
-function formatTicks(ticks: string, ticksPerSecond: bigint | null): string {
-  if (ticksPerSecond === null || ticksPerSecond <= BigInt(0)) return `${ticks} ticks`
-  try {
-    const value = BigInt(ticks)
-    const negative = value < BigInt(0)
-    const absolute = negative ? -value : value
-    const seconds = absolute / ticksPerSecond
-    const millis = ((absolute % ticksPerSecond) * BigInt(1_000)) / ticksPerSecond
-    return `${negative ? '−' : ''}${seconds},${String(millis).padStart(3, '0')} s`
-  } catch {
-    return `${ticks} ticks`
-  }
-}
-
 const MODE_TEXT: Record<string, string> = {
   playing: 'tocando',
   paused: 'pausado',
@@ -156,8 +133,6 @@ const UNCOVERED_TEXT: Record<string, string> = {
   'conflicting-evidence': 'as evidências discordam entre si',
 }
 
-const ANCHOR_MODES = ['playing', 'paused', 'rewind', 'replay', 'seek', 'commentary-only'] as const
-
 export default function PlaybackMapPage() {
   const [projectId, setProjectId] = useState('')
   const [sessionId, setSessionId] = useState('')
@@ -170,20 +145,20 @@ export default function PlaybackMapPage() {
   const [anchorIndex, setAnchorIndex] = useState('0')
   const [anchorReactionTick, setAnchorReactionTick] = useState('')
   const [anchorReferenceTick, setAnchorReferenceTick] = useState('')
-  const [anchorMode, setAnchorMode] = useState<string>('playing')
+  // Seeded from the domain constant. The six modes below are the six the anchor
+  // request schema spreads, read from one place so a seventh cannot appear in
+  // the domain and stay unrecordable on the only screen that records one.
+  const [anchorMode, setAnchorMode] = useState<string>(PLAYBACK_MODES[0])
   const [anchorNote, setAnchorNote] = useState('')
 
   const project = useMemo(() => encodeURIComponent(projectId.trim()), [projectId])
   const encodedSession = useMemo(() => encodeURIComponent(sessionId.trim()), [sessionId])
-  const sessionTicksPerSecond = useMemo(
-    () => ticksPerSecondFrom(session?.clock.timebase),
-    [session],
-  )
+  const sessionTickRate = useMemo(() => tickRateFrom(session?.clock.timebase), [session])
   // The reference has its own timebase, carried by the map. Reference ticks
   // formatted with the reaction's rate would be a plausible-looking number that
   // means nothing.
-  const referenceTicksPerSecond = useMemo(
-    () => ticksPerSecondFrom(listing?.map.referenceMedia.timebase.secondsPerTick),
+  const referenceTickRate = useMemo(
+    () => tickRateFrom(listing?.map.referenceMedia.timebase.secondsPerTick),
     [listing],
   )
 
@@ -283,17 +258,21 @@ export default function PlaybackMapPage() {
     void load()
   }, [load, projectId, sessionId])
 
+  /** A 409 read by its code: only two of them mean the fence moved. */
   const handleRefusal = useCallback((status: number, body: ApiEnvelope<unknown>) => {
-    if (status === 409) {
-      const current = body.error?.details?.currentVersionId ?? body.error?.details?.currentVersion
-      setConflict(typeof current === 'string' || typeof current === 'number' ? String(current) : 'outra')
+    const kind = classifyConflict(status, body.error?.code)
+    if (kind === null) return false
+    if (kind === 'stale-fence') {
+      setConflict(conflictingVersionFrom(body.error?.details))
       setMessage(
         'O mapa ou a sessão avançaram enquanto esta tela olhava. Recarregue antes de repetir: '
         + 'a versão em mãos é a vencida.',
       )
       return true
     }
-    return false
+    setConflict(null)
+    setMessage(kind === 'repeated-request' ? REPEATED_REQUEST_MESSAGE : UNKNOWN_CONFLICT_MESSAGE)
+    return true
   }, [])
 
   const build = useCallback(async () => {
@@ -503,9 +482,9 @@ export default function PlaybackMapPage() {
           </h2>
           <p data-testid="playback-media">
             Referência {map.referenceTrackId} ({map.referenceMedia.assetId},{' '}
-            {formatTicks(map.referenceMedia.durationTicks, referenceTicksPerSecond)}) · reação{' '}
+            {formatTicks(map.referenceMedia.durationTicks, referenceTickRate)}) · reação{' '}
             {map.reactionTrackId} ({map.reactionMedia.assetId},{' '}
-            {formatTicks(map.reactionMedia.durationTicks, sessionTicksPerSecond)})
+            {formatTicks(map.reactionMedia.durationTicks, sessionTickRate)})
           </p>
           <div data-testid="playback-review" data-required={String(listing.manualReviewRequired)}>
             {listing.manualReviewRequired
@@ -563,20 +542,20 @@ export default function PlaybackMapPage() {
                     <td>{piece.ordinal}</td>
                     <td data-testid={`mode-${piece.pieceId}`}>{MODE_TEXT[piece.mode] ?? piece.mode}</td>
                     <td>
-                      {formatTicks(piece.reactionRange.start, sessionTicksPerSecond)} →{' '}
-                      {formatTicks(piece.reactionRange.end, sessionTicksPerSecond)}
+                      {formatTicks(piece.reactionRange.start, sessionTickRate)} →{' '}
+                      {formatTicks(piece.reactionRange.end, sessionTickRate)}
                     </td>
                     <td data-testid={`reference-${piece.pieceId}`}>
                       {piece.referenceRange === null
                         ? 'a referência não andou'
-                        : `${formatTicks(piece.referenceRange.start, referenceTicksPerSecond)} → `
-                          + `${formatTicks(piece.referenceRange.end, referenceTicksPerSecond)}`}
+                        : `${formatTicks(piece.referenceRange.start, referenceTickRate)} → `
+                          + `${formatTicks(piece.referenceRange.end, referenceTickRate)}`}
                     </td>
                     <td data-testid={`rate-${piece.pieceId}`}>{piece.rate ?? 'não medida'}</td>
                     <td data-testid={`residual-${piece.pieceId}`}>
                       {piece.residualTicks === null
                         ? 'não medido'
-                        : formatTicks(piece.residualTicks, referenceTicksPerSecond)}
+                        : formatTicks(piece.residualTicks, referenceTickRate)}
                     </td>
                     <td data-testid={`method-${piece.pieceId}`}>{piece.detectionMethod}</td>
                   </tr>
@@ -596,8 +575,8 @@ export default function PlaybackMapPage() {
             <ul>
               {map.uncovered.map((entry, index) => (
                 <li data-testid={`uncovered-${index}`} key={`${entry.range.start}-${entry.range.end}`}>
-                  {formatTicks(entry.range.start, sessionTicksPerSecond)} →{' '}
-                  {formatTicks(entry.range.end, sessionTicksPerSecond)}:{' '}
+                  {formatTicks(entry.range.start, sessionTickRate)} →{' '}
+                  {formatTicks(entry.range.end, sessionTickRate)}:{' '}
                   {UNCOVERED_TEXT[entry.reason] ?? entry.reason}
                   {' '}
                   <button
@@ -634,11 +613,11 @@ export default function PlaybackMapPage() {
               {map.anchors.map((anchor) => (
                 <tr data-origin={anchor.origin} data-testid={`anchor-${anchor.anchorId}`} key={anchor.anchorId}>
                   <td>{anchor.origin === 'automatic' ? 'medida' : 'manual'}</td>
-                  <td>{formatTicks(anchor.reactionTick, sessionTicksPerSecond)}</td>
+                  <td>{formatTicks(anchor.reactionTick, sessionTickRate)}</td>
                   <td data-testid={`anchor-reference-${anchor.anchorId}`}>
                     {anchor.referenceTick === null
                       ? 'não havia referência'
-                      : formatTicks(anchor.referenceTick, referenceTicksPerSecond)}
+                      : formatTicks(anchor.referenceTick, referenceTickRate)}
                   </td>
                   <td>{MODE_TEXT[anchor.mode] ?? anchor.mode}</td>
                   <td data-testid={`anchor-evidence-${anchor.anchorId}`}>{anchor.evidenceRef}</td>
@@ -695,7 +674,7 @@ export default function PlaybackMapPage() {
               onChange={(event) => setAnchorMode(event.target.value)}
               value={anchorMode}
             >
-              {ANCHOR_MODES.map((mode) => (
+              {PLAYBACK_MODES.map((mode) => (
                 <option key={mode} value={mode}>{MODE_TEXT[mode] ?? mode}</option>
               ))}
             </select>

@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  classifyConflict,
+  conflictingVersionFrom,
+  REPEATED_REQUEST_MESSAGE,
+  UNKNOWN_CONFLICT_MESSAGE,
+} from '@/app/_operator/refusal'
+import { formatTicks, showNumber, tickRateFrom } from '@/app/_operator/tick-format'
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
 
@@ -188,45 +195,16 @@ interface SessionRead {
 
 interface ProjectVersion { id: string; sequence: number; baseHash: string }
 
-function ticksPerSecondFrom(secondsPerTick: string | undefined): bigint | null {
-  if (!secondsPerTick) return null
-  const [num, den] = secondsPerTick.split('/')
-  try {
-    const numerator = BigInt(num ?? '')
-    const denominator = BigInt(den ?? '')
-    if (numerator <= BigInt(0) || denominator <= BigInt(0)) return null
-    return denominator / numerator
-  } catch {
-    return null
-  }
-}
-
-function formatTicks(ticks: string, ticksPerSecond: bigint | null): string {
-  if (ticksPerSecond === null || ticksPerSecond <= BigInt(0)) return `${ticks} ticks`
-  try {
-    const value = BigInt(ticks)
-    const negative = value < BigInt(0)
-    const absolute = negative ? -value : value
-    const seconds = absolute / ticksPerSecond
-    const millis = ((absolute % ticksPerSecond) * BigInt(1_000)) / ticksPerSecond
-    return `${negative ? '−' : ''}${seconds},${String(millis).padStart(3, '0')} s`
-  } catch {
-    return `${ticks} ticks`
-  }
-}
+const SEVERITY_TEXT: Record<string, string> = { hard: 'bloqueia', warning: 'avisa' }
 
 /**
- * A number, or the honest absence of one.
+ * A tick as the boundary spells one: decimal digits, up to nineteen of them.
  *
- * This function is the whole reason the deltas table is readable. Rendering a
- * null as `0.00` would say "measured, and this camera already matches the
- * reference" — the one claim nobody made.
+ * Checked here so a mistyped instant is refused on screen, with the two words
+ * that say what is wrong, instead of coming back as a schema violation the
+ * operator has to decode.
  */
-function showNumber(value: number | null, digits = 3, unit = ''): string {
-  return value === null ? 'não medido' : `${value.toFixed(digits)}${unit}`
-}
-
-const SEVERITY_TEXT: Record<string, string> = { hard: 'bloqueia', warning: 'avisa' }
+const TICK = /^[0-9]{1,19}$/
 
 const ACTION_TEXT: Record<string, string> = {
   approve: 'aprovar',
@@ -255,13 +233,18 @@ export default function ColorMatchPage() {
   const [offeredCameras, setOfferedCameras] = useState<string[]>([])
   const [overrideCameraId, setOverrideCameraId] = useState('')
   const [overrideReason, setOverrideReason] = useState('')
+  // The scope of the correction. Both empty means the whole camera, and the
+  // page says so rather than implying a range it never sent.
+  const [overrideStartTick, setOverrideStartTick] = useState('')
+  const [overrideEndTick, setOverrideEndTick] = useState('')
+  const [overrideSegmentId, setOverrideSegmentId] = useState('')
   const [brightness, setBrightness] = useState('0')
   const [contrast, setContrast] = useState('1')
   const [saturation, setSaturation] = useState('1')
 
   const project = useMemo(() => encodeURIComponent(projectId.trim()), [projectId])
   const encodedSession = useMemo(() => encodeURIComponent(sessionId.trim()), [sessionId])
-  const ticksPerSecond = useMemo(() => ticksPerSecondFrom(session?.clock.timebase), [session])
+  const tickRate = useMemo(() => tickRateFrom(session?.clock.timebase), [session])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -362,14 +345,20 @@ export default function ColorMatchPage() {
     }
   }, [project])
 
+  /** A 409 read by its code: only two of them mean a fence moved. */
   const handleRefusal = useCallback((status: number, body: ApiEnvelope<unknown>) => {
-    if (status === 409) {
-      const current = body.error?.details?.currentVersion ?? body.error?.details?.currentVersionId
-      setConflict(typeof current === 'string' || typeof current === 'number' ? String(current) : 'outra')
+    const kind = classifyConflict(status, body.error?.code)
+    if (kind === 'stale-fence') {
+      setConflict(conflictingVersionFrom(body.error?.details))
       setMessage(
         'Alguma coisa avançou enquanto esta tela olhava para outra versão. Recarregue antes de repetir: '
         + 'o pedido foi calculado sobre uma versão que já não é a corrente.',
       )
+      return true
+    }
+    if (kind !== null) {
+      setConflict(null)
+      setMessage(kind === 'repeated-request' ? REPEATED_REQUEST_MESSAGE : UNKNOWN_CONFLICT_MESSAGE)
       return true
     }
     // The server knows which camera keys the session carries. When it refuses
@@ -438,6 +427,24 @@ export default function ColorMatchPage() {
       setMessage('Diga qual câmera e por quê: uma correção manual entra assinada.')
       return
     }
+    // Both ends or neither. Half a range is not a narrower correction, it is an
+    // ambiguous one, and the schema would refuse it after the operator had
+    // already been told the correction was on its way.
+    const start = overrideStartTick.trim()
+    const end = overrideEndTick.trim()
+    if ((start.length === 0) !== (end.length === 0)) {
+      setMessage('Um trecho tem começo e fim. Preencha os dois instantes, ou deixe os dois vazios.')
+      return
+    }
+    if (start.length > 0 && (!TICK.test(start) || !TICK.test(end))) {
+      setMessage('Os instantes são ticks: só dígitos, no relógio da sessão.')
+      return
+    }
+    if (start.length > 0 && BigInt(end) <= BigInt(start)) {
+      setMessage('O fim do trecho tem que vir depois do começo.')
+      return
+    }
+    const segmentId = overrideSegmentId.trim()
     setBusy(true)
     setMessage(null)
     setConflict(null)
@@ -456,6 +463,11 @@ export default function ColorMatchPage() {
             override: {
               overrideId: `override-${read.plan.rangeOverrides.length + 1}-v${read.version}`,
               cameraId: overrideCameraId.trim(),
+              // The scope, when the operator gave one. Omitted rather than sent
+              // as null: the schema refuses an unknown key, and an absent scope
+              // is what the domain reads as "the whole camera".
+              ...(segmentId.length === 0 ? {} : { segmentId }),
+              ...(start.length === 0 ? {} : { range: { start, end } }),
               parameters: {
                 brightness: Number(brightness),
                 contrast: Number(contrast),
@@ -472,7 +484,16 @@ export default function ColorMatchPage() {
         setMessage(body.error?.message ?? 'A correção local foi recusada.')
         return
       }
-      setMessage('Correção local aplicada só nos trechos que ela alcança.')
+      // Says what was actually sent. The old sentence promised a scope the
+      // request never carried, which is the difference between a correction on
+      // one take and a correction on the whole camera.
+      setMessage(
+        start.length > 0
+          ? `Correção local aplicada entre ${start} e ${end}, nessa câmera e em mais nada.`
+          : segmentId.length > 0
+            ? `Correção local aplicada no trecho ${segmentId}, nessa câmera e em mais nada.`
+            : 'Correção local aplicada na câmera inteira: nenhum trecho foi indicado.',
+      )
       setOverrideReason('')
       await load()
     } catch {
@@ -482,7 +503,8 @@ export default function ColorMatchPage() {
     }
   }, [
     brightness, contrast, encodedSession, handleRefusal, load, overrideCameraId,
-    overrideReason, project, projectVersion, read, saturation,
+    overrideEndTick, overrideReason, overrideSegmentId, overrideStartTick,
+    project, projectVersion, read, saturation,
   ])
 
   const plan = read?.plan ?? null
@@ -654,7 +676,7 @@ export default function ColorMatchPage() {
                 <li data-testid={`override-${override.overrideId}`} key={override.overrideId}>
                   {override.cameraId}
                   {override.range
-                    ? ` entre ${formatTicks(override.range.start, ticksPerSecond)} e ${formatTicks(override.range.end, ticksPerSecond)}`
+                    ? ` entre ${formatTicks(override.range.start, tickRate)} e ${formatTicks(override.range.end, tickRate)}`
                     : override.segmentId
                       ? ` no trecho ${override.segmentId}`
                       : ' na câmera inteira'}
@@ -668,8 +690,8 @@ export default function ColorMatchPage() {
             <ul data-testid="non-comparable">
               {plan.nonComparableRanges.map((range) => (
                 <li key={`${range.cameraId}-${range.measurementId}`}>
-                  {range.cameraId} entre {formatTicks(range.range.start, ticksPerSecond)} e{' '}
-                  {formatTicks(range.range.end, ticksPerSecond)}: {range.reason}. Fora do ajuste,
+                  {range.cameraId} entre {formatTicks(range.range.start, tickRate)} e{' '}
+                  {formatTicks(range.range.end, tickRate)}: {range.reason}. Fora do ajuste,
                   não diluído nele.
                 </li>
               ))}
@@ -694,9 +716,16 @@ export default function ColorMatchPage() {
         <section data-testid="override-command">
           <h2>Correção local</h2>
           <p>
-            A única cor que esta tela manda além da referência, e ela vale só
-            para o trecho que alcança: as camadas das outras câmeras passam
-            intactas.
+            A única cor que esta tela manda além da referência. As camadas das
+            outras câmeras passam intactas.
+          </p>
+          <p data-testid="override-scope-note">
+            {overrideStartTick.trim().length > 0
+              ? 'Esta correção vale só entre os dois instantes abaixo.'
+              : overrideSegmentId.trim().length > 0
+                ? 'Esta correção vale só no trecho nomeado abaixo.'
+                : 'Sem trecho e sem instantes, esta correção pega a câmera inteira — '
+                  + 'todo plano dela, do começo ao fim da sessão.'}
           </p>
           <label>
             Câmera
@@ -705,6 +734,30 @@ export default function ColorMatchPage() {
               list="color-camera-keys"
               onChange={(event) => setOverrideCameraId(event.target.value)}
               value={overrideCameraId}
+            />
+          </label>
+          <label>
+            Do instante (ticks; vazio = câmera inteira)
+            <input
+              data-testid="override-range-start"
+              onChange={(event) => setOverrideStartTick(event.target.value)}
+              value={overrideStartTick}
+            />
+          </label>
+          <label>
+            Até o instante (ticks)
+            <input
+              data-testid="override-range-end"
+              onChange={(event) => setOverrideEndTick(event.target.value)}
+              value={overrideEndTick}
+            />
+          </label>
+          <label>
+            Ou o trecho, pelo nome
+            <input
+              data-testid="override-segment"
+              onChange={(event) => setOverrideSegmentId(event.target.value)}
+              value={overrideSegmentId}
             />
           </label>
           <label>
@@ -879,7 +932,7 @@ export default function ColorMatchPage() {
                 {issue.classification} · {issue.cause} · etapa {issue.stage}
                 {issue.cameraId ? ` · câmera ${issue.cameraId}` : ''}
                 {issue.range
-                  ? ` · entre ${formatTicks(issue.range.start, ticksPerSecond)} e ${formatTicks(issue.range.end, ticksPerSecond)}`
+                  ? ` · entre ${formatTicks(issue.range.start, tickRate)} e ${formatTicks(issue.range.end, tickRate)}`
                   : ''}
               </p>
               {issue.evidenceRefs.length === 0 ? (

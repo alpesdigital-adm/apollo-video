@@ -2,8 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  classifyConflict,
+  conflictingVersionFrom,
+  REPEATED_REQUEST_MESSAGE,
+  UNKNOWN_CONFLICT_MESSAGE,
+} from '@/app/_operator/refusal'
+import { formatTicks, showBps, showRatio, tickRateFrom } from '@/app/_operator/tick-format'
 import AppShellNavigation from '@/components/AppShellNavigation'
 import LogoutButton from '@/components/LogoutButton'
+import { OUTPUT_ASPECT_RATIOS } from '@/v2/domain/multicam-output-format'
 
 /**
  * The multicam direction surface (F4.012).
@@ -32,7 +40,9 @@ import LogoutButton from '@/components/LogoutButton'
  * Both commands here are fenced on the project version the page read, and the
  * fence comes from the API, never from this file. When the server answers that
  * the version moved, the page stops and offers a reload instead of retrying
- * with the version in its hand — that version is the stale one.
+ * with the version in its hand — that version is the stale one. It answers that
+ * by code and not by status: a 409 also carries the repeated request, and a
+ * reload is not what fixes one of those.
  */
 
 interface ApiEnvelope<T> {
@@ -151,51 +161,6 @@ interface SessionRead {
 
 interface ProjectVersion { id: string; sequence: number; baseHash: string }
 
-/**
- * Ticks divided exactly, or handed back as they arrived.
- *
- * A tick is 64-bit. Parsing one into a `Number` to divide it would undo the
- * whole reason the boundary sends decimal strings, and the rounding would be
- * invisible. When the timebase is unknown the raw string is shown: a duration
- * invented from an assumed rate would be a measurement nobody took.
- */
-function formatTicks(ticks: string, ticksPerSecond: bigint | null): string {
-  if (ticksPerSecond === null || ticksPerSecond <= BigInt(0)) return `${ticks} ticks`
-  try {
-    const value = BigInt(ticks)
-    const negative = value < BigInt(0)
-    const absolute = negative ? -value : value
-    const seconds = absolute / ticksPerSecond
-    const millis = ((absolute % ticksPerSecond) * BigInt(1_000)) / ticksPerSecond
-    return `${negative ? '−' : ''}${seconds},${String(millis).padStart(3, '0')} s`
-  } catch {
-    return `${ticks} ticks`
-  }
-}
-
-/** `"1/90000"` seconds per tick means ninety thousand ticks in a second. */
-function ticksPerSecondFrom(secondsPerTick: string | undefined): bigint | null {
-  if (!secondsPerTick) return null
-  const [num, den] = secondsPerTick.split('/')
-  try {
-    const numerator = BigInt(num ?? '')
-    const denominator = BigInt(den ?? '')
-    if (numerator <= BigInt(0) || denominator <= BigInt(0)) return null
-    return denominator / numerator
-  } catch {
-    return null
-  }
-}
-
-/** A measurement in basis points, or the honest absence of one. */
-function showBps(value: number | null): string {
-  return value === null ? 'não medida' : `${(value / 100).toFixed(2)} %`
-}
-
-function showRatio(value: number | null): string {
-  return value === null ? 'não medida' : value.toFixed(3)
-}
-
 const RULE_TEXT: Record<string, string> = {
   'demonstration-prefers-screen': 'demonstração pede a tela',
   'speech-prefers-active-speaker': 'fala pede quem está falando',
@@ -208,8 +173,6 @@ const RULE_TEXT: Record<string, string> = {
   'conservative-hold': 'na dúvida, segurou',
 }
 
-const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:5'] as const
-
 export default function MulticamDirectionPage() {
   const [projectId, setProjectId] = useState('')
   const [sessionId, setSessionId] = useState('')
@@ -221,7 +184,9 @@ export default function MulticamDirectionPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [aspectRatio, setAspectRatio] = useState<string>('16:9')
+  // Seeded from the domain constant, never from a string typed here: the four
+  // formats the picker offers below are the four the request schema spreads.
+  const [aspectRatio, setAspectRatio] = useState<string>(OUTPUT_ASPECT_RATIOS[0])
   const [openWindow, setOpenWindow] = useState<string | null>(null)
   const [protectShotId, setProtectShotId] = useState('')
   const [protectTrackId, setProtectTrackId] = useState('')
@@ -232,10 +197,7 @@ export default function MulticamDirectionPage() {
   // these calls invisible to it.
   const project = useMemo(() => encodeURIComponent(projectId.trim()), [projectId])
   const encodedSession = useMemo(() => encodeURIComponent(sessionId.trim()), [sessionId])
-  const ticksPerSecond = useMemo(
-    () => ticksPerSecondFrom(session?.clock.timebase),
-    [session],
-  )
+  const tickRate = useMemo(() => tickRateFrom(session?.clock.timebase), [session])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -310,18 +272,31 @@ export default function MulticamDirectionPage() {
     void load()
   }, [load, projectId, sessionId])
 
-  /** 409 with the version the server is actually holding, or a plain refusal. */
+  /**
+   * A 409 read by its code, not by its number.
+   *
+   * The catalogue puts at least five codes on 409, and only two of them mean
+   * "the project moved". Answering "recarregue" to the other three sends the
+   * operator round a loop — most sharply for the repeated request, whose key is
+   * `protect-<shot>-<projectVersion>` and therefore collides on purpose when
+   * the same shot is protected twice with different words.
+   */
   const handleRefusal = useCallback((status: number, body: ApiEnvelope<unknown>) => {
-    if (status === 409) {
-      const current = body.error?.details?.currentVersionId ?? body.error?.details?.currentVersion
-      setConflict(typeof current === 'string' || typeof current === 'number' ? String(current) : 'outra')
+    const kind = classifyConflict(status, body.error?.code)
+    if (kind === null) return false
+    if (kind === 'stale-fence') {
+      setConflict(conflictingVersionFrom(body.error?.details))
       setMessage(
         'O projeto avançou enquanto esta tela olhava para outra versão. '
         + 'Recarregue antes de dirigir de novo: o pedido foi calculado sobre uma versão que já não é a atual.',
       )
       return true
     }
-    return false
+    // No reload affordance: neither of these is fixed by reading the project
+    // again, and offering the button would say it is.
+    setConflict(null)
+    setMessage(kind === 'repeated-request' ? REPEATED_REQUEST_MESSAGE : UNKNOWN_CONFLICT_MESSAGE)
+    return true
   }, [])
 
   const direct = useCallback(async () => {
@@ -504,7 +479,7 @@ export default function MulticamDirectionPage() {
             onChange={(event) => setAspectRatio(event.target.value)}
             value={aspectRatio}
           >
-            {ASPECT_RATIOS.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
+            {OUTPUT_ASPECT_RATIOS.map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
           </select>
         </label>
         <p data-testid="direction-fence">
@@ -530,7 +505,7 @@ export default function MulticamDirectionPage() {
           <dl>
             <dt>Trecho dirigido</dt>
             <dd data-testid="direction-range">
-              {formatTicks(direction.range.start, ticksPerSecond)} → {formatTicks(direction.range.end, ticksPerSecond)}
+              {formatTicks(direction.range.start, tickRate)} → {formatTicks(direction.range.end, tickRate)}
             </dd>
             <dt>Formato</dt>
             <dd data-testid="direction-format">{direction.format.aspectRatio}</dd>
@@ -584,7 +559,7 @@ export default function MulticamDirectionPage() {
             <p data-testid="direction-uncovered">
               Nenhum ângulo era elegível entre{' '}
               {direction.uncovered
-                .map((gap) => `${formatTicks(gap.start, ticksPerSecond)} e ${formatTicks(gap.end, ticksPerSecond)}`)
+                .map((gap) => `${formatTicks(gap.start, tickRate)} e ${formatTicks(gap.end, tickRate)}`)
                 .join('; ')}
               . Nada é ligado por cima desses trechos.
             </p>
@@ -609,8 +584,8 @@ export default function MulticamDirectionPage() {
                 ({shot.chosen.context})
               </h3>
               <p data-testid={`range-${shot.shotId}`}>
-                {formatTicks(shot.sessionRange.start, ticksPerSecond)} →{' '}
-                {formatTicks(shot.sessionRange.end, ticksPerSecond)}
+                {formatTicks(shot.sessionRange.start, tickRate)} →{' '}
+                {formatTicks(shot.sessionRange.end, tickRate)}
               </p>
               <p data-testid={`rule-${shot.shotId}`}>
                 Regra: {RULE_TEXT[shot.rule] ?? shot.rule}

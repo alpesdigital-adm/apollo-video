@@ -376,30 +376,41 @@ export default function CaptureSessionsPage() {
           destinations — the shell declares a fixed set — so this is the place
           they are reached from, and each of them links back here and to its
           siblings. The links carry the session already chosen: landing on an
-          empty form would ask the operator to retype what they just clicked. */}
-      <p data-testid="open-multicam-direction">
-        <a
-          href={`/multicam-direction?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
-        >
-          Dirigir esta sessão entre as câmeras
-        </a>
-      </p>
+          empty form would ask the operator to retype what they just clicked.
 
-      <p data-testid="open-color-match">
-        <a
-          href={`/color-match?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
-        >
-          Casar a cor entre as câmeras
-        </a>
-      </p>
+          Guarded on `selected`, like the diagnostic link above it. Rendered
+          before a session is chosen they pointed at `?projeto=&sessao=` — the
+          empty form this comment says they avoid — and looked reachable while
+          leading nowhere. */}
+      {selected && (
+        <p data-testid="open-multicam-direction">
+          <a
+            href={`/multicam-direction?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Dirigir esta sessão entre as câmeras
+          </a>
+        </p>
+      )}
 
-      <p data-testid="open-playback-map">
-        <a
-          href={`/playback-map?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected ?? '')}`}
-        >
-          Ver o que o player fez nesta reação
-        </a>
-      </p>
+      {selected && (
+        <p data-testid="open-color-match">
+          <a
+            href={`/color-match?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Casar a cor entre as câmeras
+          </a>
+        </p>
+      )}
+
+      {selected && (
+        <p data-testid="open-playback-map">
+          <a
+            href={`/playback-map?projeto=${encodeURIComponent(projectId.trim())}&sessao=${encodeURIComponent(selected)}`}
+          >
+            Ver o que o player fez nesta reação
+          </a>
+        </p>
+      )}
 
       {sync && (
         <section data-testid="sync-detail">
