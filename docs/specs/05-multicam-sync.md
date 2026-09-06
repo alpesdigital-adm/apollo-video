@@ -917,7 +917,8 @@ diferença de números.
 ### 30.5 Medido
 
 `tests/v2/color-visual-evaluations.integration.mjs`, executado nesta máquina
-(7 casos, 7 passes, N=2 amostras por caso onde N aparece):
+(7 casos, 7 passes; nos dois primeiros, N=2 é o número de intervalos medidos por
+câmera):
 
 - **Duas câmeras.** Razão azul/verde da referência 1,047486. Antes do match a
   câmera B media 0,916081 — 12,54 % de erro; depois, 1,046333 — 0,11 %. Ganho
@@ -1284,14 +1285,16 @@ F4.016 no `TODO.md` está marcada.
 | §33 Gate da fase | `multicam-longform-gate.ts` | T-F4.016 (16 casos), `E2E-F4.016` |
 
 Persistência em 33 modelos Prisma novos, distribuídos por seis migrações, todas
-aplicáveis do zero — medido levantando um PostgreSQL 16 vazio nesta máquina e
+aplicáveis do zero: medido levantando um PostgreSQL 16 vazio nesta máquina e
 rodando `db:v2:migrate:deploy`, que respondeu "All migrations have been
-successfully applied";
-`npm run db:v2:validate` mede hoje 267 tabelas, 1247 índices e 935 chaves
-estrangeiras (a Wave 18 media 227 / 1099 / 850). A superfície `/v1` passou de
-325 para 347 capabilities — 22 adicionadas, todas com esquema, exemplo
-construído por fábrica real, cobertura de concorrência e de pré-condição, e
-baseline atualizada. Quatro telas de operador: direção, cor, playback e gate.
+successfully applied".
+
+`npm run db:v2:validate` respondeu nesta máquina, em 2026-09-06, "267 tabelas,
+1247 índices, 935 chaves estrangeiras" — a nota da Wave 18 no `TODO.md` havia
+registrado 227 / 1099 / 850. O registry de capabilities passou de 325 entradas em
+`041eb97d` para 347 em `HEAD`, e `npm run api:v1:validate` respondeu no mesmo dia
+"347 capabilities, 606 schemas, 671 examples, 282 paths, compatibility baseline
+intact". Quatro telas de operador: direção, cor, playback e gate.
 
 ### 34.2 O worker de sincronização — o que passou a existir
 
