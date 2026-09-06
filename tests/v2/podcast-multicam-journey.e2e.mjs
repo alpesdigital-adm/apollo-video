@@ -9,7 +9,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
  * E2E-F4.012/F4.013/F4.014 — Journey 1: a two-camera podcast on a master audio
- * recorder, plus a camera nobody probed, from ingest to an inspected MP4.
+ * recorder, one of the cameras on two cards, from ingest to an inspected MP4.
  *
  * Every step is a published `/v1` route handler called with a `NextRequest`,
  * and both queues are drained by SEPARATE PROCESSES running the npm scripts an
@@ -41,12 +41,16 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   shot in the cut is a number the POLICY produced rather than one the fixture
  *   happened to contain. Delete rule 8 and this journey reports two
  *   `minimum-shot-violated` warnings and a 500 ms shot.
- * - **A card nobody opened is never cut to.** The third camera's part carries
- *   `probeSource: 'operator-report'` — a duration somebody wrote down — so
- *   `deriveTrackCoverage` marks the whole track `unverified`. It synchronizes
- *   like any other track and it is refused as an angle in every window, by the
- *   coverage gate and with `coverage-unverified` as the only reason. Remove the
- *   gate and the refusal disappears.
+ * - **A card nobody opened is never cut to.** Camera B stopped and restarted
+ *   and wrote two cards; only the first was ever read. The second part carries
+ *   `probeSource: 'operator-report'` — a duration somebody wrote on a label —
+ *   so `deriveTrackCoverage` marks exactly those ticks `unverified`, and the
+ *   candidates read back over `/v1` show the SAME camera eligible on card one
+ *   and refused on card two, with `coverage-unverified` as its only reason,
+ *   while it is synchronized and resolved onto its own file. Remove the gates
+ *   and this journey fails at the direction request itself: the run merges
+ *   across the card boundary and `sealShot` refuses a shot that spans two
+ *   parts.
  * - **No clip lies outside measured coverage.** Twice over: every shot's source
  *   range sits inside the coverage bounds the worker derived for that track,
  *   and so does every CLIP of the plan the renderer was actually handed — a
