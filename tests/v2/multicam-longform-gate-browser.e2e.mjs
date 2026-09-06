@@ -85,7 +85,12 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
   const client = new PrismaClient()
   const suffix = randomUUID().slice(0, 8)
   const workspaceId = `f4016-browser-${suffix}`
-  const projectId = `f4016-project-${suffix}`
+  // Deliberately near the 128-character bound the public id schema allows. The
+  // page used to build its Idempotency-Key as `gate-${projectId}-${minute}`,
+  // which for an id this long is 132 characters against a server pattern that
+  // stops at 128: "Avaliar agora" answered 422 and the operator read it as the
+  // gate refusing the project. A short fixture id could never have shown it.
+  const projectId = `f4016-project-${suffix}`.padEnd(110, 'p')
   const uiUsername = `f4016-user-${suffix}`
   const uiPassword = `Multicam-Longform-${suffix}-secure`
   const createdAt = new Date('2029-05-01T09:00:00.000Z')
@@ -454,6 +459,52 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
       .getAttribute('href')
     assert.equal(href, `/v1/artifacts/${artifactId}`)
 
+    // 4. The criteria are readable before any project has been evaluated.
+    //    `loadCatalogue` used to have one call site, inside `loadGate`, after
+    //    the early return for an empty project, so arriving here with no
+    //    `projeto` — which the link on the captures screen does whenever
+    //    nothing has been typed yet — rendered "As dez condições" above an
+    //    empty list. A screen headed "ten conditions" showing zero is the
+    //    aggregated nothing this page exists to refuse.
+    await page.goto(`${baseUrl}/multicam-longform-gate`)
+    await page.getByTestId('multicam-longform-gate-page').waitFor({ state: 'visible' })
+    await page.getByTestId('state-idle').waitFor({ state: 'visible' })
+    const listedWithoutProject = await page.getByTestId('criteria-list').locator('> li').count()
+    assert.equal(
+      listedWithoutProject,
+      MULTICAM_LONGFORM_CRITERIA.length,
+      'the ten conditions are unreadable until a project is supplied',
+    )
+    const idleStatuses = await Promise.all(MULTICAM_LONGFORM_CRITERIA.map(async (criterion) =>
+      (await page.getByTestId(`criterion-status-${criterion}`).textContent())?.trim()))
+    assert.deepEqual(
+      idleStatuses,
+      MULTICAM_LONGFORM_CRITERIA.map(() => 'não avaliado'),
+      'a criterion nobody asked about was shown as answered',
+    )
+
+    // 5. The page's own command path. The browser drove six of the seven
+    //    capabilities and POSTed the evaluation itself, so the one button that
+    //    writes was never pressed - and the key it builds is exactly what was
+    //    wrong with it.
+    await page.goto(`${baseUrl}/multicam-longform-gate?projeto=${encodeURIComponent(projectId)}`)
+    await page.getByTestId('gate-summary').waitFor({ state: 'visible' })
+    await page.getByTestId('evaluate-gate').click()
+    await page.getByTestId('message').waitFor({ state: 'visible' })
+    assert.equal(
+      (await page.getByTestId('message').textContent())?.trim(),
+      'Avaliação registrada.',
+      'the evaluation the page itself asked for came back refused',
+    )
+    const written = await client.v2MulticamLongformGate.findMany({
+      where: { workspaceId, projectId },
+      orderBy: { createdAt: 'desc' },
+    })
+    assert.equal(written.length, 3, 'the button did not write a third evaluation')
+    // The server's own bound, asserted against the key the page built for a
+    // 110-character project id.
+    assert.match(written[0].idempotencyKey, /^[\x21-\x7E]{8,128}$/)
+
     const body = (await page.locator('body').textContent()) ?? ''
     assert.doesNotMatch(body, /\b\d{1,3}%/, 'the gate was summarised as a percentage')
 
@@ -462,7 +513,10 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
       + `${statuses.filter((s) => s === 'aprovado').length} approved, ${outstandingShown} outstanding; `
       + `the fresh evaluation satisfied ${runPayload.data.gate.report.satisfied} of 10; `
       + `the seeded evaluation shows 1 approved, 1 refused, `
-      + `${artifactPayload.data.unverifiedCount} tampered and ${artifactPayload.data.unhashedCount} unhashed reference`,
+      + `${artifactPayload.data.unverifiedCount} tampered and ${artifactPayload.data.unhashedCount} unhashed reference; `
+      + `with no project in the URL the same screen still lists ${listedWithoutProject} conditions, `
+      + `and the page's own command button wrote a third record under a `
+      + `${written[0].idempotencyKey.length}-character key for a ${projectId.length}-character project`,
     )
   } finally {
     if (browser) await browser.close()

@@ -78,7 +78,7 @@ const coverage = Object.freeze({
   },
   'apollo.projects.multicam-longform-gate.evaluate': {
     mode: 'durable-covered',
-    evidence: 'F4.016 writes the gate record, its ten criteria, their checks and every evidence reference in one transaction under the unique index multicam_longform_gates_project_idempotency_key on (workspaceId, projectId, idempotencyKey), so two concurrent evaluations under one key cannot both persist and a retry returns the first record without re-reading a row; the stored actorContextHash is compared on that read, so the same key presented by another credential, environment or delegated user is refused as AUTH_INVALID and the same key with a different session filter as IDEMPOTENCY_PAYLOAD_MISMATCH rather than answering about another session',
+    evidence: 'F4.016 writes the gate record, its ten criteria, their checks and every evidence reference in one transaction under the unique index multicam_longform_gates_project_idempotency_key on (workspaceId, projectId, idempotencyKey), so two concurrent evaluations under one key cannot both persist and a retry returns the first record without re-reading a row; the stored actorContextHash is compared on that read, so the same key presented by another credential, environment or delegated user and the same key carrying a different session filter are both refused as IDEMPOTENCY_PAYLOAD_MISMATCH — one saying the key belongs to another authenticated actor context, the other that it answered a different request — rather than answering about another session; both codes are asserted against a real PostgreSQL in tests/v2/multicam-longform-gate.e2e.mjs',
   },
   'apollo.projects.editorial-syntheses.create': {
     mode: 'durable-covered',
