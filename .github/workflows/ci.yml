@@ -309,7 +309,7 @@ jobs:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_PHASE_GATE_E2E: "1"
 
-      - name: Run Wave 20 ten-minute master to two-minute cut against ffprobe and PostgreSQL
+      - name: Run Wave 20 two-hour plan and rendered two-minute cut against ffprobe and PostgreSQL
         run: npm run test:e2e:longform-synthesis
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-longform-synthesis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
