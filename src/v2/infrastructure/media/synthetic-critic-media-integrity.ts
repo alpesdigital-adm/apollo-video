@@ -20,9 +20,9 @@ import type {
 } from '../../domain/synthetic-critic-report.ts'
 import type { SyntheticCriticFinding } from '../../domain/synthetic-critic-thresholds.ts'
 import { probeAudioDurationSeconds, probeVideo } from './video-probe.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './ffmpeg-binary.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
 const execFileAsync = promisify(execFile)
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
@@ -59,14 +59,11 @@ interface StreamDetails {
 }
 
 function resolveFfprobe(environment: NodeJS.ProcessEnv): string {
-  const configured = environment.FFPROBE_PATH?.trim()
-  if (configured) return configured
-  const bundled = typeof ffprobeStatic?.path === 'string' ? ffprobeStatic.path.trim() : ''
-  return bundled || 'ffprobe'
+  return resolveFfprobeBinaryPath(ffprobeStatic?.path, undefined, environment)
 }
 
 function resolveFfmpeg(environment: NodeJS.ProcessEnv): string {
-  return environment.APOLLO_V2_FFMPEG_PATH?.trim() || environment.FFMPEG_PATH?.trim() || ffmpegStatic || 'ffmpeg'
+  return resolveFfmpegBinary(undefined, environment)
 }
 
 function finiteNumber(value: unknown): number | null {

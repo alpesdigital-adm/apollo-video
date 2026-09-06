@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdir, rm } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -21,9 +20,8 @@ import type { VerifiedMediaStorage } from '../../application/ports/media-ingest.
 import { FfmpegColorMeasurement } from './ffmpeg-color-measurement.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 type ResolvedPipeline = Readonly<ReturnType<typeof resolveColorPlan>>
@@ -154,7 +152,7 @@ export class FfmpegColorCriticEvaluator implements ColorCriticEvaluator {
   }) {
     this.workRoot = resolve(options.workRoot)
     this.storage = options.storage
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.processor = new FfmpegColorPipelineProcessor(
       options.ffmpegPath?.trim() ? { ffmpegPath: options.ffmpegPath.trim() } : {},

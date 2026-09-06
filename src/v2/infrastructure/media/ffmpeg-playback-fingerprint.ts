@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import ffmpegStatic from 'ffmpeg-static'
 
 import type { PlaybackObservation } from '../../domain/playback-map.ts'
 import {
@@ -16,6 +15,7 @@ import {
   DEFAULT_SYNC_EVIDENCE_THRESHOLDS,
   MAXIMUM_REPORTABLE_PEAK_RATIO,
 } from '../../domain/sync-evidence.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -668,7 +668,7 @@ export class FfmpegPlaybackFingerprinter {
   private readonly workRoot: string | null
 
   constructor(options: { ffmpegPath?: string; workRoot?: string } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.workRoot = options.workRoot ?? null
   }
 

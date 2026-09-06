@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
@@ -10,6 +9,7 @@ import type {
   MulticamVisualWindow,
 } from '../../application/ports/multicam-evidence-sources.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { resolveFfmpegBinary } from '../media/ffmpeg-binary.ts'
 
 /**
  * Screen activity and technical quality of a capture window, from FFmpeg
@@ -68,8 +68,6 @@ import { DomainError } from '../../domain/errors.ts'
  * `ffmpeg-sync-marker-renderer.ts:187-195`).
  */
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 const FULL_SCALE = 255
@@ -112,7 +110,7 @@ export class FfmpegMulticamVisualEvidenceProvider implements MulticamVisualEvide
   private readonly timeoutMs: number
 
   constructor(options: { ffmpegPath?: string; timeoutMs?: number } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.timeoutMs = options.timeoutMs ?? 5 * 60_000
     if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs < 5_000 || this.timeoutMs > 60 * 60_000) {
       throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Multicam visual measurement timeout is not configured')

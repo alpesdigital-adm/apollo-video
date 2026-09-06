@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
@@ -17,9 +16,8 @@ import {
 } from '../../domain/multicam-match-plan.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 function escapeFilterPath(value: string): string {
@@ -251,7 +249,7 @@ export class FfmpegColorPipelineProcessor {
   private readonly ffmpegPath: string
 
   constructor(options: { ffmpegPath?: string } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
   }
 
   async process(input: {

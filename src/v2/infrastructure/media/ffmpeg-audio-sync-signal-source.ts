@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import ffmpegStatic from 'ffmpeg-static'
 
 import type { CaptureSession, CaptureTrack, CaptureTrackPart } from '../../domain/capture-session.ts'
 import { DomainError } from '../../domain/errors.ts'
@@ -29,6 +28,7 @@ import {
   correlateAudioWindows,
   type AudioWindowCorrelation,
 } from './ffmpeg-playback-fingerprint.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -245,7 +245,7 @@ export class FfmpegAudioSyncSignalSource {
   constructor(options: AudioSyncSignalSourceOptions) {
     this.media = options.media
     this.diagnostics = options.diagnostics ?? null
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.sampleRate = options.sampleRate ?? AUDIO_SYNC_SIGNAL_DEFAULTS.sampleRate
     this.windowMs = options.windowMs ?? AUDIO_SYNC_SIGNAL_DEFAULTS.windowMs
     this.minimumPeak = options.minimumPeak ?? AUDIO_SYNC_SIGNAL_DEFAULTS.minimumPeak

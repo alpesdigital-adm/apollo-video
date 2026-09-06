@@ -257,6 +257,7 @@ import {
 import { setProjectColorPlanService } from '../application/project-color-plans.ts'
 import { concatenateBlockAudio } from './media/audio-concatenation.ts'
 import { CaptureMediaResolver } from './media/capture-media-resolver.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './media/ffmpeg-binary.ts'
 import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluator.ts'
 import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
 import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
@@ -965,11 +966,14 @@ const audioToolsRequire = createRequire(import.meta.url)
 export function createSyntheticBlockAudioCompilationService(environment: NodeJS.ProcessEnv = process.env) {
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   if (!workRoot) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires APOLLO_V2_RENDER_WORK_ROOT')
-  // Explicit env paths win: inside a bundled Next server the *-static
-  // packages resolve to paths that do not exist on disk.
-  const ffmpegPath = (environment.FFMPEG_PATH?.trim() || ((audioToolsRequire('ffmpeg-static') as string | null) ?? '')).trim()
-  const ffprobePath = (environment.FFPROBE_PATH?.trim() || ((audioToolsRequire('ffprobe-static') as { path?: string }).path ?? '')).trim()
-  if (!ffmpegPath || !ffprobePath) throw new DomainError('PERSISTENCE_NOT_CONFIGURED', 'Audio compilation requires bundled ffmpeg and ffprobe')
+  // Both binaries through the shared resolver: inside a bundled Next server the
+  // *-static packages compute paths from a rewritten `__dirname` and answer
+  // with files that are not on disk. This composition root knew that and said
+  // so only for itself; the resolver says it for every spawn site.
+  const ffmpegPath = resolveFfmpegBinary(undefined, environment)
+  const ffprobePath = resolveFfprobeBinaryPath(
+    (audioToolsRequire('ffprobe-static') as { path?: string }).path, undefined, environment,
+  )
   const artifacts = new PrismaMediaArtifactRepository(resolveV2Client())
   const plans = createSyntheticScriptPlanRepository()
   const projects = createProjectWorkspaceQueryRepository()

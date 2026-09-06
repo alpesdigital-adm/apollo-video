@@ -15,9 +15,9 @@ import type {
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
 const execFileAsync = promisify(execFile)
 
@@ -165,7 +165,7 @@ implements SpeakerDiarizationAudioPreparer {
     this.artifactRoot = resolve(options.artifactRoot.trim())
     this.workRoot = resolve(options.workRoot.trim())
     this.ffmpegPath =
-      options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+      resolveFfmpegBinary(options.ffmpegPath)
     this.ffprobePath =
       options.ffprobePath?.trim() ||
       ffprobeStatic?.path?.trim() ||

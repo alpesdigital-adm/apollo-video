@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -19,9 +18,8 @@ import { subtitleAnchorDecisionFor, type SubtitleAnchorPlanV1 } from '../../doma
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
 import { FfmpegColorPipelineProcessor } from './ffmpeg-color-pipeline-processor.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 const FORMAT_DIMENSIONS: Readonly<Record<string, readonly [number, number]>> = Object.freeze(
@@ -449,7 +447,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
 
   constructor(options: { workRoot: string; ffmpegPath?: string }) {
     this.workRoot = resolve(options.workRoot)
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.colorProcessor = new FfmpegColorPipelineProcessor({ ffmpegPath: this.ffmpegPath })
   }
 

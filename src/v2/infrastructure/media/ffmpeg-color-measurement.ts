@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -16,9 +15,8 @@ import { DomainError } from '../../domain/errors.ts'
 import type { TickInterval } from '../../domain/session-time.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
 import { probeVideo } from './video-probe.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 /**
@@ -330,7 +328,7 @@ export class FfmpegColorMeasurement {
   private readonly timeoutMs: number
 
   constructor(options: { ffmpegPath?: string; timeoutMs?: number } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 10 * 60_000) {
       throw new DomainError('INVALID_ARGUMENT', 'Colour measurement timeout is invalid')
