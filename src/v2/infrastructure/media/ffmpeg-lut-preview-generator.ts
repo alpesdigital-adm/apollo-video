@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,9 +7,8 @@ import { promisify } from 'node:util'
 
 import type { LutPreviewGenerator } from '../../application/ports/lut-preview-generator.ts'
 import { DomainError } from '../../domain/errors.ts'
+import { resolveFfmpegBinary } from './ffmpeg-binary.ts'
 
-const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const execFileAsync = promisify(execFile)
 
 function escapeFilterPath(value: string): string {
@@ -20,7 +18,7 @@ function escapeFilterPath(value: string): string {
 export class FfmpegLutPreviewGenerator implements LutPreviewGenerator {
   private readonly ffmpegPath: string
   constructor(options: { ffmpegPath?: string } = {}) {
-    this.ffmpegPath = options.ffmpegPath?.trim() || process.env.APOLLO_FFMPEG_PATH?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
   }
 
   async generate(input: { canonicalCube: string; signal?: AbortSignal }) {

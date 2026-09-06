@@ -15,9 +15,9 @@ import type {
 import { calculateCanonicalHash } from '../../domain/canonical-hash.ts'
 import { DomainError } from '../../domain/errors.ts'
 import { calculateFileSha256 } from './local-artifact-manifest.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './ffmpeg-binary.ts'
 
 const require = createRequire(import.meta.url)
-const ffmpegStatic = require('ffmpeg-static') as string | null
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
 const execFileAsync = promisify(execFile)
 
@@ -165,11 +165,16 @@ implements SpeakerDiarizationAudioPreparer {
     this.artifactRoot = resolve(options.artifactRoot.trim())
     this.workRoot = resolve(options.workRoot.trim())
     this.ffmpegPath =
-      options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
-    this.ffprobePath =
-      options.ffprobePath?.trim() ||
-      ffprobeStatic?.path?.trim() ||
-      'ffprobe'
+      resolveFfmpegBinary(options.ffmpegPath)
+    // The fourth ffprobe resolution, repaired last: `ffprobe-static` computes
+    // its path from `__dirname`, so a bundled server probed a
+    // `bin/win32/x64/ffprobe.exe` inside `.next/server/chunks` that nobody
+    // copied there, and the bare-name fallback behind it only ever resolved on
+    // a machine that happened to have ffprobe installed.
+    this.ffprobePath = resolveFfprobeBinaryPath(
+      ffprobeStatic?.path,
+      options.ffprobePath,
+    )
     this.timeoutMs = options.timeoutMs ?? 90 * 60_000
     if (
       !options.artifactRoot.trim() ||

@@ -6,13 +6,12 @@ import { promisify } from 'node:util'
 
 import { createRequire } from 'node:module'
 
-import ffmpegStatic from 'ffmpeg-static'
-
 const require = createRequire(import.meta.url)
 const ffprobeStatic = require('ffprobe-static') as { path?: string }
 
 import { DomainError } from '../../domain/errors.ts'
 import { visualPatternDurationMs, type SyncMarker } from '../../domain/sync-marker.ts'
+import { resolveFfmpegBinary, resolveFfprobeBinaryPath } from './ffmpeg-binary.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -172,15 +171,17 @@ export function synthesizeChirp(input: {
  * only on a machine that happens to have one installed — mine, and not a CI
  * runner. The repository already depends on ffprobe-static for exactly this
  * reason and every other media module resolves it the same way.
+ *
+ * The bundling repair lives in `ffmpeg-binary.ts` and is shared with ffmpeg:
+ * ffprobe-static computes its path from `__dirname` too, so trusting it
+ * unchecked pointed a production build at a `bin/win32/x64/ffprobe.exe` inside
+ * `.next/server/chunks` that nothing ever copied there.
  */
 export function resolveFfprobeBinary(
   configured?: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  const explicit = configured?.trim() || environment.FFPROBE_PATH?.trim()
-  if (explicit) return explicit
-  const bundled = typeof ffprobeStatic?.path === 'string' ? ffprobeStatic.path.trim() : ''
-  return bundled || 'ffprobe'
+  return resolveFfprobeBinaryPath(ffprobeStatic?.path, configured, environment)
 }
 
 export class FfmpegSyncMarkerRenderer {
@@ -190,7 +191,7 @@ export class FfmpegSyncMarkerRenderer {
 
   constructor(options: { workRoot: string; ffmpegPath?: string; ffprobePath?: string }) {
     this.workRoot = options.workRoot
-    this.ffmpegPath = options.ffmpegPath?.trim() || ffmpegStatic || 'ffmpeg'
+    this.ffmpegPath = resolveFfmpegBinary(options.ffmpegPath)
     this.ffprobePath = resolveFfprobeBinary(options.ffprobePath)
   }
 
