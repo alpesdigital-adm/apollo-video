@@ -276,6 +276,11 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-react-playback-journey-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
           APOLLO_REACT_PLAYBACK_JOURNEY_E2E: "1"
+      - name: Run Wave 20 insufficient evidence product journey against PostgreSQL
+        run: npm run test:e2e:insufficient-evidence-journey
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci@127.0.0.1:5432/apollo_v2?schema=public&application_name=apollo-video-e2e-insufficient-evidence-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+          APOLLO_INSUFFICIENT_EVIDENCE_E2E: "1"
       - name: Run Wave 20 capture sync worker persistence against PostgreSQL
         run: npm run test:e2e:capture-sync-persistence
         env:

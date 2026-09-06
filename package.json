@@ -62,6 +62,7 @@
     "test:e2e:color-critic": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/color-critic.e2e.mjs",
     "test:e2e:playback-map": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/playback-map.e2e.mjs",
     "test:e2e:react-playback-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/react-playback-journey.e2e.mjs",
+    "test:e2e:insufficient-evidence-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/insufficient-evidence-journey.e2e.mjs",
     "test:e2e:multicam-longform-gate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-longform-gate.e2e.mjs",
     "test:e2e:wave20-journey": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/wave20-persistence-journey.e2e.mjs",
     "test:e2e:sync-diagnostic-browser": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs --test tests/v2/sync-diagnostic-browser.e2e.mjs",
