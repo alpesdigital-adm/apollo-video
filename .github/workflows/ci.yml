@@ -276,6 +276,14 @@ jobs:
       - name: Run Wave 20 multicam direction render against ffprobe
         run: npm run test:integration:multicam-direction-render
 
+      # The calibration source for `SCREEN_ACTIVITY_SATURATION_BPS = 400`. Spec
+      # 05 §29.1 and the FR-150 traceability row both quote this suite's
+      # measured 0/4/103/137/3151 bps by name, and the script existed in
+      # package.json without a CI step while `.integration.mjs` keeps it out of
+      # `npm test` — so the two documents cited a number nothing re-measured.
+      - name: Run Wave 20 multicam visual evidence against decoded pixels
+        run: npm run test:integration:multicam-visual-evidence
+
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
