@@ -1597,22 +1597,32 @@ há teste que meça esse teto.
 
 ### 34.6 O que não foi medido neste passe
 
-Este documento foi escrito com `npm test` (2147 testes, 2147 passes, saída 0),
-seis suítes de integração de mídia da Wave 20 e quatro suítes de banco contra um
-cluster PostgreSQL 16 descartável levantado localmente e destruído em seguida.
-**Não** foram executadas aqui: as jornadas de navegador
+O passe que escreveu esta seção rodou `npm test` (2147 testes, 2147 passes,
+saída 0), seis suítes de integração de mídia da Wave 20 e quatro suítes de banco
+contra um cluster PostgreSQL 16 descartável levantado localmente e destruído em
+seguida. **Não** executou: as jornadas de navegador
 (`test:e2e:wave20-browser`, `test:e2e:multicam-longform-gate-browser`), que
 exigem `next start` e um build de produção, nem as jornadas de produto de
 podcast, professor+tela, react, evidência insuficiente e síntese long-form
 contra PostgreSQL. Elas existem, estão registradas em passos nomeados do CI, e
 são medidas lá.
 
+**Números com data, porque contagem sem data envelhece calada.** Em 2026-09-07,
+depois da rodada de fechamento, `npm test` nesta máquina devolveu **2165 testes,
+2165 passes, saída 0, 61,3 s** — os 2147 acima são do passe original e não do
+estado atual. Passes posteriores mediram contra PostgreSQL, e a traçabilidade
+registra o número de cada um: `playback-map.e2e.mjs`, `phase-gate-journey`
+(36,9 s) e `longform-synthesis-journey` (530,9 s) em 2026-09-07. As duas
+jornadas de navegador continuam sem execução registrada fora do CI.
+
 ### 34.7 A correção da fase 9: os dois compiles que a API não alcançava
 
 Uma auditoria independente conferiu o que a §34 afirma e achou o furo. Até
 `93aa7f55`, `snapshots.persist` tinha exatamente dois chamadores —
 `application/react-playback-map.ts:1054` e
-`application/compile-synthesis-to-directed-plan.ts:368` — ambos dentro dos dois
+`application/compile-synthesis-to-directed-plan.ts:368`, que em 2026-09-07 são
+as linhas 1127 e 377; continuam sendo dois, e `grep -rn "snapshots\.persist"
+src/` devolve exatamente essas duas — ambos dentro dos dois
 serviços de compile, e nenhuma rota alcançava nenhum dos dois.
 
 **O comando que prova isso não é o grep pelos nomes dos serviços.** A primeira
