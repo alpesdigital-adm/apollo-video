@@ -144,8 +144,18 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
     assert.ok(databaseUrl, `${where}: step "${step.name}" sets no V2_DATABASE_URL, so the suite would skip on connect`)
     assert.match(databaseUrl, /^postgresql:\/\//, `${where}: V2_DATABASE_URL must be a PostgreSQL URL, got ${databaseUrl}`)
 
+    // `assertIsolatedDatabase` (tests/v2/helpers/capture-journey.mjs) refuses
+    // to run against a URL whose application_name does not read like this, so
+    // journeys 1 and 2 already fail loudly on a mislabelled step. The other
+    // four do not, and every leak check in this workflow greps for the label
+    // afterwards — so the convention is asserted for all six here rather than
+    // for the two that happen to enforce it at runtime.
     const applicationName = /application_name=([^&\s]+)/.exec(databaseUrl)?.[1]
-    assert.ok(applicationName, `${where}: V2_DATABASE_URL must carry an application_name for leak detection`)
+    assert.match(
+      applicationName ?? '',
+      /^apollo-video-e2e-[a-z0-9-]+$/,
+      `${where}: V2_DATABASE_URL needs an apollo-video-e2e-… application_name, got ${applicationName ?? 'none'}`,
+    )
 
     const gateTwin = seenGates.get(gate)
     assert.equal(
