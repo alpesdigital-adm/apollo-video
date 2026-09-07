@@ -1335,7 +1335,7 @@ Waves 18/19/20: `workspaces` vem da migração inicial `20260712210000_init`. O
 vigésimo quarto, `module-graph-audit`, **não** é tabela: `grep module_graph
 prisma/v2/schema.prisma` devolve zero linhas, e a referência que o gate constrói
 é `{ type: 'module-graph-audit', id: 'legacy-runtime-audit:<scannedAt>', hash:
-auditHash }` (`multicam-longform-gate.ts:807-811`) — o resultado de uma
+auditHash }` (`multicam-longform-gate.ts:814-819`) — o resultado de uma
 varredura, não uma linha. É o mesmo fato que a nota sobre o critério 10 registra
 adiante. "evidence-ref: o que o leitor quiser" é como um gate deixa de ser
 auditável.
