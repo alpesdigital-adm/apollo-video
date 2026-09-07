@@ -20,7 +20,11 @@ import { buildDirectableMulticamWorld } from './wave20-fixtures.mjs'
  *
  * `FfmpegMulticamVisualEvidenceProvider` was shipped and wired into
  * `repository-factory.ts` without a single test executing it; every suite in
- * the lane substituted a hand-written double whose `activityBps` was 4200. The
+ * the lane substituted a hand-written double whose `activityBps` was 4200. (The
+ * other half of that hole — that nothing executed the WIRING either, so the
+ * provider could be unwired from the composition root with every check green —
+ * is closed by `multicam-direction-composition.integration.mjs` and
+ * falsification 10 of `wave20-falsification.test.mjs`.) The
  * real pass over real footage returns two orders of magnitude less than that,
  * which made the screen-activity limb of the direction score inert in
  * production while the fakes exercised it at nearly half its weight. This suite
