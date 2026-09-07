@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -10,6 +11,12 @@ import { promisify } from 'node:util'
 
 import ffmpegStatic from 'ffmpeg-static'
 import { NextRequest } from 'next/server'
+
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  openJourneyObjectStore,
+} from './helpers/journey-object-storage.mjs'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
@@ -91,6 +98,25 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const RUN = process.env.APOLLO_REACT_PLAYBACK_JOURNEY_E2E === '1'
 const SKIP = RUN ? false : 'set APOLLO_REACT_PLAYBACK_JOURNEY_E2E=1 with a migrated V2_DATABASE_URL'
+/**
+ * Local disk or versioned MinIO, chosen by the runtime env — never pinned here.
+ *
+ * `POST /v1/.../playback-map` resolves the two recordings through
+ * `CaptureMediaResolver`, so this journey does read artifact bytes, and the
+ * first s3 run said so loudly: with an empty bucket the build answered
+ * `500 INTERNAL_ERROR` where the suite expects `409
+ * MEDIA_ARTIFACT_IDENTITY_MISMATCH`, because the reference track's
+ * materialization failed before the identity comparison the assertion is about
+ * was ever reached. The two recordings are therefore uploaded, and the refusal
+ * assertion becomes a statement about the resolver rather than about which
+ * disk the file happened to be on.
+ *
+ * What object storage still does NOT cover here is the render: nothing under
+ * `src/app/v1` or `scripts/` consumes a `RenderablePlanSnapshot`, so the MP4
+ * comes from an `FfmpegEditorialProxyRenderer` this test hands local source
+ * paths to. That gap is the header's, not the driver's, and it is unchanged.
+ */
+const storageDriver = journeyStorageDriver()
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -350,12 +376,19 @@ test(
       'this E2E is restricted to a disposable local PostgreSQL',
     )
     process.env.APOLLO_API_ENVIRONMENT = 'production'
-    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
 
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-react-journey-'))
+    const root = await mkdtemp(join(tmpdir(), 'apollo-react-journey-'))
+    const artifactRoot = join(root, 'artifacts')
+    // What FFmpeg writes. In local mode these ARE the stored artifacts; in s3
+    // mode they are the fixture uploaded below, kept outside the artifact root
+    // so no key resolves to a local file.
+    const sourceRoot = storageDriver === 's3' ? join(root, 'sources') : artifactRoot
+    for (const directory of [artifactRoot, sourceRoot]) await mkdir(directory, { recursive: true })
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
-    process.env.APOLLO_V2_RENDER_WORK_ROOT = join(artifactRoot, '.work')
+    process.env.APOLLO_V2_RENDER_WORK_ROOT = join(root, 'work')
     await mkdir(process.env.APOLLO_V2_RENDER_WORK_ROOT, { recursive: true })
+    const objectStore = await openJourneyObjectStore()
 
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -428,7 +461,10 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
-      await rm(artifactRoot, { recursive: true, force: true }).catch((error) => {
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.error('object storage cleanup failed:', error?.message ?? error)
+      })
+      await rm(root, { recursive: true, force: true }).catch((error) => {
         console.error('artifact root cleanup failed:', error?.message ?? error)
       })
       await client.$disconnect().catch(() => undefined)
@@ -437,7 +473,10 @@ test(
     await clean()
 
     // ---- the two recordings, encoded here and never committed ---------------
-    const captureDirectory = join(artifactRoot, 'capture')
+    // In s3 mode `sourceRoot` sits outside the artifact root and the two files
+    // are uploaded below, so the build route can only have read them out of
+    // MinIO.
+    const captureDirectory = join(sourceRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
     const referenceSamples = buildReferenceSamples()
     // Kept, not discarded: this is what the delivered MP4's audio is measured
@@ -472,6 +511,22 @@ test(
       reactionSeconds > referenceSeconds * 1.9,
       `the reaction (${reactionSeconds}s) must not be the reference (${referenceSeconds}s)`,
     )
+
+    // ---- the storage of record ---------------------------------------------
+    if (objectStore) {
+      for (const [key, file] of [
+        ['capture/reference.mp4', referenceFile],
+        ['capture/reaction.mp4', reactionFile],
+      ]) {
+        await objectStore.put(key, file.path)
+        assert.equal(
+          existsSync(join(artifactRoot, ...key.split('/'))),
+          false,
+          `${key} must not also sit in the artifact root while MinIO is the store of record`,
+        )
+      }
+      assert.deepEqual(await objectStore.keys(), ['capture/reaction.mp4', 'capture/reference.mp4'])
+    }
 
     // ---- the world the routes read -----------------------------------------
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
@@ -968,7 +1023,7 @@ test(
     }
     const pathByArtifactId = new Map(recordings.map((recording) => [recording.artifactId, recording.file.path]))
     const renderer = new FfmpegEditorialProxyRenderer({
-      workRoot: join(artifactRoot, 'render-work'),
+      workRoot: join(root, 'render-work'),
       ffmpegPath: FFMPEG,
     })
     const operationId = 'react-playback-journey-render'
@@ -1099,6 +1154,14 @@ test(
         probe.sd > 40,
         `at ${probe.second.toFixed(2)}s (${probe.label}) the picture is flat, so it is not the reference: sd ${probe.sd.toFixed(2)}`,
       )
+    }
+
+    // What object storage holds at the end: the two recordings this journey
+    // uploaded and nothing else. Nothing in a react playback map is promoted as
+    // a derived artifact today, and a third key appearing here would mean
+    // something started writing without anybody deciding it should.
+    if (objectStore) {
+      assert.deepEqual(await objectStore.keys(), ['capture/reaction.mp4', 'capture/reference.mp4'])
     }
 
     // The file itself, kept only when a run asks for it. The renderer's own
