@@ -9,7 +9,7 @@ import type { CaptureSession, CaptureTrack } from './capture-session.ts'
  * derived once here from `CaptureTrack.trackId` — never from the device (two
  * tracks can share a body) and never from the asset (a track has several).
  *
- * The capture identifier grammar (`capture-session.ts:50`) allows upper case,
+ * The capture identifier grammar (`domain/capture-session.ts:50`) allows upper case,
  * `:` and `/`; the ColorPlan camera key must satisfy the `TOKEN` grammar in
  * `color-and-export.ts:80` (`^[a-z0-9][a-z0-9._/-]{0,127}$`) and the renderer
  * lower-cases the id before keying the colour manifest

@@ -20,7 +20,7 @@ import { getV2PostgresClient } from '../prisma-postgres/client.ts'
  * `endMs` and `speakerKey` straight off the columns, which meant a row edited
  * underneath produced observations, an evidence set, a `directionHash` and an
  * `evidenceRef` that all claimed a provenance nobody had checked — while the
- * authority repository for the same rows (`speaker-diarization-repository.ts:313`
+ * authority repository for the same rows (`prisma/speaker-diarization-repository.ts:313`
  * and `:338`) refuses on exactly those hashes. It re-derives the run from
  * `runJson` here too: `hydrateSpeakerDiarizationRun` recomputes the run hash and
  * every segment hash from the stored body and refuses a body that does not

@@ -468,7 +468,7 @@ test(
     })
     // Every recording the direction may cut has to be a linked, available
     // project asset with a probed cadence, or `hydrateSource` refuses the render
-    // that follows (`project-proxy-render-repository.ts:111-141`).
+    // that follows (`prisma/project-proxy-render-repository.ts:111-141`).
     for (const track of world.session.tracks) {
       const artifactId = track.sourceAssetId
       const mediaType = ['microphone', 'master-audio', 'scratch-audio'].includes(track.role) ? 'audio' : 'video'
@@ -713,7 +713,7 @@ test(
     // runtime path: it re-verifies the snapshot hash, derives the render
     // sources from the union of every clip's video AND audio artifact, and
     // refuses when the project's `source-master` link is not among them
-    // (`project-proxy-render-repository.ts:143-149`). A multicam plan is the
+    // (`prisma/project-proxy-render-repository.ts:144-149`). A multicam plan is the
     // first plan that puts more than one picture through it.
     const renders = new PrismaProjectProxyRenderRepository(client)
     const hydrated = await renders.readCurrentSource({ workspaceId, projectId })

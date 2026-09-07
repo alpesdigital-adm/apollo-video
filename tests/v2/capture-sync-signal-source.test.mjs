@@ -58,7 +58,7 @@ function observeInput() {
  * The diagnostic and the detections, read from where an operator left them.
  *
  * Both are in milliseconds because that is the unit both aggregates store
- * (`sync-diagnostic.ts:69-72`, `sync-marker-detection.ts:112-115`), which is
+ * (`domain/sync-diagnostic.ts:69-72`, `sync-marker-detection.ts:112-115`), which is
  * the whole reason the conversion has to happen in the adapter.
  */
 function fakeDiagnostics(options = {}) {

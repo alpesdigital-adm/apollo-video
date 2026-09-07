@@ -82,8 +82,8 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * The marker branch of "a marker or a manual anchor" is a stated omission: a
  * `reshoot-with-marker` recommendation is only derived when a capture protocol
  * evaluation caps the session at `not-synchronizable`
- * (`sync-diagnostic.ts:386-389`), and that ceiling then rejects EVERY angle
- * permanently (`multicam-direction.ts:962`), so a journey that took it could
+ * (`domain/sync-diagnostic.ts:386-389`), and that ceiling then rejects EVERY angle
+ * permanently (`domain/multicam-direction.ts:962`), so a journey that took it could
  * not also show the recovery. What this suite proves about markers is narrower
  * and true: the published vocabulary carries the remedy, and the anchor path is
  * the one it exercises end to end.
@@ -626,7 +626,7 @@ test(
           syncAudioPolicy: 'none', includeInFinalMix: false,
         }),
         // The control. `scratch-audio` is never a video angle
-        // (`multicam-direction.ts:150`), so aligning it cannot rescue the
+        // (`domain/multicam-direction.ts:150`), so aligning it cannot rescue
         // direction — which is what makes it safe to put in the same session as
         // the refusal it is a control for.
         track({
@@ -942,7 +942,8 @@ test(
       `the stored reasons never mention the sync: ${noAngle[0].detail}`,
     )
     // The control lost for a DIFFERENT reason, and the stored record says which.
-    // An audio recorder is not a video angle (`multicam-direction.ts:150`), so
+    // An audio recorder is not a video angle
+    // (`domain/multicam-direction.ts:150`), so
     // aligning one cannot rescue a direction: it is rejected as
     // `not-a-video-source` where the cameras are rejected for their sync. If
     // those two ever collapsed into one sentence, an operator reading this

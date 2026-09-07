@@ -672,7 +672,7 @@ test(
     // Regenerated, because an anchor alone cannot lift the block: `refitTrack`
     // keeps the `insufficient-evidence` warning it inherited
     // (`sync-diagnostic-anchors.ts:131-136`) and `canAutoEdit` reads exactly
-    // that warning (`sync-diagnostic.ts:431`). Composing the diagnostic again
+    // that warning (`domain/sync-diagnostic.ts:431`). Composing the diagnostic again
     // carries the manual anchors forward and re-derives the warnings from what
     // now exists, which is the only route from "anchored" to "auto-editable".
     const regenerated = await helpers.callRouteOk(diagnosticRoute.POST, {

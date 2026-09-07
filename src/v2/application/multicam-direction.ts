@@ -518,7 +518,7 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
           range,
           kind: 'active-speaker',
           // `identityResolved: false` is the diarization aggregate's own label
-          // (`speaker-diarization.ts:25`): a cluster separates voices, it does
+          // (`domain/speaker-diarization.ts:60`): a cluster separates voices, it does
           // not name people, and no rule downstream may pretend otherwise.
           value: Object.freeze({ kind: 'active-speaker' as const, speakerKey: segment.speakerKey, identityResolved: false as const }),
           confidence: 1,
@@ -1043,7 +1043,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   omittedShots: number
 }> {
   // `validId` (director-run.ts:268) refuses the `/` a session id may contain
-  // (`capture-session.ts:50`), so the id is folded rather than interpolated
+  // (`domain/capture-session.ts:50`), so the id is folded, not interpolated
   // raw — a decision that cannot be validated cannot be logged.
   //
   // Unreachable today, on purpose: `domain/sync-diagnostic.ts:130` uses a

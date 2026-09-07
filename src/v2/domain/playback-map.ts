@@ -219,7 +219,7 @@ export interface PlaybackUncoveredRange {
 
 /**
  * A manual or automatic tie between one reaction instant and one reference
- * instant. Shaped after `DiagnosticAnchor` (`sync-diagnostic.ts:65-79`) with
+ * instant. Shaped after `DiagnosticAnchor` (`domain/sync-diagnostic.ts:66-80`) with
  * ticks instead of milliseconds, because everything in this aggregate is ticks.
  */
 export interface PlaybackAnchor {

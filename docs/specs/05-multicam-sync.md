@@ -823,7 +823,7 @@ disso, `insufficient`.
   ordenados: a direção segura o ângulo corrente e emite
   `ambiguous-active-speaker`. **Qualquer** observação de `concurrent-speech` que
   cruze a janela dobra a margem, e a proveniência não entra nessa conta:
-  `multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
+  `domain/multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
   `observationsOverlapping` (`multicam-evidence.ts:392-400`) filtra por `kinds` e
   `trackId`, não por `evaluatorKind`. Uma observação `declared` alarga a margem
   tanto quanto uma `measured`.
@@ -930,8 +930,8 @@ categoria `policy`, `retryable: false` (`PUBLIC_ERROR_CATALOG`, lido em
 `POST /v1/projects/{projectId}/color-plan`, que chega ao mesmo construtor por
 `createProjectColorPlan` (`application/project-color-plans.ts:159`,
 `domain/project-color-plan.ts:54`). A rota de compilação tem asserção de
-jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1220-1245` e em
-`teacher-screen-journey.e2e.mjs:794-821` conferem o código, a categoria e o
+jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1298-1304` e em
+`teacher-screen-journey.e2e.mjs:883-889` conferem o código, a categoria e o
 `retryable` do envelope. Essas duas jornadas **não** foram executadas nesta
 máquina (§34.6); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
 código, não medição.
@@ -1335,7 +1335,7 @@ Waves 18/19/20: `workspaces` vem da migração inicial `20260712210000_init`. O
 vigésimo quarto, `module-graph-audit`, **não** é tabela: `grep module_graph
 prisma/v2/schema.prisma` devolve zero linhas, e a referência que o gate constrói
 é `{ type: 'module-graph-audit', id: 'legacy-runtime-audit:<scannedAt>', hash:
-auditHash }` (`multicam-longform-gate.ts:814-819`) — o resultado de uma
+auditHash }` (`domain/multicam-longform-gate.ts:814-819`) — o resultado de uma
 varredura, não uma linha. É o mesmo fato que a nota sobre o critério 10 registra
 adiante. "evidence-ref: o que o leitor quiser" é como um gate deixa de ser
 auditável.

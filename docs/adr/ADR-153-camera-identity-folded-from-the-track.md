@@ -11,7 +11,7 @@ Três lugares precisam falar da mesma câmera e nenhum deles usa a mesma
 gramática de identificador:
 
 - um ângulo é um `CaptureTrack`, cuja gramática de id
-  (`capture-session.ts:50`) aceita maiúsculas, `:` e `/`;
+  (`domain/capture-session.ts:50`) aceita maiúsculas, `:` e `/`;
 - um alvo de cor é uma chave de `ColorPlan.cameras`, que precisa satisfazer o
   TOKEN de `color-and-export.ts:80` — `^[a-z0-9][a-z0-9._/-]{0,127}$`, só
   minúsculas;
