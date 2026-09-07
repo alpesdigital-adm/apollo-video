@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
+import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 /**
  * T-F4.016 — the six product journeys are wired into CI, proved by reading CI.
@@ -24,9 +26,17 @@ import test from 'node:test'
  * journey and forgetting the workflow is caught, instead of being hidden by a
  * second copy of the name living here. Only the six journeys themselves are
  * written down, because that list IS the mandate.
+ *
+ * A first version of this file asserted only that a step EXISTED with the
+ * right env. An audit defeated it three ways without touching a name: `if:
+ * false` on the step, `continue-on-error: true` on the step, and `if: false` on
+ * the job that owns all six. A step that cannot fail the build enforces
+ * nothing, so the parser now reads the switches as well as the names, and the
+ * assertions below cover being switched off as well as being deleted.
  */
 
-const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
+const REPO = new URL('../../', import.meta.url)
+const read = (relative) => readFile(new URL(relative, REPO), 'utf8')
 
 /**
  * BRIEF-E2E §"Jornadas", numbered as the briefing numbers them. The order is
@@ -41,20 +51,59 @@ const MANDATORY_JOURNEYS = [
   { number: 6, subject: 'two hours to about two minutes', script: 'test:e2e:longform-synthesis' },
 ]
 
+const SUITE_FILE = /tests\/[A-Za-z0-9/._-]+\.(?:mjs|cjs|js)/g
+
+const isLiteral = (value, word) => value !== undefined && new RegExp(`^(?:${word}|'${word}'|"${word}")$`).test(value)
+
 /**
- * Steps in `ci.yml` are two spaces deeper than `steps:`, which sits at four,
- * so a step opens at six and everything belonging to it is indented at least
- * eight. A blank line belongs to whatever step precedes it; anything shallower
- * than eight closes the step, which is what makes a `# comment` written
- * between two steps at six spaces end the first rather than join it.
+ * `ci.yml` is read structurally rather than by regexing the whole file, because
+ * the two things that decide whether a command runs — which job owns it and
+ * which switches are set on it — are positional. Top-level keys sit at column
+ * zero, jobs two spaces in, job attributes at four, steps open with `- ` at
+ * six, and everything belonging to a step is indented at least eight. A blank
+ * line belongs to whatever step precedes it; anything shallower than eight
+ * closes the step, which is what makes a `# comment` written between two steps
+ * at six spaces end the first rather than join it — and what makes a step
+ * commented out stop counting as a step, which regexing the raw text did not.
  */
-const parseWorkflowSteps = (workflow) => {
+const parseWorkflow = (workflow) => {
+  const jobs = []
   const steps = []
+  let topLevelKey = null
+  let job = null
   let current = null
 
   for (const line of workflow.split('\n')) {
+    const topLevel = /^([A-Za-z][A-Za-z0-9_-]*):/.exec(line)
+    if (topLevel) {
+      topLevelKey = topLevel[1]
+      job = null
+      current = null
+      continue
+    }
+
+    // Only `jobs:` holds jobs. Without this, `- main` under `on.push.branches`
+    // parses as a step, at exactly the indentation a step uses.
+    if (topLevelKey !== 'jobs') continue
+
+    const header = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(line)
+    if (header) {
+      job = { id: header[1], attrs: new Map() }
+      jobs.push(job)
+      current = null
+      continue
+    }
+    if (!job) continue
+
+    const jobAttribute = /^ {4}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
+    if (jobAttribute) {
+      job.attrs.set(jobAttribute[1], jobAttribute[2].trim())
+      current = null
+      continue
+    }
+
     if (/^ {6}- /.test(line)) {
-      current = { lines: [line] }
+      current = { job, lines: [line] }
       steps.push(current)
       continue
     }
@@ -66,10 +115,17 @@ const parseWorkflowSteps = (workflow) => {
     current.lines.push(line)
   }
 
-  return steps.map(({ lines }) => {
+  const parsed = steps.map(({ job: owner, lines }) => {
     const body = lines.join('\n')
     const name = /^ {6}- name: (.+)$/.exec(lines[0])?.[1]?.trim() ?? null
     const npmScripts = [...body.matchAll(/npm run ([a-z0-9:._-]+)/g)].map((match) => match[1])
+    const suiteFiles = [...body.matchAll(SUITE_FILE)].map((match) => match[0])
+
+    const attrs = new Map()
+    for (const line of lines.slice(1)) {
+      const attribute = /^ {8}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
+      if (attribute) attrs.set(attribute[1], attribute[2].trim())
+    }
 
     const env = new Map()
     const envAt = lines.findIndex((line) => /^ {8}env:\s*$/.test(line))
@@ -82,19 +138,38 @@ const parseWorkflowSteps = (workflow) => {
       }
     }
 
-    return { name, npmScripts, env }
+    return { job: owner, name, npmScripts, suiteFiles, env, attrs }
   })
+
+  return { jobs, steps: parsed }
 }
 
+/**
+ * A step counts as coverage only if a red run inside it turns the build red.
+ * `if: false` never runs; `continue-on-error: true` runs and is ignored; either
+ * one on the owning job does the same to every step in it. Any other `if:` is
+ * counted as running, which is the honest limit of reading YAML without
+ * evaluating GitHub's expression language: `if: always()` genuinely runs, and
+ * `if: ${{ github.event_name == 'push' }}` genuinely runs on half the events.
+ */
+const gatesTheBuild = (step) =>
+  !isLiteral(step.attrs.get('if'), 'false') &&
+  !isLiteral(step.attrs.get('continue-on-error'), 'true') &&
+  !isLiteral(step.job?.attrs.get('if'), 'false') &&
+  !isLiteral(step.job?.attrs.get('continue-on-error'), 'true')
+
 const singleTestFileOf = (command) => {
-  const files = [...command.matchAll(/tests\/[A-Za-z0-9/._-]+\.(?:mjs|cjs|js)/g)].map((match) => match[0])
+  const files = [...command.matchAll(SUITE_FILE)].map((match) => match[0])
   return files.length === 1 ? files[0] : null
 }
 
 test('T-F4.016 every mandatory product journey has a CI step, its own gate and a database', async () => {
   const [rawPackage, workflow] = await Promise.all([read('package.json'), read('.github/workflows/ci.yml')])
   const { scripts } = JSON.parse(rawPackage)
-  const steps = parseWorkflowSteps(workflow)
+  const { jobs, steps } = parseWorkflow(workflow)
+
+  assert.ok(jobs.length > 0, 'parsed no jobs out of ci.yml; the parser and the workflow have diverged')
+  assert.ok(steps.length > 0, 'parsed no steps out of ci.yml; the parser and the workflow have diverged')
 
   assert.equal(
     MANDATORY_JOURNEYS.length,
@@ -130,14 +205,44 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 
     const [step] = running
     assert.ok(step.name, `${where}: its CI step must be named, so a failure names the journey`)
+    assert.ok(step.job, `${where}: step "${step.name}" was parsed outside any job, which cannot happen in a valid workflow`)
+
+    // Existing with the right env is not the same as running. A mandatory
+    // journey is mandatory on every build, so it may carry no `if:` at all —
+    // not even `always()`, which would be a way to spell a condition today and
+    // spell `false` tomorrow — and it may not be excused from failing.
+    assert.equal(
+      step.attrs.get('if'),
+      undefined,
+      `${where}: step "${step.name}" declares if: ${step.attrs.get('if')}; a mandatory journey runs on every build`,
+    )
+    assert.ok(
+      !isLiteral(step.attrs.get('continue-on-error'), 'true'),
+      `${where}: step "${step.name}" sets continue-on-error: true, so the journey can fail without failing the build`,
+    )
+    assert.equal(
+      step.job.attrs.get('if'),
+      undefined,
+      `${where}: job "${step.job.id}" declares if: ${step.job.attrs.get('if')}, which switches the journey off with it`,
+    )
+    assert.ok(
+      !isLiteral(step.job.attrs.get('continue-on-error'), 'true'),
+      `${where}: job "${step.job.id}" sets continue-on-error: true, so nothing it runs can fail the build`,
+    )
 
     // Not `env` inherited from the job: each journey declares its own, because
     // that is where the gate lives and because the URL carries the
     // `application_name` the orphan-backend check greps for afterwards.
+    //
+    // The value is unquoted before comparing. GitHub coerces env values to
+    // strings, so `APOLLO_X_E2E: 1` and `APOLLO_X_E2E: "1"` both reach the
+    // suite as `'1'` and both run the journey; failing the second spelling
+    // would be this test inventing a rule the platform does not have.
+    const gateValue = step.env.get(gate)?.replace(/^(['"])(.*)\1$/, '$2')
     assert.equal(
-      step.env.get(gate),
-      '"1"',
-      `${where}: step "${step.name}" must set ${gate}: "1", found ${step.env.get(gate) ?? 'nothing'}`,
+      gateValue,
+      '1',
+      `${where}: step "${step.name}" must set ${gate} to 1, found ${step.env.get(gate) ?? 'nothing'}`,
     )
 
     const databaseUrl = step.env.get('V2_DATABASE_URL')
@@ -176,98 +281,241 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 })
 
 /**
- * Scripts that no CI step runs, and that no other CI-wired script covers. This
- * list is a ratchet, not a permission: the assertion below fails both when a
- * script goes unwired without being written down here and when one on the list
- * finally gets a CI step and the entry is left behind. It exists because
- * `test:integration:multicam-visual-evidence` sat here unnoticed while spec 05
- * quoted the numbers it measures.
- *
- * Everything on it predates Wave 20 and belongs to Phases 1-3. Two entries are
- * different in kind and should stay off CI rather than be wired:
- * `test:e2e:provider-live` calls paid providers, which the owner's briefing
- * forbids in CI, and `test:integration:image-analysis` needs a Tesseract
- * install the workflow does not provision. The rest are simply unrun, and
- * closing them is a scoping decision for the owner, not a whitespace fix.
+ * Reasons a suite file is allowed to run in no CI step. `PHASE_1_3` and
+ * `NO_SCRIPT` are debts; the other two are decisions.
  */
-const KNOWN_UNWIRED_SCRIPTS = [
-  'test:integration:media-input',
-  'test:integration:reframe',
-  'test:integration:output-formats',
-  'test:integration:responsive-placement',
-  'test:integration:render-geometry',
-  'test:integration:format-critic',
-  'test:integration:format-quality-by-output',
-  'test:integration:wave9',
-  'test:integration:wave10',
-  'test:integration:subtitle-sidecar',
-  'test:integration:subtitle-sidecar-db',
-  'test:integration:transformation-critic-media',
-  'test:integration:media-library',
-  'test:integration:media-segment',
-  'test:integration:image-analysis',
-  'test:integration:visual-montage',
-  'test:integration:subtitle-styles',
-  'test:integration:subtitle-style-tokens',
-  'test:integration:subtitle-anchor',
-  'test:integration:review',
-  'test:integration:asset-selection',
-  'test:integration:final-export',
-  'test:integration:quality-iteration',
-  'test:integration:project-duplication',
-  'test:integration:mvp-core-gate',
-  'test:integration:speech-segments',
-  'test:integration:evidence-segments',
-  'test:integration:long-form-moments',
-  'test:integration:validated-segments',
-  'test:integration:hierarchical-processing',
-  'test:integration:long-form-stage-fencing',
-  'test:integration:source-deconstruction',
-  'test:integration:production-batches',
-  'test:integration:script-alignments',
-  'test:integration:take-libraries',
-  'test:e2e:mvp-core-full',
-  'test:e2e:provider-live',
+const PAID_PROVIDERS = 'calls paid providers, which the owner’s briefing forbids in CI'
+const NEEDS_TESSERACT = 'needs a Tesseract install the workflow does not provision'
+const PHASE_1_3 = 'Phase 1-3 suite with an npm script and no CI step'
+const NO_SCRIPT = 'Phase 1-3 suite with no npm script at all, so wiring it means writing one first'
+
+/**
+ * Suite files that no CI step runs, each with a reason and with every document
+ * that leans on it.
+ *
+ * The unit here is the FILE, not the npm script. An earlier version of this
+ * list was keyed by script, and an audit found thirteen `*.integration.mjs`
+ * files that no script names at all — invisible to `npm test`, which discovers
+ * only `*.test.mjs`, invisible to CI, and invisible to a ratchet that counts
+ * scripts. `tests/v2/prisma-manual-edit.integration.mjs` is 88 KB of them.
+ *
+ * `citedBy` is the second half of the same lesson. This list exists because
+ * `test:integration:multicam-visual-evidence` sat unwired while spec 05 quoted
+ * the numbers it measures, and the first version of the list then described its
+ * own entries as "simply unrun" while seven of them were somebody's cited
+ * evidence. The assertion below holds `citedBy` to exactly the set of documents
+ * that name the file, so writing a document that leans on an unrun suite fails
+ * this test until the citation is recorded here — which is the moment to notice
+ * that the proof being cited did not run.
+ *
+ * A citation is a file, not a line: line numbers in TODO.md rot on the next
+ * insertion above them, and a stale line number would make this fail for a
+ * reason that has nothing to do with coverage.
+ */
+const KNOWN_UNRUN_SUITES = [
+  { file: 'tests/v2/contamination-golden-fixtures.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/contiguous-evaluation-repository.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/contiguous-evidence-repository.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/contiguous-extraction-repository.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/ffmpeg-contiguous-audio-evidence-provider.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/ffmpeg-contiguous-visual-evidence-provider.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/ffmpeg-speaker-diarization-audio-preparer.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/format-quality-critic.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/image-analysis-tesseract.integration.mjs', reason: NEEDS_TESSERACT },
+  { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/media-segment-materialization.integration.mjs', reason: PHASE_1_3 },
+  {
+    file: 'tests/v2/mvp-core-full-journey.e2e.mjs',
+    reason: `${PHASE_1_3}; docs/quality/mvp-core-gate-v1.md calls it "a prova principal" of the MVP core gate`,
+    citedBy: ['docs/quality/mvp-core-gate-v1.md'],
+  },
+  { file: 'tests/v2/output-formats-render.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-asset-selection.integration.mjs', reason: PHASE_1_3 },
+  {
+    file: 'tests/v2/prisma-final-export.integration.mjs',
+    reason: `${PHASE_1_3}; TODO.md cites it as the evidence closing F1-048/T-FR-231`,
+    citedBy: ['TODO.md'],
+  },
+  { file: 'tests/v2/prisma-format-quality-by-output.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-hierarchical-processing.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-long-form-moment-catalog.integration.mjs', reason: PHASE_1_3 },
+  {
+    file: 'tests/v2/prisma-manual-edit.integration.mjs',
+    reason: `${NO_SCRIPT}; docs/REQUIREMENTS-TRACEABILITY.md cites it for FR-233 and says in the same paragraph that it was never executed`,
+    citedBy: ['docs/REQUIREMENTS-TRACEABILITY.md'],
+  },
+  { file: 'tests/v2/prisma-media-library.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-montage-alternative.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/prisma-mvp-core-gate.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-production-batch.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-project-duplication.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-proxy-review.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/prisma-quality-iteration.integration.mjs', reason: PHASE_1_3 },
+  {
+    file: 'tests/v2/prisma-review-annotation.integration.mjs',
+    reason: `${PHASE_1_3}; TODO.md cites it as the evidence closing F1-039 and F1-040`,
+    citedBy: ['TODO.md'],
+  },
+  {
+    file: 'tests/v2/prisma-review-patch-batch.integration.mjs',
+    reason: `${NO_SCRIPT}; TODO.md cites it as the evidence closing F1-044/T-FR-215`,
+    citedBy: ['TODO.md'],
+  },
+  {
+    file: 'tests/v2/prisma-review-patch.integration.mjs',
+    reason: `${NO_SCRIPT}; TODO.md cites it as the evidence closing F1-043/T-FR-214`,
+    citedBy: ['TODO.md'],
+  },
+  { file: 'tests/v2/prisma-script-alignment.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-source-deconstruction.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-speech-segment-catalog.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/prisma-subtitle-sidecar.integration.mjs', reason: PHASE_1_3 },
+  {
+    file: 'tests/v2/prisma-take-library.integration.mjs',
+    reason: `${PHASE_1_3}; docs/quality/take-library-v1.md reports it as having passed over a real rebuilt database`,
+    citedBy: ['docs/quality/take-library-v1.md'],
+  },
+  { file: 'tests/v2/prisma-validated-segment-catalog.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/provider-live-contract.e2e.mjs', reason: PAID_PROVIDERS },
+  { file: 'tests/v2/reframe-plan-render.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/render-geometry-render.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/responsive-placement-visual.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/source-deconstruction-golden-reel.integration.mjs', reason: NO_SCRIPT },
+  { file: 'tests/v2/subtitle-anchor-render.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/subtitle-sidecar-pipeline.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/subtitle-style-token-goldens.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/subtitle-style-visual-goldens.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/transformation-critic-media.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/visual-montage-render.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/wave10-combined-journey.integration.mjs', reason: PHASE_1_3 },
+  { file: 'tests/v2/wave9-combined-journeys.integration.mjs', reason: PHASE_1_3 },
 ]
 
-test('T-F4.016 no new integration or e2e script goes unrun by CI', async () => {
-  const [rawPackage, workflow] = await Promise.all([read('package.json'), read('.github/workflows/ci.yml')])
-  const { scripts } = JSON.parse(rawPackage)
+const listSuiteFiles = async () => {
+  const root = fileURLToPath(new URL('tests/', REPO))
+  const entries = await readdir(root, { recursive: true, withFileTypes: true })
+  return entries
+    .filter((entry) => entry.isFile() && /\.(?:integration|e2e)\.mjs$/.test(entry.name))
+    .map((entry) => `tests/${path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join('/')}`)
+    .sort()
+}
 
-  const testFilesOf = (command) => [...command.matchAll(/tests\/[A-Za-z0-9/._-]+\.(?:mjs|cjs|js)/g)].map((m) => m[0])
-  const runByCi = new Set([...workflow.matchAll(/npm run ([a-z0-9:._-]+)/g)].map((match) => match[1]))
+const listMarkdown = async () => {
+  const root = fileURLToPath(REPO)
+  const entries = await readdir(fileURLToPath(new URL('docs/', REPO)), { recursive: true, withFileTypes: true })
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => path.join(entry.parentPath, entry.name))
+  files.push(path.join(root, 'TODO.md'))
+  return Promise.all(
+    files.map(async (file) => ({
+      name: path.relative(root, file).split(path.sep).join('/'),
+      text: await readFile(file, 'utf8'),
+    })),
+  )
+}
 
-  // A file counts as run if some CI step names it directly, or if a script CI
-  // does run names it. `npm test` finds `*.test.mjs` on its own; it finds
-  // neither `*.integration.mjs` nor `*.e2e.mjs`, which is the whole reason a
-  // script can exist and never execute.
-  const filesRunByCi = new Set([...workflow.matchAll(/tests\/[A-Za-z0-9/._-]+\.(?:mjs|cjs|js)/g)].map((m) => m[0]))
+/**
+ * What CI actually runs, as a set of suite files: every file a gating step
+ * names directly, plus every file named by a script such a step invokes.
+ * `npm test` finds `*.test.mjs` on its own; it finds neither `*.integration.mjs`
+ * nor `*.e2e.mjs`, which is the whole reason a suite can exist and never run.
+ */
+const suiteFilesRunByCi = (steps, scripts) => {
+  const gating = steps.filter(gatesTheBuild)
+  const runByCi = new Set(gating.flatMap((step) => step.npmScripts))
+  const files = new Set(gating.flatMap((step) => step.suiteFiles))
   for (const [name, command] of Object.entries(scripts)) {
     if (!runByCi.has(name)) continue
-    for (const file of testFilesOf(command)) filesRunByCi.add(file)
+    for (const match of command.matchAll(SUITE_FILE)) files.add(match[0])
   }
+  return { runByCi, files }
+}
 
-  const unwired = Object.entries(scripts)
-    .filter(([name]) => /^test:(?:integration|e2e):/.test(name))
-    .filter(([name]) => !runByCi.has(name))
-    .filter(([, command]) => {
-      const files = testFilesOf(command)
-      return files.length === 0 || !files.every((file) => file.endsWith('.test.mjs') || filesRunByCi.has(file))
-    })
-    .map(([name]) => name)
+test('T-F4.016 no integration or e2e suite file goes unrun by CI without being declared', async () => {
+  const [rawPackage, workflow, present] = await Promise.all([
+    read('package.json'),
+    read('.github/workflows/ci.yml'),
+    listSuiteFiles(),
+  ])
+  const { scripts } = JSON.parse(rawPackage)
+  const { steps } = parseWorkflow(workflow)
+  const { files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
 
-  const known = new Set(KNOWN_UNWIRED_SCRIPTS)
-  const undeclared = unwired.filter((name) => !known.has(name))
+  assert.ok(present.length > 0, 'found no integration or e2e suite files under tests/; the glob and the tree have diverged')
+
+  const declared = new Map(KNOWN_UNRUN_SUITES.map((entry) => [entry.file, entry]))
+  assert.equal(declared.size, KNOWN_UNRUN_SUITES.length, 'KNOWN_UNRUN_SUITES lists the same file twice')
+
+  const undeclared = present.filter((file) => !filesRunByCi.has(file) && !declared.has(file))
   assert.deepEqual(
     undeclared,
     [],
-    `these npm scripts run in no CI step and no other suite covers their files; wire them into .github/workflows/ci.yml or add them to KNOWN_UNWIRED_SCRIPTS with a reason: ${undeclared.join(', ')}`,
+    `these suite files run in no CI step; wire them into .github/workflows/ci.yml or add them to KNOWN_UNRUN_SUITES with a reason: ${undeclared.join(', ')}`,
   )
 
-  const stale = KNOWN_UNWIRED_SCRIPTS.filter((name) => !unwired.includes(name))
+  const nowRun = [...declared.keys()].filter((file) => filesRunByCi.has(file))
   assert.deepEqual(
-    stale,
+    nowRun,
     [],
-    `these scripts are listed as unwired but CI now covers them (or they no longer exist); remove them from KNOWN_UNWIRED_SCRIPTS: ${stale.join(', ')}`,
+    `these files are declared unrun but CI now runs them; remove them from KNOWN_UNRUN_SUITES: ${nowRun.join(', ')}`,
+  )
+
+  const gone = [...declared.keys()].filter((file) => !present.includes(file))
+  assert.deepEqual(
+    gone,
+    [],
+    `these files are declared unrun but no longer exist; remove them from KNOWN_UNRUN_SUITES: ${gone.join(', ')}`,
+  )
+
+  const unexplained = KNOWN_UNRUN_SUITES.filter((entry) => !entry.reason || entry.reason.length < 20).map((entry) => entry.file)
+  assert.deepEqual(unexplained, [], `these entries carry no usable reason: ${unexplained.join(', ')}`)
+})
+
+test('T-F4.016 every npm integration or e2e script either runs in CI or runs a declared suite', async () => {
+  const [rawPackage, workflow] = await Promise.all([read('package.json'), read('.github/workflows/ci.yml')])
+  const { scripts } = JSON.parse(rawPackage)
+  const { steps } = parseWorkflow(workflow)
+  const { runByCi, files: filesRunByCi } = suiteFilesRunByCi(steps, scripts)
+
+  const declared = new Set(KNOWN_UNRUN_SUITES.map((entry) => entry.file))
+
+  const unaccounted = Object.entries(scripts)
+    .filter(([name]) => /^test:(?:integration|e2e):/.test(name))
+    .filter(([name]) => !runByCi.has(name))
+    .flatMap(([name, command]) => {
+      const files = [...command.matchAll(SUITE_FILE)].map((match) => match[0])
+      if (files.length === 0) return [`${name} (names no test file at all)`]
+      const dark = files.filter(
+        (file) => !file.endsWith('.test.mjs') && !filesRunByCi.has(file) && !declared.has(file),
+      )
+      return dark.map((file) => `${name} -> ${file}`)
+    })
+
+  assert.deepEqual(
+    unaccounted,
+    [],
+    `these npm scripts run in no CI step and name a suite nothing else runs; wire them into .github/workflows/ci.yml or declare the file in KNOWN_UNRUN_SUITES: ${unaccounted.join(', ')}`,
+  )
+})
+
+test('T-F4.016 every unrun suite a document leans on says so where it is declared', async () => {
+  const documents = await listMarkdown()
+  assert.ok(documents.length > 0, 'read no Markdown under docs/; the walk and the tree have diverged')
+
+  const wrong = []
+  for (const entry of KNOWN_UNRUN_SUITES) {
+    const basename = entry.file.split('/').pop()
+    const found = documents.filter((document) => document.text.includes(basename)).map((document) => document.name).sort()
+    const recorded = [...(entry.citedBy ?? [])].sort()
+    if (found.join('|') === recorded.join('|')) continue
+    wrong.push(`${entry.file}: cited by [${found.join(', ') || 'nothing'}], declared citedBy [${recorded.join(', ') || 'nothing'}]`)
+  }
+
+  assert.deepEqual(
+    wrong,
+    [],
+    `a document naming a suite CI never runs is a claim resting on a proof that did not execute; record it in that entry's citedBy, or stop citing it:\n  ${wrong.join('\n  ')}`,
   )
 })
