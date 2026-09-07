@@ -1540,9 +1540,13 @@ há teste que meça esse teto.
   não entra na decisão (§29.1).
 - **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
   `PLAYBACK_DETECTION_METHODS`. O que falta ao segundo não é motor de OCR — o
-  repositório tem Tesseract atrás de `ImageVisionProvider` — e sim o caminho de
-  quadro de vídeo até essa porta e o trabalho de região por player (§32.2).
-  Enquanto não existirem, player escondido é trecho `manual-anchor-required`
+  repositório tem Tesseract atrás de `ImageVisionProvider`, ligado no worker de
+  ingestão em `repository-factory.ts:1979` — e sim o caminho de quadro de vídeo
+  até essa porta e o trabalho de região por player (§32.2). O motor é binário
+  externo escolhido por `APOLLO_TESSERACT_PATH`, não pacote npm; quem procura em
+  `package.json` não acha e conclui que não existe, que foi exatamente o erro
+  que a linha F4.015 da traçabilidade carregou até 2026-09-07. Enquanto não
+  existirem detectores, player escondido é trecho `manual-anchor-required`
   para uma pessoa responder (PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
