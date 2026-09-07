@@ -74,8 +74,18 @@ const SKIP = RUN
  */
 const TIMEOUT = 15 * 60_000
 
-/** Sandbox unless the caller declared otherwise: the API clients are sandbox. */
-process.env.APOLLO_API_ENVIRONMENT ??= 'sandbox'
+/**
+ * The environment the clients are issued in, and the one the routes check.
+ *
+ * These two have to be the same value or every request is rejected before it
+ * reaches the gate. They used to disagree: the clients below were pinned to
+ * `sandbox` while `??=` left an environment the caller had already set alone —
+ * and CI sets `APOLLO_API_ENVIRONMENT: production` for the whole job, so the
+ * journey answered 401 AUTH_INVALID there and passed on a developer machine,
+ * where nothing sets it. One value now feeds both.
+ */
+const API_ENVIRONMENT = process.env.APOLLO_API_ENVIRONMENT ?? 'sandbox'
+process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
 
 /**
  * Invoke a published route the way Next would.
@@ -263,14 +273,14 @@ test(
       id: `f4016-journey-caller-a-${randomUUID().slice(0, 8)}`,
       workspaceId: A,
       name: 'phase gate journey A',
-      environment: 'sandbox',
+      environment: API_ENVIRONMENT,
       scopes: ['projects:read', 'projects:write'],
     })
     const callerB = await issue({
       id: `f4016-journey-caller-b-${randomUUID().slice(0, 8)}`,
       workspaceId: B,
       name: 'phase gate journey B',
-      environment: 'sandbox',
+      environment: API_ENVIRONMENT,
       scopes: ['projects:read', 'projects:write'],
     })
     const bearerA = `Bearer ${callerA.token}`

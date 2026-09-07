@@ -112,7 +112,15 @@ const SKIP = RUN
   ? false
   : 'set APOLLO_LONGFORM_SYNTHESIS_E2E=1 with a migrated V2_DATABASE_URL and ffmpeg'
 
-process.env.APOLLO_API_ENVIRONMENT ??= 'sandbox'
+/**
+ * One value for the clients this journey issues and for the environment the
+ * routes check them against. Pinning the client to `sandbox` while leaving the
+ * environment to `??=` is what made the phase-gate journey answer 401
+ * AUTH_INVALID in CI, which sets `APOLLO_API_ENVIRONMENT: production` for the
+ * whole job, while passing on a developer machine where nothing sets it.
+ */
+const API_ENVIRONMENT = process.env.APOLLO_API_ENVIRONMENT ?? 'sandbox'
+process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
 
 const require = createRequire(import.meta.url)
 const ffmpegPath = require('ffmpeg-static')
@@ -491,7 +499,7 @@ async function driveJourney(t, {
       id: `lfs-client-${suffix}`,
       workspaceId,
       name: 'long-form synthesis journey',
-      environment: 'sandbox',
+      environment: API_ENVIRONMENT,
       scopes: ['projects:read', 'projects:write'],
     })
     const authorization = `Bearer ${caller.token}`
