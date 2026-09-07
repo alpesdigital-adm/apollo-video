@@ -1404,8 +1404,9 @@ segue cortando o intervalo exato.
 
 **O áudio continua na entrada não-buscada, de propósito.** `atrim` é exato ao
 sample e uma busca só pode cair num limite de pacote; buscar o áudio também
-mudou 5624 dos 5635 quadros de áudio, e o objetivo da mudança é que os bytes
-**não** se movam.
+mudou 5624 dos 5635 quadros de áudio — número medido pelo autor da mudança e
+registrado na mensagem do commit `4416e57b`, não re-executado aqui — e o
+objetivo da mudança é que os bytes **não** se movam.
 
 **Medido pelo autor da mudança**, registrado na mensagem do commit `4416e57b` e
 **não re-executado ao escrever este documento**:
