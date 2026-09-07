@@ -7,7 +7,9 @@ import {
 } from '../domain/desired-action.ts'
 import {
   validateDirectedEditPlan,
+  validateDirectorDecisions,
   type DirectedEditPlan,
+  type DirectorDecisionInput,
   type DirectedTransition,
 } from '../domain/director-run.ts'
 import type { RenderablePlanSnapshot } from './ports/renderable-plan-snapshot-repository.ts'
@@ -40,8 +42,20 @@ import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
  * render repository included — believe a critic passed this plan, which is the
  * one thing this compiler cannot claim.
  *
- * `director.decisions` is empty for the same reason, and the assumptions say so
- * in words rather than leaving a reader to notice the empty array.
+ * `director.decisions` is where the compiler's OWN reasoning goes, and it is
+ * not a critic's. F4.012 fills the same field from `buildAngleDecisions`
+ * (`multicam-direction.ts:1027`) without any critic either: a decision log says
+ * why this cut chose what it chose, and the three reference fields above are
+ * what keeps a reader from mistaking that for an approval. So a compiler that
+ * has per-cut reasoning passes it in and it is validated by
+ * `validateDirectorDecisions`, the same gate the direction goes through; a
+ * compiler that has none passes none and the field stays empty, with an
+ * assumption saying so in words rather than leaving a reader to guess whether
+ * the emptiness means "nothing to say" or "nobody wrote it".
+ *
+ * Today the react playback compile passes decisions
+ * (`react-playback-map.ts` `buildPlaybackDecisions`) and the multi-range
+ * synthesis compile does not.
  */
 
 export const RENDERABLE_PLAN_ORIGINS = Object.freeze([
@@ -123,6 +137,17 @@ export interface AssembleDirectedEditPlanInput {
   /** Source spans this cut kept, in the source's own seconds. */
   readonly retainedSourceRanges?: readonly Readonly<{ sourceStartSeconds: number; sourceEndSeconds: number }>[]
   readonly lineageRefs: readonly string[]
+  /**
+   * Why this cut chose what it chose, one entry per decision, or nothing.
+   *
+   * Validated by `validateDirectorDecisions`, which bounds the log at 4-64
+   * entries and demands a choice, a reason, evidence and a confidence from
+   * every one of them: a compiler with fewer than four things to say is refused
+   * rather than allowed to publish a log too thin to audit. Omitting the field
+   * leaves the log empty, which is the honest shape for a compiler that
+   * justifies its cut somewhere else.
+   */
+  readonly decisions?: readonly Readonly<DirectorDecisionInput>[]
   readonly assumptions: readonly string[]
   readonly createdAt: string
 }
@@ -268,7 +293,9 @@ export function assembleDirectedEditPlan(
     }),
     director: Object.freeze({
       plannerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
-      decisions: Object.freeze([]),
+      decisions: input.decisions === undefined
+        ? Object.freeze([])
+        : validateDirectorDecisions(input.decisions),
       assumptions: Object.freeze([...new Set(input.assumptions)]),
     }),
     createdAt: input.createdAt,
@@ -294,8 +321,8 @@ const HASH_EXCLUDED_FIELD = 'createdAt' as const
  *   recomputes this over the parsed `planJson` and refuses a row that no longer
  *   matches. A hash over a *projection* of the plan — clips, sources,
  *   transitions, markers — left everything else outside it: `director.decisions`
- *   (the one field the module comment above says a reader must never be able to
- *   believe), `overlayTracks` (burned-in copy), `subtitleTracks`, `composition`,
+ *   (the decision log, which an UPDATE could otherwise fill with an approval
+ *   nobody gave), `overlayTracks` (burned-in copy), `subtitleTracks`, `composition`,
  *   `movementPolicy`, `subtitlePolicy`, `editorial.exclusions`,
  *   `retimedTranscript`, `state`, `schemaVersion` and `protectedElements`. An
  *   UPDATE that injected a fabricated critic decision and a CTA overlay

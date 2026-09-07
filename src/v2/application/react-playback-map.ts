@@ -6,7 +6,7 @@ import type {
   CaptureTrack,
   CaptureTrackPart,
 } from '../domain/capture-session.ts'
-import type { DirectedEditPlan } from '../domain/director-run.ts'
+import type { DirectedEditPlan, DirectorDecisionInput } from '../domain/director-run.ts'
 import type { DesiredActionInput } from '../domain/desired-action.ts'
 import { assertDomain, DomainError } from '../domain/errors.ts'
 import {
@@ -762,6 +762,163 @@ function shotMarker(
 }
 
 /**
+ * The decision log of a react cut: why the viewer sees what they see, piece by
+ * piece.
+ *
+ * F4.012 already publishes one of these for a multicam cut
+ * (`multicam-direction.ts` `buildAngleDecisions`), and it is the only record a
+ * reviewer can open to ask "why this, here?" without re-running the compiler.
+ * A react cut answers the same question -- every piece decides between the
+ * reference recording and the reactor's own -- and until this existed it
+ * answered it nowhere: the compiled plan carried an empty `director.decisions`
+ * while the direction carried a full one.
+ *
+ * Nothing here is new evidence. Every field is read off the piece the map
+ * already resolved: its mode, its measured rate, the boundary cause it
+ * recorded, the detection method that produced it and its own confidence. The
+ * compiler decides only which of the two recordings the piece implies, which is
+ * `referenceRange !== null` and nothing else.
+ *
+ * Two shapes of the boundary constrain the output and are honoured here rather
+ * than discovered at runtime:
+ *
+ * - `validateDirectorDecisions` (`director-run.ts:296`) bounds the log at 4-64
+ *   entries. Three summary decisions plus one per piece clears the floor for
+ *   the smallest possible map, and a busier one is cited least-confident first
+ *   -- the pieces a reviewer opens -- with the summary saying how many were
+ *   left out and that the map itself still holds every one.
+ * - `createDecisionConfidence` (`decision-confidence.ts:33`) demands evidence
+ *   refs matching a narrower grammar than the aggregate does. A piece's own
+ *   `evidenceRefs` cannot be passed through: an anchor's ref is built from a
+ *   human note (`playback-map.ts:1481`) and the aggregate only requires it to
+ *   be non-empty, so a note with a space in it would make an otherwise valid
+ *   map uncompilable. The refs below are built from identities the aggregate
+ *   does validate, and the piece's own evidence is cited by count and through
+ *   the piece hash that covers it.
+ *
+ * The ids are keyed by the map hash and the piece ORDINAL rather than by the
+ * map and piece ids, because `validId` caps a decision id at 128 characters
+ * while `playback-map.ts:316` lets a map id run to 128 on its own -- and a
+ * session id at the domain limit is a case the suite already holds
+ * (`playback-map-service.test.mjs` "a session id at the domain limit still
+ * yields a map id the domain accepts"). The ids stay unique because ordinals
+ * are contiguous and unique within a map, and the piece id itself is named in
+ * the reason, where nothing truncates it.
+ */
+export function buildPlaybackDecisions(map: Readonly<PlaybackMap>): Readonly<{
+  decisions: readonly Readonly<DirectorDecisionInput>[]
+  assumptions: readonly string[]
+  omittedPieces: number
+}> {
+  // `validId` (`director-run.ts:268`) refuses both the `/` a map id may contain
+  // (`playback-map.ts:316`) and any id past 128 characters. The map hash is
+  // hexadecimal, fixed width and already the map's identity, so it is the token
+  // -- a decision that cannot be validated cannot be logged.
+  const token = map.mapHash.slice(0, 12)
+  const mapRef = `playback-map:${map.mapId}:v${map.version}`
+  const sessionRef = `capture-session:${map.sessionId}:v${map.sessionVersion}`
+  const byConfidence = [...map.pieces]
+    .sort((left, right) => (left.confidence - right.confidence) || (left.ordinal - right.ordinal))
+  const cited = byConfidence.slice(0, 64 - 3).sort((left, right) => left.ordinal - right.ordinal)
+  const omittedPieces = byConfidence.length - cited.length
+  const weakest = byConfidence[0]
+  const modes = [...new Set(map.pieces.map((piece) => piece.mode))]
+  const methods = [...new Set(map.pieces.map((piece) => piece.detectionMethod))]
+
+  const summary: DirectorDecisionInput = {
+    id: `decision-playback-summary-${token}`,
+    category: 'angle',
+    choice: `${map.pieces.length} piece(s) in modes ${modes.join(', ')}`,
+    reason: [
+      `Mapped reaction ${map.sessionId} version ${map.sessionVersion} at reference epoch ${map.referenceEpoch}`,
+      `against reference ${map.referenceMedia.assetId} by ${methods.join(' and ')}`,
+      `${map.anchors.length} anchor(s) placed`,
+      omittedPieces > 0
+        ? `${omittedPieces} piece decision(s) are omitted here and stored in full in the map`
+        : 'every piece decision is cited here',
+    ].join('; '),
+    evidenceRefs: Object.freeze([mapRef, sessionRef, `playback-evidence:${map.mapHash.slice(0, 32)}`]),
+    // The weakest piece is the cut's confidence: a react edit is only as
+    // trustworthy as its least certain piece, and averaging would let fifty
+    // locked seconds hide one guess. The direction's summary reduces the same
+    // way, for the same reason.
+    confidence: weakest ? weakest.confidence : 0,
+    alternatives: Object.freeze([]),
+  }
+  const seam: DirectorDecisionInput = {
+    id: `decision-playback-seams-${token}`,
+    category: 'transition',
+    choice: 'straight-cut',
+    reason: 'Every seam is a thing the player did, over one continuous reaction audio bed: a straight cut with a bounded edge fade is invisible, and any other transition would assert an editorial beat the map did not measure.',
+    evidenceRefs: Object.freeze([mapRef]),
+    confidence: 0.9,
+    alternatives: Object.freeze([
+      'cross-dissolve: refused -- the Director plan admits only straight cuts (director-run.ts:134)',
+    ]),
+  }
+  const audio: DirectorDecisionInput = {
+    id: `decision-playback-audio-${token}`,
+    category: 'insert',
+    choice: map.reactionMedia.assetId,
+    reason: `Every shot takes its sound from the reaction ${map.reactionMedia.assetId}; the reference's own audio is never mixed in, because the map measured where the reference played and never at what level it was heard.`,
+    evidenceRefs: Object.freeze([mapRef, `playback-reaction-track:${map.reactionTrackId}`]),
+    confidence: 0.9,
+    alternatives: Object.freeze([
+      `${map.referenceMedia.assetId}: refused -- mixing the reference under the reaction is a level decision nothing in this aggregate measured`,
+    ]),
+  }
+  const pieces = cited.map((piece): DirectorDecisionInput => {
+    const fromReference = piece.referenceRange !== null
+    const referenceSpan = piece.referenceRange === null
+      ? null
+      : serializeTickInterval(piece.referenceRange)
+    return {
+      id: `decision-playback-${token}-p${String(piece.ordinal).padStart(3, '0')}`,
+      category: 'angle',
+      choice: fromReference ? map.referenceMedia.assetId : map.reactionMedia.assetId,
+      reason: [
+        `Piece ${piece.pieceId} (ordinal ${piece.ordinal}) is ${piece.mode} running ${piece.direction}`,
+        referenceSpan === null
+          ? 'so the shot is the reactor, because the reference produced no time here'
+          : `so the shot is the reference over ticks ${referenceSpan.start}-${referenceSpan.end}`,
+        piece.rate === null ? 'rate not measured' : `rate ${serializeRational(piece.rate)}`,
+        piece.discontinuityReason === null
+          ? 'it opens the map'
+          : `it begins on ${piece.discontinuityReason}`,
+        `detected by ${piece.detectionMethod} over ${piece.evidenceRefs.length} observation ref(s)`,
+        piece.residualTicks === null
+          ? 'no residual to report'
+          : `worst residual ${piece.residualTicks} reference tick(s)`,
+      ].join('; '),
+      // Keyed by map hash rather than map id for the same width reason as the
+      // decision id: `REF` stops at 256 characters and a map id and a piece id
+      // can each be 128 on their own.
+      evidenceRefs: Object.freeze([
+        mapRef,
+        `playback-piece:${token}:${piece.pieceId}`,
+        `playback-piece-evidence:${piece.pieceHash}`,
+      ]),
+      confidence: piece.confidence,
+      alternatives: Object.freeze([
+        fromReference
+          ? `${map.reactionMedia.assetId}: refused -- the reference played here, and showing the reactor instead would drop the material the reaction is about`
+          : `${map.referenceMedia.assetId}: refused -- the reference produced no time over this stretch, so there is nothing of it to show`,
+      ]),
+    }
+  })
+
+  return Object.freeze({
+    decisions: Object.freeze([summary, seam, audio, ...pieces]),
+    assumptions: Object.freeze(
+      omittedPieces > 0
+        ? [`${omittedPieces} piece decision(s) exceed the 64-decision cap and are stored in full in playback map ${map.mapId} rather than in this log.`]
+        : [],
+    ),
+    omittedPieces,
+  })
+}
+
+/**
  * Compile a resolved playback map into a plan the renderer accepts.
  *
  * The output timeline is the *reaction's*, piece by piece. That is the whole
@@ -883,6 +1040,7 @@ export function compilePlaybackMapToDirectedPlan(
     }
   }
 
+  const justification = buildPlaybackDecisions(map)
   const plan = assembleDirectedEditPlan({
     planId: `${map.mapId}:v${map.version}:directed`,
     projectVersionId: options.projectVersionId,
@@ -923,10 +1081,16 @@ export function compilePlaybackMapToDirectedPlan(
       `playback-map:${map.mapId}:v${map.version}`,
       ...map.anchors.map((anchor) => `playback-anchor:${anchor.anchorId}`),
     ],
+    // The per-piece log, built from the pieces the map already resolved. It is
+    // the compiler's own reasoning and never a critic's: `assembleDirectedEditPlan`
+    // still fills the three Director reference fields with this derivation
+    // rather than with a run id, so no reader can take this for an approval.
+    decisions: justification.decisions,
     assumptions: [
       `The output runs the reaction's ${reactionSeconds.toFixed(3)} s, not the reference's ${referenceSeconds.toFixed(3)} s (ADR-135).`,
       'Materialization is cut-only: a paused stretch shows the reactor, because the editorial path has no freeze frame and no picture-in-picture.',
       'Every shot carries the reaction\'s audio; the reference\'s own sound is not mixed in by this compiler.',
+      ...justification.assumptions,
     ],
     createdAt: options.createdAt,
   })
