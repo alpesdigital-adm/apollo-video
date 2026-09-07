@@ -16,7 +16,7 @@ nenhum: ele faz uma decisão existente parecer inexistente. O título de cada
 entrada abaixo é o cabeçalho do próprio arquivo, exceto nas entradas que já
 tinham título curado aqui, que foram preservadas.
 
-Total: 157 ADRs.
+Total: 158 ADRs.
 
 - [ADR-001 — Estrutura modular da v2](./ADR-001-v2-modular-architecture.md)
 - [ADR-002 — Banco, persistência v2 e migrations](./ADR-002-database-and-migrations.md)
@@ -175,3 +175,4 @@ Total: 157 ADRs.
 - [ADR-155 — Um único plano renderizável, e materialização só por corte](./ADR-155-one-renderable-plan-and-cut-only-materialization.md)
 - [ADR-156 — O gate da fase é derivado de linhas persistidas, e o hash tem três estados](./ADR-156-phase-gate-derived-from-persisted-evidence.md)
 - [ADR-157 — Crítico de cor: a ação vem de uma tabela de causa, e a intenção declarada tem teto](./ADR-157-colour-critic-cause-table-and-declared-intent-ceiling.md)
+- [ADR-158 — O binário de mídia é resolvido em quatro passos, e binário ausente é falha de implantação](./ADR-158-media-binary-resolution-and-deployment-fault.md)
