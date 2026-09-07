@@ -684,6 +684,19 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'human-approval',
       reason: 'Answers a stretch the detector left unresolved because several stories fit it equally well; a person decides which one happened, because an agent picking one would manufacture the measurement the aggregate refused to invent.',
     },
+    // The two compiles. Bounded and unconfirmed for the same reason the gate is:
+    // each reads a decision somebody already made, resolves the recordings it
+    // names through the project's own media links, and writes one
+    // content-addressed plan row. Neither renders, spends, or decides anything
+    // about the cut — a recompile of an unmoved derivation is the same row.
+    'apollo.projects.capture-sessions.playback-map.plan.compile': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Turns one resolved playback map, named by the exact version and hash the caller read, into a stored renderable plan; every frame number comes from the map and from durations the server measured, and a recompile of the same map returns the same row.',
+    },
+    'apollo.projects.editorial-syntheses.render-plan.compile': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Turns one immutable multi-range synthesis into a stored renderable plan, refusing any master whose bytes are no longer the ones the ranges were selected from; it renders nothing, changes no media and converges on a recompile.',
+    },
     // F4.016. Bounded and unconfirmed, unlike every other Wave 20 command: this
     // one writes an audit record and nothing else. It changes no media, moves no
     // aggregate, and cannot approve anything a person would otherwise judge —

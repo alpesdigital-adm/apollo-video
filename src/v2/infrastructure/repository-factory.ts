@@ -2678,7 +2678,6 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
   const repository = createPlaybackMapRepository()
   const sessions = createCaptureSessionRepository()
   const snapshots = createRenderablePlanSnapshotRepository()
-  const sources = createRenderSourceRepository()
   const clock = () => new Date()
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
@@ -2691,7 +2690,6 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
     read: readReactPlaybackMapService({ repository }),
     listVersions: listReactPlaybackMapVersionsService({ repository }),
     listReferenceDependents: listReferenceDependentsService({ repository }),
-    compile: compileReactPlaybackPlanService({ repository, sessions, sources, snapshots, clock }),
   })
 }
 
@@ -2808,6 +2806,31 @@ export function createColorCriticReportReadServices() {
     list: listColorCriticReportsService({ reports }),
     read: readColorCriticReportService({ reports }),
     listIssues: listColorCriticIssuesService({ reports }),
+  })
+}
+
+/**
+ * The compile, assembled without a decoder (F4.015).
+ *
+ * Deliberately separate from `createReactPlaybackMapServices`, for the reason
+ * `createMulticamDirectionReadServices` is separate from the direction runner:
+ * that root builds a `CaptureMediaResolver` and an FFmpeg fingerprinter, both
+ * of which refuse to be constructed without a configured artifact root, so a
+ * route that only compiles a map that has already been measured would answer
+ * `PERSISTENCE_NOT_CONFIGURED` on a deployment setting it never uses. Measured,
+ * not guessed: the published compile route returned exactly that 503 the first
+ * time it ran against a database with no media configuration.
+ *
+ * Compiling reads the stored map, the session it was derived under and the
+ * project's media-asset links. It opens no file.
+ */
+export function createReactPlaybackPlanCompileService() {
+  return compileReactPlaybackPlanService({
+    repository: createPlaybackMapRepository(),
+    sessions: createCaptureSessionRepository(),
+    sources: createRenderSourceRepository(),
+    snapshots: createRenderablePlanSnapshotRepository(),
+    clock: () => new Date(),
   })
 }
 

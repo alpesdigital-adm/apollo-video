@@ -82,6 +82,8 @@ import {
 } from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
+import { RENDERABLE_PLAN_ORIGINS } from '../application/renderable-edit-plan.ts'
+import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
 
 export type JsonSchema = Readonly<Record<string, unknown>>
@@ -172,11 +174,11 @@ const directorBudgetReservationSchema = {
     settledAt: { anyOf: [dateTimeSchema, { type: 'null' }] },
   },
 } as const
+// Spread from the domain constant rather than retyped. The eight ids below
+// used to be a hand-written copy that happened to be right; a ninth objective
+// would have left the published enum silently short.
 const strategicObjectiveSchema = {
-  enum: [
-    'discovery', 'awareness', 'warming', 'lead-generation',
-    'sale', 'whatsapp', 'booking', 'download',
-  ],
+  enum: STRATEGIC_OBJECTIVES.map((objective) => objective.id),
 } as const
 const editorialIdSchema = { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$' } as const
 const editorialTokenSchema = { type: 'string', minLength: 3, maxLength: 256 } as const
@@ -27253,6 +27255,126 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         pieces: { type: 'array', items: playbackPieceSchema },
         filteredOut: { type: 'integer', minimum: 0 },
         omittedPieces: { type: 'integer', minimum: 0 },
+      },
+    }),
+  ),
+  // -------------------------------------------------------------------------
+  // Wave 20 — the two compilers that make a decision renderable
+  //
+  // One answer for both: what a caller can act on is the identity of the cut,
+  // the derivation that decided it at the hash it held, and the three numbers
+  // that say whether it is the cut they meant. The plan document itself is not
+  // published inline — a long-form cut is thousands of clips wide, and every
+  // compile response would be a download.
+  // -------------------------------------------------------------------------
+  defineSchema(
+    'compile-react-playback-plan-request',
+    1,
+    'Compile a resolved playback map into a plan the renderer accepts',
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['baseVersionId', 'baseHash', 'reactionTrackId', 'projectVersionId', 'objective', 'planFps'],
+      properties: {
+        // `<sessionId>:playback:<trackId>:v<n>` — the map version the caller
+        // decided against, not whatever is head when the request lands.
+        baseVersionId: w20VersionRefSchema,
+        baseHash: sha256Schema,
+        reactionTrackId: idSchema,
+        // The project version the plan belongs to. The same cut under two
+        // project versions is two plans, which is why it is part of the
+        // snapshot's natural key.
+        projectVersionId: idSchema,
+        // What the cut is for. It reaches the plan as a desired action, and
+        // this compile sends no destination with it, so only the objectives
+        // that need none — `discovery`, `awareness`, `warming` — can be
+        // delivered; the other five are refused INVALID_ARGUMENT naming the
+        // destination they would require. All three produce the same
+        // `continue-viewing` action, so the objective never changes the
+        // compiled document and is not part of the snapshot's natural key.
+        objective: strategicObjectiveSchema,
+        // The delivery frame rate, exact. 30000/1001 is not 29.97, and a
+        // rounded number here would put a drift nobody chose into the timeline.
+        //
+        // It is part of the snapshot's natural key, because it is the timebase
+        // every clip is expressed in: compiling one map version into one
+        // project version at 25/1 and again at 30/1 produces two plans, each
+        // with its own `planId` and `planHash`, and neither supersedes the
+        // other. Repeating a compile at a rate already stored replays that
+        // plan and answers 200.
+        planFps: rationalSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'compile-synthesis-render-plan-request',
+    1,
+    'Compile a stored multi-range synthesis into a plan the renderer accepts',
+    {
+      type: 'object',
+      additionalProperties: false,
+      // No fence and no frame rate. A synthesis is one immutable
+      // content-addressed cut, so there is no later version of it to be stale
+      // against, and it already fixed its frame rate exactly — a second answer
+      // here would contradict the aggregate. With no rate to choose, the
+      // request contributes only the project version to the plan's identity,
+      // and a repeat compile always replays.
+      required: ['projectVersionId', 'objective'],
+      properties: {
+        projectVersionId: idSchema,
+        // Same restriction as the react compile: no destination travels with
+        // the objective, so `discovery`, `awareness` and `warming` are the
+        // three this compile can deliver.
+        objective: strategicObjectiveSchema,
+      },
+    },
+  ),
+  defineSchema(
+    'renderable-plan-compiled',
+    1,
+    'The compiled plan a derivation produced, as the row that was stored',
+    successSchema({
+      type: 'object',
+      additionalProperties: false,
+      required: ['plan', 'replayed'],
+      properties: {
+        plan: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'planId', 'planHash', 'origin', 'sourceId', 'sourceHash', 'sourceVersion',
+            'projectId', 'projectVersionId', 'fps', 'durationFrames', 'clipCount',
+            'compilerVersion', 'assumptions', 'lineageRefs', 'createdAt',
+          ],
+          properties: {
+            planId: w20DerivedIdSchema,
+            // The identity of the cut, over the whole document minus
+            // `createdAt`. Two callers holding this hold the same clips.
+            planHash: sha256Schema,
+            origin: { type: 'string', enum: [...RENDERABLE_PLAN_ORIGINS] },
+            sourceId: w20DerivedIdSchema,
+            // The hash the deciding aggregate held when it was read. A source
+            // that later moves leaves this naming a hash nothing matches, which
+            // is how a reader learns the plan is stale.
+            sourceHash: sha256Schema,
+            // Null where the source is not versioned: a synthesis is one
+            // immutable cut, and writing 1 would invent a chain it lacks.
+            sourceVersion: { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+            projectId: idSchema,
+            projectVersionId: idSchema,
+            fps: { type: 'number', exclusiveMinimum: 0 },
+            durationFrames: { type: 'integer', minimum: 1 },
+            clipCount: { type: 'integer', minimum: 1 },
+            compilerVersion: { type: 'string', minLength: 1, maxLength: 128 },
+            // What the cut takes for granted, in the compiler's own words: that
+            // the output runs the reaction and not the reference, that
+            // materialization is cut-only, how much source a synthesis dropped.
+            assumptions: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } },
+            lineageRefs: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 512 } },
+            createdAt: dateTimeSchema,
+          },
+        },
+        replayed: { type: 'boolean' },
       },
     }),
   ),

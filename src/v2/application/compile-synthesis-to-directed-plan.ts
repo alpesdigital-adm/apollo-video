@@ -9,10 +9,13 @@ import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 import type { EditorialSynthesisRepository } from './ports/editorial-synthesis-repository.ts'
 import type { RenderSourceRepository } from './ports/render-source-repository.ts'
-import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
+import type {
+  RenderablePlanSnapshotRepository,
+  StoredRenderablePlanSnapshot,
+} from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
-  calculateRenderablePlanHash,
+  renderablePlanSnapshotOf,
   type RenderablePlanMarker,
   type RenderablePlanSeam,
   type RenderablePlanSource,
@@ -310,6 +313,12 @@ export function compileSynthesisRenderPlanService(dependencies: {
     plan: Readonly<DirectedEditPlan>
     planHash: string
     replayed: boolean
+    /**
+     * The stored row, as the repository read it back. Carried out of the
+     * service so the published surface presents what PostgreSQL holds rather
+     * than a projection a route composed beside it.
+     */
+    snapshot: Readonly<StoredRenderablePlanSnapshot>
   }>> => {
     const stored = await dependencies.syntheses.read({
       workspaceId: input.workspaceId,
@@ -366,26 +375,23 @@ export function compileSynthesisRenderPlanService(dependencies: {
       createdAt,
     })
     const persisted = await dependencies.snapshots.persist({
-      snapshot: {
+      snapshot: renderablePlanSnapshotOf({
         workspaceId: input.workspaceId,
         projectId: input.projectId,
-        planId: plan.id,
         origin: 'multi-range-synthesis',
         sourceId: stored.synthesis.id,
         sourceHash: stored.synthesis.synthesisHash,
+        // A synthesis is one immutable cut, not a chain.
         sourceVersion: null,
-        fps: plan.fps,
-        durationFrames: plan.durationFrames,
-        clipCount: plan.videoTracks[0]?.clips.length ?? 0,
         plan,
-        planHash: calculateRenderablePlanHash(plan),
-      },
+      }),
       createdAt,
     })
     return Object.freeze({
       plan: persisted.snapshot.plan,
       planHash: persisted.snapshot.planHash,
       replayed: persisted.replayed,
+      snapshot: persisted.snapshot,
     })
   }
 }

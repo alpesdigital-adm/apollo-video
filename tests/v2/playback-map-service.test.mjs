@@ -64,6 +64,21 @@ function baseOf(session) {
   }
 }
 
+/**
+ * The playback map pair a compile has to name.
+ *
+ * Read off the head rather than assembled from a local variable so a test that
+ * anchored in between fences on the version it actually produced.
+ */
+async function mapFenceOf(kit) {
+  const head = await kit.read({
+    workspaceId: WORKSPACE,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+  })
+  return { baseVersionId: head.versionRef, baseHash: head.map.mapHash }
+}
+
 function fakeSessions(session) {
   return {
     async readHead({ workspaceId }) {
@@ -158,6 +173,15 @@ function memoryPlaybackMaps() {
   }
 }
 
+/**
+ * The snapshot store, keyed the way PostgreSQL keys it.
+ *
+ * `fps` is in the match because it is in `renderable_plan_snapshots_source_key`
+ * and in the row id the Prisma repository derives. A fake that keyed on four
+ * columns while the database keyed on five would have hidden the defect this
+ * file now pins: a second compile at a second delivery rate answering
+ * PERSISTENCE_CONFLICT.
+ */
 function memorySnapshots() {
   const rows = []
   return {
@@ -166,7 +190,8 @@ function memorySnapshots() {
       const existing = rows.find((row) =>
         row.workspaceId === snapshot.workspaceId && row.origin === snapshot.origin &&
         row.sourceId === snapshot.sourceId && row.sourceHash === snapshot.sourceHash &&
-        row.plan.projectVersionId === snapshot.plan.projectVersionId)
+        row.plan.projectVersionId === snapshot.plan.projectVersionId &&
+        row.fps === snapshot.fps)
       if (existing) {
         if (existing.planHash === snapshot.planHash) {
           return { snapshot: existing, replayed: true }
@@ -437,6 +462,7 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   })
 
   const compiled = await kit.compile({
+    ...(await mapFenceOf(kit)),
     actor,
     sessionId: SESSION,
     reactionTrackId: REACTION_TRACK,
@@ -523,6 +549,7 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   )
 
   const again = await kit.compile({
+    ...(await mapFenceOf(kit)),
     actor,
     sessionId: SESSION,
     reactionTrackId: REACTION_TRACK,
@@ -535,12 +562,103 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   assert.equal(kit.snapshots.rows.length, 1)
 })
 
+test('T-F4.015 a second delivery rate is a second plan, and the objective is not a rate', async () => {
+  // The published knob that was one-shot. `planFps` is a caller choice on
+  // `compile-react-playback-plan-request/v1` and the capability said "compiling
+  // the same map twice returns the stored plan" — but the frame rate was not in
+  // the snapshot's natural key while it does change every frame number in the
+  // document, so the second rate collided with the first. Measured before the
+  // fix, on this fixture: 30/1 stored a 1200-frame plan and 25/1 was answered
+  // PERSISTENCE_CONFLICT, a 409 whose details named neither the rate nor a way
+  // forward.
+  const fixture = world()
+  const kit = wire(fixture)
+  const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+  const head = await kit.read({
+    workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+  })
+  await kit.anchor({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    baseVersionId: head.versionRef,
+    baseHash: built.map.mapHash,
+    anchor: {
+      anchorId: 'anchor-ana-1',
+      reactionTick: built.map.uncovered[0].range.start,
+      referenceTick: null,
+      mode: 'commentary-only',
+    },
+  })
+  const request = {
+    ...(await mapFenceOf(kit)),
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    projectVersionId: 'version-react-1',
+    objective: 'discovery',
+  }
+
+  const thirty = await kit.compile({ ...request, planFps: rational(BigInt(30), BigInt(1)) })
+  const twentyFive = await kit.compile({ ...request, planFps: rational(BigInt(25), BigInt(1)) })
+
+  // Two cuts of the same forty seconds, and the frame numbers prove they are
+  // not the same document: the rate is the timebase every clip is expressed in.
+  assert.equal(thirty.replayed, false)
+  assert.equal(twentyFive.replayed, false)
+  assert.equal(thirty.plan.durationFrames, 40 * 30)
+  assert.equal(twentyFive.plan.durationFrames, 40 * 25)
+  assert.equal(thirty.snapshot.fps, 30)
+  assert.equal(twentyFive.snapshot.fps, 25)
+  assert.notEqual(twentyFive.planHash, thirty.planHash)
+  assert.equal(kit.snapshots.rows.length, 2, 'each delivery rate keeps its own plan')
+
+  // Neither supersedes the other: asking again for a rate already stored
+  // replays that rate's plan rather than the most recent one.
+  const thirtyAgain = await kit.compile({ ...request, planFps: rational(BigInt(30), BigInt(1)) })
+  assert.equal(thirtyAgain.replayed, true)
+  assert.equal(thirtyAgain.planHash, thirty.planHash)
+  const twentyFiveAgain = await kit.compile({ ...request, planFps: rational(BigInt(25), BigInt(1)) })
+  assert.equal(twentyFiveAgain.replayed, true)
+  assert.equal(twentyFiveAgain.planHash, twentyFive.planHash)
+  assert.equal(kit.snapshots.rows.length, 2)
+
+  // And the objective is NOT a second rate, which is why it is not in the key.
+  // It reaches the plan only as a desired action, this compile sends no
+  // destination with it, and the three objectives that need none all produce
+  // the same `continue-viewing` action — so `awareness` at a stored rate is the
+  // same document and replays. Keying on the objective would have split one
+  // plan into two rows carrying one `planHash`, which the database refuses.
+  const awareness = await kit.compile({
+    ...request,
+    objective: 'awareness',
+    planFps: rational(BigInt(30), BigInt(1)),
+  })
+  assert.equal(awareness.replayed, true)
+  assert.equal(awareness.planHash, thirty.planHash)
+  assert.equal(kit.snapshots.rows.length, 2)
+
+  // The five objectives that WOULD change the document are refused before a
+  // plan exists, and the refusal says what they would need. This is a published
+  // enum wider than what the compile can deliver — recorded here as measured
+  // behaviour rather than left for a caller to discover as a 400.
+  const sale = await kit.compile({
+    ...request,
+    objective: 'sale',
+    planFps: rational(BigInt(30), BigInt(1)),
+  }).then(() => null, (caught) => caught)
+  assert.equal(sale?.code, 'INVALID_ARGUMENT')
+  assert.match(sale.message, /Objective sale requires an explicit destination/)
+  assert.equal(kit.snapshots.rows.length, 2, 'a refused compile must not leave a snapshot behind')
+})
+
 test('T-F4.015 an unresolved map cannot be compiled, and the refusal names the stretch', async () => {
   const fixture = world()
   const kit = wire(fixture)
   await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
 
   const error = await kit.compile({
+    ...(await mapFenceOf(kit)),
     actor,
     sessionId: SESSION,
     reactionTrackId: REACTION_TRACK,
@@ -552,6 +670,62 @@ test('T-F4.015 an unresolved map cannot be compiled, and the refusal names the s
   assert.equal(error?.code, 'PLAYBACK_MAP_UNRESOLVED')
   assert.equal(error.details.uncovered.length, 1)
   assert.equal(kit.snapshots.rows.length, 0, 'a refused compile must not leave a snapshot behind')
+})
+
+test('T-F4.015 a compile that names a map version the anchor moved past is refused with the current pair', async () => {
+  // The gap publishing this service exposed. `compile` read whatever the head
+  // was and never asked what the caller had decided against, so it was the one
+  // playback command with no fence — and the session check does NOT cover it:
+  // a rebuild against a newer session produces a map whose `sessionVersion`
+  // agrees with the session perfectly, so an operator who read v1 would have
+  // been handed a plan for a cut they never saw, with nothing in the answer
+  // saying so.
+  const fixture = world()
+  const kit = wire(fixture)
+  const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+  const stale = await mapFenceOf(kit)
+  await kit.anchor({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    ...stale,
+    anchor: {
+      anchorId: 'anchor-ana-1',
+      reactionTick: built.map.uncovered[0].range.start,
+      referenceTick: null,
+      mode: 'commentary-only',
+    },
+  })
+
+  const error = await kit.compile({
+    ...stale,
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    projectVersionId: 'version-react-1',
+    objective: 'discovery',
+    planFps: rational(BigInt(30), BigInt(1)),
+  }).then(() => null, (caught) => caught)
+
+  assert.equal(error?.code, 'PLAYBACK_MAP_VERSION_STALE')
+  assert.equal(error.details.currentVersion, 2)
+  assert.equal(error.details.currentVersionId, `${SESSION}:playback:${REACTION_TRACK}:v2`)
+  assert.equal(kit.snapshots.rows.length, 0, 'a refused compile must not leave a snapshot behind')
+
+  // And the same call with the pair the map actually holds compiles, so the
+  // refusal above is the fence and not the map being uncompilable.
+  const compiled = await kit.compile({
+    ...(await mapFenceOf(kit)),
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    projectVersionId: 'version-react-1',
+    objective: 'discovery',
+    planFps: rational(BigInt(30), BigInt(1)),
+  })
+  assert.equal(compiled.mapVersion, 2)
+  assert.equal(compiled.snapshot.sourceVersion, 2)
+  assert.equal(compiled.snapshot.planHash, compiled.planHash)
 })
 
 test('T-F4.015 a reaction the detector never locked onto is refused by name, not resolved by guess', async () => {
@@ -679,6 +853,7 @@ test('T-F4.015 the stored plan names the version that was compiled, not the one 
     },
   })
   const compiled = await kit.compile({
+    ...(await mapFenceOf(kit)),
     actor,
     sessionId: SESSION,
     reactionTrackId: REACTION_TRACK,
@@ -740,6 +915,7 @@ test('T-F4.015 a map compiled against a session that has moved past it is refuse
     })
 
     const error = await kit.compile({
+      ...(await mapFenceOf(kit)),
       actor,
       sessionId: SESSION,
       reactionTrackId: REACTION_TRACK,
@@ -810,6 +986,7 @@ test('T-F4.015 a recording the project cannot render from is refused before a pl
     })
 
     const error = await kit.compile({
+      ...(await mapFenceOf(kit)),
       actor,
       sessionId: SESSION,
       reactionTrackId: REACTION_TRACK,
@@ -848,6 +1025,7 @@ test('T-F4.015 a rebuild reports the compiled plan it stranded, and so does the 
   })
   assert.equal(resolved.invalidated, null, 'nothing had been compiled yet')
   const compiled = await kit.compile({
+    ...(await mapFenceOf(kit)),
     actor,
     sessionId: SESSION,
     reactionTrackId: REACTION_TRACK,

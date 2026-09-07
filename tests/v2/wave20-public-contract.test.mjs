@@ -40,6 +40,11 @@ import {
   parseBuildPlaybackMapBody,
   parsePlaybackAnchorBody,
 } from '../../src/v2/public-api/react-playback-map-contract.ts'
+import {
+  parseCompilePlaybackPlanBody,
+  parseCompileSynthesisPlanBody,
+} from '../../src/v2/public-api/renderable-plan-contract.ts'
+import { RENDERABLE_PLAN_ORIGINS } from '../../src/v2/application/renderable-edit-plan.ts'
 import { derivationVersion } from '../../src/v2/public-api/capture-derivation-contract.ts'
 import { presentPublicDomainError } from '../../src/v2/public-api/error-presenter.ts'
 import { PUBLIC_SCHEMA_EXAMPLES } from '../../src/v2/public-api/schema-examples.ts'
@@ -819,4 +824,154 @@ test('T-F4.015 a published example states what the fixture it was built from act
     'the example must exhaust the budget exactly when it has spent it',
   )
   assert.ok(listing.reports.length > 0, 'the listing example must list something')
+})
+
+// ---------------------------------------------------------------------------
+// The two compiles, published after the rest of Wave 20
+//
+// They are a separate list from WAVE20_IDS because they answer the fence
+// question differently, and the difference is the point rather than an
+// oversight: the react map is a version chain and the compile fences on it; an
+// EditorialSynthesis is one immutable content-addressed cut with no later
+// version to be stale against, so there is nothing to fence and the request
+// says so by carrying no fence at all. Everything else about them is held to
+// the same rules as the other six Wave 20 commands.
+// ---------------------------------------------------------------------------
+
+const WAVE20_PLAN_IDS = Object.freeze([
+  'apollo.projects.capture-sessions.playback-map.plan.compile',
+  'apollo.projects.editorial-syntheses.render-plan.compile',
+])
+
+const WAVE20_PLAN_ROUTES = WAVE20_PLAN_IDS.map((id) => {
+  const entry = capability(id)
+  const file = routeFileFor(entry)
+  assert.ok(existsSync(file), `${id} must have a route file at ${file}`)
+  return { entry, file, source: readFileSync(file, 'utf8') }
+})
+
+test('T-F4.016 the two compiles are published commands with a route, a presenter and a scope', () => {
+  const examples = readFileSync('src/v2/public-api/schema-examples.ts', 'utf8')
+  for (const { entry, file, source } of WAVE20_PLAN_ROUTES) {
+    assert.equal(entry.exposure, 'public')
+    assert.equal(entry.authMode, 'required')
+    assert.equal(entry.operationKind, 'command')
+    assert.equal(entry.endpoint.method, 'POST')
+    assert.ok(entry.endpoint.path.startsWith('/v1/projects/'))
+    assert.deepEqual([...entry.requiredScopes], ['projects:write'])
+    assert.deepEqual([...entry.successStatuses], [201, 200])
+    assert.equal(entry.requestBodyRequired, true)
+    // Natural, and therefore no header: the plan is content-addressed under
+    // (workspace, origin, source, source hash, project version), so a repeat
+    // replays. A route that advertised Idempotency-Key without reading one
+    // would publish a mandatory parameter nothing consumes.
+    assert.equal(entry.idempotency, 'natural')
+    assert.equal(
+      /idempotency-key/i.test(source),
+      false,
+      `${entry.id} declares a natural key and must not read a header`,
+    )
+
+    const handler = handlerSource(source, 'POST')
+    assert.ok(
+      handler.includes("requireScope(actor, 'projects:write')"),
+      `${entry.id} must call requireScope in its handler`,
+    )
+    const calls = handler.match(/presentSuccess\(/g) ?? []
+    assert.equal(calls.length, 1, `${entry.id} must build exactly one success body`)
+    const named = /presentSuccess\(\s*(present[A-Za-z0-9]*)\(/.exec(handler)
+    assert.ok(named, `${entry.id} must pass presentSuccess a named presenter, not a literal in ${file}`)
+    assert.equal(
+      named[1],
+      'presentCompiledRenderablePlan',
+      `${entry.id} must answer through the one shared compiled-plan presenter`,
+    )
+    // The published example is built by the same presenter the route emits
+    // through, so what Ajv validates is what a caller receives.
+    const start = examples.indexOf(`'${entry.outputSchemaRef}': [`)
+    assert.ok(start >= 0, `${entry.outputSchemaRef} must publish an example`)
+    assert.ok(
+      examples.slice(start, start + 800).includes('data: presentCompiledRenderablePlan('),
+      `the ${entry.outputSchemaRef} example must be built by the presenter the route uses`,
+    )
+    // The route reaches the application layer rather than a repository.
+    assert.match(
+      source,
+      /from '@\/v2\/infrastructure\/repository-factory'/,
+      `${entry.id} must build its service from the composition root`,
+    )
+  }
+})
+
+test('T-F4.016 the compile that has a version chain fences on it, and the one that has none says so', () => {
+  const react = capability('apollo.projects.capture-sessions.playback-map.plan.compile')
+  const reactInput = getPublicSchema(react.inputSchemaRef).schema
+  assert.ok(reactInput.required.includes('baseVersionId'), 'the map compile must fence on baseVersionId')
+  assert.ok(reactInput.required.includes('baseHash'), 'the map compile must fence on baseHash')
+  // And the parser refuses what the schema requires, one key at a time, off the
+  // published example — the edge that let a Wave 20 fence be made optional in
+  // the parser while the schema, the audit and every gate stayed green.
+  const reactExample = PUBLIC_SCHEMA_EXAMPLES[react.inputSchemaRef][0]
+  assert.doesNotThrow(() => parseCompilePlaybackPlanBody(reactExample))
+  for (const key of reactInput.required) {
+    const { [key]: _removed, ...without } = reactExample
+    refuses(() => parseCompilePlaybackPlanBody(without), key)
+  }
+  // A rate that is not a rate is refused at the boundary rather than rounded.
+  refuses(
+    () => parseCompilePlaybackPlanBody({ ...reactExample, planFps: '29.97' }),
+    'planFps',
+  )
+  // An objective outside the domain constant is refused by name.
+  refuses(
+    () => parseCompilePlaybackPlanBody({ ...reactExample, objective: 'engagement' }),
+    'objective',
+  )
+
+  const synthesis = capability('apollo.projects.editorial-syntheses.render-plan.compile')
+  const synthesisInput = getPublicSchema(synthesis.inputSchemaRef).schema
+  assert.deepEqual(
+    [...synthesisInput.required].sort(),
+    ['objective', 'projectVersionId'],
+    'the synthesis compile takes ids and an objective, and nothing that asserts a measurement',
+  )
+  const synthesisExample = PUBLIC_SCHEMA_EXAMPLES[synthesis.inputSchemaRef][0]
+  assert.doesNotThrow(() => parseCompileSynthesisPlanBody(synthesisExample))
+  for (const key of synthesisInput.required) {
+    const { [key]: _removed, ...without } = synthesisExample
+    refuses(() => parseCompileSynthesisPlanBody(without), key)
+  }
+  // Neither request has any shape a caller could use to assert what the cut is:
+  // no source, no digest, no duration, no clip and no frame rate.
+  for (const forbidden of ['sources', 'sourceArtifactId', 'sha256', 'durationSeconds', 'clips', 'frameRate', 'planFps']) {
+    refuses(
+      () => parseCompileSynthesisPlanBody({ ...synthesisExample, [forbidden]: 'x' }),
+      forbidden,
+    )
+  }
+})
+
+test('T-F4.016 the compiled-plan answer is the stored row, and it publishes what makes a plan falsifiable', () => {
+  const schema = getPublicSchema('apollo://schemas/renderable-plan-compiled/v1').schema
+  const plan = schema.properties.data.properties.plan
+  assert.equal(plan.additionalProperties, false)
+  // The four fields a reader needs to tell a current plan from a stale one, and
+  // the origins spread from the domain constant rather than retyped.
+  for (const field of ['planHash', 'sourceId', 'sourceHash', 'sourceVersion']) {
+    assert.ok(plan.required.includes(field), `the answer must carry ${field}`)
+  }
+  assert.deepEqual(plan.properties.origin.enum, [...RENDERABLE_PLAN_ORIGINS])
+  // Null is a legal answer for a source with no chain, and it is the synthesis
+  // example that proves the schema allows it rather than a comment saying so.
+  const examples = PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/renderable-plan-compiled/v1']
+  assert.equal(examples.length, 2, 'both origins must publish an example')
+  const byOrigin = Object.fromEntries(examples.map((entry) => [entry.data.plan.origin, entry.data.plan]))
+  assert.deepEqual(Object.keys(byOrigin).sort(), [...RENDERABLE_PLAN_ORIGINS].sort())
+  assert.equal(byOrigin['multi-range-synthesis'].sourceVersion, null)
+  assert.equal(typeof byOrigin['react-playback'].sourceVersion, 'number')
+  // The assumptions are the honest part of an automated cut and they travel.
+  assert.ok(
+    byOrigin['react-playback'].assumptions.some((line) => line.includes('ADR-135')),
+    'the react example must publish the compiler sentence about which recording sets the length',
+  )
 })

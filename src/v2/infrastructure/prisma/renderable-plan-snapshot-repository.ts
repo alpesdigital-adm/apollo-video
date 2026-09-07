@@ -136,13 +136,27 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
   }): Promise<Readonly<{ snapshot: Readonly<StoredRenderablePlanSnapshot>; replayed: boolean }>> {
     const { snapshot } = input
     // The natural key of the bridge, hashed into the row id: one derivation, at
-    // one hash, for one project version. A retry lands on the same row.
+    // one hash, for one project version, delivered at one frame rate. A retry
+    // lands on the same row.
+    //
+    // The rate is the caller's, not the source's. `planFps` is a published knob
+    // of the compile capability and it is the timebase every clip is expressed
+    // in, so the same map at 25/1 and at 30/1 are two documents with two plan
+    // hashes. While it was out of this key the second rate collided with the
+    // first and was answered PERSISTENCE_CONFLICT — a refusal nothing in the
+    // schema, the description or the details explained. The objective is not
+    // here on purpose: see `renderable_plan_delivery_rate_key`.
+    //
+    // The DB's `renderable_plan_snapshots_source_key` holds the same columns and
+    // is what actually enforces this; the id is that key hashed, so a divergence
+    // between the two would show up as a P2002 the replay below cannot resolve.
     const id = childRowId([
       snapshot.workspaceId,
       snapshot.origin,
       snapshot.sourceId,
       snapshot.sourceHash.slice(0, 16),
       snapshot.plan.projectVersionId,
+      String(snapshot.fps),
     ], 200)
     try {
       await this.client.v2RenderablePlanSnapshot.create({
@@ -168,16 +182,26 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
       if (!isPrismaCode(error, 'P2002')) throw error
       const stored = await this.readByKey(snapshot)
       // Same key, same cut: the caller compiled twice and gets the first
-      // answer. Same key, different cut: something other than the source
-      // changed the compiler's output, and overwriting the plan somebody
-      // already rendered would erase the evidence of what was rendered.
+      // answer. Same key, different cut: the request was identical down to the
+      // delivery rate, so what changed the compiler's output was not the
+      // request — a compiler that moved, or a row edited underneath — and
+      // overwriting the plan somebody already rendered would erase the evidence
+      // of what was rendered. The details name the whole key: "a different plan
+      // is stored for that source hash" left a reader guessing which part of
+      // their request had collided.
       if (stored && stored.planHash === snapshot.planHash) {
         return Object.freeze({ snapshot: stored, replayed: true })
       }
       throw new DomainError(
         'PERSISTENCE_CONFLICT',
-        `A different plan is already stored for ${snapshot.origin} ${snapshot.sourceId} at that hash`,
-        { sourceId: snapshot.sourceId, storedPlanHash: stored?.planHash ?? null },
+        `A different plan is already stored for ${snapshot.origin} ${snapshot.sourceId} at that hash, in project version ${snapshot.plan.projectVersionId} at ${snapshot.fps} fps`,
+        {
+          sourceId: snapshot.sourceId,
+          projectVersionId: snapshot.plan.projectVersionId,
+          fps: snapshot.fps,
+          storedPlanHash: stored?.planHash ?? null,
+          incomingPlanHash: snapshot.planHash,
+        },
       )
     }
     // Read back rather than handing the caller its own object: the round trip
@@ -202,6 +226,7 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
         sourceId: snapshot.sourceId,
         sourceHash: snapshot.sourceHash,
         projectVersionId: snapshot.plan.projectVersionId,
+        fps: snapshot.fps,
       },
       select: SNAPSHOT_SELECT,
     })

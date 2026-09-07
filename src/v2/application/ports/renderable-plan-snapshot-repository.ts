@@ -25,6 +25,11 @@ export interface RenderablePlanSnapshot {
   readonly sourceHash: string
   /** The chain position, where the source is versioned. Null where it is not. */
   readonly sourceVersion: number | null
+  /**
+   * The delivery frame rate. It is the one measurement in this row the request
+   * chooses rather than the server measures, and it is part of the natural key
+   * `persist` writes under.
+   */
   readonly fps: number
   readonly durationFrames: number
   readonly clipCount: number
@@ -41,11 +46,19 @@ export interface RenderablePlanSnapshotRepository {
   /**
    * Store a compiled plan.
    *
-   * Compiling the same derivation twice is a replay — the same source hash
-   * produces the same cut — and returns the stored row without a second write.
+   * The natural key is the derivation at its hash, the project version it is
+   * compiled into, and the frame rate it is delivered at. Compiling the same
+   * derivation twice the same way is a replay — the same source hash at the
+   * same rate produces the same cut — and returns the stored row without a
+   * second write. Asking for a different delivery rate is a different plan and
+   * gets a row of its own: `fps` is the timebase every clip is expressed in, so
+   * the two documents are not the same cut and neither one supersedes the
+   * other.
+   *
    * The same key with a *different* plan is a conflict rather than an
-   * overwrite: something other than the source changed the cut, and silently
-   * replacing the plan someone already rendered would erase the evidence.
+   * overwrite, and now means one thing only: something other than the request
+   * changed the cut. Silently replacing the plan someone already rendered would
+   * erase the evidence of what was rendered.
    */
   persist(input: {
     snapshot: Readonly<RenderablePlanSnapshot>

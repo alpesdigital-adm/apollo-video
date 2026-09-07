@@ -61,12 +61,23 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * public error envelope. It costs no `next build` and leaves no process
  * behind.
  *
- * What is NOT through the API: the evidence world itself. Nine of the ten
- * criteria read rows — coverage, clock maps, final-export operations, media
+ * What IS through the API and used not to be: the two compiles. Section 0
+ * builds the world with both renderable plans deliberately missing, watches the
+ * gate answer eight of ten and name criterion 4 and criterion 6, then writes
+ * both plans through `POST .../playback-map/plan` and
+ * `POST .../editorial-syntheses/{id}/render-plan` and evaluates again. Until
+ * those routes existed nothing under `src/app` reached either compiler, so ten
+ * of ten was a number only a test could produce.
+ *
+ * What is still NOT through the API: the rest of the evidence world. Eight of
+ * the ten criteria read rows — coverage, clock maps, final-export operations, media
  * manifests among them — that no `/v1` route can write today, so the world is
  * built by `buildGateWorld` through the real repositories and services, the
  * same way `multicam-longform-gate.e2e.mjs` builds it. Said plainly because
- * the alternative is to imply a write surface that does not exist.
+ * the alternative is to imply a write surface that does not exist: coverage,
+ * clock maps, colour measurements, the critic verdict and the final-export
+ * operation are produced by decoders and workers, and none of them has a `/v1`
+ * writer today.
  */
 
 const RUN = process.env.APOLLO_PHASE_GATE_E2E === '1'
@@ -297,6 +308,13 @@ test(
     const outstandingRoute = await import(
       '../../src/app/v1/projects/[projectId]/multicam-longform-gate/outstanding/route.ts'
     )
+    // The two compiles this journey used to have to seed through repositories.
+    const playbackPlanRoute = await import(
+      '../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/playback-map/plan/route.ts'
+    )
+    const synthesisPlanRoute = await import(
+      '../../src/app/v1/projects/[projectId]/editorial-syntheses/[synthesisId]/render-plan/route.ts'
+    )
 
     const client = new PrismaClient()
     const A = 'f4016-journey-workspace-a'
@@ -346,6 +364,10 @@ test(
       otherWorkspaceId: B,
       otherProjectId: PROJECT_B,
       otherClientId: OWNER_B,
+      // The two renderable plans are NOT seeded. Section 0 below writes them
+      // through the published routes, which is the only way this journey can
+      // claim the gate is reachable from outside a test.
+      renderablePlans: 'omit',
     })
 
     // The credentials the journey actually authenticates with. They are issued
@@ -395,6 +417,148 @@ test(
       catalogue.payload.data.criteria.map((entry) => entry.criterion),
       [...MULTICAM_LONGFORM_CRITERIA],
       'the published catalogue is the domain constant, not a copy of it',
+    )
+
+    // ---- 0. the two compiles, through the published routes ----------------
+    //
+    // Before these routes existed, `compileReactPlaybackPlanService` and
+    // `compileSynthesisRenderPlanService` had no capability, no schema and no
+    // address: nothing under `src/app` called either one, and they are the only
+    // two writers of `renderable_plan_snapshots`. Criterion 4's
+    // `map-compiled-into-plan` and criterion 6's `context-proof-recorded` both
+    // read that table, so ten of ten was a number only a test could produce.
+    //
+    // The negative is asserted first and it is the whole point: with the world
+    // otherwise complete and the two plans missing, the gate answers eight of
+    // ten and names the two criteria. If the two calls below did nothing, this
+    // suite would still be here saying so.
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A } }),
+      0,
+      'the world was seeded with renderable plans it was asked to omit',
+    )
+    const uncompiled = await evaluate(bearerA, `phase-gate-journey-uncompiled-${randomUUID()}`)
+    assert.equal(uncompiled.status, 201, uncompiled.text)
+    assert.equal(uncompiled.payload.data.gate.report.approved, false)
+    assert.equal(uncompiled.payload.data.gate.report.satisfied, 8)
+    assert.deepEqual(
+      [...uncompiled.payload.data.gate.report.failed].sort(),
+      ['contextual-multi-range-synthesis', 'react-edited-with-piecewise-map'],
+      'exactly the two criteria that read a compiled plan must be the ones missing',
+    )
+    assert.deepEqual(
+      Object.fromEntries(
+        uncompiled.payload.data.gate.report.criteria
+          .filter((entry) => !entry.passed)
+          .map((entry) => [
+            entry.criterion,
+            entry.checks.filter((check) => !check.passed).map((check) => check.code),
+          ]),
+      ),
+      {
+        'react-edited-with-piecewise-map': ['map-compiled-into-plan'],
+        'contextual-multi-range-synthesis': ['context-proof-recorded'],
+      },
+      'the two criteria must fail on the compiled plan and on nothing else',
+    )
+
+    const compileMap = await callRoute(NextRequest, playbackPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/capture-sessions/${world.ids.reactSession}/playback-map/plan`,
+      params: { projectId: PROJECT_A, sessionId: world.ids.reactSession },
+      body: {
+        baseVersionId: `${world.ids.reactSession}:playback:track-reaction:v${world.resolvedReact.map.version}`,
+        baseHash: world.resolvedReact.map.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: VERSION_A,
+        objective: 'discovery',
+        planFps: '30/1',
+      },
+      authorization: bearerA,
+    })
+    assert.equal(compileMap.status, 201, compileMap.text)
+    assert.equal(compileMap.payload.data.replayed, false)
+    assert.equal(compileMap.payload.data.plan.origin, 'react-playback')
+    assert.equal(compileMap.payload.data.plan.sourceHash, world.resolvedReact.map.mapHash)
+    assert.equal(compileMap.payload.data.plan.sourceVersion, world.resolvedReact.map.version)
+    assert.ok(compileMap.payload.data.plan.clipCount >= 1)
+
+    // The fence is a fence over the wire and not only inside the service: the
+    // pair the build produced is one version behind the anchor that resolved
+    // the map, and it is refused with the pair that is current.
+    const staleCompile = await callRoute(NextRequest, playbackPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/capture-sessions/${world.ids.reactSession}/playback-map/plan`,
+      params: { projectId: PROJECT_A, sessionId: world.ids.reactSession },
+      body: {
+        baseVersionId: `${world.ids.reactSession}:playback:track-reaction:v${world.react.map.version}`,
+        baseHash: world.react.map.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: VERSION_A,
+        objective: 'discovery',
+        planFps: '30/1',
+      },
+      authorization: bearerA,
+    })
+    assert.equal(staleCompile.status, 409, staleCompile.text)
+    assert.equal(staleCompile.payload.error.code, 'PLAYBACK_MAP_VERSION_STALE')
+    assert.equal(
+      staleCompile.payload.error.details.currentVersion,
+      world.resolvedReact.map.version,
+      'a stale fence must be answered with the version that is current',
+    )
+
+    const compileCut = await callRoute(NextRequest, synthesisPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
+      params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
+      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      authorization: bearerA,
+    })
+    assert.equal(compileCut.status, 201, compileCut.text)
+    assert.equal(compileCut.payload.data.replayed, false)
+    assert.equal(compileCut.payload.data.plan.origin, 'multi-range-synthesis')
+    assert.equal(compileCut.payload.data.plan.sourceHash, world.synthesis.synthesisHash)
+    assert.equal(
+      compileCut.payload.data.plan.sourceVersion,
+      null,
+      'an immutable cut has no chain position to report',
+    )
+    assert.equal(
+      compileCut.payload.data.plan.clipCount,
+      world.synthesis.ranges.length,
+      'every selected range has to survive into the plan, once',
+    )
+
+    // A recompile replays: the same derivation at the same hash is one row, and
+    // the second call does no new work rather than minting a second plan.
+    const compileAgain = await callRoute(NextRequest, synthesisPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
+      params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
+      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      authorization: bearerA,
+    })
+    assert.equal(compileAgain.status, 200, compileAgain.text)
+    assert.equal(compileAgain.payload.data.replayed, true)
+    assert.equal(compileAgain.payload.data.plan.planHash, compileCut.payload.data.plan.planHash)
+
+    // A caller from another workspace cannot compile into this project.
+    const foreignCompile = await callRoute(NextRequest, synthesisPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${PROJECT_A}/editorial-syntheses/${world.synthesis.id}/render-plan`,
+      params: { projectId: PROJECT_A, synthesisId: world.synthesis.id },
+      body: { projectVersionId: VERSION_A, objective: 'discovery' },
+      authorization: bearerB,
+    })
+    assert.equal(foreignCompile.status, 404, foreignCompile.text)
+    assert.equal(foreignCompile.payload.error.code, 'EDITORIAL_SYNTHESIS_NOT_FOUND')
+
+    // Exactly two rows, both written by a route handler.
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A } }),
+      2,
+      'the two compiles must have written exactly two plans',
     )
 
     // ---- 1. the world the gate is meant to approve ------------------------
@@ -452,8 +616,8 @@ test(
     )
     assert.equal(
       await client.v2MulticamLongformGate.count({ where: { workspaceId: A, projectId: PROJECT_A } }),
-      1,
-      'the replay wrote a second row',
+      2,
+      'the replay wrote a third row; only section 0 and the approval may have written',
     )
 
     const mismatch = await evaluate(bearerA, approvedKey, { sessionId: 'f4016-session-podcast' })
@@ -993,9 +1157,11 @@ test(
     })
     assert.equal(history.status, 200, history.text)
     const gates = history.payload.data.gates
-    // Thirteen rows: the first approval, then six break/restore pairs. The
-    // five refused bodies and the foreign-workspace attempt wrote nothing.
+    // Fourteen rows: section 0's uncompiled world, the first approval, then six
+    // break/restore pairs. The five refused bodies and the foreign-workspace
+    // attempt wrote nothing.
     const VERDICTS = [
+      false, // the world before the two plans were compiled through /v1
       true,
       false, true, // the deleted match-plan head
       false, true, // the tampered synthesis objective

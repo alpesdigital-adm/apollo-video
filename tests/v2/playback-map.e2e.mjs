@@ -66,7 +66,7 @@ test(
     const { PrismaRenderSourceRepository } = await import(
       '../../src/v2/infrastructure/prisma/render-source-repository.ts'
     )
-    const { calculateRenderablePlanHash } = await import(
+    const { calculateRenderablePlanHash, renderablePlanSnapshotOf } = await import(
       '../../src/v2/application/renderable-edit-plan.ts'
     )
     const {
@@ -375,8 +375,29 @@ test(
     }).then(() => null, (error) => error)
     assert.equal(denied?.code, 'PLAYBACK_MAP_NOT_FOUND')
 
+    // The map pair the compile is fenced on: version 2, the one the anchor
+    // produced and the only one that is resolved enough to compile.
+    const resolvedFence = {
+      baseVersionId: `${SESSION}:playback:${REACTION_TRACK}:v${resolved.map.version}`,
+      baseHash: resolved.map.mapHash,
+    }
+    const stalePlan = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      baseVersionId: head.versionRef, baseHash: first.map.mapHash,
+      projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    }).then(() => null, (error) => error)
+    assert.equal(stalePlan?.code, 'PLAYBACK_MAP_VERSION_STALE')
+    assert.equal(stalePlan.details.currentVersion, 2)
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A } }),
+      0,
+      'a compile refused by the fence must not leave a snapshot behind',
+    )
+
     const compiled = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     })
@@ -416,6 +437,7 @@ test(
     // Recompiling is a replay: the same derivation at the same hash is one row.
     const again = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     })
@@ -472,9 +494,11 @@ test(
     // caller anywhere — not a route, not a worker, not a test — so the claim
     // that this is "where the compiler proves the adapters satisfy the ports"
     // was a `tsc` structural check and nothing more. Three of them now run
-    // against this database. The build/anchor/compile half of the factory still
-    // has no caller: it needs a capture session read from PostgreSQL, and this
-    // journey seeds only the session head, which is phase 3's work.
+    // against this database. The build/anchor half of the factory is not
+    // exercised here: it needs a capture session read from PostgreSQL, and this
+    // journey seeds only the session head, which is phase 3's work. The compile
+    // is not in this factory at all — it lives in
+    // `createReactPlaybackPlanCompileService`, which the published route calls.
     const {
       createReactPlaybackMapServices,
       createRenderSourceRepository,
@@ -615,6 +639,86 @@ test(
     assert.equal(restored.planHash, compiled.planHash)
     assert.deepEqual(restored.plan.videoTracks[0].clips[0], storedPlan.videoTracks[0].clips[0])
 
+    // A second delivery rate is a second plan, and PostgreSQL is what says so.
+    //
+    // `planFps` is a published knob of the compile capability, and until this
+    // wave's review it was not in `renderable_plan_snapshots_source_key`: the
+    // same map version, into the same project version, at 25/1 after 30/1 hit
+    // the unique index and came back PERSISTENCE_CONFLICT — a 409 that named
+    // neither the rate nor a way forward. The in-memory suite pins the decision;
+    // only this one proves the index agrees, because the index is what enforces
+    // it when two operators compile at once.
+    const twentyFive = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
+      projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(25), BigInt(1)),
+    })
+    assert.equal(twentyFive.replayed, false)
+    assert.equal(twentyFive.plan.durationFrames, 40 * 25)
+    assert.notEqual(twentyFive.planHash, compiled.planHash)
+    const bothRates = await client.v2RenderablePlanSnapshot.findMany({
+      where: { workspaceId: A, sourceId: resolved.map.mapId },
+      orderBy: { fps: 'asc' },
+      select: { fps: true, planHash: true, sourceHash: true, projectVersionId: true, durationFrames: true },
+    })
+    assert.equal(bothRates.length, 2, 'each delivery rate keeps its own row')
+    assert.deepEqual(bothRates.map((row) => row.fps), [25, 30])
+    assert.deepEqual(bothRates.map((row) => row.durationFrames), [40 * 25, 40 * 30])
+    // Same derivation, same hash, same project version: the two rows differ in
+    // the delivery rate alone, which is exactly what the old key forbade.
+    assert.equal(new Set(bothRates.map((row) => row.sourceHash)).size, 1)
+    assert.equal(new Set(bothRates.map((row) => row.projectVersionId)).size, 1)
+    assert.equal(new Set(bothRates.map((row) => row.planHash)).size, 2)
+
+    // Neither rate supersedes the other: asking again for the first one replays
+    // the first one rather than handing back the most recent row.
+    const thirtyAgain = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
+      projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    })
+    assert.equal(thirtyAgain.replayed, true)
+    assert.equal(thirtyAgain.planHash, compiled.planHash)
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A, sourceId: resolved.map.mapId } }),
+      2,
+    )
+
+    // And what the conflict now means, which is the only thing it ever claimed
+    // to mean: the same source, at the same hash, into the same project version,
+    // at the same rate, compiling to a DIFFERENT document. Nothing a request can
+    // ask for produces this — it takes a compiler that moved or a row edited
+    // underneath — so it is provoked here by persisting a drifted plan directly.
+    const drifted = renderablePlanSnapshotOf({
+      workspaceId: A,
+      projectId: PROJECT_A,
+      origin: 'react-playback',
+      sourceId: resolved.map.mapId,
+      sourceHash: resolved.map.mapHash,
+      sourceVersion: resolved.map.version,
+      plan: {
+        ...compiled.plan,
+        director: {
+          ...compiled.plan.director,
+          assumptions: [...compiled.plan.director.assumptions, 'compiled by a planner that moved'],
+        },
+      },
+    })
+    const drift = await snapshots.persist({ snapshot: drifted, createdAt: iso(210) })
+      .then(() => null, (error) => error)
+    assert.equal(drift?.code, 'PERSISTENCE_CONFLICT')
+    assert.equal(drift.details.fps, 30, 'the refusal must name the delivery rate that collided')
+    assert.equal(drift.details.projectVersionId, VERSION_A)
+    assert.equal(drift.details.storedPlanHash, compiled.planHash)
+    assert.equal(drift.details.incomingPlanHash, drifted.planHash)
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A, sourceId: resolved.map.mapId } }),
+      2,
+      'a refused write must not leave a third row behind',
+    )
+
     // Unlinking a recording refuses the next compile instead of storing a plan
     // whose sources the renderer cannot resolve. A different project version, so
     // the refusal cannot be the idempotency key answering for it.
@@ -624,6 +728,7 @@ test(
     await client.v2ProjectMediaAsset.delete({ where: { id: referenceLink.id } })
     const unresolvable = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     }).then(() => null, (error) => error)
@@ -647,7 +752,10 @@ test(
       `E2E-F4.015 playback map: v1 ${first.map.pieces.length} pieces / ` +
       `${first.map.uncovered.length} uncovered -> v2 ${resolved.map.status}, ` +
       `plan ${compiled.plan.durationFrames} frames over ` +
-      `${compiled.plan.videoTracks[0].clips.length} clips, 1 snapshot row, ` +
+      `${compiled.plan.videoTracks[0].clips.length} clips at 30 fps and ` +
+      `${twentyFive.plan.durationFrames} frames at 25 fps = 2 snapshot rows, ` +
+      `same map hash and same project version; a drifted plan at a stored rate ` +
+      `refused by ${drift.code} naming fps ${drift.details.fps}; ` +
       `second writer refused by ${lost.code} at the service and ${rejected.code} at the database; ` +
       `sources ${compiled.plan.sources.map((source) => `${source.artifactId}@${source.durationSeconds}s`).join(' + ')} ` +
       `all linked to ${PROJECT_A}; stored plan refused after a CHECK-passing clip shift ` +

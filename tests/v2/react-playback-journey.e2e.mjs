@@ -73,13 +73,9 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    different sources they have to be, and a silent track fails the loudness
  *    floor.
  *
- * TWO hops here are NOT published capabilities. Both are named rather than
- * left for a reader to discover:
+ * ONE hop here is NOT a published capability. It is named rather than left for
+ * a reader to discover:
  *
- * - **Compile.** The registry has `playback-map.build/read/pieces.list/anchors.add`
- *   and nothing for compiling a renderable plan, so this journey reaches it
- *   through the same composition root a worker would
- *   (`createReactPlaybackMapServices().compile`).
  * - **Render.** Nothing under `src/app/v1` or `scripts/` consumes a
  *   `RenderablePlanSnapshot` either, so the MP4 comes from instantiating
  *   `FfmpegEditorialProxyRenderer` directly — which means this test hands the
@@ -90,7 +86,8 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   below; it does not prove that a published route would hand the renderer
  *   the same inputs.
  *
- * Both gaps are reported rather than papered over.
+ * That gap is reported rather than papered over. The compile is no longer one:
+ * `POST .../playback-map/plan` publishes it, and the journey drives it there.
  *
  * The domain arrives through `await import` inside the test: tsx resolves a
  * static `.ts` specifier before it transforms the target and the file dies at
@@ -438,7 +435,7 @@ test(
     const { FfmpegEditorialProxyRenderer } = await import(
       '../../src/v2/infrastructure/media/ffmpeg-editorial-proxy-renderer.ts'
     )
-    const { createReactPlaybackMapServices } = await import(
+    const { createRenderablePlanSnapshotRepository } = await import(
       '../../src/v2/infrastructure/repository-factory.ts'
     )
     const { disconnectV2PostgresClient } = await import(
@@ -452,6 +449,9 @@ test(
     )
     const anchorsRoute = await import(
       '../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/playback-map/anchors/route.ts'
+    )
+    const planRoute = await import(
+      '../../src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/playback-map/plan/route.ts'
     )
 
     const client = new PrismaClient()
@@ -1012,22 +1012,47 @@ test(
 
     // ---- claim 5: the compiled plan renders and the footage is the plan's --
     //
-    // The one hop with no published capability. `createReactPlaybackMapServices`
-    // is the composition root a worker would use, and it is executed here
-    // rather than described.
-    const services = createReactPlaybackMapServices()
-    const compiled = await services.compile({
-      actor: { workspaceId: WORKSPACE, kind: 'api-client', id: CLIENT },
-      sessionId: SESSION,
-      reactionTrackId: REACTION_TRACK,
-      projectVersionId: VERSION,
-      objective: 'discovery',
-      planFps: rational(BigInt(FPS), BigInt(1)),
+    // Through `/v1` now. This hop used to reach past the API into
+    // `createReactPlaybackMapServices()` because the compile had no capability
+    // and no route, which meant the only thing that could produce a renderable
+    // plan for a react edit was a test.
+    const planned = await callRoute(planRoute.POST, `${basePath}/playback-map/plan`, {
+      method: 'POST',
+      token,
+      params,
+      body: {
+        baseVersionId: anchored.payload.data.versionRef,
+        baseHash: anchored.payload.data.map.mapHash,
+        reactionTrackId: REACTION_TRACK,
+        projectVersionId: VERSION,
+        objective: 'discovery',
+        planFps: `${FPS}/1`,
+      },
     })
+    assert.equal(planned.status, 201, JSON.stringify(planned.payload))
+    assert.equal(planned.payload.data.plan.sourceVersion, 2)
+    assert.equal(planned.payload.data.plan.sourceHash, anchored.payload.data.map.mapHash)
+
+    // The document the renderer receives, read back out of PostgreSQL rather
+    // than out of the response: the published answer is a summary, and what
+    // gets rendered below has to be the stored plan itself.
+    const storedPlan = await createRenderablePlanSnapshotRepository().readLatestForSource({
+      workspaceId: WORKSPACE,
+      origin: 'react-playback',
+      sourceId: planned.payload.data.plan.sourceId,
+    })
+    assert.ok(storedPlan, 'the published compile stored no plan')
+    assert.equal(storedPlan.planHash, planned.payload.data.plan.planHash)
+    const compiled = { plan: storedPlan.plan, planHash: storedPlan.planHash, mapVersion: storedPlan.sourceVersion }
     validateDirectedEditPlan(compiled.plan)
     assert.equal(compiled.mapVersion, 2)
     const reactionFrames = Math.round(REACTION_SECONDS * FPS)
     assert.equal(compiled.plan.durationFrames, reactionFrames)
+    assert.equal(
+      planned.payload.data.plan.durationFrames,
+      reactionFrames,
+      'the published summary disagrees with the plan it summarises',
+    )
     assert.notEqual(
       compiled.plan.durationFrames,
       Math.round(REFERENCE_SECONDS * FPS),
