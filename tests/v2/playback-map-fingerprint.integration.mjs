@@ -44,7 +44,7 @@ const FFMPEG = ffmpegStatic ?? 'ffmpeg'
  * of this reference is a distinct linear sweep, and consecutive seconds sweep in
  * opposite directions, so a locked window names one second and no other.
  *
- * The reaction is sixty seconds against a thirty-second reference — deliberately
+ * The reaction is seventy seconds against a thirty-second reference — deliberately
  * unequal, because "the recording duration never implies the reference duration"
  * (ADR-135) is the invariant this fixture exists to falsify.
  */
@@ -397,7 +397,7 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
 
   // The two durations are measured, not assumed, and they are different.
   assert.ok(Math.abs(referenceProbe.duration - REFERENCE_SECONDS) < 0.5, 'reference is ~30 s')
-  assert.ok(Math.abs(reactionProbe.duration - REACTION_SECONDS) < 0.5, 'reaction is ~60 s')
+  assert.ok(Math.abs(reactionProbe.duration - REACTION_SECONDS) < 0.5, `reaction is ~${REACTION_SECONDS} s`)
   assert.ok(reactionProbe.duration > referenceProbe.duration * 1.9, 'the reaction is twice the reference')
 
   const media = mediaFor(REFERENCE_SECONDS, REACTION_SECONDS)
@@ -676,8 +676,8 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
   // ffprobe's number is the one that refuses.
   //
   // The lie made concrete: the last piece extended to play reference time only a
-  // sixty-second reference would have. The same body is refused under the
-  // measured thirty seconds and accepted under the copied sixty.
+  // seventy-second reference would have. The same body is refused under the
+  // measured thirty seconds and accepted under the copied seventy.
   // The LAST piece, read off the map rather than named: `tail` stopped being it
   // when the rewind was appended, and slicing the last one off while re-adding
   // `tail` produced two pieces with the same id instead of the overreach this
