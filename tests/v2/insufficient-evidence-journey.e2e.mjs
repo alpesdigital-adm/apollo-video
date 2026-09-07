@@ -16,6 +16,7 @@ import {
   closeJourneyObjectStore,
   journeyStorageDriver,
   journeyStorageEnvironment,
+  journeyStorageLabel,
   openJourneyObjectStore,
 } from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -1096,7 +1097,8 @@ test(
       `${anchorsPlaced} anchors over ${anchorPlan.length} tracks -> pass 2 insufficient=${secondOutcome.insufficient} ` +
       `method=[${afterTracks.map((entry) => entry.selectedMethod).join(',')}] ` +
       `diagnostic v${cleared.version} status=${cleared.status} confidence=${cleared.globalConfidence} ` +
-      `autoEdit=${cleared.autoEdit.allowed}; direction ${directed.status} shots=${cut.direction.shotCount} uncovered=0`,
+      `autoEdit=${cleared.autoEdit.allowed}; direction ${directed.status} shots=${cut.direction.shotCount} uncovered=0; ` +
+      `${journeyStorageLabel(storageDriver)}`,
     )
   },
 )

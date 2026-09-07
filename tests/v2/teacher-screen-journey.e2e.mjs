@@ -10,6 +10,7 @@ import {
   closeJourneyObjectStore,
   journeyStorageDriver,
   journeyStorageEnvironment,
+  journeyStorageLabel,
   openJourneyObjectStore,
   storedArtifactPath,
 } from './helpers/journey-object-storage.mjs'
@@ -1089,7 +1090,8 @@ test(
       `duration=${Number(outputVideo.duration).toFixed(3)}s ${outputVideo.width}x${outputVideo.height} ` +
       `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputByteSize} ` +
       `mp4sha256=${outputSha256.slice(0, 16)} ` +
-      `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}]` +
+      `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}] ` +
+      `${journeyStorageLabel(storageDriver)}` +
       `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
   },

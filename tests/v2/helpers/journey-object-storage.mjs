@@ -29,9 +29,20 @@ import { dirname, join } from 'node:path'
  *   puts its fixtures there. The artifact root becomes staging: the app writes
  *   through `S3VerifiedMediaStorage` and materializes sources through
  *   `S3ArtifactSourceMaterializer`, so every byte the render decodes has made a
- *   round trip through MinIO. Reading a stored object goes through `HeadObject`
- *   first and then a `GET` **bound to that VersionId**, which is what makes the
- *   word "versioned" mean something instead of decorating a bucket name.
+ *   round trip through MinIO. An object this run PUT is read back bound to the
+ *   VersionId the store answered for that put — the version this run wrote,
+ *   not whichever is newest by then. An object the APP wrote, a delivered
+ *   render, has no such id to bind to: that read heads and then gets one id,
+ *   which cannot tear between two versions but is still the latest at the
+ *   moment of the head. Two different claims, so they are written as two.
+ *
+ * Which mode a run is in is stated in each journey's measured line rather than
+ * inferred — `journeyStorageLabel()` — and a bucket named without a driver to
+ * use it is refused below. Both exist because the local and the s3 run of these
+ * journeys used to print the IDENTICAL line: a CI step that lost its
+ * `APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3` would have gone on passing, on a
+ * local disk, under a name that says versioned MinIO, and nothing in the log
+ * could have told the two apart.
  *
  * The bucket is created rather than reused on purpose: `CreateBucket`
  * succeeding is the proof that no state was inherited, and `close()` proves the
@@ -59,7 +70,32 @@ export function journeyStorageDriver(environment = process.env) {
     DRIVERS.includes(driver),
     `APOLLO_V2_ARTIFACT_STORAGE_DRIVER must be one of ${DRIVERS.join(', ')}, not ${JSON.stringify(driver)}`,
   )
+  // A bucket with no driver to open it is a contradiction, and it is the exact
+  // shape a CI step takes when its driver line goes missing: the workflow still
+  // hands the run its exclusive `APOLLO_V2_S3_BUCKET` (job-level in
+  // `local-infrastructure`, per-step below it), every `if (objectStore)` block
+  // in the journeys skips, and the step passes on a local disk under a name
+  // that promises versioned MinIO. Refused here, before any database work, so
+  // the failure names its own cause.
+  const bucket = (environment.APOLLO_V2_S3_BUCKET ?? '').trim()
+  assert.ok(
+    bucket === '' || driver === 's3',
+    `APOLLO_V2_S3_BUCKET names ${bucket} while APOLLO_V2_ARTIFACT_STORAGE_DRIVER is ${driver}: ` +
+    'a journey given a bucket has to run against it',
+  )
   return driver
+}
+
+/**
+ * What a journey prints so its measured line says which store it ran against.
+ *
+ * A person reading two CI steps has to be able to tell them apart, and until
+ * this existed they could not: the local and the object-storage runs of these
+ * journeys produced byte-identical measured lines.
+ */
+export function journeyStorageLabel(driver = journeyStorageDriver(), environment = process.env) {
+  if (driver !== 's3') return `storage=${driver}`
+  return `storage=s3 bucket=${(environment.APOLLO_V2_S3_BUCKET ?? '').trim()}`
 }
 
 /**
@@ -83,6 +119,8 @@ export async function openJourneyObjectStore({ environment = process.env } = {})
   }))
   const versioning = await client.send(new aws.GetBucketVersioningCommand({ Bucket: bucket }))
   assert.equal(versioning.Status, 'Enabled', 'the journey bucket must be versioned')
+  /** VersionId per key, for the keys THIS run wrote. */
+  const written = new Map()
   return Object.freeze({
     aws,
     bucket,
@@ -102,7 +140,7 @@ export async function openJourneyObjectStore({ environment = process.env } = {})
     async put(key, filePath) {
       const body = await readFile(filePath)
       const sha256 = createHash('sha256').update(body).digest('hex')
-      const written = await client.send(new aws.PutObjectCommand({
+      const stored = await client.send(new aws.PutObjectCommand({
         Bucket: bucket,
         Key: key,
         Body: body,
@@ -111,24 +149,39 @@ export async function openJourneyObjectStore({ environment = process.env } = {})
         Metadata: { 'apollo-sha256': sha256 },
       }))
       assert.ok(
-        written.VersionId && written.VersionId !== 'null',
+        stored.VersionId && stored.VersionId !== 'null',
         `object storage answered no version for ${key}`,
       )
-      return written.VersionId
+      written.set(key, stored.VersionId)
+      return stored.VersionId
     },
     /**
      * Copy the object at `key` to a local path and answer that path.
      *
-     * `HeadObject` then `GetObject` with the VersionId it reported: a bare
-     * `GET` would read "whatever is latest now", which is the one thing a
-     * versioned store exists to let a reader avoid.
+     * For a key THIS run put, both calls name the VersionId the store answered
+     * then: the bytes read back are the bytes this run wrote, and a later
+     * version — a re-promotion, another run sharing the bucket — cannot be
+     * mistaken for them. For a key the APP wrote, a delivered render nobody
+     * here handed a version to, there is no such id: the head chooses one and
+     * the get names it, which rules out a torn read across two versions but is
+     * still the latest at the moment of the head. The versioning itself is
+     * proven by `GetBucketVersioning` above and by every put answering a
+     * non-null VersionId — this call does not have to carry that claim too.
      */
     async readTo(key, targetPath) {
-      const head = await client.send(new aws.HeadObjectCommand({ Bucket: bucket, Key: key }))
+      const pinned = written.get(key) ?? null
+      const head = await client.send(new aws.HeadObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ...(pinned ? { VersionId: pinned } : {}),
+      }))
       assert.ok(
         head.VersionId && head.VersionId !== 'null',
         `stored object ${key} is not version-bound`,
       )
+      if (pinned) {
+        assert.equal(head.VersionId, pinned, `object storage answered a version ${key} was not written as`)
+      }
       const object = await client.send(new aws.GetObjectCommand({
         Bucket: bucket,
         Key: key,

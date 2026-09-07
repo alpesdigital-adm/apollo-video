@@ -10,6 +10,7 @@ import {
   closeJourneyObjectStore,
   journeyStorageDriver,
   journeyStorageEnvironment,
+  journeyStorageLabel,
   openJourneyObjectStore,
   storedArtifactPath,
 } from './helpers/journey-object-storage.mjs'
@@ -1937,7 +1938,8 @@ test(
       `luma=a:${sourceLuma.a.toFixed(1)}>${deliveredLuma.a.toFixed(1)} b:${sourceLuma.b.toFixed(1)}>${deliveredLuma.b.toFixed(1)} gap=${sourceGap.toFixed(1)}>${deliveredGap.toFixed(1)} ` +
       `critic=${report.reportId}:${report.action}:${report.cause}:hard${report.hardIssues}/warn${report.warningIssues} ` +
       `criticConfidence=${report.confidence}(${report.confidenceBand}) measured=${measuredDimensions.length}/${judged.dimensions.length} judgedFiles=${judged.bytesEvaluated.length} ` +
-      `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')}` +
+      `protocolCeiling=${evaluation.data.evaluation.ceiling} unmet=${unmet.join('+')} ` +
+      `${journeyStorageLabel(storageDriver)}` +
       `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
     assert.deepEqual(unmet, ['end-marker', 'start-marker'], 'no marker was filmed, and only that is unmet')

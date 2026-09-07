@@ -15,6 +15,7 @@ import { NextRequest } from 'next/server'
 import {
   closeJourneyObjectStore,
   journeyStorageDriver,
+  journeyStorageLabel,
   openJourneyObjectStore,
 } from './helpers/journey-object-storage.mjs'
 
@@ -1132,13 +1133,16 @@ test(
 
     // ---- the footage, not the container ------------------------------------
     //
-    // Everything above holds for 1800 frames of anything. A plan that cut the
-    // right lengths from the wrong moments renders a file with the same frame
-    // count, the same duration, the same codecs and the same dimensions — and a
-    // different sha256 nobody may pin, because the digest is FFmpeg-build
-    // dependent and this suite runs on Windows and on the ubuntu runner. So the
-    // output is measured against the two things the fixture knows: the
-    // reaction's own audio, and which source each stretch must have come from.
+    // Everything above holds for `reactionFrames` frames of anything — the count
+    // asserted on the plan above, named rather than typed, because the last time
+    // this fixture's length changed the typed number stayed behind at 1800. A
+    // plan that cut the right lengths from the wrong moments renders a file with
+    // the same frame count, the same duration, the same codecs and the same
+    // dimensions — and a different sha256 nobody may pin, because the digest is
+    // FFmpeg-build dependent and this suite runs on Windows and on the ubuntu
+    // runner. So the output is measured against the two things the fixture
+    // knows: the reaction's own audio, and which source each stretch must have
+    // come from.
     const deliveredAudio = decodeAudio(rendered.outputPath)
     let audioEnergy = 0
     for (const sample of deliveredAudio) audioEnergy += sample * sample
@@ -1291,7 +1295,8 @@ test(
       `${video.width}x${video.height} / ${rendered.byteSize} bytes / sha256 ${outputSha256.slice(0, 16)}; ` +
       `audio rms ${audioRms.toFixed(4)}, reaction lag ` +
       `[${audioProbes.map((probe) => `${probe.label} ${probe.lagSeconds.toFixed(3)}s r=${probe.score.toFixed(3)}`).join(', ')}]; ` +
-      `pixels [${pixelProbes.map((probe) => `${probe.label} sd=${probe.sd.toFixed(2)} mean=${probe.mean.toFixed(1)}`).join(', ')}]` +
+      `pixels [${pixelProbes.map((probe) => `${probe.label} sd=${probe.sd.toFixed(2)} mean=${probe.mean.toFixed(1)}`).join(', ')}]; ` +
+      `${journeyStorageLabel(storageDriver)}` +
       `${retainedPath ? ` / retained at ${retainedPath}` : ''}`,
     )
   },

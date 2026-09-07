@@ -5,6 +5,7 @@ import test from 'node:test'
 import {
   closeJourneyObjectStore,
   journeyStorageDriver,
+  journeyStorageLabel,
   openJourneyObjectStore,
 } from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
@@ -138,15 +139,33 @@ process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
  * file. `buildGateWorld` writes no bytes anywhere, in either mode
  * (`multicam-longform-gate-world.mjs:1017-1075` creates `v2MediaArtifact` and
  * `v2MediaArtifactManifest` rows and stops), and the artifacts the report cites
- * carry synthetic digests no real file could have. So the s3 run cannot say
- * "the gate read its evidence out of MinIO"; it says the gate reaches the same
- * verdict with the object-storage composition root wired, and the bucket is
+ * carry synthetic digests no real file could have.
+ *
+ * So what the s3 run proves is narrower than "the gate read its evidence out of
+ * MinIO", and narrower than "the gate ran on the object-storage composition
+ * root" too: no route this journey imports ever constructs artifact storage at
+ * all. Measured — `createArtifact|Materializer|ContentStorage|VerifiedMedia|
+ * RenderInput` has zero hits across the six route modules imported below, and
+ * this suite sets neither `APOLLO_V2_ARTIFACT_ROOT` nor
+ * `APOLLO_V2_RENDER_WORK_ROOT`, one of which the composition root demands the
+ * moment anything asks it for storage in either mode
+ * (`local-artifact-content-storage.ts:87`, `repository-factory.ts:1252-1257`).
+ * The whole S3 conversation in an s3 run is this suite's own CreateBucket,
+ * PutBucketVersioning, GetBucketVersioning, ListObjectVersions and DeleteBucket.
+ *
+ * Stated plainly, then: the gate reaches the same verdict whichever driver the
+ * environment names — it is indifferent to it — and the bucket it was handed is
  * EMPTY at the end.
  *
- * That emptiness is the falsifiable half. The day a criterion starts opening a
- * file — a probe re-derived from bytes, an export verified against its object —
- * this assertion fails and somebody has to decide whether the gate should be
- * doing that, instead of it happening silently on a developer's disk.
+ * That emptiness is the falsifiable half, and what it falsifies is a WRITE. The
+ * day a criterion starts putting bytes anywhere — an export promoted, a probe
+ * cached — the assertion at the end of this journey fails. A criterion that
+ * starts READING a file never reaches that assertion: under s3 it dies first
+ * with PERSISTENCE_NOT_CONFIGURED, "Render work root is required for S3
+ * artifact materialization", because neither this suite nor the CI step that
+ * runs it configures one. Two different failures, one decision behind them —
+ * whether the gate should be touching bytes at all — and this is what each of
+ * them looks like, instead of it happening silently on a developer's disk.
  */
 const storageDriver = journeyStorageDriver()
 process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
@@ -1018,9 +1037,10 @@ test(
     assert.equal(outstanding.payload.data.approved, true)
     assert.deepEqual(outstanding.payload.data.outstanding, [])
 
-    // What object storage saw: nothing. See the note on `storageDriver` — the
-    // gate is a reader of rows and of the module graph, and this is the
-    // assertion that will notice the day it stops being one.
+    // What object storage saw: nothing. See the note on `storageDriver` — no
+    // route here constructs artifact storage at all, so this is the assertion
+    // that notices the day a criterion starts WRITING bytes. One that starts
+    // READING them fails earlier and louder, on the work root nobody configured.
     if (objectStore) {
       assert.deepEqual(
         await objectStore.keys(),
@@ -1037,7 +1057,8 @@ test(
       `tampered synthesis -> ${tamperedReport.satisfied}/10 evidence-unverified, ` +
       `restored -> ${restoredSynthesis.payload.data.gate.report.satisfied}/10; ` +
       '5 bodies carrying a verdict refused 422 INVALID_ARGUMENT with 0 rows written; ' +
-      `4 more conditions broken one at a time: ${conditions.join(', ')}`,
+      `4 more conditions broken one at a time: ${conditions.join(', ')}; ` +
+      `${journeyStorageLabel(storageDriver)}, bucket keys ${objectStore ? (await objectStore.keys()).length : 'n/a'}`,
     )
   },
 )
