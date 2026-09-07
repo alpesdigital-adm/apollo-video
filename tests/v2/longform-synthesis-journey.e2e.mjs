@@ -74,10 +74,13 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *    check runs against rows;
  * 4. it is read back through `GET .../editorial-syntheses/{id}`, which
  *    re-derives the stored hash and refuses the row if it does not match;
- * 5. `compileSynthesisRenderPlanService` resolves the render sources from the
- *    project's own media links — the durations the renderer will use are the
- *    ones ffprobe measured at ingest — and persists a renderable plan
- *    snapshot;
+ * 5. the cut is compiled through
+ *    `POST .../editorial-syntheses/{id}/render-plan`, whose service resolves
+ *    the render sources from the project's own media links — the durations the
+ *    renderer will use are the ones ffprobe measured at ingest — and persists a
+ *    renderable plan snapshot. This hop used to reach past the API into the
+ *    application service while the react journey beside it went through its
+ *    route, which left the published compile driven by one suite;
  * 6. the plan that is RENDERED is the one read back out of
  *    `renderable_plan_snapshots`, not the one held in memory;
  * 7. and the output is measured: frame count, duration, frame rate, video and
@@ -385,17 +388,8 @@ async function driveJourney(t, {
     const { nodeApiCredentialCrypto } = await import(
       '../../src/v2/infrastructure/security/api-credential.ts'
     )
-    const { PrismaEditorialSynthesisRepository } = await import(
-      '../../src/v2/infrastructure/prisma/editorial-synthesis-repository.ts'
-    )
-    const { PrismaRenderSourceRepository } = await import(
-      '../../src/v2/infrastructure/prisma/render-source-repository.ts'
-    )
     const { PrismaRenderablePlanSnapshotRepository } = await import(
       '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
-    )
-    const { compileSynthesisRenderPlanService } = await import(
-      '../../src/v2/application/compile-synthesis-to-directed-plan.ts'
     )
     const { createMediaArtifactManifest } = await import(
       '../../src/v2/domain/media-artifact.ts'
@@ -419,6 +413,9 @@ async function driveJourney(t, {
     )
     const synthesisRoute = await import(
       '../../src/app/v1/projects/[projectId]/editorial-syntheses/[synthesisId]/route.ts'
+    )
+    const renderPlanRoute = await import(
+      '../../src/app/v1/projects/[projectId]/editorial-syntheses/[synthesisId]/render-plan/route.ts'
     )
 
     const suffix = randomUUID().slice(0, 8)
@@ -720,22 +717,31 @@ async function driveJourney(t, {
       'the stored ranges are not the ones the request declared',
     )
 
-    // ---- the bridge, over the stored aggregate ---------------------------
-    const syntheses = new PrismaEditorialSynthesisRepository(client)
+    // ---- the bridge, over the stored aggregate, through `/v1` -------------
+    //
+    // Through the published route rather than the application service. The
+    // service call this replaces reached past the API into the composition the
+    // route performs, so the only suite driving
+    // `POST .../editorial-syntheses/{id}/render-plan` was the phase-gate
+    // journey — and this one would have kept passing if the route had been
+    // deleted. The caller brings two ids and nothing else: no source, no
+    // digest, no duration and no frame rate, because the synthesis already
+    // fixed the rate.
     const snapshots = new PrismaRenderablePlanSnapshotRepository(client)
-    const compiled = await compileSynthesisRenderPlanService({
-      syntheses,
-      sources: new PrismaRenderSourceRepository(client),
-      snapshots,
-      clock: () => createdAt,
-    })({
-      workspaceId,
-      projectId,
-      synthesisId,
-      projectVersionId: versionId,
-      objective: 'discovery',
+    const planned = await callRoute(NextRequest, renderPlanRoute, {
+      method: 'POST',
+      path: `/v1/projects/${projectId}/editorial-syntheses/${synthesisId}/render-plan`,
+      params: { projectId, synthesisId },
+      authorization,
+      body: { projectVersionId: versionId, objective: 'discovery' },
     })
-    assert.equal(compiled.replayed, false)
+    assert.equal(planned.status, 201, planned.text)
+    const compiled = planned.payload.data.plan
+    assert.equal(planned.payload.data.replayed, false)
+    assert.equal(compiled.origin, 'multi-range-synthesis')
+    assert.equal(compiled.sourceId, synthesisId)
+    assert.equal(compiled.sourceHash, summary.synthesisHash)
+    assert.equal(compiled.clipCount, WINDOWS.length)
 
     // The plan that gets rendered is the one PostgreSQL returned, so a
     // serialization that lost a frame index would render the wrong span.
@@ -746,6 +752,11 @@ async function driveJourney(t, {
     })
     assert.ok(storedSnapshot, 'the compile step persisted no renderable plan snapshot')
     assert.equal(storedSnapshot.planHash, compiled.planHash)
+    assert.equal(
+      compiled.durationFrames,
+      storedSnapshot.durationFrames,
+      'the published summary disagrees with the plan it summarises',
+    )
     assert.equal(storedSnapshot.sourceHash, summary.synthesisHash)
     assert.equal(storedSnapshot.origin, 'multi-range-synthesis')
     assert.equal(storedSnapshot.clipCount, WINDOWS.length)
@@ -897,7 +908,8 @@ async function driveJourney(t, {
       + `${masterByteSize} bytes sha256 ${masterSha256.slice(0, 16)}, encoded in ${encodeSeconds.toFixed(1)}s) `
       + `-> synthesis ${synthesisId} `
       + `${summary.rangeCount} ranges ${summary.droppedMs}ms dropped compression ${summary.compressionBps}bps `
-      + `hash ${summary.synthesisHash.slice(0, 12)} -> plan ${plan.id} ${plan.durationFrames} frames `
+      + `hash ${summary.synthesisHash.slice(0, 12)} -> POST render-plan ${planned.status} `
+      + `-> plan ${plan.id} ${plan.durationFrames} frames `
       + `hash ${compiled.planHash.slice(0, 12)} -> MP4 ${measuredSeconds.toFixed(3)}s `
       + `rendered in ${renderSeconds.toFixed(1)}s, `
       + `${countedFrames} frames (expected ${expectedFrames}) ${outVideo.codec_name}/${outAudio.codec_name}@${outAudio.sample_rate} `
