@@ -1491,11 +1491,23 @@ são medidas lá.
 ### 34.7 A correção da fase 9: os dois compiles que a API não alcançava
 
 Uma auditoria independente conferiu o que a §34 afirma e achou o furo. Até
-`93aa7f55`, `grep -rln "compileReactPlaybackPlanService|compileSynthesisRenderPlanService" src/app/`
-respondia **nenhum arquivo**, e `snapshots.persist` tinha exatamente dois
-chamadores — `application/react-playback-map.ts:1054` e
-`application/compile-synthesis-to-directed-plan.ts:368` — ambos dentro daqueles
-dois serviços. Como o critério 4 do gate lê `map-compiled-into-plan` e o
+`93aa7f55`, `snapshots.persist` tinha exatamente dois chamadores —
+`application/react-playback-map.ts:1054` e
+`application/compile-synthesis-to-directed-plan.ts:368` — ambos dentro dos dois
+serviços de compile, e nenhuma rota alcançava nenhum dos dois.
+
+**O comando que prova isso não é o grep pelos nomes dos serviços.** A primeira
+redação desta seção citava
+`grep -rlnE "compileReactPlaybackPlanService|compileSynthesisRenderPlanService" src/app/`,
+que responde **nenhum arquivo antes e depois da correção**: as rotas chegam aos
+compiladores por fábricas da raiz de composição, e os nomes dos serviços só
+aparecem dentro de `repository-factory.ts`. Quem reexecutasse o comando leria
+"continua quebrado". O comando que de fato responde é
+`grep -rlnE "createReactPlaybackPlanCompileService|createSynthesisRenderPlanService" src/app/`,
+que devolve os dois arquivos de rota; a prova durável é o caminhador de alcance
+(`applicationServicesForEndpoint`), que atribui cada compilador à rota dele e a
+nenhuma outra — asserção em `public-operation-contracts.test.mjs` —, mais a
+jornada do phase gate, que chama as duas rotas por HTTP. Como o critério 4 do gate lê `map-compiled-into-plan` e o
 critério 6 lê o plano compilado dentro de `context-proof-recorded`, o **dez de
 dez da §33 era um número que só um teste conseguia produzir**. Isso contradiz a
 regra API-first da própria wave.
@@ -1548,5 +1560,72 @@ zero. Os dois passaram a ser contados, o relatório nomeia os culpados
 (`unboundActionIds`, `routesWithoutApplicationServiceEndpoints`), a recusa
 continua no CLI nos dois modos, e um teste novo torna cada número diferente de
 zero de propósito para provar que ele se move.
+
+Nada nesta seção afirma implantação ou aceite. Os dois continuam pendentes.
+
+### 34.8 A revisão da fase 9: o que a correção da §34.7 deixou passar
+
+A revisão da própria §34.7 achou quatro coisas. A do meio é a que muda
+comportamento.
+
+**A taxa de entrega não estava na identidade do plano.** O pedido
+`compile-react-playback-plan-request/v1` publica `planFps` como escolha do
+chamador, e a descrição da capability prometia "compilar o mesmo mapa duas vezes
+devolve o plano guardado". As duas coisas só eram verdade em uma taxa: `planFps`
+é a base de tempo em que todo clipe do plano é expresso, e ela não estava na
+chave natural do snapshot. Medido no mapa de fixture antes da correção: 30/1
+guardou um plano de 1200 quadros e 25/1 foi recusado com **409
+`PERSISTENCE_CONFLICT`**, cujos detalhes não nomeavam a taxa nem um caminho
+adiante. Uma taxa de entrega por (versão de mapa, versão de projeto) era uma
+regra que ninguém escreveu e ninguém escolheu. A migration
+`20260907120000_renderable_plan_delivery_rate_key` põe `fps` em
+`renderable_plan_snapshots_source_key`; as duas taxas passam a ser dois planos,
+cada um com a sua linha, e pedir de novo uma taxa já guardada replica aquela
+linha e não a mais recente. Provado nos dois níveis: no conjunto em memória e
+contra um PostgreSQL 16 descartável, onde recriar o índice antigo de cinco
+colunas na mão faz o E2E falhar por `PERSISTENCE_CONFLICT` e recriá-lo com seis
+faz passar.
+
+O `objective` **não** entrou nessa chave, e a leitura de que ele também parte o
+plano não se reproduz. Ele chega ao plano só como ação desejada, nenhuma das duas
+rotas manda destino junto, e os três objetivos que dispensam destino —
+`discovery`, `awareness`, `warming` — produzem a mesma ação `continue-viewing`.
+Medido: compilar a 30/1 para `discovery` e depois para `awareness` devolve o
+mesmo hash de plano e replica. Colocar o objetivo na chave partiria um plano em
+duas linhas com um único `planHash`, o que o único `(workspaceId, planHash)`
+recusa — um conflito fabricado a partir de um replay. **Fica aberto**, porque a
+decisão é do dono do produto e não desta correção: o enum publicado de `objective`
+tem oito valores e só três são entregáveis; os outros cinco são recusados
+`INVALID_ARGUMENT` nomeando o destino que exigiriam. Os testes fixam esse
+comportamento e o comentário do schema passou a dizê-lo, mas estreitar o enum ou
+aceitar um `desiredAction` continua por decidir.
+
+**Fiação morta na raiz de composição.** `createReactPlaybackMapServices` continuou
+construindo um membro `compile:` depois que a rota publicada passou a usar
+`createReactPlaybackPlanCompileService`. Ninguém o chamava, e o caminhador do
+relatório de paridade segue uma chamada de fábrica para dentro de todo serviço
+que ela constrói — então aquele membro morto atribuía o compilador às linhas de
+`build` e de `anchors`, duas rotas que nunca o invocam. Não era só inflação
+cosmética: `api-governance-coverage.test.mjs` casa o escopo exigido de uma rota
+contra o fonte concatenado de todos os serviços atribuídos a ela. Removido, com
+um teste que anda por toda capability publicada e exige que cada um dos dois
+compiladores esteja atribuído a exatamente uma rota — a dele.
+
+**A jornada de long-form não passava pela rota.** `react-playback-journey` foi
+convertida e `longform-synthesis-journey` não: o passo 5 chamava
+`compileSynthesisRenderPlanService` direto, e o cabeçalho narrava o passo como o
+serviço. A rota `POST .../editorial-syntheses/{id}/render-plan` ficava dirigida
+por uma única suíte. Agora são duas. Medido nesta máquina em 2026-09-07: 2
+testes, 2 passes, 530,9 s, os dois cortes por `POST render-plan 201`.
+
+**Uma medição que não se reproduzia** — o grep citado como prova de fechamento —
+está corrigida no início da §34.7, junto com o comando que de fato responde.
+
+Contagens conferidas nesta máquina em 2026-09-07 e refletidas em
+`docs/REQUIREMENTS-TRACEABILITY.md`: `playback-map-service.test.mjs` tem 18
+testes, o registry tem cinco capabilities de `playback-map`, a jornada do phase
+gate roda **14 avaliações** (oito de dez antes dos compiles, dez de dez depois,
+40 artefatos citados) e `npm run api:v1:validate` responde "349 capabilities,
+609 schemas, 675 examples, 284 paths, compatibility baseline intact".
 
 Nada nesta seção afirma implantação ou aceite. Os dois continuam pendentes.
