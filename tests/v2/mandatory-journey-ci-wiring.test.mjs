@@ -377,7 +377,11 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/ffmpeg-contiguous-visual-evidence-provider.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/ffmpeg-speaker-diarization-audio-preparer.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/format-quality-critic.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/image-analysis-tesseract.integration.mjs', reason: NEEDS_TESSERACT },
+  {
+    file: 'tests/v2/image-analysis-tesseract.integration.mjs',
+    reason: `${NEEDS_TESSERACT}; PRD FR-145 and the F4.015 traceability row cite it as why the OCR engine is present but unrun in CI`,
+    citedBy: ['docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
+  },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-segment-materialization.integration.mjs', reason: PHASE_1_3 },
