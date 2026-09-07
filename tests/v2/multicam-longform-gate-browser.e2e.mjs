@@ -524,7 +524,21 @@ test('E2E-F4.016 the phase gate page shows ten conditions, each answered on its 
       return isEvaluationRead ? route.abort('failed') : route.continue()
     })
     await page.getByTestId(`open-evaluation-${seededGate.id}`).click()
-    await page.getByTestId('message').waitFor({ state: 'visible' })
+    // Wait for the message to CHANGE, not to become visible: it is already
+    // visible, carrying the confirmation the evaluate button left behind, so
+    // `waitFor({ state: 'visible' })` returns at once and the assertion below
+    // samples the stale text. On this author's machine the handler happened to
+    // win that race; on a GitHub runner it did not, and the suite reported the
+    // previous message as though the screen had stayed silent. If the handler
+    // never answers — the defect this step exists for — the wait times out and
+    // the step still fails.
+    await page.waitForFunction(
+      (stale) => {
+        const node = document.querySelector('[data-testid="message"]')
+        return node !== null && (node.textContent ?? '').trim() !== stale
+      },
+      'Avaliação registrada.',
+    )
     assert.equal(
       (await page.getByTestId('message').textContent())?.trim(),
       'A rede falhou ao abrir esta avaliação.',
