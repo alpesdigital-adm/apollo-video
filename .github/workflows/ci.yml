@@ -263,6 +263,15 @@ jobs:
       - name: Run Wave 20 multicam direction render against ffprobe
         run: npm run test:integration:multicam-direction-render
 
+      # Shipped in Wave 20 with an npm script and no CI step, so it had never
+      # run here. CONTRACT §3: a script that is not a named CI step is a
+      # suite nobody executes.
+      - name: Run Wave 20 multicam visual evidence against real pixels
+        run: npm run test:integration:multicam-visual-evidence
+
+      - name: Run Wave 20 multicam silence evidence against real samples
+        run: npm run test:integration:multicam-silence-evidence
+
       - name: Run Wave 20 react playback fingerprint fixture
         run: npm run test:integration:playback-map-fingerprint
 
