@@ -22,7 +22,7 @@ import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
  * One renderable plan shape for every Wave 20 compiler (F4.015, F4.016 cond. 6).
  *
  * `DirectedEditPlan` is the only plan the render path accepts, and
- * `validateDirectedEditPlan` (`director-run.ts:335`) is the only thing that says
+ * `validateDirectedEditPlan` (`director-run.ts:349`) is the only thing that says
  * a plan is renderable. Both the react playback map and the multi-range
  * synthesis produce cuts that nothing could render before this wave, and both
  * would otherwise have grown a private plan type — two shapes, two validators,

@@ -1493,7 +1493,7 @@ test(
     //
     // So the record is the honest outcome and this is the tripwire under it:
     // the day somebody does add the protection, this test fails and points at
-    // the three places the record lives (PRD FR-150, spec 05 s34.7,
+    // the three places the record lives (PRD FR-150, spec 05 s33.2 and s34.9,
     // REQUIREMENTS-TRACEABILITY).
     const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
     const { PrismaWorkspaceRepository } = await import(

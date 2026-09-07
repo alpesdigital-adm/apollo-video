@@ -1495,6 +1495,28 @@ vocabulário de fronteira da Wave 18 entra por spread, acrescido de `pause`,
 trecho que só uma pessoa pode responder, erro de fronteira de 0 ou 15 quadros
 por peça, e o mesmo `mapHash` em duas execuções. Ver ADR-152.
 
+**O corte de react passou a dizer por que corta (2026-09-07).** A direção
+multicâmera (F4.012) já publicava um log de decisão em `director.decisions`; o
+compile do react publicava um `Object.freeze([])`, e o
+`grep -rnE "reactDirector|react-director" src/ tests/` que a auditoria rodou
+saía com 1 e nenhuma linha — o corte de react era o único da wave cujas escolhas
+de imagem nenhum registro explicava. `buildPlaybackDecisions`
+(`react-playback-map.ts`) monta o log a partir das peças que o mapa já resolveu
+— modo, direção, taxa medida, causa da fronteira, método de detecção, resíduo e
+a confiança da própria peça — e `assembleDirectedEditPlan` o passa por
+`validateDirectorDecisions`, a mesma autoridade por onde a direção passa: 4 a 64
+entradas, cada uma com escolha, razão, evidência e confiança, e com tipo de
+decisão, detalhe de confiança e banda **derivados ali**, nunca declarados pelo
+compilador. A escolha por peça é a gravação que a peça implica — referência
+quando existe `referenceRange`, reactor quando não —, e uma peça pausada diz por
+escrito que a referência não produziu tempo ali. Os três campos de referência do
+plano continuam nomeando `react-playback:<mapId>`: um log mais completo não
+compra a aparência de uma aprovação que nenhum crítico deu. Medido sobre o
+fixture não-saudável: 12 decisões sobre 9 peças, todas na banda `auto-apply`. O
+compile da síntese multi-range (F4.016) continua sem log e com a lista vazia,
+porque ele justifica o seu corte no próprio agregado de síntese; a lista vazia é
+a forma honesta disso e não uma pendência escondida.
+
 **Não entregue, nomeado aqui em vez de calado (2026-09-07).**
 `PLAYBACK_DETECTION_METHODS` tem quatro valores e só dois produzem peça em
 produção: `audio-fingerprint`, que o correlator FFmpeg mede, e `manual-anchor`,
@@ -1639,6 +1661,36 @@ pagar o segundo passe sobre a mídia já materializada, com licença e custo por
 minuto. A alternativa é declarar demonstração física, atenção e expressão fora
 do escopo e apagar a palavra da linha do requisito. Nada foi começado, e nada
 aqui aproxima uma coisa da outra.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07): "histórico
+imutável" é imutável para quem lê, não para um DELETE.** Vale para todos os
+agregados versionados desta wave — sessão de captura, diagnóstico de
+sincronismo, direção multicâmera, plano de match, mapa de playback, snapshot de
+plano renderizável e o registro do gate. Medido num PostgreSQL 16 descartável
+migrado do zero: nas quinze tabelas de histórico e de gate há **0 gatilhos** não
+internos, **0 rules** e **0 tabelas com row-level security**; no banco inteiro,
+268 tabelas e os mesmos três zeros. Um UPDATE é pego na leitura, porque a
+hidratação recalcula o hash e recusa a linha — `wave20-persistence.e2e.mjs`
+prova isso em quatro agregados. Um DELETE não é pego por nada: apagar a versão 1
+de uma direção removeu 1 linha, levou em cascata as decisões de plano dela, e a
+cabeça continuou respondendo na v2 nomeando pelo hash um ancestral que já não
+existe. A cadeia é verificável para frente a partir de uma linha e inverificável
+para trás depois de uma linha que alguém removeu.
+
+A proteção **não** foi adicionada, e a razão é medida e não suposta: bloquear
+DELETE nessas tabelas quebra um caminho de escrita de produção e duas suítes.
+`capture-session-repository.ts:407` apaga o mapa de relógio anterior dentro de
+`persistClockMap`, porque "um mapa é a resposta corrente para uma fonte";
+`multicam-longform-gate.e2e.mjs` falsifica nove dos dez critérios apagando uma
+linha de evidência de cada vez e ainda exige que apagar um registro de gate
+cascateie para os seus critérios, checagens e evidências (304 chaves
+estrangeiras do schema são `ON DELETE CASCADE`); e a limpeza de toda suíte
+PostgreSQL da wave apaga das mesmas tabelas. Uma proteção que um GUC de sessão
+desligasse para acomodar tudo isso protegeria contra engano e não contra
+intenção, e seria descrita aqui como "o banco recusa um DELETE", que não é
+verdade. O registro fica aqui, na spec 05 §34.9 e na linha de rastreabilidade;
+o arame de tropeço é o terceiro teste de `wave20-persistence.e2e.mjs`, que falha
+no dia em que a proteção existir e nomeia os três lugares a corrigir.
 
 
 ---

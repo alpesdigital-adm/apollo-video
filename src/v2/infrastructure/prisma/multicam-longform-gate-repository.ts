@@ -280,7 +280,7 @@ function check(
  * direction and the colour match plan -- each record the session version and
  * the reference epoch they were derived under, and the direction records the
  * diagnostic version as well. The services that BUILD them fence on exactly
- * that (`react-playback-map.ts:1020`, `multicam-color-match.ts:565`,
+ * that (`react-playback-map.ts:1184`, `multicam-color-match.ts:565`,
  * `multicam-direction.ts` through `compileShotsToSourceRanges`), and refuse to
  * derive across a session that moved. The gate reads aggregates that are
  * already persisted, where no such refusal ever ran: a direction cut under
@@ -291,7 +291,7 @@ function check(
  * The comparison is the session version and the reference epoch, and NOT the
  * diagnostic version, even though the direction records one. Every fence the
  * domain owns compares exactly these two -- `multicam-direction.ts:673-674`
- * and `:2146`, `react-playback-map.ts:1020`, `multicam-color-match.ts:565` --
+ * and `:2146`, `react-playback-map.ts:1184`, `multicam-color-match.ts:565` --
  * and `directMulticam` asks the diagnostic to describe the CURRENT session
  * version, never to be the newest diagnostic. A gate that demanded the newest
  * would invent a rule the derivation does not have: re-measuring a session and

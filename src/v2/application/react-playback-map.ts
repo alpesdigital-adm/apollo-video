@@ -782,7 +782,7 @@ function shotMarker(
  * Two shapes of the boundary constrain the output and are honoured here rather
  * than discovered at runtime:
  *
- * - `validateDirectorDecisions` (`director-run.ts:296`) bounds the log at 4-64
+ * - `validateDirectorDecisions` (`director-run.ts:294`) bounds the log at 4-64
  *   entries. Three summary decisions plus one per piece clears the floor for
  *   the smallest possible map, and a busier one is cited least-confident first
  *   -- the pieces a reviewer opens -- with the summary saying how many were
@@ -810,7 +810,7 @@ export function buildPlaybackDecisions(map: Readonly<PlaybackMap>): Readonly<{
   assumptions: readonly string[]
   omittedPieces: number
 }> {
-  // `validId` (`director-run.ts:268`) refuses both the `/` a map id may contain
+  // `validId` (`director-run.ts:280`) refuses both the `/` a map id may contain
   // (`playback-map.ts:316`) and any id past 128 characters. The map hash is
   // hexadecimal, fixed width and already the map's identity, so it is the token
   // -- a decision that cannot be validated cannot be logged.
@@ -853,7 +853,7 @@ export function buildPlaybackDecisions(map: Readonly<PlaybackMap>): Readonly<{
     evidenceRefs: Object.freeze([mapRef]),
     confidence: 0.9,
     alternatives: Object.freeze([
-      'cross-dissolve: refused -- the Director plan admits only straight cuts (director-run.ts:134)',
+      'cross-dissolve: refused -- the Director plan admits only straight cuts (director-run.ts:147)',
     ]),
   }
   const audio: DirectorDecisionInput = {
