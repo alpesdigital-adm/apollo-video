@@ -318,12 +318,20 @@ jobs:
         run: npm run test:integration:color-match
 
       - name: Run Wave 20 colour visual evaluations and keep the artifacts
+        id: color-visual-evaluations
         run: npm run test:integration:color-visual-evaluations
         env:
           APOLLO_COLOR_VISUAL_EVAL_OUTPUT: ${{ runner.temp }}/color-visual-evaluations
 
+      # `always()` alone made this step demand files from a job that had failed
+      # before the evaluations ran, so an unrelated failure earlier in the job
+      # was reported twice and the second report named the wrong step. It now
+      # runs whenever the producing step ran — including when that step itself
+      # failed, which is exactly when its partial output is worth keeping — and
+      # is skipped when the evaluations never started. `if-no-files-found`
+      # stays `error`: if the suite ran, the files must exist.
       - name: Publish Wave 20 colour visual evaluation artifacts
-        if: always()
+        if: always() && steps.color-visual-evaluations.conclusion != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: apollo-color-visual-evaluations-${{ github.sha }}
@@ -547,6 +555,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # The Wave 20 journeys spawn `worker:v2:capture-sync`, and every
+      # `worker:v2:*` script in this repository runs `tsx --env-file=.env`,
+      # which exits 9 when the file is absent. The quality job has prepared it
+      # since Wave 18; this job did not, and the podcast journey it gained in
+      # Wave 20 reported `driver exited 9: node: .env: not found` on a runner
+      # where nothing had created one.
+      - name: Prepare integration environment
+        run: touch .env
 
       - name: Install locked dependencies
         run: npm ci
