@@ -49,8 +49,21 @@ const WORKSPACE = 'workspace-silence-evidence'
 const PROJECT = 'project-silence-evidence'
 const SESSION = 'session-silence-evidence'
 const CLIP_SECONDS = 8
-/** The gap inside `speech-with-gap`, in seconds of the file. */
-const GAP = Object.freeze({ startSeconds: 2, endSeconds: 5 })
+/**
+ * The gap inside `speech-with-gap`, in seconds of the file.
+ *
+ * The end is deliberately OFF the 100 ms grid `astats` measures blocks on, and
+ * that is the whole reason this fixture can falsify anything. Ended at exactly
+ * 5,000 ms, every block either lies wholly inside the stretch or starts after
+ * it, so the provider's "wholly inside, not merely starting inside" filter and
+ * a filter that only checks the start select the identical set: the guard is in
+ * the source and no fixture can tell whether it is. Ended at 4,950 ms, the
+ * block at 4,900-5,000 ms — the one carrying the tone that RESUMED — really
+ * does straddle the end. Measured on this file: the guard reports
+ * -77.04 dBFS for the gap and its removal reports -12.04 dBFS, which is what
+ * the `< -60` ceiling assertion below is there to catch.
+ */
+const GAP = Object.freeze({ startSeconds: 2, endSeconds: 4.95 })
 /** Amplitude 0.0002 of full scale is about -74 dBFS: quiet, and not zero. */
 const ROOM_TONE = 0.0002
 
@@ -144,8 +157,11 @@ test('T-F4.012 the FFmpeg listening pass finds the gap, and a continuous tone ha
   )
   // The ceiling is the room tone that was really there, not the -50 dBFS
   // threshold it was detected under. A block that merely STARTS inside the
-  // stretch carries the sound that ended it, and counting one put this number
-  // at -9.06 dBFS while the samples were 65 dB quieter.
+  // stretch carries the sound that ended it, and counting one puts this number
+  // at -12.04 dBFS while the samples in the gap are 65 dB quieter. Falsified,
+  // not asserted from reading: replacing the provider's whole-block filter with
+  // `block.atMs < range.endMs` makes this assertion fail at -12.04 dBFS and the
+  // producer case below fail at the same value.
   assert.ok(
     found.ceilingDbfs < -60 && found.ceilingDbfs > -90,
     `the ceiling is the measured room tone, not the threshold: ${found.ceilingDbfs} dBFS`,

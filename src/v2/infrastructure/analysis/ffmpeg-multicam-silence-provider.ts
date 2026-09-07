@@ -303,9 +303,13 @@ export class FfmpegMulticamSilenceProvider implements MulticamSilenceEvidencePro
       for (const range of readSilentRanges(output, durationMs)) {
         // Wholly inside, not merely starting inside. The block that straddles
         // the end of a stretch contains the sound that ENDED it: counted, it
-        // reported a room-tone pause at −9 dBFS because speech resumed 20 ms
-        // into that block. Measured, not reasoned about — see the numbers in
-        // `multicam-silence-evidence.integration.mjs`.
+        // reports a room-tone pause tens of dB louder than any sample inside
+        // the pause. Measured, not reasoned about, and falsifiable —
+        // `multicam-silence-evidence.integration.mjs` ends its generated gap at
+        // 4,950 ms, deliberately off the 100 ms block grid, so the block at
+        // 4,900 ms really straddles: this filter reports −77,04 dBFS for that
+        // gap and `block.atMs < range.endMs` reports −12,04 dBFS, which the
+        // suite's ceiling assertion refuses.
         const inside = blocks
           .filter((block) => block.atMs >= range.startMs
             && block.atMs + MULTICAM_SILENCE_DEFAULTS.blockMs <= range.endMs)
