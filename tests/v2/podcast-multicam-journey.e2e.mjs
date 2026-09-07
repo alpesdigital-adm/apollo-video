@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageEnvironment,
+  openJourneyObjectStore,
+  storedArtifactPath,
+} from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
@@ -146,6 +154,12 @@ const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
 const RUN = process.env.APOLLO_PODCAST_MULTICAM_E2E === '1'
+/**
+ * Local disk or versioned MinIO, chosen by the runtime env the composition
+ * root reads — never pinned in this file. Read once, at load, so the value the
+ * worker children get is the value this process opened its bucket with.
+ */
+const storageDriver = journeyStorageDriver()
 
 const FPS = 30
 /** One tick is one frame, so a session instant and an output frame are the same integer. */
@@ -304,12 +318,31 @@ test(
     // and gets away with because it never renders — makes every render of it
     // fail with `INVALID_RENDER_INPUT`.
     const at = (second) => new Date(Date.parse('2026-02-10T09:00:00.000Z') + second * 1_000)
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-podcast-multicam-e2e-'))
+    const root = await mkdtemp(join(tmpdir(), 'apollo-podcast-multicam-e2e-'))
+    const artifactRoot = join(root, 'artifacts')
+    // The bytes FFmpeg writes. In local mode they ARE the stored artifacts, so
+    // this is the artifact root itself; in s3 mode they are the fixture the
+    // journey uploads, and they are kept OUTSIDE the artifact root on purpose:
+    // an assertion below proves no source key resolves to a local file, so
+    // every frame the render decoded can only have come out of MinIO.
+    const sourceRoot = storageDriver === 's3' ? join(root, 'sources') : artifactRoot
+    // Where the s3 materializers stage what they download, and where this
+    // suite copies a stored object to before handing it to ffprobe.
+    const workRoot = join(root, 'work')
+    const readbackRoot = join(root, 'readback')
+    for (const directory of [artifactRoot, sourceRoot, workRoot, readbackRoot]) {
+      await mkdir(directory, { recursive: true })
+    }
     // The direction route and the render worker both build FFmpeg providers and
     // a media materializer from the environment, so this process needs the
     // artifact root too — not just the worker children.
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
-    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    process.env.APOLLO_V2_RENDER_WORK_ROOT = workRoot
+    // Read, never pinned. Every capture journey used to assign `'local'` here,
+    // which made "runs against versioned object storage" unfalsifiable and
+    // silently overrode any CI step that tried to say otherwise.
+    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
+    const objectStore = await openJourneyObjectStore()
     // Bootstrap login, for the one decision an unattended credential may not
     // make. Same env block the Wave 19 browser journey uses.
     const uiUsername = 'podcast-operator'
@@ -382,7 +415,10 @@ test(
       } catch (error) {
         console.log(`podcast cleanup reported: ${error?.message ?? error}`)
       }
-      await rm(artifactRoot, { recursive: true, force: true }).catch((error) => {
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.log(`podcast object storage cleanup reported: ${error?.message ?? error}`)
+      })
+      await rm(root, { recursive: true, force: true }).catch((error) => {
         console.log(`podcast artifact root cleanup reported: ${error?.message ?? error}`)
       })
       await prisma.$disconnect()
@@ -397,7 +433,7 @@ test(
     // diarization run describable: a run that put one voice on one file and the
     // other voice on the other file, over two files carrying the identical
     // signal, would be a seeded projection nothing in the audio supports.
-    const mediaDirectory = join(artifactRoot, 'capture')
+    const mediaDirectory = join(sourceRoot, 'capture')
     const room = helpers.sweepSamples({ seconds: MASTER_SECONDS })
     const masterPcm = join(mediaDirectory, 'master.pcm')
     await helpers.writePcm(masterPcm, room)
@@ -433,10 +469,10 @@ test(
       cardTwo: 'capture/camera-b-card-2.mp4',
     })
     const files = Object.freeze({
-      master: helpers.artifactPath(artifactRoot, keys.master),
-      a: helpers.artifactPath(artifactRoot, keys.a),
-      b: helpers.artifactPath(artifactRoot, keys.b),
-      cardTwo: helpers.artifactPath(artifactRoot, keys.cardTwo),
+      master: helpers.artifactPath(sourceRoot, keys.master),
+      a: helpers.artifactPath(sourceRoot, keys.a),
+      b: helpers.artifactPath(sourceRoot, keys.b),
+      cardTwo: helpers.artifactPath(sourceRoot, keys.cardTwo),
     })
     const masterBytes = await helpers.encodeAudioRecording({
       ffmpegPath, outputPath: files.master, pcmPath: masterPcm, seconds: MASTER_SECONDS,
@@ -513,6 +549,27 @@ test(
       )
     }
     const producerDigest = await helpers.binaryDigest(ffprobePath)
+
+    // ---- the storage of record --------------------------------------------
+    // In s3 mode the four recordings are PUT into the run's own versioned
+    // bucket under the same keys the media rows carry, and the artifact root is
+    // then proven to hold none of them: the direction, the colour match and the
+    // render all resolve sources through `S3ArtifactSourceMaterializer`, so a
+    // local copy at the artifact path would be an escape hatch that lets the
+    // journey pass without object storage ever being read.
+    if (objectStore) {
+      for (const key of Object.values(keys)) {
+        await objectStore.put(key, helpers.artifactPath(sourceRoot, key))
+      }
+      assert.deepEqual(await objectStore.keys(), Object.values(keys).slice().sort())
+      for (const key of Object.values(keys)) {
+        assert.equal(
+          existsSync(helpers.artifactPath(artifactRoot, key)),
+          false,
+          `${key} must not also sit in the artifact root while MinIO is the store of record`,
+        )
+      }
+    }
 
     // ---- the world the ingest pipeline would have left --------------------
     await helpers.createWorkspaceRow({ prisma, workspaceId, name: 'Podcast multicam journey', createdAt: at(0) })
@@ -766,8 +823,9 @@ test(
     assert.equal(requested.data.run.state, 'queued')
 
     const workerEnvironment = {
-      APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
-      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      // The same store this process opened, not a second one: a worker left on
+      // the local driver would render from a disk the parent never wrote to.
+      ...journeyStorageEnvironment({ driver: storageDriver, artifactRoot, workRoot }),
       // The render worker seals its recipe parameters before it writes a
       // manifest; without a key it refuses to start rather than storing them in
       // the clear.
@@ -1483,7 +1541,15 @@ test(
       where: { workspaceId, id: outputArtifactId },
       select: { artifactKey: true },
     })
-    const outputPath = helpers.artifactPath(artifactRoot, outputArtifact.artifactKey)
+    // In s3 mode this is a version-bound GET out of MinIO, not a path on this
+    // machine: the bytes measured below are the bytes the store holds, and a
+    // render that had only reached the local staging root would fail here
+    // rather than pass on a leftover.
+    const outputPath = await storedArtifactPath(objectStore, {
+      artifactRoot,
+      artifactKey: outputArtifact.artifactKey,
+      readbackRoot,
+    })
     const outputBytes = await readFile(outputPath)
     const outputSha256 = helpers.sha256Of(outputBytes)
     const outputByteSize = Number(publishedArtifact.data.artifact.byteSize)
