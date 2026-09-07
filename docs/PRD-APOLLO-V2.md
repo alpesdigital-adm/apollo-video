@@ -1494,6 +1494,30 @@ vocabulário de fronteira da Wave 18 entra por spread, acrescido de `pause`,
 (referência 30,00 s, reação 60,00 s): 119 janelas, 69 travadas, 8 peças, 1
 trecho que só uma pessoa pode responder, erro de fronteira de 0 ou 15 quadros
 por peça, e o mesmo `mapHash` em duas execuções. Ver ADR-152.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` tem quatro valores e só dois produzem peça em
+produção: `audio-fingerprint`, que o correlator FFmpeg mede, e `manual-anchor`,
+que uma pessoa registra por `applyPlaybackAnchor`. Os outros dois nunca foram
+implementados e não são baratos:
+
+- **`player-visual`** significa ler a posição do player dentro do quadro da
+  reação — barra de progresso, botão de play, estado da interface. Isso é
+  detecção de UI em vídeo (template matching ou um modelo treinado por player),
+  e cada player muda de aparência entre versões.
+- **`ocr-timestamp`** significa ler o relógio que o player desenha. Isso exige
+  um motor de OCR, e o repositório não tem nenhum: as dependências de mídia são
+  `ffmpeg-static` e `ffprobe-static`, e nada mais.
+
+Nenhum dos dois é uma lacuna escondida no código: o vocabulário existe para que
+o agregado consiga registrar uma peça que veio da interface do player sem
+fingir que um correlator a produziu, e enquanto ninguém escreve o detector o
+efeito prático é o já documentado — um player escondido vira trecho descoberto
+com `manual-anchor-required`, e uma pessoa responde. A decisão do proprietário
+é entre financiar um detector visual (dependência nova, manutenção por player,
+custo por minuto) e assumir que react com player escondido é sempre trabalho
+manual.
+
 ### FR-146 — Sync audio separado
 
 Scratch audio pode servir para sync e ser descartado no mix final.
@@ -1553,6 +1577,40 @@ h264/aac, e a inspeção de pixel confirmou a troca de ângulo (vermelho aos
 plano de 30/1) são recusadas pela compilação com as taxas que o `ffprobe` leu.
 Superfície `/v1` com cinco capabilities e tela de operador em
 `/multicam-direction`. Deploy e aceite pendentes.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).** Das oito
+espécies, **cinco** têm adaptador ligado na raiz de composição: falante ativo e
+fala simultânea vêm da diarização persistida, atividade de tela e qualidade
+técnica vêm dos pixels, e silêncio vem das amostras
+(`ffmpeg/silencedetect+astats`, medido: um tom contínuo não produz trecho
+nenhum, uma pausa de 3 s a −74,82 dBFS produz exatamente ela, zeros digitais
+produzem o piso de −120 dBFS). A **sexta**, reação, o produtor sabe emitir e a
+porta `MulticamPerceptionSource` não tem adaptador nenhum, então em produção
+ela é ausência — nunca zero. **Duas** continuam modeladas, validadas pelo
+agregado e aceitas pelo banco sem que nada as observe:
+
+- **demonstração** exigiria detecção de mãos e objetos. Este repositório tem
+  FFmpeg e nenhum modelo de visão. Chamar movimento de tela de "demonstração"
+  poria o nome errado num número real — a mesma recusa que o passe visual já
+  faz sobre nitidez. A consequência está escrita onde ela dói: a regra
+  `demonstration-prefers-screen` decide por uma tela compartilhada e **nunca**
+  pode decidir por uma demonstração física numa câmera, porque em produção não
+  existe observação de uma.
+- **atenção** exigiria olhar (gaze), outro modelo que não existe aqui.
+
+E **expressão**, que a linha do requisito acima pede, não é sequer uma espécie
+de evidência: não está em `MULTICAM_EVIDENCE_KINDS` e nunca esteve. Ler
+expressão facial é mais um modelo de visão, não um parâmetro de FFmpeg. A linha
+do requisito fica como está — ela continua sendo o requisito — e o que muda é
+que a entrega agora diz que essa parte não foi feita, em vez de enumerar oito
+espécies e deixar o leitor concluir que a lista respondia à linha inteira.
+
+As três custam a mesma decisão, e ela é do proprietário: adotar um modelo de
+visão (dependência nova, licença, custo por minuto de vídeo, provedor externo
+ou peso local, e um segundo passe sobre a mídia já materializada) ou declarar
+demonstração física, atenção e expressão fora do escopo e apagar a palavra da
+linha do requisito. Nada foi começado, e nada aqui aproxima uma coisa da outra.
+
 
 ---
 

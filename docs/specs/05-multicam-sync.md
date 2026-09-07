@@ -678,6 +678,36 @@ fonte, 240 quadros cada): campo de cor estático 0 bps, slideshow trocando a cad
 dois segundos 4 bps, padrão em movimento 103 bps, zoom de mandelbrot 137 bps,
 ruído de quadro inteiro 3151 bps.
 
+**Quais espécies alguém realmente observa (2026-09-07).** Cinco têm adaptador
+ligado em `createDirectMulticamSessionService`: `active-speaker` e
+`concurrent-speech` da diarização persistida, `screen-activity` e
+`technical-quality` dos pixels
+(`ffmpeg-multicam-visual-evidence-provider.ts`), e `silence` das amostras
+(`ffmpeg-multicam-silence-provider.ts`, `ffmpeg/silencedetect+astats`:
+`silencedetect=noise=-50dB:d=0.700` diz **onde**, `astats` sobre blocos de
+100 ms diz **quão baixo**, e o teto reportado é o bloco inteiro mais alto
+dentro do trecho — nunca a média, que subestimaria uma pausa com uma batida
+dentro). `reaction` o produtor sabe emitir, e a porta `MulticamPerceptionSource`
+não tem adaptador, então em produção não existe.
+
+`demonstration` e `attention` **não são produzidas por nada**, e não dá para
+produzi-las com o que o repositório tem: demonstração física exige detecção de
+mãos e objetos, atenção exige olhar, e as dependências de mídia aqui são
+`ffmpeg-static` e `ffprobe-static`. Chamar movimento de tela de "demonstração"
+poria o nome errado num número real — a mesma recusa que o passe visual faz
+sobre nitidez. O preço está em §29.3: `demonstration-prefers-screen` decide por
+uma tela compartilhada e nunca pode decidir por uma demonstração física numa
+câmera. A escolha entre adotar um modelo de visão e declarar as duas fora de
+escopo é do proprietário; ver PRD FR-150.
+
+O passe de silêncio ouve toda faixa cujo `syncAudioPolicy` não seja `none` — a
+declaração da própria faixa —, não os papéis de vídeo: um microfone nunca é
+ângulo e uma câmera com áudio de sync ainda tem o que ser ouvido. Cada parte é
+materializada **uma vez** e serve às duas passagens, porque o driver S3 baixa a
+gravação inteira a cada `resolve`. Um arquivo sem faixa de áudio devolve
+`measuredBlockCount: 0` e é **reportado** em `skipped`, nunca registrado como
+trecho silencioso: nada ouvido e nada soando são fatos opostos.
+
 ### 29.2 Candidatos
 
 Um candidato é derivado por faixa e por janela. `ANGLE_CONTEXTS` é
@@ -1175,6 +1205,25 @@ Recusas nomeadas: `PLAYBACK_EVIDENCE_INSUFFICIENT`, `PLAYBACK_MAP_UNRESOLVED`,
 `PLAYBACK_SESSION_NOT_REACT`, `PLAYBACK_REACTION_TRACK_AMBIGUOUS`,
 `PLAYBACK_TRACK_NOT_SINGLE_PART`, `PLAYBACK_MAP_NOT_FOUND`.
 
+**Quantos detectores existem, de quatro declarados (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` é `audio-fingerprint`, `player-visual`,
+`ocr-timestamp` e `manual-anchor`. Dois produzem peça:
+`audio-fingerprint`, pelo correlator de `ffmpeg-playback-fingerprint.ts`, e
+`manual-anchor`, por `applyPlaybackAnchor` quando uma pessoa responde um trecho
+descoberto. `player-visual` e `ocr-timestamp` **não têm detector nenhum** e não
+são baratos de escrever: o primeiro é detecção de interface dentro do quadro
+(barra de progresso, botão, estado do player, que muda a cada versão de cada
+player); o segundo exige um motor de OCR, e as dependências de mídia deste
+repositório são `ffmpeg-static` e `ffprobe-static`.
+
+O vocabulário continua com quatro valores de propósito — o agregado precisa
+conseguir registrar uma peça que veio da interface do player sem fingir que um
+correlator a produziu — e enquanto ninguém escreve os dois detectores o efeito
+é o já descrito acima: player escondido vira trecho descoberto com
+`manual-anchor-required`, e uma pessoa responde. Financiar um detector visual
+ou assumir que react com player escondido é sempre trabalho manual é decisão
+do proprietário; ver PRD FR-145.
+
 ### 32.3 Materialização é só corte
 
 A compilação transforma o mapa num plano renderizável cuja linha do tempo é a
@@ -1345,7 +1394,7 @@ F4.016 no `TODO.md` está marcada.
 
 | Seção | Módulo de domínio | Evidência |
 |---|---|---|
-| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts` | T-FR-150 (33 casos), T-F4.012 (21 casos de serviço) |
+| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts`, `ffmpeg-multicam-silence-provider.ts` | T-FR-150 (33 casos), T-F4.012 (24 casos de serviço, 2 de mídia em `multicam-silence-evidence.integration.mjs`) |
 | §30 Match de cor | `color-measurement.ts`, `multicam-match-plan.ts` | T-FR-183/T-FR-184 (43 casos), T-F4.013/T-F4.014 (30 casos de serviço) |
 | §31 Crítico de cor | `color-critic-report.ts` | T-FR-184, `color-visual-evaluations.integration.mjs` (7 avaliações) |
 | §32 React PlaybackMap | `playback-map.ts`, `playback-mode.ts` | T-F4.015 (31 casos + 16 de serviço) |
@@ -1455,6 +1504,17 @@ há teste que meça esse teto.
   motivo registrado na §27.3: `MarkerDetection` guarda os ids das observações,
   não o pico e o segundo pico que a fusão mediu.
 - **`spoken-code` continua sem reconhecedor de fala.**
+- **`demonstration` e `attention` continuam sem produtor.** As duas espécies são
+  modeladas, validadas pelo agregado e aceitas pelo `CHECK` da migração, e nada
+  as observa: demonstração física exige detecção de mãos e objetos, atenção
+  exige olhar, e as dependências de mídia aqui são `ffmpeg-static` e
+  `ffprobe-static`. Preço: `demonstration-prefers-screen` decide por tela
+  compartilhada e nunca por demonstração física numa câmera. `expressão`, que a
+  linha de FR-150 pede, nem espécie de evidência é. Decisão de escopo do
+  proprietário (§29.1, PRD FR-150).
+- **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
+  `PLAYBACK_DETECTION_METHODS`; enquanto não existirem, player escondido é
+  trecho `manual-anchor-required` para uma pessoa responder (§32.2, PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os
