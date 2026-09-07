@@ -3714,6 +3714,32 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.capture-sessions.playback-map.plan.compile": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/compile-react-playback-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/renderable-plan-compiled/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan"
+      },
+      "toolName": "apollo.projects.capture-sessions.playback-map.plan.compile",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.capture-sessions.playback-map.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -5106,6 +5132,32 @@
         200
       ],
       "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.editorial-syntheses.render-plan.compile": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/compile-synthesis-render-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/renderable-plan-compiled/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan"
+      },
+      "toolName": "apollo.projects.editorial-syntheses.render-plan.compile",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        201,
+        200
+      ],
+      "idempotency": "natural",
+      "requestBodyRequired": true,
       "responseMediaType": "application/json"
     },
     "apollo.projects.evidence-segments.catalog": {
@@ -34591,6 +34643,82 @@
               "const": "v1"
             }
           }
+        }
+      }
+    },
+    "apollo://schemas/compile-react-playback-plan-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseVersionId",
+        "baseHash",
+        "reactionTrackId",
+        "projectVersionId",
+        "objective",
+        "planFps"
+      ],
+      "properties": {
+        "baseVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300
+        },
+        "baseHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reactionTrackId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "objective": {
+          "enum": [
+            "discovery",
+            "awareness",
+            "warming",
+            "lead-generation",
+            "sale",
+            "whatsapp",
+            "booking",
+            "download"
+          ]
+        },
+        "planFps": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,18}/[1-9][0-9]{0,18}$"
+        }
+      }
+    },
+    "apollo://schemas/compile-synthesis-render-plan-request/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "objective"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "objective": {
+          "enum": [
+            "discovery",
+            "awareness",
+            "warming",
+            "lead-generation",
+            "sale",
+            "whatsapp",
+            "booking",
+            "download"
+          ]
         }
       }
     },
@@ -171004,6 +171132,147 @@
             "totalAssetBytes": {
               "type": "string",
               "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/renderable-plan-compiled/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan",
+            "replayed"
+          ],
+          "properties": {
+            "plan": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "planId",
+                "planHash",
+                "origin",
+                "sourceId",
+                "sourceHash",
+                "sourceVersion",
+                "projectId",
+                "projectVersionId",
+                "fps",
+                "durationFrames",
+                "clipCount",
+                "compilerVersion",
+                "assumptions",
+                "lineageRefs",
+                "createdAt"
+              ],
+              "properties": {
+                "planId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "planHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "origin": {
+                  "type": "string",
+                  "enum": [
+                    "react-playback",
+                    "multi-range-synthesis"
+                  ]
+                },
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "sourceHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "sourceVersion": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projectId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "projectVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "durationFrames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "clipCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "compilerVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "assumptions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "lineageRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
             }
           }
         },

@@ -4,9 +4,9 @@
     "uiActions": 155,
     "capabilities": 138,
     "endpoints": 138,
-    "registeredCapabilities": 347,
-    "operableCapabilities": 347,
-    "publicContractCapabilities": 347,
+    "registeredCapabilities": 349,
+    "operableCapabilities": 349,
+    "publicContractCapabilities": 349,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -6831,6 +6831,28 @@
       "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/anchors",
       "inputSchemaRef": "apollo://schemas/add-react-playback-anchor-request/v1",
       "outputSchemaRef": "apollo://schemas/react-playback-map-anchored/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.capture-sessions.playback-map.plan.compile",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan",
+      "inputSchemaRef": "apollo://schemas/compile-react-playback-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/renderable-plan-compiled/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.editorial-syntheses.render-plan.compile",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan",
+      "inputSchemaRef": "apollo://schemas/compile-synthesis-render-plan-request/v1",
+      "outputSchemaRef": "apollo://schemas/renderable-plan-compiled/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

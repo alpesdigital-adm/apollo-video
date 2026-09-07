@@ -7323,6 +7323,62 @@ export const FOUNDATION_CAPABILITIES = defineCapabilityRegistry([
     requestBodyRequired: true,
   },
   // ---------------------------------------------------------------------------
+  // Wave 20 — the two compiles that make a decision renderable.
+  //
+  // Both services existed, were tested and were wired into the composition root
+  // before this entry, and neither could be reached from outside a test: nothing
+  // under `src/app` called either one, so the only two writers of
+  // `renderable_plan_snapshots` were unreachable through the published API. The
+  // F4.016 gate reads exactly those rows for criterion 4
+  // (`map-compiled-into-plan`) and for the render evidence behind criterion 6,
+  // which meant the gate could not be driven to ten of ten by a client — only by
+  // a test reaching past the API into the repositories.
+  //
+  // They are commands rather than jobs because they finish inside the request:
+  // the map or the synthesis is already stored, the recordings are already
+  // measured, and compiling is arithmetic over both. Nothing here decodes media.
+  // ---------------------------------------------------------------------------
+  {
+    id: 'apollo.projects.capture-sessions.playback-map.plan.compile',
+    version: '1.0.0',
+    title: 'Compile a resolved playback map into a renderable plan',
+    description: 'Turns one resolved playback map into the cut a renderer accepts: every piece becomes a clip of the reaction or of the reference, the seams carry the reason the player changed what it was doing, and the timeline runs for as long as the reaction did rather than for as long as the reference did. Refuses a map version the caller no longer holds, a map with a stretch nobody answered, and a recording whose bytes are not the ones the map was measured against. Compiling the same map twice returns the stored plan.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/compile-react-playback-plan-request/v1',
+    outputSchemaRef: 'apollo://schemas/renderable-plan-compiled/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan' },
+    toolName: 'apollo.projects.capture-sessions.playback-map.plan.compile',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  {
+    id: 'apollo.projects.editorial-syntheses.render-plan.compile',
+    version: '1.0.0',
+    title: 'Compile a multi-range synthesis into a renderable plan',
+    description: 'Turns one stored multi-range synthesis into the cut a renderer accepts, keeping every selected range once and in output order, carrying each splice justification onto the seam it explains, and marking the dropped span an editor has to listen to before defending the join. The masters are resolved through the media links the project itself carries and refused when their bytes are no longer the ones the ranges were selected from; the caller supplies no source, no digest and no duration. Compiling the same synthesis twice returns the stored plan.',
+    exposure: 'public',
+    operationKind: 'command',
+    authMode: 'required',
+    requiredScopes: ['projects:write'],
+    inputSchemaRef: 'apollo://schemas/compile-synthesis-render-plan-request/v1',
+    outputSchemaRef: 'apollo://schemas/renderable-plan-compiled/v1',
+    endpoint: { method: 'POST', path: '/v1/projects/{projectId}/editorial-syntheses/{synthesisId}/render-plan' },
+    toolName: 'apollo.projects.editorial-syntheses.render-plan.compile',
+    supportsDryRun: false,
+    costClass: 'low',
+    confirmation: 'none',
+    successStatuses: [201, 200],
+    idempotency: 'natural',
+    requestBodyRequired: true,
+  },
+  // ---------------------------------------------------------------------------
   // Wave 20 — F4.016 the multicamera and long-form phase gate.
   //
   // Seven capabilities, one of them a command. ADR-135's sentence that outranks

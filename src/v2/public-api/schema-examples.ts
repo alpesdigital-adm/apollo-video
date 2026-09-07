@@ -78,6 +78,12 @@ import {
   addMulticamMatchRangeOverride,
   deriveMulticamMatchPlan,
 } from '../domain/multicam-match-plan.ts'
+import { compileSynthesisToDirectedPlan } from '../application/compile-synthesis-to-directed-plan.ts'
+import { compilePlaybackMapToDirectedPlan } from '../application/react-playback-map.ts'
+import { renderablePlanSnapshotOf } from '../application/renderable-edit-plan.ts'
+import { createEditorialSynthesis } from '../domain/editorial-synthesis.ts'
+import { STORY_GOLDEN_FIXTURES } from '../domain/story-plan.ts'
+import { presentCompiledRenderablePlan } from './renderable-plan-contract.ts'
 import { createPiecewiseClockMap } from '../domain/piecewise-clock-map.ts'
 import { applyPlaybackAnchor, buildPlaybackMap, defaultPlaybackPolicy } from '../domain/playback-map.ts'
 import { createProjectVersion } from '../domain/project-version.ts'
@@ -6928,6 +6934,129 @@ const w20AnchoredPlaybackMapExample = applyPlaybackAnchor(w20PlaybackMapExample,
     note: 'The player was off-screen here; the timecode in the corner reads 00:20 when it comes back.',
     createdAt: w20At(400),
   },
+})
+
+/**
+ * Wave 20 fixture — the two compiled plans, built by the compilers themselves.
+ *
+ * The react plan is `compilePlaybackMapToDirectedPlan` over the anchored map
+ * above, at thirty frames a second, with the two recordings measured the way a
+ * server measures them: forty seconds of reaction and thirty of reference. The
+ * published assumptions are therefore the compiler's own sentence about
+ * ADR-135 — the output runs the reaction's length, not the reference's — and
+ * not prose written next to a schema.
+ *
+ * The synthesis plan is `compileSynthesisToDirectedPlan` over a real
+ * `createEditorialSynthesis`: two hours of interview kept as six windows two
+ * minutes long, at 30000/1001. Every number a reader sees below — the duration
+ * in frames, the clip count, the plan hash — is what those compilers produced.
+ */
+const w20ReactPlanFps = rational(BigInt(30), BigInt(1))
+const w20ReactMeasured = new Map([
+  ['asset-reaction', { artifactId: 'artifact-reaction', sha256: w20Digest('6'), durationSeconds: 40 }],
+  ['asset-reference', { artifactId: 'artifact-reference', sha256: w20Digest('7'), durationSeconds: 30 }],
+])
+const w20ReactPlanExample = compilePlaybackMapToDirectedPlan(w20AnchoredPlaybackMapExample, {
+  session: w20ReactSessionExample,
+  measured: w20ReactMeasured,
+  artifactByAssetId: new Map([
+    ['asset-reaction', 'artifact-reaction'],
+    ['asset-reference', 'artifact-reference'],
+  ]),
+  projectVersionId: 'project-version-3',
+  objective: 'discovery',
+  planFps: w20ReactPlanFps,
+  createdAt: w20At(500),
+})
+const w20ReactPlanSnapshotExample = Object.freeze({
+  ...renderablePlanSnapshotOf({
+    workspaceId,
+    projectId,
+    origin: 'react-playback',
+    sourceId: w20AnchoredPlaybackMapExample.mapId,
+    sourceHash: w20AnchoredPlaybackMapExample.mapHash,
+    sourceVersion: w20AnchoredPlaybackMapExample.version,
+    plan: w20ReactPlanExample,
+  }),
+  createdAt: w20At(500),
+})
+
+const w20SynthesisMasterSha = w20Digest('9')
+const w20SynthesisLineage = Object.freeze({
+  sourceArtifactId: 'artifact-founder-interview',
+  sourceArtifactSha256: w20SynthesisMasterSha,
+  sourceManifestId: 'manifest-founder-interview',
+  sourceManifestHash: w20Digest('a'),
+  indexRunId: 'index-run-founder-interview',
+  momentId: 'moment-founder-interview',
+  momentHash: w20Digest('b'),
+  evaluationId: 'evaluation-founder-interview',
+  evaluationHash: w20Digest('c'),
+})
+const w20SynthesisRanges = [
+  { rangeId: 'range-1', startMs: 120_000, endMs: 145_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-2', startMs: 900_000, endMs: 918_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-3', startMs: 1_800_000, endMs: 1_822_000, claimIds: ['claim-1'], qualifierIds: [], proofContextIds: [] },
+  { rangeId: 'range-4', startMs: 3_600_000, endMs: 3_615_000, claimIds: [], qualifierIds: ['qualifier-1'], proofContextIds: [] },
+  { rangeId: 'range-5', startMs: 5_400_000, endMs: 5_425_000, claimIds: [], qualifierIds: [], proofContextIds: ['proof-1'] },
+  { rangeId: 'range-6', startMs: 7_000_000, endMs: 7_015_000, claimIds: [], qualifierIds: [], proofContextIds: [] },
+].map((window) => ({
+  ...window,
+  lineage: w20SynthesisLineage,
+  rightsSnapshotId: 'rights-founder-interview',
+  rightsStatus: 'approved' as const,
+  consentStatus: 'approved' as const,
+}))
+const w20SynthesisExample = createEditorialSynthesis({
+  id: 'synthesis-founder-interview',
+  workspaceId,
+  projectId,
+  objective: 'two-minute cut of the founder interview',
+  targetDurationMs: 120_000,
+  toleranceMs: 2_000,
+  sourceDurationMs: 7_200_000,
+  frameRate: rational(BigInt(30_000), BigInt(1_001)),
+  storyPlan: {
+    ...STORY_GOLDEN_FIXTURES.linear,
+    id: 'story-plan-founder-interview',
+    mode: 'multi-range' as const,
+    targetDurationMs: { min: 100_000, max: 140_000 },
+    blocks: STORY_GOLDEN_FIXTURES.linear.blocks.map((block) => ({
+      ...block,
+      durationTargetMs: { min: 20_000, ideal: 30_000, max: 45_000 },
+    })),
+  },
+  editPlanId: 'edit-plan-founder-interview',
+  ranges: w20SynthesisRanges,
+  joins: w20SynthesisRanges.slice(0, -1).map((range, index) => ({
+    beforeRangeId: range.rangeId,
+    afterRangeId: w20SynthesisRanges[index + 1]!.rangeId,
+    kind: 'spliced' as const,
+    justification: `window ${index + 1} closes the thought that window ${index + 2} opens`,
+    continuityRisks: ['argument'],
+  })),
+})
+const w20SynthesisPlanExample = compileSynthesisToDirectedPlan(w20SynthesisExample, {
+  sources: [{
+    artifactId: 'artifact-founder-interview',
+    sha256: w20SynthesisMasterSha,
+    durationSeconds: 7_200,
+  }],
+  projectVersionId: 'project-version-3',
+  objective: 'discovery',
+  createdAt: w20At(600),
+})
+const w20SynthesisPlanSnapshotExample = Object.freeze({
+  ...renderablePlanSnapshotOf({
+    workspaceId,
+    projectId,
+    origin: 'multi-range-synthesis',
+    sourceId: w20SynthesisExample.id,
+    sourceHash: w20SynthesisExample.synthesisHash,
+    sourceVersion: null,
+    plan: w20SynthesisPlanExample,
+  }),
+  createdAt: w20At(600),
 })
 
 /**
@@ -14407,6 +14536,45 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
           pieces: w20PlaybackMapExample.pieces,
           filteredOut: 0,
           omittedPieces: 0,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+    ],
+    // -----------------------------------------------------------------------
+    // Wave 20 — the two compilers that make a decision renderable
+    // -----------------------------------------------------------------------
+    'apollo://schemas/compile-react-playback-plan-request/v1': [
+      {
+        baseVersionId: `capture-session-react-watchalong:playback:track-reaction:v${w20AnchoredPlaybackMapExample.version}`,
+        baseHash: w20AnchoredPlaybackMapExample.mapHash,
+        reactionTrackId: 'track-reaction',
+        projectVersionId: 'project-version-3',
+        objective: 'discovery',
+        planFps: '30/1',
+      },
+    ],
+    'apollo://schemas/compile-synthesis-render-plan-request/v1': [
+      {
+        projectVersionId: 'project-version-3',
+        objective: 'discovery',
+      },
+    ],
+    'apollo://schemas/renderable-plan-compiled/v1': [
+      // The react compile: a forty-second reaction over a thirty-second
+      // reference, so the plan runs the reaction and says so in its own words.
+      {
+        data: presentCompiledRenderablePlan({
+          snapshot: w20ReactPlanSnapshotExample,
+          replayed: false,
+        }),
+        meta: { apiVersion: 'v1' },
+      },
+      // The synthesis compile: two hours kept as six windows, `sourceVersion`
+      // null because an immutable cut has no chain.
+      {
+        data: presentCompiledRenderablePlan({
+          snapshot: w20SynthesisPlanSnapshotExample,
+          replayed: false,
         }),
         meta: { apiVersion: 'v1' },
       },
