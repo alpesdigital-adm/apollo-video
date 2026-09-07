@@ -1,6 +1,6 @@
 # Apollo Video v2 — Backlog executável
 
-> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.1  
+> **Fonte principal:** [`docs/PRD-APOLLO-V2.md`](./docs/PRD-APOLLO-V2.md), versão 1.2  
 > **Rastreabilidade:** [`docs/REQUIREMENTS-TRACEABILITY.md`](./docs/REQUIREMENTS-TRACEABILITY.md)  
 > **Especificações:** [`docs/specs`](./docs/specs)  
 > **Estado:** backlog inicial; nenhuma caixa marcada sem evidência verificável  
@@ -1806,8 +1806,11 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > 12 capabilities `/v1` com rotas executáveis, worker durável com lease e
 > fencing, página operável `/capture-sessions` e quatro E2E.
 >
-> **Não entregue e fora do escopo desta wave:** F4.009 a F4.016, providers
-> pagos, deploy e aceite.
+> **Não entregue e fora do escopo da Wave 18:** F4.009 a F4.016, providers
+> pagos, deploy e aceite. Esta frase é de 2026-09-03 e vale para a Wave 18 —
+> F4.012 a F4.016 foram implementados localmente depois, na Wave 20; cada seção
+> abaixo tem a sua nota. Deploy e aceite continuam pendentes, e é por isso que
+> nenhuma caixa mudou.
 >
 > **Verificado por medição:** suíte 1796/1796; `db:v2:validate` 227 tabelas,
 > 1099 índices, 850 FKs; E2E 5/5, 4/4 e 4/4.
@@ -1819,15 +1822,15 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.009 — Capture Protocol [FR-147]
 
 - [ ] Criar requisitos por cenário: professor+tela, podcast, react e multicâmera. Evidência T-FR-147.
-- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência tela `/capture`.
-- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture`.
-- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachProtocol`.
+- [ ] Exibir pré-requisitos antes do upload e no diagnóstico quando faltarem. Evidência telas `/capture-protocols` e `/sync-diagnostic`.
+- [ ] Recomendar clap/marker, scratch audio, clock contínuo e gravação de referência. Evidência tela `/capture-protocols`.
+- [ ] Salvar protocolo usado na CaptureSession. Evidência ADR-131 e `attachCaptureProtocolService` (`src/v2/application/capture-protocol.ts`).
 - [ ] Criar E2E de aceite do protocolo e aviso de sincronização limitada. Evidência T-FR-147.
 
 ### F4.010 — Apollo Sync Marker [FR-148]
 
 - [ ] Especificar marker audiovisual com flash, chirp e ID/tempo decodificável. Evidência T-FR-148.
-- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência API direction-v2.
+- [ ] Criar tela/arquivo de marker para reprodução e captura. Evidência capabilities `apollo.projects.capture-sessions.sync-markers.generate` e tela `/capture-protocols`.
 - [ ] Implementar detectors independentes de áudio e vídeo. Evidência T-FR-148.
 - [ ] Fundir detections, medir precisão e rejeitar falso positivo. Evidência T-FR-148.
 - [ ] Criar fixtures filmadas/gravadas em diferentes dispositivos. Evidência T-FR-148.
@@ -1835,12 +1838,29 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ### F4.011 — SyncDiagnostic [FR-149]
 
 - [ ] Modelar método, confidence, residual, drift, coverage, warnings e ações. Evidência T-FR-149.
-- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e API direction-v2.
+- [ ] Criar visualização de waveforms/anchors/maps e preview lado a lado. Evidência modelo SyncDiagnostic e tela `/sync-diagnostic`.
 - [ ] Permitir adicionar/mover/remover anchor manual e recalcular. Evidência T-FR-149.
 - [ ] Bloquear auto-edit quando confidence/coverage estiver abaixo do mínimo. Evidência T-FR-149.
 - [ ] Criar E2E de diagnóstico aprovado, corrigido e impossível. Evidência T-FR-149.
 
 ### F4.012 — Direção multicâmera [FR-150]
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-150` em `multicam-direction.test.mjs` e
+> `wave20-falsification.test.mjs`; `T-F4.012` em
+> `multicam-direction-service.test.mjs`, `capture-sync-worker.test.mjs`,
+> `capture-sync-worker-coverage.test.mjs`, `capture-sync-signal-source.test.mjs`,
+> `audio-sync-correlation.test.mjs`, `multicam-direction-render.integration.mjs`,
+> `capture-sync-worker.integration.mjs`,
+> `multicam-visual-evidence.integration.mjs` e as três suítes de persistência da
+> wave; `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs`,
+> `teacher-screen-journey.e2e.mjs`, `insufficient-evidence-journey.e2e.mjs`,
+> `capture-sync-worker-persistence.e2e.mjs` e `wave20-operator-browser.e2e.mjs`.
+> Registro: spec 05 §29, §27.1 e §34; ADR-153.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
 - [ ] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
@@ -1850,6 +1870,19 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F4.013 — Multicam color match [FR-183]
 
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-183` em `multicam-color.test.mjs`,
+> `color-export-journeys.test.mjs`, `color-measurement.integration.mjs` e
+> `wave20-falsification.test.mjs`; `T-F4.013` em `color-match-service.test.mjs`,
+> `color-match.integration.mjs`, `color-visual-evaluations.integration.mjs`,
+> `wave20-persistence.test.mjs`, `wave20-public-contract.test.mjs` e
+> `wave20-persistence-journey.e2e.mjs`. Registro: spec 05 §30 e §34; ADR-153,
+> ADR-154.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
+
 - [ ] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
 - [ ] Aplicar match antes da creative LUT. Evidência T-FR-183.
 - [ ] Permitir reference camera e override por range. Evidência T-FR-183.
@@ -1858,12 +1891,38 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### F4.014 — Crítico de cor [FR-184]
 
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-FR-184` em `multicam-color.test.mjs`,
+> `color-measurement.integration.mjs` e `wave20-falsification.test.mjs`;
+> `T-F4.014` em `color-match-service.test.mjs`, `color-match.integration.mjs`,
+> `color-visual-evaluations.integration.mjs`,
+> `project-proxy-render-worker.test.mjs`, `wave20-persistence.test.mjs`,
+> `wave20-public-contract.test.mjs` e `wave20-persistence-journey.e2e.mjs`.
+> Registro: spec 05 §31 e §34; ADR-157.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
+
 - [ ] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
 - [ ] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
 - [ ] Propor correção limitada ou revisão humana conforme confidence. Evidência T-FR-184.
 - [ ] Criar visual eval com fontes técnicas e LUTs diferentes. Evidência T-FR-184.
 
 ### F4.015 — React playback map
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-F4.015` em `playback-map.test.mjs`,
+> `playback-map-service.test.mjs`, `renderable-plan-hash.test.mjs`,
+> `playback-map-fingerprint.integration.mjs`, `wave20-falsification.test.mjs`,
+> `wave20-persistence.test.mjs`, `wave20-public-contract.test.mjs` e
+> `wave20-persistence-journey.e2e.mjs`; `E2E-F4.015` em `playback-map.e2e.mjs` e
+> `react-playback-journey.e2e.mjs`. Registro: spec 05 §32 e §34; ADR-152,
+> ADR-155.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
 - [ ] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
@@ -1872,6 +1931,22 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 - [ ] Criar fixture com play, pause, rewind e seek. Evidência: T-F4.015 e ADR-135.
 
 ### F4.016 — Gate multicâmera/long-form
+
+> **Wave 20, implementado localmente entre 2026-09-04 e 2026-09-06.** Suítes que
+> exercem estes itens: `T-F4.016` em `multicam-longform-gate.test.mjs`,
+> `multicam-longform-gate-public-contract.test.mjs`,
+> `synthesis-directed-plan.test.mjs`, `synthesis-render.integration.mjs` e
+> `wave20-falsification.test.mjs`; `E2E-F4.016` em
+> `multicam-longform-gate.e2e.mjs`, `phase-gate-journey.e2e.mjs`,
+> `longform-synthesis-journey.e2e.mjs` e
+> `multicam-longform-gate-browser.e2e.mjs`. Registro: spec 05 §33 e §34;
+> ADR-155, ADR-156. Um gate aprovado em PostgreSQL não é implantação nem aceite:
+> ele diz que as dez condições estão satisfeitas num banco desta máquina, e nada
+> mais.
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
 - [ ] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
@@ -2383,6 +2458,20 @@ Para cada decisão:
 
 ## 14. Jornadas E2E obrigatórias
 
+> **Nenhum ponteiro `T-J.001` a `T-J.009` resolve para um teste — conferido em
+> 2026-09-06.** Esses ids eram gerados por
+> `src/v2/application/mandatory-journeys.ts` a partir de
+> `completeJourneyFixture`, que construía toda etapa com `passed: true` e em
+> seguida afirmava que ela passara; como o arquivo terminava em `.test.mjs`,
+> aquilo rodava dentro do `npm test` e do CI sem nunca poder falhar. Foi removido
+> no commit `e8ba18e6` (ADR-141), e hoje `grep -rl "T-J\.00[0-9]" tests/` não
+> devolve arquivo nenhum. Restam **35** ponteiros desses nesta seção — quatro em
+> cada uma de J.001 a J.006 e J.008, sete em J.009 — e cada um deles nomeia um
+> teste que não existe, que é exatamente o defeito que ADR-141 descreve. Só
+> J.007 teve os seus quatro trocados por ids de testes reais. Nenhuma caixa desta
+> seção está marcada, e substituir um ponteiro não marcaria nenhuma: as jornadas
+> obrigatórias continuam sem módulo que as avalie.
+
 ### J.001 — Vídeo bruto único
 
 - [ ] Criar projeto media-only com objetivo estratégico. Evidência: T-J.001 e ADR-141.
@@ -2427,10 +2516,16 @@ Para cada decisão:
 
 ### J.007 — Multicâmera, tela e react
 
-- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: T-J.007 e ADR-141.
-- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: T-J.007 e ADR-141.
-- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: T-J.007 e ADR-141.
-- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: T-J.007 e ADR-141.
+> **Ponteiro de evidência corrigido em 2026-09-06.** As quatro linhas abaixo
+> citavam `T-J.007`, id que nunca existiu como teste — a nota no começo da §14
+> conta por quê, e vale para as outras oito jornadas, que seguem citando os seus.
+> Os ids abaixo são os testes que de fato exercem cada item, e nenhum deles fecha
+> a jornada: as caixas seguem desmarcadas.
+
+- [ ] Ingerir tracks com durações e áudios diferentes em CaptureSession. Evidência: `E2E-FR-140` em `capture-heterogeneous-session.e2e.mjs` e ADR-130.
+- [ ] Sincronizar por cascade, corrigir drift e representar gaps. Evidência: `E2E-FR-142`/`E2E-FR-144`/`E2E-FR-145` em `capture-heterogeneous-session.e2e.mjs` e `E2E-F4.012` em `capture-sync-worker-persistence.e2e.mjs`.
+- [ ] Exigir marker/anchor quando evidência for insuficiente. Evidência: `E2E-FR-142` em `capture-insufficient-evidence.e2e.mjs` e `E2E-F4.012` em `insufficient-evidence-journey.e2e.mjs`.
+- [ ] Dirigir podcast, professor+tela e react com playback map. Evidência: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs` e `teacher-screen-journey.e2e.mjs`, `E2E-F4.015` em `react-playback-journey.e2e.mjs`.
 
 ### J.008 — Localização
 

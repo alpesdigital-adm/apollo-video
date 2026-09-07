@@ -47,7 +47,7 @@ renderer ◄── RenderInput materializado
 - Dynamic route `params` é assíncrono em pages e route handlers.
 - Builds usam Webpack explicitamente enquanto os aliases de Remotion não forem migrados para Turbopack.
 - O adapter FFmpeg invoca `ffmpeg`/`ffprobe` com `execFile` e arrays de argumentos, sem shell ou wrapper abandonado.
-- `FFMPEG_PATH`/`FFPROBE_PATH` têm precedência; os binários empacotados são fallback e o `PATH` do worker é a última opção.
+- A resolução do binário de mídia tem **quatro** passos e mora em `ffmpeg-binary.ts`, não nesta lista: primeiro o que a implantação nomeou (para ffmpeg, na ordem `APOLLO_V2_FFMPEG_PATH`, `FFMPEG_PATH`, `APOLLO_FFMPEG_PATH`, `FFMPEG_BIN`; para ffprobe, `APOLLO_V2_FFPROBE_PATH` e `FFPROBE_PATH`), depois o binário empacotado **se estiver em disco**, depois uma busca em `node_modules` que sobrevive ao bundling, e por fim o `PATH`, nomeado de forma absoluta. Sob `next build` o caminho que o `ffmpeg-static` calcula é inválido, então uma implantação tem de satisfazer um dos outros passos: [ADR-158](ADR-158-media-binary-resolution-and-deployment-fault.md).
 - Todo processo de mídia usa timeout finito, `AbortSignal`, `maxBuffer`, `shell: false`, `-nostdin` e saída sem progresso interativo.
 - Falhas de processo são classificadas como cancelamento, timeout, limite de saída ou erro operacional; argumentos e paths não entram na mensagem pública.
 - Outputs FFmpeg são materializados em arquivo parcial irmão, validados e promovidos por rename no mesmo filesystem; o path final nunca aponta para encode incompleto.

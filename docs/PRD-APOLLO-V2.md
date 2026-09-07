@@ -1480,6 +1480,20 @@ Entregue localmente em 2026-09-03: um tick entre duas peças devolve
 `uncovered`, sem número junto — interpolar ali é como uma edição longa termina
 um quadro fora na segunda metade. Duas peças nunca reivindicam o mesmo tick, e a
 causa registrada da fronteira precisa bater com a evidência medida.
+
+A metade react deste requisito — pause/rewind e mapping não linear — foi
+entregue localmente em 2026-09-06, e **não** pelo `PiecewiseClockMap`. Uma pausa
+não tem lei afim (taxa zero é recusada) e um replay reivindica os mesmos ticks
+da referência duas vezes (sobreposição de origem é recusada); as duas recusas
+são certas e ficaram como estão. O `react-playback-map/v1` mapeia reação →
+referência, direção em que intervalos da reação nunca se sobrepõem e intervalos
+da referência podem repetir, correr para trás ou faltar. Seis modos —
+`playing`, `paused`, `rewind`, `replay`, `seek`, `commentary-only` — e o
+vocabulário de fronteira da Wave 18 entra por spread, acrescido de `pause`,
+`commentary` e `manual-anchor`. Medido sobre uma gravação de react gerada
+(referência 30,00 s, reação 60,00 s): 119 janelas, 69 travadas, 8 peças, 1
+trecho que só uma pessoa pode responder, erro de fronteira de 0 ou 15 quadros
+por peça, e o mesmo `mapHash` em duas execuções. Ver ADR-152.
 ### FR-146 — Sync audio separado
 
 Scratch audio pode servir para sync e ser descartado no mix final.
@@ -1504,6 +1518,41 @@ Método, confiança, offset, drift, coverage, warnings e necessidade de anchors.
 ### FR-150 — Direção multicâmera
 
 Escolher ângulo por falante, expressão, tela relevante, reação, formato e ritmo.
+
+
+Entregue localmente em 2026-09-06: oito espécies de evidência sobre a sessão
+(falante ativo, fala simultânea, silêncio, reação, demonstração, atividade de
+tela, qualidade técnica e atenção), cada observação dizendo se foi medida,
+controlada ou declarada. A escolha do ângulo é um score de nove parcelas
+nomeadas sob a calibração `multicam-direction-2026-09-v2` — plano mínimo de
+1200 ms, cutaway devolvido em 4000 ms, ganho mínimo de 0,15 para trocar de
+ângulo, ritmo alvo de 8000 ± 4000 ms — e cada decisão registra qual das nove
+regras decidiu e por quê, em texto. Formato entra como penalidade de contexto:
+em 9:16 o plano aberto vale metade.
+
+O que não é escolhido automaticamente é tão importante quanto o que é. Quinze
+razões nomeadas tornam um ângulo inelegível, e o candidato rejeitado continua
+guardado dentro do hash da decisão, com a sua razão. Uma janela sem nenhum
+ângulo elegível não recebe ângulo: vira um intervalo descoberto, a direção fica
+com `manualReviewRequired` e a compilação recusa transformá-la em clipes. Dois
+ângulos com evidência a menos de 0,1 um do outro não são ordenados — a direção
+segura o plano corrente e avisa; qualquer observação de fala simultânea que
+cruze a janela dobra essa margem, declarada ou medida (spec 05 §29.4). Uma
+seleção protegida por uma pessoa nunca é substituída em silêncio: elegível, ela
+vence; inelegível, o aviso nomeia as rejeições que a impediram. O chamador não
+manda score, elegibilidade, medição nem aprovação — um pedido que traga
+qualquer um deles é recusado pelo nome.
+
+Um ângulo é um clipe, e um de cada vez: a compilação resolve cada plano contra
+o mapa de relógio da faixa escolhida e emite `EditorialCutClip`. Professor e
+tela são **cortados** entre si, nunca compostos — o caminho editorial não tem
+picture-in-picture nem freeze (spec 05 §34.4). Medido com FFmpeg real: uma
+direção de duas câmeras rendeu 2 clipes sobre 3 fontes, 300 quadros, 10,000 s,
+h264/aac, e a inspeção de pixel confirmou a troca de ângulo (vermelho aos
+2,50 s, azul aos 7,50 s); duas câmeras a cadências diferentes (30/1 e 25/1 num
+plano de 30/1) são recusadas pela compilação com as taxas que o `ffprobe` leu.
+Superfície `/v1` com cinco capabilities e tela de operador em
+`/multicam-direction`. Deploy e aceite pendentes.
 
 ---
 
@@ -1613,9 +1662,71 @@ UI atual; o aceite de FR-182 é API-first e não afirma essa superfície.
 
 Igualar exposição, white balance, contraste, saturação e pele antes da LUT.
 
+
+Entregue localmente em 2026-09-06: oito dimensões medidas por câmera e por
+intervalo, cada uma com unidade fixa, e um piso de três quadros decodificados
+abaixo do qual o intervalo não foi medido — um quadro é um still, não uma
+estatística. O match é um estágio do ColorPlan que já existia (`match`, dentro
+de `technical → match → creative-lut → output`), e a ordem não é convenção: um
+plano que declare a LUT criativa antes do match é recusado com
+`COLOR_STAGE_VIOLATION`. O provedor `apollo-match` ganhou uma segunda versão
+declarada, com ganho por canal para white balance; uma transformação v2 tem hash
+diferente da v1, e as compilações existentes não foram tocadas (ADR-154).
+
+Medido sobre pixels reais: com duas câmeras, a razão azul/verde da câmera B
+passou de 0,916081 para 1,046333 contra uma referência de 1,047486 — de 12,54 %
+de erro para 0,11 %; com três câmeras, o erro de vermelho caiu de 17,03 % para
+1,05 %. A mesma câmera casada, sob duas LUTs criativas diferentes, continua
+produzindo resultados separados (0,0828 em azul, 0,1235 em vermelho) e digests
+distintos: o match não apaga a intenção que vem depois dele.
+
+A câmera de referência é escolhida por alguém, e a escolha é carregada como
+atestação cercada por `baseVersionId` + `baseHash` da sessão que essa pessoa
+estava vendo — não como medição. Overrides são por câmera e opcionalmente por
+segmento ou intervalo, com motivo e ator. Uma correção além do limite é
+grampeada no limite e o plano diz isso com `humanReviewRequired`; nunca é
+aplicada em força total nem descartada em silêncio, e um único par de intervalos
+não pode reivindicar confiança acima de 0,8. Sete recusas fail-closed cobrem
+referência sem medição, HDR sem tone-map, colorimetrias diferentes, medição
+insuficiente, intervalos que nunca se cruzam, violação de estágio e colisão de
+identidade de câmera. **Fica em aberto:** a dimensão `skin` é medida mas não
+entra em transformação alguma. Deploy e aceite pendentes.
+
 ### FR-184 — Crítico de cor
 
 Skin tones, clipping, blacks, saturation, mismatch, brand color drift e HDR/SDR.
+
+
+Entregue localmente em 2026-09-06: doze dimensões avaliadas antes e depois do
+output transform, mais as que só existem comparando os dois lados. Cinco
+dimensões são obrigatórias — sem elas nada se sabe sobre os bytes — e as três
+dimensões entre câmeras são `not-applicable` com uma câmera e obrigatórias com
+duas ou mais: comparação ilegível num sujeito multicâmera é evidência faltando,
+não defeito ausente. Dois limiares por dimensão, `warn` e `hard`, sob a
+calibração `color-critic-thresholds/v1`.
+
+A ação nunca é a média dos números: ela é lida numa tabela de dez causas com
+precedência declarada, e a precedência começa em defeito técnico irreversível.
+Um defeito duro **medido** supera uma dimensão que ninguém conseguiu ler — saber
+que um quadro está ceifado não fica menos certo porque uma segunda pergunta
+ficou sem resposta — e tudo abaixo disso cai para revisão humana. Correção
+automática limitada exige confiança ≥ 0,85 e no máximo duas iterações. Uma
+intenção criativa declarada limita um deslocamento de cor e nunca uma amostra
+destruída: clipping, blacks esmagados, pele fora da banda, deriva de cor de
+marca e inconsistência HDR/SDR não são desfeitos por ganho nenhum, e o que a
+declaração pode desculpar tem teto (ADR-157).
+
+Medido: com `highlights = 0,5` a ação é `reject` por defeito irreversível, com
+declaração ou sem ela, enquanto o controle da mesma suíte sai `human-review` por
+correção não derivável — o positivo e o negativo lado a lado. Um cast medido de
+0,201998 é preservado quando declarado e continua sendo defeito quando não
+declarado, com a rejeição residual em pele. Um desencontro confinado a um
+segundo é reportado como aquele intervalo daquela câmera, e não como defeito
+global. Uma mancha de pele controlada é medida por máscara de banda e rotulada
+como controlada, nunca como pele real. O avaliador declara o que é: ele não lê
+pixels, compara agregados de medição contra limiares versionados. **Não
+calibrado contra material real** — todos os números vieram de fixtures geradas.
+Deploy e aceite pendentes.
 
 ---
 
@@ -2932,7 +3043,9 @@ foi contabilizada neste aceite.
 - Cross-library long-form retrieval.
 - Editorial synthesis multi-range.
 - Color match multicâmera.
+- Crítico de cor antes e depois do output transform.
 - API de CaptureSession, anchors, diagnostic e sync maps autorizados.
+- Gate da fase com cada condição visível sozinha.
 
 **Critério de saída:** múltiplas fontes do mesmo evento são sincronizadas, diagnosticadas e editadas automaticamente.
 
