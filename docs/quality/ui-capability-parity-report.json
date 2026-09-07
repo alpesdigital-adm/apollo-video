@@ -12,6 +12,8 @@
     "unboundActions": 0,
     "routesWithoutApplicationService": 0
   },
+  "unboundActionIds": [],
+  "routesWithoutApplicationServiceEndpoints": [],
   "rows": [
     {
       "uiAction": "src/app/batches/page.tsx:1016",

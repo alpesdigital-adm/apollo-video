@@ -190,23 +190,66 @@ function reachableApplicationServices(root, path, functionName, visited = new Se
   return services
 }
 
+/**
+ * The application services a route can reach, or an empty list.
+ *
+ * It used to throw on the empty case, which made `routesWithoutApplicationService`
+ * unreportable — and made the `calls.length === 0` filter in
+ * `T-F0-034-shared-service-boundary` dead code, because the helper it filters
+ * could never return an empty array. The refusal now lives at the two places
+ * that want to refuse (`public-operation-contracts.test.mjs` and the CLI below),
+ * and the report can state the number instead of asserting it away.
+ */
 export function applicationServicesForEndpoint(root, endpoint) {
   const cacheKey = `${root}#${endpoint.method} ${endpoint.path}`
   const cached = applicationServiceCache.get(cacheKey)
   if (cached) return cached
   const path = routeFileForEndpoint(root, endpoint)
   assert.ok(existsSync(path), `capability route does not exist: ${endpoint.method} ${endpoint.path}`)
-  const services = [...reachableApplicationServices(root, path, endpoint.method)].sort()
-  assert.ok(services.length > 0,
-    `public UI route does not reach a V2 application service: ${endpoint.method} ${endpoint.path}`)
-  const discovered = Object.freeze(services)
+  const discovered = Object.freeze(
+    [...reachableApplicationServices(root, path, endpoint.method)].sort(),
+  )
   applicationServiceCache.set(cacheKey, discovered)
   return discovered
 }
 
-export function createUiCapabilityParityReport(root, registry = FOUNDATION_CAPABILITIES) {
-  const actions = discoverUiNetworkActions(root)
-  const bindings = bindUiNetworkActionsToCapabilities(actions, registry)
+/**
+ * Which discovered UI actions do NOT resolve to an exposed capability.
+ *
+ * `bindUiNetworkActionsToCapabilities` refuses the whole list when one action
+ * fails to bind, which is the right behaviour for a gate and the wrong one for
+ * a report: the summary published `unboundActions: 0` as a literal, so the
+ * number was true only in the sense that the generator would have crashed
+ * before writing it. Binding each action on its own is what turns that constant
+ * into a measurement — and it is still refused, by the CLI below, before
+ * anything is written.
+ */
+function unbindableUiActions(actions, registry) {
+  return actions.filter((action) => {
+    try {
+      bindUiNetworkActionsToCapabilities([action], registry)
+      return false
+    } catch {
+      return true
+    }
+  })
+}
+
+/**
+ * `actions` is an injection point for the falsification test in
+ * `capability-registry.test.mjs`, and for nothing else: the two counters below
+ * can only be shown to move if a caller can hand the report a UI action the
+ * repository does not contain. Production always discovers them from `src`.
+ */
+export function createUiCapabilityParityReport(
+  root,
+  registry = FOUNDATION_CAPABILITIES,
+  actions = discoverUiNetworkActions(root),
+) {
+  const unbound = unbindableUiActions(actions, registry)
+  const bindings = unbound.length > 0
+    ? []
+    : bindUiNetworkActionsToCapabilities(actions, registry)
   const capabilities = new Map(registry.map((capability) => [capability.id, capability]))
   const rows = bindings.map((binding) => {
     const capability = capabilities.get(binding.capabilityId)
@@ -254,9 +297,16 @@ export function createUiCapabilityParityReport(root, registry = FOUNDATION_CAPAB
         (capability) => capability.exposure === 'internal-only',
       ).length,
       unjustifiedCapabilities: unjustifiedCapabilities.length,
-      unboundActions: 0,
-      routesWithoutApplicationService: 0,
+      // Counted, not declared. Both were literal zeros.
+      unboundActions: unbound.length,
+      routesWithoutApplicationService: rows.filter(
+        (row) => row.applicationServices.length === 0,
+      ).length,
     },
+    unboundActionIds: Object.freeze(unbound.map((action) => action.id)),
+    routesWithoutApplicationServiceEndpoints: Object.freeze(
+      rows.filter((row) => row.applicationServices.length === 0).map((row) => row.endpoint),
+    ),
     rows,
     capabilityContracts,
     internalOnlySurfaces: INTERNAL_ONLY_SURFACES,
@@ -271,7 +321,16 @@ const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).hr
 if (import.meta.url === invokedPath) {
   const root = resolve(import.meta.dirname, '..')
   const output = resolve(root, 'docs/quality/ui-capability-parity-report.json')
-  const serialized = serializeUiCapabilityParityReport(createUiCapabilityParityReport(root))
+  const report = createUiCapabilityParityReport(root)
+  // The gate, kept where it was strong and moved off the summary field it used
+  // to impersonate: a UI action with no capability, or a public route that
+  // reaches no application service, refuses the report in both modes rather
+  // than being written down as a zero.
+  assert.deepEqual(report.unboundActionIds, [],
+    'every operable UI network action must resolve to one exposed capability')
+  assert.deepEqual(report.routesWithoutApplicationServiceEndpoints, [],
+    'every UI-reachable public route must reach a V2 application service')
+  const serialized = serializeUiCapabilityParityReport(report)
   if (process.argv.includes('--check')) {
     assert.equal(readFileSync(output, 'utf8'), serialized,
       'UI capability parity report drifted; run npm run api:parity:report')

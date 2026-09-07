@@ -399,6 +399,47 @@ test('T-F0-034-shared-service-boundary UI and external API converge on the same 
   )
 })
 
+test('T-F0-034 the parity report counts what it claims instead of publishing two zeros', () => {
+  // `unboundActions` and `routesWithoutApplicationService` were literal zeros in
+  // the summary. They read as measurements, and no arrangement of the codebase
+  // could have moved either one: an action that bound to nothing crashed the
+  // binder, and a route reaching no service crashed the service walker. This
+  // test is the falsification the numbers were missing — it makes each one
+  // non-zero on purpose and reads the name of the offender back out.
+  const bound = createUiCapabilityParityReport(root)
+  assert.equal(bound.summary.unboundActions, 0)
+  assert.equal(bound.summary.routesWithoutApplicationService, 0)
+
+  // Take away one capability the UI calls; its action now resolves to nothing.
+  const dropped = bound.rows[0].capabilityId
+  const withoutOne = FOUNDATION_CAPABILITIES.filter((entry) => entry.id !== dropped)
+  const orphaned = createUiCapabilityParityReport(root, withoutOne)
+  assert.ok(orphaned.summary.unboundActions >= 1, 'dropping a bound capability must be counted')
+  assert.ok(
+    orphaned.unboundActionIds.includes(bound.rows[0].uiAction),
+    'the report must name the action that resolved to nothing',
+  )
+
+  // A UI action aimed at a real route that imports no application service.
+  // `/v1/health` is one, so this measures the walker rather than a missing file.
+  const serviceless = createUiCapabilityParityReport(
+    root,
+    FOUNDATION_CAPABILITIES,
+    [{ id: 'probe:health', method: 'GET', path: '/v1/health' }],
+  )
+  assert.equal(serviceless.summary.uiActions, 1)
+  assert.equal(
+    serviceless.summary.routesWithoutApplicationService,
+    1,
+    'a route reaching no application service must be counted',
+  )
+  assert.deepEqual(
+    serviceless.routesWithoutApplicationServiceEndpoints,
+    ['GET /v1/health'],
+    'the report must name the endpoint that reaches nothing',
+  )
+})
+
 test('T-F0-034 generated parity report covers actions, capabilities, endpoints and tests', () => {
   const report = createUiCapabilityParityReport(root)
   assert.equal(report.schemaVersion, 'ui-capability-parity-report/v1')
