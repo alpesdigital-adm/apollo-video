@@ -2648,7 +2648,6 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
   const repository = createPlaybackMapRepository()
   const sessions = createCaptureSessionRepository()
   const snapshots = createRenderablePlanSnapshotRepository()
-  const sources = createRenderSourceRepository()
   const clock = () => new Date()
   const workRoot = environment.APOLLO_V2_RENDER_WORK_ROOT?.trim()
   const media: PlaybackMediaPort = createCaptureMediaResolver(environment)
@@ -2661,7 +2660,6 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
     read: readReactPlaybackMapService({ repository }),
     listVersions: listReactPlaybackMapVersionsService({ repository }),
     listReferenceDependents: listReferenceDependentsService({ repository }),
-    compile: compileReactPlaybackPlanService({ repository, sessions, sources, snapshots, clock }),
   })
 }
 

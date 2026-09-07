@@ -494,9 +494,11 @@ test(
     // caller anywhere — not a route, not a worker, not a test — so the claim
     // that this is "where the compiler proves the adapters satisfy the ports"
     // was a `tsc` structural check and nothing more. Three of them now run
-    // against this database. The build/anchor/compile half of the factory still
-    // has no caller: it needs a capture session read from PostgreSQL, and this
-    // journey seeds only the session head, which is phase 3's work.
+    // against this database. The build/anchor half of the factory is not
+    // exercised here: it needs a capture session read from PostgreSQL, and this
+    // journey seeds only the session head, which is phase 3's work. The compile
+    // is not in this factory at all — it lives in
+    // `createReactPlaybackPlanCompileService`, which the published route calls.
     const {
       createReactPlaybackMapServices,
       createRenderSourceRepository,
