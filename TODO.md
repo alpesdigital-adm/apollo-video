@@ -2420,39 +2420,39 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 
 ### Antes de F1 público
 
-- [x] Decidir modelo de permissões por membro e registrar em ADR-010/012. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir limites de auto-aplicação de correções sem revisão humana. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir duração e custo-alvo do primeiro proxy por duração de source. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir política inicial de retenção de masters, derivatives e temporários. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir OAuth 2.1, signed service keys ou ambos para clients externos. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir versionamento, depreciação e janela de suporte da API. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir garantias de ordenação, retenção e replay de webhooks. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir rate limits, quotas e limites de custo por client/workspace. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir modelo de permissões por membro e registrar em ADR-010/012. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir limites de auto-aplicação de correções sem revisão humana. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir duração e custo-alvo do primeiro proxy por duração de source. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir política inicial de retenção de masters, derivatives e temporários. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir OAuth 2.1, signed service keys ou ambos para clients externos. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir versionamento, depreciação e janela de suporte da API. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir garantias de ordenação, retenção e replay de webhooks. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir rate limits, quotas e limites de custo por client/workspace. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir tools MCP oficiais e quais exigem preflight ou aprovação humana. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F2 público
 
-- [x] Decidir quantidade padrão e máxima de variações por lote. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir critério e fontes externas para status “validado” de hooks. Evidência: T-DECISION-001 e ADR-140.
-- [x] Decidir importação direta por URL, termos e regras de plataforma. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir licenciamento e provenance de LUTs e stock. Evidência: T-DECISION-001 e ADR-140.
+- [x] Decidir quantidade padrão e máxima de variações por lote. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir critério e fontes externas para status “validado” de hooks. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Decidir importação direta por URL, termos e regras de plataforma. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir compartilhamento de biblioteca entre workspaces ou confirmar isolamento estrito. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir licenciamento e provenance de LUTs e stock. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F3 público
 
-- [x] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs. Evidência: T-DECISION-001 e ADR-140.
-- [x] Definir disclosure padrão de mídia sintética por mercado/canal. Evidência: T-DECISION-001 e ADR-140.
+- [x] Selecionar providers iniciais de imagem/vídeo além de HeyGen/ElevenLabs. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Definir disclosure padrão de mídia sintética por mercado/canal. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ### Antes de F5 público
 
-- [x] Definir estratégia de licenciamento de música e SFX. Evidência: T-DECISION-001 e ADR-140.
-- [x] Calibrar loudness targets e regras de locale/mercado. Evidência: T-DECISION-001 e ADR-140.
+- [x] Definir estratégia de licenciamento de música e SFX. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Calibrar loudness targets e regras de locale/mercado. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 Para cada decisão:
 
-- [x] Registrar owner, data limite, opções, evidências e impacto. Evidência: T-DECISION-001 e ADR-140.
-- [x] Publicar ADR/decision record e atualizar defaults/configuração versionada. Evidência: T-DECISION-001 e ADR-140.
-- [x] Adicionar teste que fixe a decisão onde ela alterar comportamento. Evidência: T-DECISION-001 e ADR-140.
+- [x] Registrar owner, data limite, opções, evidências e impacto. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Publicar ADR/decision record e atualizar defaults/configuração versionada. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
+- [x] Adicionar teste que fixe a decisão onde ela alterar comportamento. Evidência: ADR-140 e docs/PUBLIC-RELEASE-DECISIONS.md (T-DECISION-001 removido com release-risk-control.ts em e8ba18e6; sem substituto executável).
 
 ---
 
