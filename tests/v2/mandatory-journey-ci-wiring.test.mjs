@@ -216,13 +216,18 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
     assert.ok(gate, `${where}: ${file} does not declare "const RUN = process.env.APOLLO_..._E2E === '1'"`)
 
     const running = steps.filter((step) => step.npmScripts.includes(journey.script))
-    assert.equal(
-      running.length,
-      1,
-      `${where}: expected exactly one CI step running "npm run ${journey.script}", found ${running.length}`,
+    // At least one, not exactly one. A journey may legitimately run more than
+    // once — the podcast and teacher journeys each run a second time against
+    // versioned object storage, which is the same suite under a different
+    // artifact driver and is what proves the briefing's "PostgreSQL 16 AND
+    // versioned object storage". What the mandate needs is that no journey is
+    // absent; every step that does run it is then held to the rules below.
+    assert.ok(
+      running.length >= 1,
+      `${where}: no CI step runs "npm run ${journey.script}"`,
     )
 
-    const [step] = running
+    for (const step of running) {
     assert.ok(step.name, `${where}: its CI step must be named, so a failure names the journey`)
     assert.ok(step.job, `${where}: step "${step.name}" was parsed outside any job, which cannot happen in a valid workflow`)
 
@@ -281,6 +286,22 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
       `${where}: V2_DATABASE_URL needs an apollo-video-e2e-… application_name, got ${applicationName ?? 'none'}`,
     )
 
+    // Uniqueness of the label is per STEP, not per journey: two steps running
+    // the same journey under different storage drivers must still be
+    // distinguishable in a leak check, and sharing a label would make one of
+    // them invisible.
+    const nameTwin = seenApplicationNames.get(applicationName)
+    assert.equal(
+      nameTwin,
+      undefined,
+      `${where}: step "${step.name}" shares application_name ${applicationName} with ${nameTwin}`,
+    )
+    seenApplicationNames.set(applicationName, `journey ${journey.number} step "${step.name}"`)
+    }
+
+    // Uniqueness of the GATE is per journey, because every step of one journey
+    // shares it by design. Two different journeys sharing one gate is the
+    // defect: neither could then be run alone.
     const gateTwin = seenGates.get(gate)
     assert.equal(
       gateTwin,
@@ -288,14 +309,6 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
       `${where}: shares gate ${gate} with journey ${gateTwin}, so one of the two can never be run alone`,
     )
     seenGates.set(gate, journey.number)
-
-    const nameTwin = seenApplicationNames.get(applicationName)
-    assert.equal(
-      nameTwin,
-      undefined,
-      `${where}: shares application_name ${applicationName} with journey ${nameTwin}`,
-    )
-    seenApplicationNames.set(applicationName, journey.number)
   }
 })
 
