@@ -25,7 +25,7 @@ import {
  * The bridge from a multi-range synthesis to something that renders
  * (F4.016 condition 6).
  *
- * `EditorialSynthesisEditPlan` (`editorial-synthesis.ts:121`) is a *selection*:
+ * `EditorialSynthesisEditPlan` (`domain/editorial-synthesis.ts:121`) is a *selection*:
  * exact rational frame rate, contiguous clips, lineage per range, and nothing
  * else. It has no `rate`, no transitions, no composition and no audio timeline
  * hash, so no renderer in this repository accepts it — which is why the

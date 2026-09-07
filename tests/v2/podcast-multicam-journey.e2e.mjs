@@ -141,7 +141,7 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * of the diarization fixture is a consequence of it: the direction's speaker
  * rule keys off WHICH FILE carries a segment, never off which voice. A cluster
  * key is `calculateSpeakerKey({ sourceArtifactSha256, provider, providerLabel })`
- * (`speaker-diarization.ts:150`), so two runs over two files can never share a
+ * (`domain/speaker-diarization.ts:150`), so two runs over two files can never share a
  * key even when the same human spoke into both microphones, and a diarizer that
  * (correctly) reported both people on both cameras' scratch audio would leave
  * the direction with identical evidence on both angles and nothing to choose
@@ -938,7 +938,7 @@ test(
     }
     // Regenerated, because an anchor alone cannot lift the block: `refitTrack`
     // keeps the `insufficient-evidence` warning it inherited and `canAutoEdit`
-    // reads exactly that warning (`sync-diagnostic.ts:431`).
+    // reads exactly that warning (`domain/sync-diagnostic.ts:431`).
     const regenerated = await helpers.callRouteOk(diagnosticRoute.POST, {
       method: 'POST',
       path: `/v1/projects/${projectId}/capture-sessions/${sessionId}/sync-diagnostic`,
@@ -1349,7 +1349,7 @@ test(
     // `renderPolicy: 'full-timeline'` (`edit-command-registry.ts:109,119`), so
     // each queues a render of the version it created — and a render whose
     // version the project has since moved past cannot file its proxy review:
-    // `proxy-review-repository.ts:256` refuses it with `VERSION_CONFLICT`,
+    // `prisma/proxy-review-repository.ts:256` refuses it with `VERSION_CONFLICT`,
     // "Proxy review no longer belongs to the current project version", after
     // ffmpeg has already written the file. Batching the two drains, which is
     // what the draft did, therefore threw away the first render every time.

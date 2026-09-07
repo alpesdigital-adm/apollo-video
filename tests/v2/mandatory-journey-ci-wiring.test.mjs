@@ -198,6 +198,7 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 
   const seenGates = new Map()
   const seenApplicationNames = new Map()
+  const versionedStorage = []
 
   for (const journey of MANDATORY_JOURNEYS) {
     const where = `journey ${journey.number} (${journey.subject})`
@@ -217,15 +218,20 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 
     const running = steps.filter((step) => step.npmScripts.includes(journey.script))
     // At least one, not exactly one. A journey may legitimately run more than
-    // once — the podcast and teacher journeys each run a second time against
-    // versioned object storage, which is the same suite under a different
-    // artifact driver and is what proves the briefing's "PostgreSQL 16 AND
-    // versioned object storage". What the mandate needs is that no journey is
-    // absent; every step that does run it is then held to the rules below.
+    // once — the podcast and phase gate journeys each run a second time in the
+    // `local-infrastructure` job, the same suite under `s3`, which is the half
+    // of the briefing's "PostgreSQL 16 AND versioned object storage" the
+    // `quality` job cannot give. Which journeys those are is asserted below
+    // rather than described here, because an earlier version of this comment
+    // named the teacher journey — which runs once, in `quality`, with no s3
+    // env at all — and nothing in the file could contradict it.
     assert.ok(
       running.length >= 1,
       `${where}: no CI step runs "npm run ${journey.script}"`,
     )
+    if (running.some((step) => isLiteral(step.env.get('APOLLO_V2_ARTIFACT_STORAGE_DRIVER'), 's3'))) {
+      versionedStorage.push(journey.script)
+    }
 
     for (const step of running) {
     assert.ok(step.name, `${where}: its CI step must be named, so a failure names the journey`)
@@ -310,6 +316,24 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
     )
     seenGates.set(gate, journey.number)
   }
+
+  // The count that the briefing's "PostgreSQL 16 AND versioned object storage"
+  // actually buys, written as an equality so it cannot drift into prose again.
+  // Two of six, not four and not all six: `APOLLO_V2_ARTIFACT_STORAGE_DRIVER:
+  // s3` appears on the podcast and phase gate steps of `local-infrastructure`
+  // and nowhere else, so teacher-screen, react-playback, insufficient-evidence
+  // and longform-synthesis prove PostgreSQL only. Three of those four read the
+  // driver from the environment and would run under `s3` unchanged — no CI
+  // step gives them one; `longform-synthesis` reaches the renderer from a local
+  // fixture path and has no artifact store in its path at all.
+  //
+  // Adding a journey to the `s3` half is a welcome change that must edit this
+  // list, spec 05 §34.4 and the FR-150/F4.015/F4.016 traceability rows with it.
+  assert.deepEqual(
+    versionedStorage.toSorted(),
+    ['test:e2e:phase-gate-journey', 'test:e2e:podcast-multicam-journey'],
+    'exactly the podcast and phase gate journeys are wired to run against versioned object storage',
+  )
 })
 
 /**
@@ -353,7 +377,11 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/ffmpeg-contiguous-visual-evidence-provider.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/ffmpeg-speaker-diarization-audio-preparer.integration.mjs', reason: NO_SCRIPT },
   { file: 'tests/v2/format-quality-critic.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/image-analysis-tesseract.integration.mjs', reason: NEEDS_TESSERACT },
+  {
+    file: 'tests/v2/image-analysis-tesseract.integration.mjs',
+    reason: `${NEEDS_TESSERACT}; PRD FR-145 and the F4.015 traceability row cite it as why the OCR engine is present but unrun in CI`,
+    citedBy: ['docs/PRD-APOLLO-V2.md', 'docs/REQUIREMENTS-TRACEABILITY.md'],
+  },
   { file: 'tests/v2/long-form-stage-fencing.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-input-runtime.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/media-segment-materialization.integration.mjs', reason: PHASE_1_3 },

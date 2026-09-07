@@ -36,7 +36,9 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   the file itself, and only the busy window produces a `screen-activity`
  *   observation at all — a still picture measures zero, and zero activity is
  *   the ABSENCE of an observation rather than an observation of stillness
- *   (`application/multicam-direction.ts:576-578`).
+ *   (`application/multicam-direction.ts:654-663`, the `activityBps > 0` guard
+ *   on the push; this citation read 576-578 and pointed at the window-ceiling
+ *   comment even before the module was edited).
  * - **The direction returns to the camera when the demonstration ends.** The
  *   shot after the busy window is the teacher's camera again, and the seam
  *   lands where the measured activity stops — at the file's busy stretch
@@ -112,6 +114,17 @@ const RUN = process.env.APOLLO_TEACHER_SCREEN_E2E === '1'
  * Local disk or versioned MinIO, chosen by the runtime env the composition root
  * reads — never pinned in this file. Read once, at load, so the worker child
  * gets the same store this process opened.
+ *
+ * **In CI this is always local disk.** `grep -n
+ * "npm run test:e2e:teacher-screen-journey" .github/workflows/ci.yml` returns
+ * one line, 456, in the `quality` job, whose step sets no
+ * APOLLO_V2_ARTIFACT_STORAGE_DRIVER — so this journey proves PostgreSQL 16 and
+ * not the briefing's other half. The `s3` path here is capability, not
+ * coverage: reading the driver from the environment means a step that supplies
+ * one needs no edit to this file. Said plainly because "chosen by the runtime
+ * env" reads like a claim that both are chosen somewhere, and only the podcast
+ * and phase gate journeys get an `s3` step (spec 05 §34.4, and the equality
+ * asserted in `mandatory-journey-ci-wiring.test.mjs`).
  */
 const storageDriver = journeyStorageDriver()
 
@@ -452,7 +465,8 @@ test(
     // `sourceAssetId` IS the media artifact id. The compiled clips carry it
     // straight through as `sourceArtifactId`, and the direction refuses a plan
     // that cuts a recording the project does not link as available media
-    // (`multicam-direction.ts:1221-1227`).
+    // (`application/multicam-direction.ts:1355-1368`,
+    // `MEDIA_ARTIFACT_SOURCE_NOT_FOUND`).
     const trackPart = ({ trackId, artifactId, sha256, endTicks }) => ({
       partId: `part-${trackId}`,
       ordinal: 0,
@@ -658,7 +672,7 @@ test(
     // Regenerated, because an anchor alone cannot lift the block: `refitTrack`
     // keeps the `insufficient-evidence` warning it inherited
     // (`sync-diagnostic-anchors.ts:131-136`) and `canAutoEdit` reads exactly
-    // that warning (`sync-diagnostic.ts:431`). Composing the diagnostic again
+    // that warning (`domain/sync-diagnostic.ts:431`). Composing the diagnostic again
     // carries the manual anchors forward and re-derives the warnings from what
     // now exists, which is the only route from "anchored" to "auto-editable".
     const regenerated = await helpers.callRouteOk(diagnosticRoute.POST, {
@@ -1052,7 +1066,9 @@ test(
 
     // ---- gap 2, measured: what the protocol says about this session -------
     // Run last on purpose. A stored evaluation constrains every later direction
-    // (`multicam-direction.ts:1171`), so evaluating first would have made this
+    // (`application/multicam-direction.ts:1299-1305`, where an evaluation is
+    // kept only when its `sessionVersion` matches), so evaluating first would
+    // have made this
     // journey about a refusal rather than about the demonstration. The verdict
     // is asserted so the missing markers are a number in the record.
     const evaluation = await helpers.callRouteOk(protocolEvaluationsRoute.POST, {

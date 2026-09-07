@@ -290,7 +290,7 @@ function check(
  *
  * The comparison is the session version and the reference epoch, and NOT the
  * diagnostic version, even though the direction records one. Every fence the
- * domain owns compares exactly these two -- `multicam-direction.ts:673-674`
+ * domain owns compares exactly these two -- `domain/multicam-direction.ts:673-674`
  * and `:2146`, `react-playback-map.ts:1184`, `multicam-color-match.ts:565` --
  * and `directMulticam` asks the diagnostic to describe the CURRENT session
  * version, never to be the newest diagnostic. A gate that demanded the newest

@@ -121,24 +121,37 @@ import { calculateVersionHash, stableSerialize } from './version-hash.ts'
  * produces `quality-below-floor`. Wiring silence into a rule is work nobody has
  * started.
  *
- * **What is not wired yet, stated rather than implied.** Two things this module
- * consumes have no production caller in the repository:
+ * **How this module is reached in production, and the one limb that is not.**
+ * `directMulticamSessionService` is reached over HTTP. Two published `/v1`
+ * routes import `createDirectMulticamSessionService` from
+ * `repository-factory.ts` and call it —
+ * `src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/direction/route.ts`
+ * (`POST`, capability `apollo.projects.capture-sessions.direction.run`) and its
+ * `protected-selections/route.ts` (`POST`, capability
+ * `…direction.protected-selections.direct`) — and
+ * `podcast-multicam-journey.e2e.mjs` drives the first of them against
+ * PostgreSQL. `grep -rln createDirectMulticamSessionService src/app/` returns
+ * exactly those two files. There is still no worker for
+ * `direct-multicam-session`: the command runs on the request, never on a queue.
  *
- * - `MulticamPerceptionSource` has no adapter. `repository-factory.ts` builds a
- *   diarization source, a visual provider and a silence provider, and nothing
- *   for perception, so the
- *   `reaction` observations below and the `reactionIntensityFloorBps` that
- *   filters them are exercised by tests and by nothing else. That is the honest
- *   state — a session nobody ran perception over produces no reaction evidence
- *   at all, which the direction handles by holding the current angle — and it
- *   is a phase-4 integration need, not a gap somebody should paper over with a
- *   stub returning intensity zero.
- * - nothing calls `directMulticamSessionService`. There is no HTTP route and no
- *   worker for `direct-multicam-session`; the factories that build its
- *   repository, its diarization source and its visual provider exist and have
- *   no call site. The slice is proven end to end by the PostgreSQL E2E and the
- *   FFmpeg integration suites, which is not the same as being reachable in
- *   production, and the hand-off says so.
+ * An earlier version of this block said nothing called the service and that no
+ * HTTP route existed for it, while the `silence` note below said
+ * `createDirectMulticamSessionService` wires `FfmpegMulticamSilenceProvider`
+ * unconditionally in production. Both could not be true; the first was the
+ * false one, and it survived because it was prose about routes with no route
+ * in it. Whoever edits this paragraph runs that grep first.
+ *
+ * The limb that genuinely has no production producer is perception.
+ * `MulticamPerceptionSource` has no adapter: `repository-factory.ts` builds a
+ * diarization source, a visual provider and a silence provider, and nothing for
+ * perception — `grep -rn MulticamPerceptionSource src/v2/infrastructure/`
+ * returns one line, a comment in `repository-factory.ts` saying so, and no
+ * class implementing it — so the `reaction` observations below and the
+ * `reactionIntensityFloorBps` that filters them are exercised by tests and by
+ * nothing else. That is the honest state — a session nobody ran perception over
+ * produces no reaction evidence at all, which the direction handles by holding
+ * the current angle — and it is a phase-4 integration need, not a gap somebody
+ * should paper over with a stub returning intensity zero.
  */
 
 export const MULTICAM_DIRECTION_PLANNER_VERSION = 'multicam-direction-planner/2026-09-v1'
@@ -369,7 +382,7 @@ function sessionRangeForSourceMs(input: {
  *
  * Every part, not `track.sourceAssetId` — which is documented as "the asset
  * that gives the track its identity, its FIRST part's source"
- * (`capture-session.ts:178-179`). A recorder that stopped and restarted
+ * (`domain/capture-session.ts:199-200`). A recorder that stopped and restarted
  * produces a second file on the same track (`addCaptureSessionTrackPart`), and
  * a lookup by track identity alone would neither ask for that file's
  * diarization nor recognise a run that arrived for it — dropping the run with
@@ -505,7 +518,7 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
           range,
           kind: 'active-speaker',
           // `identityResolved: false` is the diarization aggregate's own label
-          // (`speaker-diarization.ts:25`): a cluster separates voices, it does
+          // (`domain/speaker-diarization.ts:60`): a cluster separates voices, it does
           // not name people, and no rule downstream may pretend otherwise.
           value: Object.freeze({ kind: 'active-speaker' as const, speakerKey: segment.speakerKey, identityResolved: false as const }),
           confidence: 1,
@@ -1029,12 +1042,12 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   assumptions: readonly string[]
   omittedShots: number
 }> {
-  // `validId` (director-run.ts:280) refuses the `/` a session id may contain
-  // (`capture-session.ts:50`), so the id is folded rather than interpolated
+  // `validId` (`domain/director-run.ts:280`) refuses the `/` a session id may
+  // contain (`domain/capture-session.ts:50`), so the id is folded, not interpolated
   // raw — a decision that cannot be validated cannot be logged.
   //
-  // Unreachable today, and left in on purpose: `sync-diagnostic.ts:151` uses a
-  // NARROWER id grammar than `capture-session.ts:50` and refuses the same `/`,
+  // Unreachable today, on purpose: `domain/sync-diagnostic.ts:130` uses a
+  // NARROWER id grammar than `domain/capture-session.ts:50` and refuses that `/`,
   // so a session id containing one can have no diagnostic and therefore cannot
   // be directed at all. That divergence between two authority modules is
   // reported rather than relied on; the day it is reconciled, this keeps

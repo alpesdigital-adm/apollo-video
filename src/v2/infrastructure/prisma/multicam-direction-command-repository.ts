@@ -43,7 +43,7 @@ import {
  *   with the cadence each file was probed at. A direction cuts several
  *   recordings; `hydrateSource` refuses a render whose clips name an artifact
  *   the project does not link as available
- *   (`project-proxy-render-repository.ts:111-141`), and the service is where an
+ *   (`prisma/project-proxy-render-repository.ts:111-141`), and the service is where an
  *   operator can still act on that.
  * - the commit re-reads the stored direction and refuses if it is no longer the
  *   one the Command names. The direction lives in its own chain, so a Command
@@ -83,7 +83,7 @@ function parseArray(value: string, field: string): readonly unknown[] {
  * hands the plan back out of `hydrateStoredCommand`, so an edited snapshot
  * would have produced a direction — and a replayed answer — over bytes whose
  * hash nobody checked. The authority reader of the same snapshot does check it
- * (`project-proxy-render-repository.ts:99`), and CONTRACT §4 asks hydration to
+ * (`prisma/project-proxy-render-repository.ts:99`), and CONTRACT §4 asks hydration to
  * re-verify every hash. `calculateVersionHash` is canonical over the parsed
  * object, so a re-serialization with different key order still reproduces it.
  */

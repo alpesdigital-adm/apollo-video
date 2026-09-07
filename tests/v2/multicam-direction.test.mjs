@@ -404,8 +404,8 @@ test('T-FR-150 golden 1: a podcast follows the active speaker across two cameras
 
 test('T-FR-150 golden 1b: the audio bed reads what the audio IS, not only that somebody marked it for the mix', () => {
   // A recorder whose channel carries no final content (`syncAudioPolicy: 'none'`)
-  // is still legally markable for the mix (`capture-session.ts:363` gates only by
-  // role), so reading `includeInFinalMix` alone laid an empty channel under every
+  // is still legally markable for the mix (`domain/capture-session.ts:383-387` gates
+  // only by role), so reading `includeInFinalMix` alone laid an empty channel under every
   // shot while the lapel microphone that WAS a final candidate sat unused.
   const world = podcastWorld({
     masterAudio: { syncAudioPolicy: 'none', includeInFinalMix: true },

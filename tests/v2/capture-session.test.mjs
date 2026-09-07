@@ -309,8 +309,8 @@ test('T-FR-140 the reference track must be one of the session tracks', () => {
 // asserted a `discardScratch: true` flag on a millisecond-based helper. The
 // authority does not compute a discard flag at all: it REFUSES to build a
 // session in which a scratch-audio track is marked for the mix
-// (`capture-session.ts:362-366`) or offers its audio as final
-// (`capture-session.ts:367-371`), because a flag can be ignored downstream and a
+// (`domain/capture-session.ts:383-387`) or offers its audio as final
+// (`domain/capture-session.ts:388-392`), because a flag can be ignored downstream and a
 // refused aggregate cannot. Asserting the refusal is asserting the requirement.
 function screenTrack(overrides = {}) {
   return track({
@@ -380,13 +380,13 @@ test('T-FR-146 unequal camera and screen keep their own coverage, and scratch au
   assert.equal(screen.includeInFinalMix, false)
   assert.equal(camera.includeInFinalMix, true)
 
-  // …and the exclusion is enforced, not merely recorded: `capture-session.ts:362-366`
+  // …and the exclusion is enforced, not merely recorded: `domain/capture-session.ts:383-387`
   // refuses the aggregate outright rather than silently unsetting the flag.
   assert.throws(
     () => session({ tracks: [track(), screenTrack(), scratchTrack({ includeInFinalMix: true })] }),
     /scratch-audio track carries no final audio and cannot be marked for the final mix/,
   )
-  // `capture-session.ts:367-371`: nor can it volunteer its audio as the final one.
+  // `domain/capture-session.ts:388-392`: nor can it volunteer its audio as the final one.
   assert.throws(
     () => session({ tracks: [track(), screenTrack(), scratchTrack({ syncAudioPolicy: 'final-candidate' })] }),
     /scratch-audio track cannot offer its audio as a final candidate/,

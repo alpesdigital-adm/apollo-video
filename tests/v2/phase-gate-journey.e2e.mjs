@@ -112,7 +112,7 @@ process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
  * `REQUEST_RATE_ANOMALY` when `usage.baselineRequests > 0`
  * (`governance-anomaly.ts:152`), and `baselineRequests` is the count of
  * admissions in `[now - 300 s, now - 60 s)` — strictly OLDER than the signal
- * window (`governance-admission-repository.ts:435-452`). A run that finishes
+ * window (`prisma/governance-admission-repository.ts:435-452`). A run that finishes
  * inside one 60 s window therefore has no baseline at all and cannot trip it,
  * whatever it does; a run that outlives 60 s gets a baseline made of its own
  * first minute, and the threshold collapses to the floor

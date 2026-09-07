@@ -44,7 +44,7 @@ import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
  *
  * `director.decisions` is where the compiler's OWN reasoning goes, and it is
  * not a critic's. F4.012 fills the same field from `buildAngleDecisions`
- * (`multicam-direction.ts:1027`) without any critic either: a decision log says
+ * (`application/multicam-direction.ts:1040`) without any critic either: a decision log says
  * why this cut chose what it chose, and the three reference fields above are
  * what keeps a reader from mistaking that for an approval. So a compiler that
  * has per-cut reasoning passes it in and it is validated by

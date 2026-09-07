@@ -82,8 +82,8 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * The marker branch of "a marker or a manual anchor" is a stated omission: a
  * `reshoot-with-marker` recommendation is only derived when a capture protocol
  * evaluation caps the session at `not-synchronizable`
- * (`sync-diagnostic.ts:386-389`), and that ceiling then rejects EVERY angle
- * permanently (`multicam-direction.ts:962`), so a journey that took it could
+ * (`domain/sync-diagnostic.ts:386-389`), and that ceiling then rejects EVERY angle
+ * permanently (`domain/multicam-direction.ts:962`), so a journey that took it could
  * not also show the recovery. What this suite proves about markers is narrower
  * and true: the published vocabulary carries the remedy, and the anchor path is
  * the one it exercises end to end.
@@ -106,12 +106,19 @@ const RUN = process.env.APOLLO_INSUFFICIENT_EVIDENCE_E2E === '1'
 const SKIP = RUN ? false : 'set APOLLO_INSUFFICIENT_EVIDENCE_E2E=1 with a migrated V2_DATABASE_URL'
 /**
  * Local disk or versioned MinIO, chosen by the runtime env the composition root
- * reads — never pinned in this file. This journey is one of the three that
- * genuinely resolves artifact bytes: the sync worker opens all four recordings
- * to look for a signal, and the whole point of the suite is that it finds none.
- * A refusal reached because the store was unreachable would be the same word
- * for a different fact, which is why the s3 path is exercised rather than
- * assumed equivalent.
+ * reads — never pinned in this file. This journey genuinely resolves artifact
+ * bytes: the sync worker opens all four recordings to look for a signal, and
+ * the whole point of the suite is that it finds none. A refusal reached because
+ * the store was unreachable would be the same word for a different fact, which
+ * is why the `s3` path is written to work rather than assumed equivalent.
+ *
+ * **No CI step exercises it.** An earlier version of this note said the s3 path
+ * "is exercised", which was never true here: `grep -n
+ * "npm run test:e2e:insufficient-evidence-journey" .github/workflows/ci.yml`
+ * returns one line, 390, in the `quality` job, whose step sets no
+ * APOLLO_V2_ARTIFACT_STORAGE_DRIVER. This journey proves PostgreSQL 16 only.
+ * Writing the s3 path is capability; running it is coverage, and only the
+ * podcast and phase gate journeys have it (spec 05 §34.4).
  */
 const storageDriver = journeyStorageDriver()
 
@@ -449,7 +456,8 @@ test(
     // Artifact id and capture asset id are the same string on purpose: the
     // compile step looks a probed cadence up by `track.sourceAssetId` against
     // the project's media links, which are keyed by artifact id
-    // (`multicam-direction.ts:1195-1205`).
+    // (`application/multicam-direction.ts:1338-1340`, the `probedRates` map
+    // keyed by `link.artifactId`).
     const recordings = [
       { assetId: 'ie-asset-master', key: 'capture/master.m4a', file: masterFile, mediaType: 'audio', container: 'm4a', role: 'source-master' },
       { assetId: 'ie-asset-cam-a', key: 'capture/camera-a.mp4', file: cameraAFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
@@ -618,7 +626,7 @@ test(
           syncAudioPolicy: 'none', includeInFinalMix: false,
         }),
         // The control. `scratch-audio` is never a video angle
-        // (`multicam-direction.ts:150`), so aligning it cannot rescue the
+        // (`domain/multicam-direction.ts:150`), so aligning it cannot rescue
         // direction — which is what makes it safe to put in the same session as
         // the refusal it is a control for.
         track({
@@ -934,7 +942,8 @@ test(
       `the stored reasons never mention the sync: ${noAngle[0].detail}`,
     )
     // The control lost for a DIFFERENT reason, and the stored record says which.
-    // An audio recorder is not a video angle (`multicam-direction.ts:150`), so
+    // An audio recorder is not a video angle
+    // (`domain/multicam-direction.ts:150`), so
     // aligning one cannot rescue a direction: it is rejected as
     // `not-a-video-source` where the cameras are rejected for their sync. If
     // those two ever collapsed into one sentence, an operator reading this

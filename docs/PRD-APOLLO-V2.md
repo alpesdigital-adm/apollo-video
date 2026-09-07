@@ -1530,7 +1530,11 @@ implementados e não são baratos:
 - **`ocr-timestamp`** significa ler o relógio que o player desenha. Motor de OCR
   o repositório **tem**: a porta `ImageVisionProvider` já roda Tesseract
   (`tesseract-image-vision-provider.ts`, ligado por `APOLLO_TESSERACT_PATH`) e o
-  worker de ingestão a usa. O que não existe é o resto do detector, e é a parte
+  worker de ingestão a usa (`repository-factory.ts:1979`). Não é pacote npm — é
+  binário externo que a implantação instala, e é por isso que
+  `image-analysis-tesseract.integration.mjs` roda em nenhum passo do CI. Quem
+  procurar o motor em `package.json` não acha e conclui errado: a linha de
+  F4.015 da traçabilidade concluiu, e foi corrigida contra este parágrafo. O que não existe é o resto do detector, e é a parte
   cara: não há caminho de quadro de vídeo materializado até essa porta — ela só
   recebe imagem parada vinda da ingestão —, e transformar texto reconhecido em
   posição de playhead é trabalho de região e template por player, porque cada um
@@ -1679,7 +1683,7 @@ para trás depois de uma linha que alguém removeu.
 
 A proteção **não** foi adicionada, e a razão é medida e não suposta: bloquear
 DELETE nessas tabelas quebra um caminho de escrita de produção e duas suítes.
-`capture-session-repository.ts:407` apaga o mapa de relógio anterior dentro de
+`prisma/capture-session-repository.ts:407` apaga o mapa de relógio anterior dentro de
 `persistClockMap`, porque "um mapa é a resposta corrente para uma fonte";
 `multicam-longform-gate.e2e.mjs` falsifica nove dos dez critérios apagando uma
 linha de evidência de cada vez e ainda exige que apagar um registro de gate

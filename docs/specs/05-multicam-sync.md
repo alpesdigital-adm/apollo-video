@@ -823,7 +823,7 @@ disso, `insufficient`.
   ordenados: a direção segura o ângulo corrente e emite
   `ambiguous-active-speaker`. **Qualquer** observação de `concurrent-speech` que
   cruze a janela dobra a margem, e a proveniência não entra nessa conta:
-  `multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
+  `domain/multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
   `observationsOverlapping` (`multicam-evidence.ts:392-400`) filtra por `kinds` e
   `trackId`, não por `evaluatorKind`. Uma observação `declared` alarga a margem
   tanto quanto uma `measured`.
@@ -930,8 +930,8 @@ categoria `policy`, `retryable: false` (`PUBLIC_ERROR_CATALOG`, lido em
 `POST /v1/projects/{projectId}/color-plan`, que chega ao mesmo construtor por
 `createProjectColorPlan` (`application/project-color-plans.ts:159`,
 `domain/project-color-plan.ts:54`). A rota de compilação tem asserção de
-jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1220-1245` e em
-`teacher-screen-journey.e2e.mjs:794-821` conferem o código, a categoria e o
+jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1298-1304` e em
+`teacher-screen-journey.e2e.mjs:883-889` conferem o código, a categoria e o
 `retryable` do envelope. Essas duas jornadas **não** foram executadas nesta
 máquina (§34.6); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
 código, não medição.
@@ -1351,7 +1351,7 @@ Waves 18/19/20: `workspaces` vem da migração inicial `20260712210000_init`. O
 vigésimo quarto, `module-graph-audit`, **não** é tabela: `grep module_graph
 prisma/v2/schema.prisma` devolve zero linhas, e a referência que o gate constrói
 é `{ type: 'module-graph-audit', id: 'legacy-runtime-audit:<scannedAt>', hash:
-auditHash }` (`multicam-longform-gate.ts:807-811`) — o resultado de uma
+auditHash }` (`domain/multicam-longform-gate.ts:814-819`) — o resultado de uma
 varredura, não uma linha. É o mesmo fato que a nota sobre o critério 10 registra
 adiante. "evidence-ref: o que o leitor quiser" é como um gate deixa de ser
 auditável.
@@ -1374,7 +1374,7 @@ diferentes:
   sob uma versão de sessão ou uma época de referência que a sessão já não tem.
   É a mesma comparação que os serviços fazem ao **derivar**
   (`react-playback-map.ts:1184`, `multicam-color-match.ts:565`,
-  `compileShotsToSourceRanges` em `multicam-direction.ts:2146`), refeita sobre
+  `compileShotsToSourceRanges` em `domain/multicam-direction.ts:2146`), refeita sobre
   linhas já persistidas — que é onde ela nunca tinha rodado, e por isso uma
   direção cortada sob uma versão de sessão respondia a este gate exatamente tão
   bem depois de a sessão passar dela.
@@ -1588,12 +1588,42 @@ há teste que meça esse teto.
   não entra na decisão (§29.1).
 - **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
   `PLAYBACK_DETECTION_METHODS`. O que falta ao segundo não é motor de OCR — o
-  repositório tem Tesseract atrás de `ImageVisionProvider` — e sim o caminho de
-  quadro de vídeo até essa porta e o trabalho de região por player (§32.2).
-  Enquanto não existirem, player escondido é trecho `manual-anchor-required`
+  repositório tem Tesseract atrás de `ImageVisionProvider`, ligado no worker de
+  ingestão em `repository-factory.ts:1979` — e sim o caminho de quadro de vídeo
+  até essa porta e o trabalho de região por player (§32.2). O motor é binário
+  externo escolhido por `APOLLO_TESSERACT_PATH`, não pacote npm; quem procura em
+  `package.json` não acha e conclui que não existe, que foi exatamente o erro
+  que a linha F4.015 da traçabilidade carregou até 2026-09-07. Enquanto não
+  existirem detectores, player escondido é trecho `manual-anchor-required`
   para uma pessoa responder (PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
+- **Quatro das seis jornadas obrigatórias nunca tocam armazenamento de objetos
+  versionado.** O briefing pede "PostgreSQL 16 **e** armazenamento de objetos
+  versionado"; só duas jornadas provam as duas metades, e é honesto dizer quais.
+  `grep -n "APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3" .github/workflows/ci.yml`
+  devolve sete passos, e os de jornada obrigatória são dois: `Run Wave 20
+  podcast multicam journey against PostgreSQL and versioned MinIO` (linha 760) e
+  `Run Wave 20 phase gate journey against PostgreSQL and versioned MinIO` (778),
+  ambos no job `local-infrastructure`, cada um com bucket exclusivo por run.
+  - **Provam as duas metades:** `podcast-multicam-journey` (as quatro gravações
+    entram no bucket versionado e o render as lê de volta por `materialize`) e
+    `phase-gate-journey` (roda contra o bucket e o afirma **vazio** no fim,
+    porque nenhuma rota do gate constrói armazenamento de artefato — é uma
+    afirmação falsificável, não um comentário).
+  - **Provam só PostgreSQL:** `teacher-screen-journey`, `react-playback-journey`
+    e `insufficient-evidence-journey` leem o driver do ambiente e rodariam sob
+    `s3` sem alterar uma linha; nenhum passo do CI lhes dá um, então rodam uma
+    vez cada, no job `quality`, sobre disco local. `longform-synthesis-journey`
+    não tem armazenamento de artefato no caminho: os bytes chegam ao renderer
+    por `sources: [{ path: masterPath }]` de um `mkdtemp` da própria suíte, e o
+    cabeçalho do arquivo já dizia isso — era o único dos quatro que dizia.
+  - A regra que impede isto de voltar a ser prosa:
+    `mandatory-journey-ci-wiring.test.mjs` monta a lista das jornadas com passo
+    `s3` e afirma que ela é exatamente `{podcast, phase gate}`. Ligar uma quarta
+    jornada ao MinIO é mudança bem-vinda que precisa editar essa asserção, este
+    parágrafo e as linhas FR-150/F4.015/F4.016 da traçabilidade junto.
+
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os
   números das §§29–31 vieram de fixtures geradas.
 
@@ -1615,22 +1645,32 @@ há teste que meça esse teto.
 
 ### 34.6 O que não foi medido neste passe
 
-Este documento foi escrito com `npm test` (2147 testes, 2147 passes, saída 0),
-seis suítes de integração de mídia da Wave 20 e quatro suítes de banco contra um
-cluster PostgreSQL 16 descartável levantado localmente e destruído em seguida.
-**Não** foram executadas aqui: as jornadas de navegador
+O passe que escreveu esta seção rodou `npm test` (2147 testes, 2147 passes,
+saída 0), seis suítes de integração de mídia da Wave 20 e quatro suítes de banco
+contra um cluster PostgreSQL 16 descartável levantado localmente e destruído em
+seguida. **Não** executou: as jornadas de navegador
 (`test:e2e:wave20-browser`, `test:e2e:multicam-longform-gate-browser`), que
 exigem `next start` e um build de produção, nem as jornadas de produto de
 podcast, professor+tela, react, evidência insuficiente e síntese long-form
 contra PostgreSQL. Elas existem, estão registradas em passos nomeados do CI, e
 são medidas lá.
 
+**Números com data, porque contagem sem data envelhece calada.** Em 2026-09-07,
+depois da rodada de fechamento, `npm test` nesta máquina devolveu **2165 testes,
+2165 passes, saída 0, 61,3 s** — os 2147 acima são do passe original e não do
+estado atual. Passes posteriores mediram contra PostgreSQL, e a traçabilidade
+registra o número de cada um: `playback-map.e2e.mjs`, `phase-gate-journey`
+(36,9 s) e `longform-synthesis-journey` (530,9 s) em 2026-09-07. As duas
+jornadas de navegador continuam sem execução registrada fora do CI.
+
 ### 34.7 A correção da fase 9: os dois compiles que a API não alcançava
 
 Uma auditoria independente conferiu o que a §34 afirma e achou o furo. Até
 `93aa7f55`, `snapshots.persist` tinha exatamente dois chamadores —
 `application/react-playback-map.ts:1054` e
-`application/compile-synthesis-to-directed-plan.ts:368` — ambos dentro dos dois
+`application/compile-synthesis-to-directed-plan.ts:368`, que em 2026-09-07 são
+as linhas 1127 e 377; continuam sendo dois, e `grep -rn "snapshots\.persist"
+src/` devolve exatamente essas duas — ambos dentro dos dois
 serviços de compile, e nenhuma rota alcançava nenhum dos dois.
 
 **O comando que prova isso não é o grep pelos nomes dos serviços.** A primeira
@@ -1819,7 +1859,7 @@ a nomear o ancestral pelo hash.
 **Um defeito de documentação achado ao medir.** A linha de rastreabilidade de
 F4.016 citava um `fingerprint` da jornada do phase gate como se fosse um valor
 para conferir. Ele não é: `evaluatedAt` está dentro do relatório que
-`calculateCanonicalHash` cobre (`multicam-longform-gate.ts:576-581`) e a jornada
+`calculateCanonicalHash` cobre (`domain/multicam-longform-gate.ts:576-581`) e a jornada
 avalia por `/v1` com o relógio real, então duas execuções em 2026-09-07
 devolveram `87337fe91d33` e `d422d78a6274`. O que se confere ali é o que não
 depende do instante: 14 avaliações, 41 artefatos citados e o replay

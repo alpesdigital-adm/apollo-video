@@ -99,9 +99,17 @@ const SKIP = RUN ? false : 'set APOLLO_REACT_PLAYBACK_JOURNEY_E2E=1 with a migra
 /**
  * Local disk or versioned MinIO, chosen by the runtime env — never pinned here.
  *
+ * **No CI step gives this journey an `s3` driver.** `grep -n
+ * "npm run test:e2e:react-playback-journey" .github/workflows/ci.yml` returns
+ * one line, 371, in the `quality` job, whose step sets no
+ * APOLLO_V2_ARTIFACT_STORAGE_DRIVER — so what CI proves here is PostgreSQL 16,
+ * not the briefing's other half (spec 05 §34.4). The paragraph below is the
+ * author's own s3 run on a workstation, kept because the defect it found is
+ * real and the upload it forced is still in the code; it is not a CI result.
+ *
  * `POST /v1/.../playback-map` resolves the two recordings through
- * `CaptureMediaResolver`, so this journey does read artifact bytes, and the
- * first s3 run said so loudly: with an empty bucket the build answered
+ * `CaptureMediaResolver`, so this journey does read artifact bytes, and that
+ * s3 run said so loudly: with an empty bucket the build answered
  * `500 INTERNAL_ERROR` where the suite expects `409
  * MEDIA_ARTIFACT_IDENTITY_MISMATCH`, because the reference track's
  * materialization failed before the identity comparison the assertion is about

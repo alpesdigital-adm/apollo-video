@@ -909,7 +909,7 @@ test('E2E-F4.012/013/014/015 the Wave 20 operator pages never render an absence 
     const deriveAnswer = await waitForAnswer(operator, '/color-match', fromDerive, 'the derivation')
     // The answer, by its real shape rather than "something came back". On this
     // project no source carries a trusted colour compilation, so the ColorPlan
-    // context refuses to be read at all — `project-color-plan-repository.ts:311`
+    // context refuses to be read at all — `prisma/project-color-plan-repository.ts:311`
     // — and the derivation cannot write the layer it exists to write.
     //
     // Worth naming, because the code is doing double duty: PERSISTENCE_CONFLICT
