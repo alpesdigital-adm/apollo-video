@@ -457,6 +457,40 @@ test('T-F4.015 a rewind that runs past what was played is a rewind, not a replay
   assert.equal(map.pieces[1].discontinuityReason, 'rewind')
 })
 
+test('T-F4.015 a run that ends on the last tick of the reference reports it exhausted', () => {
+  // Thirty seconds of reaction that are thirty seconds of reference, 1:1, so
+  // the single run ends exactly on the declared duration.
+  //
+  // The warning is the map's answer to "did the reactor reach the end", and it
+  // had no assertion in this repository until this test: removing the three
+  // lines that raise it (playback-map.ts:824-826) left 47 unit tests and the
+  // fingerprint fixture green, measured by an auditor before this was written.
+  const windows = []
+  for (let tick = 0; tick < 30; tick += 0.5) windows.push(observation(tick, tick))
+  const against = (referenceSeconds) => buildPlaybackMap({
+    mapId: 'playback-map-exhausted',
+    session: reactSession(),
+    reactionTrack: reactionTrack(),
+    referenceTrack: referenceTrack(),
+    referenceMedia: { ...REFERENCE_MEDIA, durationTicks: seconds(referenceSeconds) },
+    reactionMedia: { ...REACTION_MEDIA, durationTicks: seconds(30) },
+    observations: windows,
+    policy: POLICY,
+  })
+
+  const exhausted = against(30)
+  assert.deepEqual(exhausted.pieces.map((piece) => piece.mode), ['playing'])
+  assert.equal(exhausted.pieces[0].referenceRange.end, seconds(30))
+  assert.ok(exhausted.warnings.includes('reference-exhausted'))
+
+  // The same windows against a reference the caller declares longer. Nothing
+  // about the audio changed; the end moved, so the reactor no longer reached
+  // it and the map stops claiming they did.
+  const longer = against(40)
+  assert.ok(!longer.warnings.includes('reference-exhausted'))
+  assert.ok(longer.pieces[0].referenceRange.end < seconds(40))
+})
+
 test('T-F4.015 two plausible references in one window become uncovered, never an invented piece', () => {
   const windows = scenarioObservations()
   // Same window, two references four seconds apart: the correlator found both
