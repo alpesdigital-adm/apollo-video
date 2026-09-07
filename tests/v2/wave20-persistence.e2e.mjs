@@ -8,12 +8,12 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *
  * The structural suite (`wave20-persistence.test.mjs`) reads the migration as
  * text and proves the CHECK bodies name the domain's own constants. It cannot
- * prove they are constraints. Only a database can, and there is no database on
- * the machine this was written on: the CHECK and EXCLUDE bodies are parsed for
- * the first time when CI applies the migration, so everything below has never
- * been executed locally.
+ * prove they are constraints. Only a database can. When this was written there
+ * was none on the machine and everything below had run only in CI; the three
+ * tests have since been executed against a throwaway PostgreSQL 16 cluster
+ * migrated from empty, and CI remains the reference measurement.
  *
- * Four things are checked here that no fake and no text search can check:
+ * Five things are checked here that no fake and no text search can check:
  *
  * - **The refusals are refusals.** A row that lies about a derived flag, an
  *   action that contradicts its cause, a measurement that is "unavailable" and
@@ -30,6 +30,10 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  * - **Workspace isolation is a foreign key, not a WHERE clause.** A child
  *   pointing at a parent in another workspace is refused by the composite key
  *   rather than by whoever remembered to filter.
+ * - **What "immutable history" means here, measured rather than asserted.**
+ *   The third test below reads the catalogue and then deletes a version row,
+ *   because the phrase covers an UPDATE and does not cover a DELETE, and the
+ *   difference belongs in a number rather than in prose.
  */
 
 const RUN = process.env.APOLLO_WAVE20_PERSISTENCE_E2E === '1'
@@ -1452,6 +1456,231 @@ test(
         `measurement dimensions=${Object.keys(matchA.measurements[0].dimensions).length}, ` +
         `plan issues=${matchA.plan.issues.length}, critic dimensions=${reportA.dimensions.length}, ` +
         `playback pieces v1=${playbackA.map.pieces.length} v2=${anchored.pieces.length}`,
+    )
+  },
+)
+
+test(
+  'E2E-F4.016 immutable history means refused on read, and it does not mean refused on DELETE',
+  { skip: RUN ? false : 'set APOLLO_WAVE20_PERSISTENCE_E2E=1 with a migrated V2_DATABASE_URL' },
+  async (t) => {
+    // The contract for this wave says "immutable histories: version chain plus
+    // head; hydration re-verifies every hash". The second test above proves the
+    // second half of that sentence for four aggregates: an edited row is
+    // refused on read. This test measures the FIRST half, because nothing did,
+    // and the two halves are not the same protection.
+    //
+    // What it proves:
+    //
+    // - The protection is application code, not database. There is no trigger,
+    //   no rule and no row-level security on any of these tables, so nothing
+    //   below the repositories refuses anything.
+    // - A DELETE therefore succeeds. A version row disappears, the head goes on
+    //   naming its hash, and the chain that was supposed to be a history has a
+    //   hole in it that no read complains about until it asks for that version.
+    //
+    // Why it is a test rather than a fix. Blocking DELETE in the database
+    // breaks three things this repository does on purpose and one of them is a
+    // production write path:
+    //
+    // - `capture-session-repository.ts` deletes the previous clock map inside
+    //   `persistClockMap` -- "a map is the current answer for one source".
+    // - `multicam-longform-gate.e2e.mjs` falsifies nine of the ten gate
+    //   criteria by deleting one evidence row each, and asserts that deleting a
+    //   gate record cascades to its criteria, checks and evidence.
+    // - The cleanup of every Postgres suite here, including this file's own,
+    //   deletes from the same tables.
+    //
+    // So the record is the honest outcome and this is the tripwire under it:
+    // the day somebody does add the protection, this test fails and points at
+    // the three places the record lives (PRD FR-150, spec 05 s33.2 and s34.9,
+    // REQUIREMENTS-TRACEABILITY).
+    const { createWorkspace } = await import('../../src/v2/domain/workspace.ts')
+    const { PrismaWorkspaceRepository } = await import(
+      '../../src/v2/infrastructure/prisma/workspace-repository.ts'
+    )
+    const { PrismaMulticamDirectionRepository } = await import(
+      '../../src/v2/infrastructure/prisma/multicam-direction-repository.ts'
+    )
+    const { calculateMulticamDirectionHash } = await import(
+      '../../src/v2/domain/multicam-direction.ts'
+    )
+    const { buildDirectionWorld } = await import('./wave20-fixtures.mjs')
+
+    const client = new PrismaClient()
+    const W = 'w20i-workspace'
+    const PROJECT = 'w20i-project'
+    const VERSION = 'w20i-version'
+    const SESSION = 'w20i-session'
+    const at = (second) => new Date(Date.parse('2029-05-03T09:00:00.000Z') + second * 1_000)
+
+    const clean = async () => {
+      for (const table of [
+        client.v2MulticamAngleScoreComponent, client.v2MulticamAngleCandidate,
+        client.v2MulticamShotAlternative, client.v2MulticamShotDecision,
+        client.v2MulticamDirectionHead, client.v2MulticamDirection,
+        client.v2MulticamObservation, client.v2MulticamEvidenceSet,
+        client.v2CaptureSessionHead,
+      ]) {
+        await table.deleteMany({ where: { workspaceId: W } })
+      }
+      await client.v2ProjectVersion.deleteMany({ where: { workspaceId: W } })
+      await client.v2ProjectSnapshot.deleteMany({ where: { workspaceId: W } })
+      await client.v2Project.deleteMany({ where: { workspaceId: W } })
+      await client.v2Workspace.deleteMany({ where: { id: W } })
+    }
+
+    t.after(async () => {
+      try {
+        await clean()
+      } catch (error) {
+        console.error('cleanup failed:', error?.message ?? error)
+      } finally {
+        await client.$disconnect()
+      }
+    })
+    await clean()
+
+    // ---- the catalogue, over the tables the phrase is about ---------------
+    // Read from `pg_catalog` rather than from the migration text: a migration
+    // that creates a trigger and a database that has one are different claims,
+    // and only the second is what protects a row.
+    const HISTORY_TABLES = [
+      'capture_session_versions', 'capture_session_heads',
+      'sync_diagnostics', 'sync_diagnostic_heads',
+      'multicam_directions', 'multicam_direction_heads',
+      'multicam_match_plans', 'multicam_match_plan_heads',
+      'playback_maps', 'playback_map_heads',
+      'renderable_plan_snapshots',
+      'multicam_longform_gates', 'multicam_longform_gate_criteria',
+      'multicam_longform_gate_checks', 'multicam_longform_gate_evidence',
+    ]
+    const [guards] = await client.$queryRawUnsafe(
+      `SELECT
+         count(*) FILTER (WHERE NOT t.tgisinternal) AS triggers,
+         count(DISTINCT c.oid) FILTER (WHERE c.relrowsecurity) AS rls,
+         count(DISTINCT c.oid) AS tables
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       LEFT JOIN pg_trigger t ON t.tgrelid = c.oid
+       WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])`,
+      HISTORY_TABLES,
+    )
+    const [rules] = await client.$queryRawUnsafe(
+      "SELECT count(*) AS rules FROM pg_rules WHERE schemaname = 'public' AND tablename = ANY($1::text[])",
+      HISTORY_TABLES,
+    )
+    assert.equal(
+      Number(guards.tables),
+      HISTORY_TABLES.length,
+      'the table list drifted from the schema; a name that does not exist measures nothing',
+    )
+    assert.equal(Number(guards.triggers), 0, 'a trigger appeared: the record in the PRD and spec 05 s34.7 is now wrong')
+    assert.equal(Number(guards.rls), 0, 'row-level security appeared: the same record is now wrong')
+    assert.equal(Number(rules.rules), 0, 'a rule appeared: the same record is now wrong')
+
+    // ---- and what that costs, on a real two-version chain -----------------
+    const workspaces = new PrismaWorkspaceRepository(client)
+    await workspaces.create(createWorkspace({
+      id: W, slug: W, name: 'W20 immutability', status: 'active', createdAt: at(0).toISOString(),
+    }))
+    await client.v2Project.create({
+      data: {
+        id: PROJECT,
+        workspaceId: W,
+        name: 'W20 immutability',
+        status: 'reviewing-proxy',
+        objective: 'discovery',
+        format: '16:9',
+        locale: 'pt-BR',
+        createdByType: 'api-client',
+        createdById: 'w20i-client',
+        createdAt: at(0),
+        updatedAt: at(0),
+      },
+    })
+    for (const kind of ['brief', 'edit-plan', 'policies']) {
+      await client.v2ProjectSnapshot.create({
+        data: {
+          id: `${VERSION}-${kind}`,
+          workspaceId: W,
+          projectId: PROJECT,
+          kind,
+          schemaVersion: 1,
+          contentJson: JSON.stringify({ kind }),
+          contentHash: '1'.repeat(64),
+          createdAt: at(0),
+        },
+      })
+    }
+    await client.v2ProjectVersion.create({
+      data: {
+        id: VERSION,
+        workspaceId: W,
+        projectId: PROJECT,
+        sequence: 1,
+        briefSnapshotId: `${VERSION}-brief`,
+        editPlanSnapshotId: `${VERSION}-edit-plan`,
+        policiesSnapshotId: `${VERSION}-policies`,
+        baseHash: '2'.repeat(64),
+        createdBy: 'w20i-client',
+        createdAt: at(0),
+      },
+    })
+
+    const directions = new PrismaMulticamDirectionRepository(client)
+    const world = buildDirectionWorld({ workspaceId: W, projectId: PROJECT, sessionId: SESSION })
+    await client.v2CaptureSessionHead.create({
+      data: {
+        id: `${SESSION}:head`, workspaceId: W, projectId: PROJECT, sessionId: SESSION,
+        version: world.session.version, sessionHash: world.session.sessionHash,
+        status: world.session.status, createdAt: at(0), updatedAt: at(0),
+      },
+    })
+    await directions.persistEvidenceSet({ set: world.evidence, createdAt: at(1).toISOString() })
+    await directions.appendVersion({
+      direction: world.direction, base: null, occurredAt: at(2).toISOString(),
+    })
+    const later = (() => {
+      const { directionHash, ...body } = world.direction
+      const moved = { ...body, generatedAt: new Date(Date.parse(body.generatedAt) + 1_000).toISOString() }
+      return Object.freeze({ ...moved, directionHash: calculateMulticamDirectionHash(moved) })
+    })()
+    const advanced = await directions.appendVersion({
+      direction: later,
+      base: { version: 1, directionHash: world.direction.directionHash },
+      occurredAt: at(3).toISOString(),
+    })
+    assert.equal(advanced.stored.version, 2)
+    assert.equal(advanced.stored.previousVersionHash, world.direction.directionHash)
+
+    // Version 1 is the ancestor the head's chain names. Deleting it is the
+    // thing the phrase "immutable history" reads as forbidden.
+    const removed = await client.$executeRawUnsafe(
+      'DELETE FROM "multicam_directions" WHERE "workspaceId" = $1 AND "sessionId" = $2 AND "version" = 1',
+      W, SESSION,
+    )
+    assert.equal(removed, 1, 'the database refused the delete, and the record is now wrong')
+    assert.equal(
+      await directions.readVersion({ workspaceId: W, sessionId: SESSION, version: 1 }),
+      null,
+      'the deleted version came back',
+    )
+    // The head still answers, still names the ancestor by hash, and nothing in
+    // the read path says the ancestor is gone. That is the whole finding: the
+    // chain is verifiable forwards from a row and unverifiable backwards past
+    // a row somebody removed.
+    const head = await directions.readHead({ workspaceId: W, sessionId: SESSION })
+    assert.equal(head.version, 2)
+    assert.equal(head.previousVersionHash, world.direction.directionHash)
+    const shots = await client.v2MulticamShotDecision.count({
+      where: { workspaceId: W, sessionId: SESSION, directionId: { endsWith: ':v1' } },
+    })
+    console.log(
+      `[E2E-F4.016] immutability: ${HISTORY_TABLES.length} history tables, `
+      + `${Number(guards.triggers)} triggers, ${Number(rules.rules)} rules, ${Number(guards.rls)} with RLS; `
+      + `DELETE of version 1 removed ${removed} row and ${shots === 0 ? 'its' : shots + ' remaining'} shot decisions, `
+      + `head still at v${head.version} naming the ancestor hash`,
     )
   },
 )

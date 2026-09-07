@@ -1259,6 +1259,22 @@ taxa zero) nem picture-in-picture. `retainedSourceRanges` lista o que sobrevive
 da referência, em segundos dela; a reação não aparece ali porque ela não é um
 intervalo de origem retido — ela é a linha do tempo.
 
+O plano também carrega, desde 2026-09-07, um log de decisão por peça em
+`director.decisions` — antes era uma lista vazia congelada.
+`buildPlaybackDecisions` o monta a partir das peças já resolvidas e
+`assembleDirectedEditPlan` o passa por `validateDirectorDecisions`, a mesma
+autoridade da direção multicâmera: 4 a 64 entradas, escolha, razão, evidência e
+confiança em cada uma, com tipo, detalhe e banda de confiança derivados ali. São
+três decisões de resumo — o mapa, a regra de emenda e a cama de áudio — mais uma
+por peça, citadas da menos confiante para cima quando passam do teto de 64. As
+refs de evidência são construídas a partir de identidades que o agregado valida
+(mapa, peça e hash da peça) e **não** repassam as `evidenceRefs` da peça: uma
+âncora manual constrói a sua a partir da nota de uma pessoa
+(`playback-map.ts:1481`) e o agregado só exige que ela não seja vazia, então uma
+nota com espaço tornaria incompilável um mapa válido. Os três campos de
+referência do plano continuam nomeando a derivação, nunca uma run: o log diz por
+que o compilador cortou, e não que alguém aprovou.
+
 ### 32.4 Medido
 
 `tests/v2/playback-map-fingerprint.integration.mjs`, executado nesta máquina
@@ -1345,6 +1361,38 @@ auditável.
 `evidence-unverified` (investigue a linha), `evidence-not-measured`
 (meça — nulo, nunca zero), `requirement-unmet` (conserte o conteúdo) e
 `evidence-stale` (re-execute contra a versão corrente).
+
+`evidence-stale` **não** é geral, e esta lista o apresentava como se fosse.
+Quem o emite são três dos dez critérios, respondendo a duas perguntas
+diferentes:
+
+- o critério 4 (`react-edited-with-piecewise-map`) o usa quando o plano
+  compilado não nomeia mais o mapa no hash em que o mapa está — plano velho,
+  mapa novo;
+- os critérios 4, 5 (`active-speaker-and-demonstration-directed`) e 7
+  (`colour-match-precedes-creative-lut`) o usam quando o agregado foi derivado
+  sob uma versão de sessão ou uma época de referência que a sessão já não tem.
+  É a mesma comparação que os serviços fazem ao **derivar**
+  (`react-playback-map.ts:1184`, `multicam-color-match.ts:565`,
+  `compileShotsToSourceRanges` em `multicam-direction.ts:2146`), refeita sobre
+  linhas já persistidas — que é onde ela nunca tinha rodado, e por isso uma
+  direção cortada sob uma versão de sessão respondia a este gate exatamente tão
+  bem depois de a sessão passar dela.
+
+A comparação é versão de sessão **e** época de referência, e não a versão do
+diagnóstico, embora a direção registre uma. Toda trava que o domínio tem
+compara exatamente esses dois, e `directMulticam` pede que o diagnóstico
+descreva a versão **corrente** da sessão, nunca que ele seja o mais novo; exigir
+o mais novo inventaria uma regra que a derivação não tem. A primeira versão
+desta correção comparava a versão do diagnóstico e o
+`phase-gate-journey.e2e.mjs` a recusou, porque anexar um diagnóstico mais novo
+movia dois critérios onde a suíte prova que se move exatamente um.
+
+Os outros sete critérios não fazem comparação de versão nenhuma, e não é
+esquecimento: os critérios 1 e 2 escolhem a avaliação de protocolo pela chave
+`[workspace, sessão, versão de sessão, protocolo, versão de protocolo]`, então
+já leem a linha da versão certa em vez de comparar depois; os critérios 6, 8, 9
+e 10 leem agregados que não são derivados de uma sessão de captura.
 
 A verificação de hash tem três estados, e o terceiro é o que torna o gate
 possível: hash presente e conferido; hash presente e **não** conferido, que é
@@ -1711,10 +1759,85 @@ testes, 2 passes, 530,9 s, os dois cortes por `POST render-plan 201`.
 está corrigida no início da §34.7, junto com o comando que de fato responde.
 
 Contagens conferidas nesta máquina em 2026-09-07 e refletidas em
-`docs/REQUIREMENTS-TRACEABILITY.md`: `playback-map-service.test.mjs` tem 18
-testes, o registry tem cinco capabilities de `playback-map`, a jornada do phase
-gate roda **14 avaliações** (oito de dez antes dos compiles, dez de dez depois,
-40 artefatos citados) e `npm run api:v1:validate` responde "349 capabilities,
-609 schemas, 675 examples, 284 paths, compatibility baseline intact".
+`docs/REQUIREMENTS-TRACEABILITY.md`: `playback-map-service.test.mjs` tinha 18
+testes e passou a ter 19 na §34.9, o registry tem cinco capabilities de
+`playback-map`, a jornada do phase gate roda **14 avaliações** (oito de dez
+antes dos compiles, dez de dez depois; 40 artefatos citados então, 41 depois da
+§34.9) e `npm run api:v1:validate` responde "349 capabilities, 609 schemas, 675
+examples, 284 paths, compatibility baseline intact".
 
 Nada nesta seção afirma implantação ou aceite. Os dois continuam pendentes.
+
+### 34.9 A fase 11: três achados que a re-auditoria deixou em aberto
+
+A re-auditoria da §34.8 deixou três coisas sem registro em lugar nenhum que um
+leitor procure. Duas viraram código; uma virou declaração, porque consertá-la
+quebraria o que ela deveria proteger.
+
+**O corte de react não dizia por que cortava.** `grep -rnE
+"reactDirector|react-director" src/ tests/` saía com 1 e nenhuma linha, e
+`renderable-edit-plan.ts` punha `decisions: Object.freeze([])` no plano — de
+modo que a única metade da wave sem log de decisão era justamente a que decide,
+peça a peça, se o espectador vê a referência ou o reactor. `buildPlaybackDecisions`
+passou a montar esse log das peças já resolvidas e `assembleDirectedEditPlan`
+passou a aceitá-lo e a validá-lo com `validateDirectorDecisions` (spec §32.3,
+PRD FR-145). Dois limites do domínio foram achados ao fazer isso e estão no
+comentário da função: as `evidenceRefs` de uma peça **não** podem ser repassadas
+a `createDecisionConfidence`, porque a de uma âncora é construída a partir da
+nota de uma pessoa e o agregado só exige que ela não seja vazia; e o id de uma
+decisão para em 128 caracteres enquanto um id de mapa sozinho pode chegar a 128,
+caso que a suíte já cobre. Medido: `playback-map-service.test.mjs` passou de 18
+para 19 testes, e o novo mede 12 decisões sobre 9 peças.
+
+**A trava de sincronismo não era refeita sobre evidência já persistida.**
+`grep -n evidence-stale multicam-longform-gate-repository.ts` devolvia
+exatamente uma linha, dentro do critério 4, e ela comparava a linhagem de um
+plano contra um mapa — não uma derivação contra a sessão de que ela saiu. Os
+critérios 4, 5 e 7 passaram a comparar a versão de sessão e a época de
+referência que o agregado registrou contra o que a sessão diz agora, e a falhar
+com `evidence-stale` (spec §33.2, que apresentava as cinco razões lisas, como se
+a checagem fosse geral). Os contadores da sessão são lidos das linhas de cabeça
+e não por `PrismaCaptureSessionRepository.readHead`, de propósito: aquela
+leitura re-deriva o agregado e levanta `PERSISTENCE_CONFLICT`, o que deixaria uma
+linha de sessão editada decidir três critérios que não são sobre a integridade
+dela. Falsificado em `multicam-longform-gate.e2e.mjs`: a sessão do podcast, que
+carrega a direção **e** o plano de match, avança uma versão por
+`changeCaptureSessionStatus`; exatamente esses dois critérios caem com
+`evidence-stale`, o critério de react — que está em outra sessão — não se move, e
+devolver a sessão restaura 10/10. Contra o leitor como ele estava antes, esse
+bloco para em "direction-persisted passed over a session that moved past it".
+
+**"Histórico imutável" é imutável para quem lê, não para um DELETE.** Está
+declarado no PRD FR-150 com os números medidos e a razão de não ter sido
+consertado — bloquear DELETE quebra `persistClockMap`, as nove falsificações do
+próprio gate e a limpeza de toda suíte PostgreSQL da wave. O terceiro teste de
+`wave20-persistence.e2e.mjs` mede a declaração em vez de repeti-la: 15 tabelas
+de histórico, 0 gatilhos, 0 rules, 0 com row-level security, e um DELETE da
+versão 1 de uma direção que remove 1 linha e cascateia, com a cabeça continuando
+a nomear o ancestral pelo hash.
+
+**Um defeito de documentação achado ao medir.** A linha de rastreabilidade de
+F4.016 citava um `fingerprint` da jornada do phase gate como se fosse um valor
+para conferir. Ele não é: `evaluatedAt` está dentro do relatório que
+`calculateCanonicalHash` cobre (`multicam-longform-gate.ts:576-581`) e a jornada
+avalia por `/v1` com o relógio real, então duas execuções em 2026-09-07
+devolveram `87337fe91d33` e `d422d78a6274`. O que se confere ali é o que não
+depende do instante: 14 avaliações, 41 artefatos citados e o replay
+byte-a-byte de 20 374 caracteres.
+
+O `fingerprint` do `multicam-longform-gate.e2e.mjs` também não serve como valor
+para copiar, e por outro motivo. Ali o relógio é da fixture, então ele é
+determinístico para uma dada árvore de código — duas execuções seguidas sem
+tocar em nada devolveram `70d89211e284` — mas ele **se move quando o código se
+move**: durante este passe ele foi `e3b5c38c6c8f`, depois `1ae136b295a7` em
+quatro execuções, depois `70d89211e284`. O que se confere ali é `satisfied
+10/10`, `1/10` no projeto vazio e quais critérios caem em cada falsificação.
+
+Medido nesta máquina em 2026-09-07 contra um PostgreSQL 16 descartável migrado
+do zero: `npm test` 2166 testes / 2166 passes, `test:e2e:multicam-longform-gate`
+3 passes, `test:e2e:phase-gate-journey` 1 passe, `test:e2e:wave20-persistence` 3
+passes, `test:e2e:playback-map` 1 passe, `test:e2e:react-playback-journey` 1
+passe. Cinco execuções do gate durante este passe mediram 369,3 s, 54,5 s,
+62,8 s, 30,3 s e 28,9 s — dispersão grande demais para que qualquer uma delas
+seja um número de duração para citar. Nada nesta seção afirma
+implantação ou aceite.

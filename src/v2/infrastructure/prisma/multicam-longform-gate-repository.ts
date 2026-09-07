@@ -272,6 +272,65 @@ function check(
 }
 
 /** Every check of a criterion, failed for the same reason. */
+/**
+ * What a session-derived aggregate was derived under, against what the session
+ * says now.
+ *
+ * The three Wave 20 aggregates the gate reads -- the playback map, the multicam
+ * direction and the colour match plan -- each record the session version and
+ * the reference epoch they were derived under, and the direction records the
+ * diagnostic version as well. The services that BUILD them fence on exactly
+ * that (`react-playback-map.ts:1184`, `multicam-color-match.ts:565`,
+ * `multicam-direction.ts` through `compileShotsToSourceRanges`), and refuse to
+ * derive across a session that moved. The gate reads aggregates that are
+ * already persisted, where no such refusal ever ran: a direction cut under
+ * session v3 answered this gate exactly as well after the session reached v4.
+ * That is what `evidence-stale` is for -- "re-run against the current version"
+ * is a different operator action from "fix the content".
+ *
+ * The comparison is the session version and the reference epoch, and NOT the
+ * diagnostic version, even though the direction records one. Every fence the
+ * domain owns compares exactly these two -- `multicam-direction.ts:673-674`
+ * and `:2146`, `react-playback-map.ts:1184`, `multicam-color-match.ts:565` --
+ * and `directMulticam` asks the diagnostic to describe the CURRENT session
+ * version, never to be the newest diagnostic. A gate that demanded the newest
+ * would invent a rule the derivation does not have: re-measuring a session and
+ * getting the same verdict back would stale a direction the domain would still
+ * accept. The recorded `diagnosticVersion` stays what it is for -- naming which
+ * diagnostic was read -- and is not a freshness counter here.
+ *
+ * A null `current` is NOT staleness. It means the session head could not be
+ * read at all, which is a different failure and is reported by the criteria
+ * that cite the session; asserting freshness there would be a claim from
+ * missing data.
+ */
+function derivationFreshness(
+  derived: Readonly<{ sessionVersion: number; referenceEpoch: number }>,
+  current: Readonly<{ sessionVersion: number; referenceEpoch: number }> | null,
+): Readonly<{ stale: boolean; detail: string }> {
+  if (current === null) {
+    return Object.freeze({
+      stale: false,
+      detail: 'the session head could not be read, so freshness was not compared',
+    })
+  }
+  const behind: string[] = []
+  if (derived.sessionVersion !== current.sessionVersion) {
+    behind.push(`session version ${derived.sessionVersion}, and the session is at ${current.sessionVersion}`)
+  }
+  if (derived.referenceEpoch !== current.referenceEpoch) {
+    behind.push(`reference epoch ${derived.referenceEpoch}, and the session is at ${current.referenceEpoch}`)
+  }
+  return Object.freeze(
+    behind.length === 0
+      ? {
+        stale: false,
+        detail: `derived under session v${derived.sessionVersion} at reference epoch ${derived.referenceEpoch}, which is what the session says now`,
+      }
+      : { stale: true, detail: `derived under ${behind.join('; ')}` },
+  )
+}
+
 function criterionFailed(
   criterion: MulticamLongformCriterion,
   reason: MulticamLongformFailureReason,
@@ -639,6 +698,39 @@ implements MulticamLongformGateRepository {
     this.criticReports = new PrismaColorCriticReportRepository(client)
     this.syntheses = new PrismaEditorialSynthesisRepository(client)
     this.snapshots = new PrismaRenderablePlanSnapshotRepository(client)
+  }
+
+  /**
+   * The session as it stands now: its head version and that version's
+   * reference epoch.
+   *
+   * Read straight off the head rows rather than through
+   * `PrismaCaptureSessionRepository.readHead`, and deliberately: this answers a
+   * FRESHNESS question -- which counters are current -- and the repository read
+   * re-derives the whole aggregate and raises `PERSISTENCE_CONFLICT` when a
+   * hash disagrees. Borrowing it here would let one edited session row decide
+   * three criteria that are not about that session's integrity. Integrity is
+   * asserted where the session is cited as evidence with its hash, in criterion
+   * 4; here the counters are the answer.
+   */
+  private async currentDerivationTarget(workspaceId: string, sessionId: string): Promise<Readonly<{
+    sessionVersion: number
+    referenceEpoch: number
+  }> | null> {
+    const head = await this.client.v2CaptureSessionHead.findFirst({
+      where: { workspaceId, sessionId },
+      select: { version: true },
+    })
+    if (!head) return null
+    const version = await this.client.v2CaptureSessionVersion.findFirst({
+      where: { workspaceId, sessionId, version: head.version },
+      select: { version: true, referenceEpoch: true },
+    })
+    if (!version) return null
+    return Object.freeze({
+      sessionVersion: version.version,
+      referenceEpoch: version.referenceEpoch,
+    })
   }
 
   async findIdempotent(input: {
@@ -1239,6 +1331,10 @@ implements MulticamLongformGateRepository {
       map.referenceMedia.timebase.secondsPerTick,
     )
     const plan = snapshot.plan
+    const freshness = derivationFreshness(
+      { sessionVersion: map.sessionVersion, referenceEpoch: map.referenceEpoch },
+      await this.currentDerivationTarget(workspaceId, head.sessionId),
+    )
     return {
       sessionId: head.sessionId,
       evidence: {
@@ -1246,9 +1342,9 @@ implements MulticamLongformGateRepository {
         checks: [
           check(
             'playback-map-persisted',
-            map.status === 'resolved',
-            'requirement-unmet',
-            `playback map ${map.mapId} v${map.version} status ${map.status}, ${map.pieces.length} pieces, ${map.uncovered.length} uncovered stretches`,
+            map.status === 'resolved' && !freshness.stale,
+            freshness.stale ? 'evidence-stale' : 'requirement-unmet',
+            `playback map ${map.mapId} v${map.version} status ${map.status}, ${map.pieces.length} pieces, ${map.uncovered.length} uncovered stretches; ${freshness.detail}`,
             [mapRef],
           ),
           check(
@@ -1367,6 +1463,16 @@ implements MulticamLongformGateRepository {
       const justified = [speaker, demonstration].filter(
         (shot): shot is NonNullable<typeof shot> => Boolean(shot),
       )
+      const freshness = derivationFreshness(
+        { sessionVersion: direction.sessionVersion, referenceEpoch: direction.referenceEpoch },
+        await this.currentDerivationTarget(workspaceId, sessionId),
+      )
+      // Cited without a hash on purpose: what was read here is the head
+      // POINTER's counters, not the session document, so there is no session
+      // hash this reader verified. `ref` counts a hash-less citation as
+      // unhashed rather than as one that failed to verify, which is the
+      // difference the gate's own CHECK constraint rests on.
+      const sessionRef = ref('capture-session', sessionId, null, false)
       return {
         sessionId,
         evidence: {
@@ -1374,10 +1480,10 @@ implements MulticamLongformGateRepository {
           checks: [
             check(
               'direction-persisted',
-              direction.shots.length >= 1,
-              'requirement-unmet',
-              `direction v${stored.version} of session ${sessionId}: ${direction.shots.length} shots, ${direction.uncovered.length} uncovered ranges, manualReviewRequired=${direction.manualReviewRequired}`,
-              [directionRef],
+              direction.shots.length >= 1 && !freshness.stale,
+              freshness.stale ? 'evidence-stale' : 'requirement-unmet',
+              `direction v${stored.version} of session ${sessionId}: ${direction.shots.length} shots, ${direction.uncovered.length} uncovered ranges, manualReviewRequired=${direction.manualReviewRequired}; ${freshness.detail}`,
+              [directionRef, sessionRef],
             ),
             check(
               'active-speaker-rule-fired',
@@ -1577,6 +1683,14 @@ implements MulticamLongformGateRepository {
         projectId,
         transforms[0]?.cameraId ?? plan.referenceCameraId,
       )
+      const freshness = derivationFreshness(
+        { sessionVersion: plan.sessionVersion, referenceEpoch: plan.referenceEpoch },
+        await this.currentDerivationTarget(workspaceId, sessionId),
+      )
+      // Hash-less for the same reason as the direction's: the counters come
+      // from the head pointer, not from a session document this reader
+      // re-derived.
+      const sessionRef = ref('capture-session', sessionId, null, false)
       return {
         sessionId,
         evidence: {
@@ -1584,10 +1698,10 @@ implements MulticamLongformGateRepository {
           checks: [
             check(
               'match-plan-persisted',
-              plan.pipelineStage === 'match',
-              'requirement-unmet',
-              `match plan ${plan.planId} v${stored.version}: stage ${plan.pipelineStage}, reference camera ${plan.referenceCameraId}, confidence ${plan.confidence}, humanReviewRequired=${plan.humanReviewRequired}`,
-              [planRef],
+              plan.pipelineStage === 'match' && !freshness.stale,
+              freshness.stale ? 'evidence-stale' : 'requirement-unmet',
+              `match plan ${plan.planId} v${stored.version}: stage ${plan.pipelineStage}, reference camera ${plan.referenceCameraId}, confidence ${plan.confidence}, humanReviewRequired=${plan.humanReviewRequired}; ${freshness.detail}`,
+              [planRef, sessionRef],
             ),
             check(
               'transforms-are-match-stage',

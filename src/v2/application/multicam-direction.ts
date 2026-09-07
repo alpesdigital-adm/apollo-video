@@ -889,7 +889,7 @@ function isDirected(plan: MulticamDirectionCommandContext['currentPlan']): plan 
  *
  * One shot is one clip; nothing composes, overlays or retimes. The seams are
  * explicit straight cuts because that is the only transition the plan admits
- * (`director-run.ts:134`), and there is exactly one per seam because
+ * (`director-run.ts:147`), and there is exactly one per seam because
  * `validateDirectedEditPlan` counts them (`:358`).
  *
  * `sources[]` lists the files the picture comes from. The audio bed rides on the
@@ -1029,7 +1029,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   assumptions: readonly string[]
   omittedShots: number
 }> {
-  // `validId` (director-run.ts:268) refuses the `/` a session id may contain
+  // `validId` (director-run.ts:280) refuses the `/` a session id may contain
   // (`capture-session.ts:50`), so the id is folded rather than interpolated
   // raw — a decision that cannot be validated cannot be logged.
   //
@@ -1076,7 +1076,7 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
     reason: 'Angle changes over one continuous audio bed: a straight cut with a bounded edge fade is invisible, and any other transition would assert an editorial beat the evidence did not find.',
     evidenceRefs: Object.freeze([directionRef]),
     confidence: 0.9,
-    alternatives: Object.freeze(['cross-dissolve: refused — the Director plan admits only straight cuts (director-run.ts:134)']),
+    alternatives: Object.freeze(['cross-dissolve: refused — the Director plan admits only straight cuts (director-run.ts:147)']),
   }
   const audio: DirectorDecisionInput = {
     id: `decision-angle-audio-${token}`,

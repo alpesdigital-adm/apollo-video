@@ -1330,6 +1330,93 @@ test(
     assert.equal(healthy.gate.report.satisfied, 10, 'the world did not come back')
 
     // -----------------------------------------------------------------------
+    // The sync fence, applied to evidence that is ALREADY persisted.
+    //
+    // Every service that derives one of these aggregates refuses to derive it
+    // across a session that moved. Nothing re-asked that question of a row
+    // already in the database, so a direction cut under one session version
+    // answered this gate exactly as well after the session moved past it.
+    // Measured by running this block against the reader as it stood before the
+    // fix: it stopped at `direction-persisted passed over a session that moved
+    // past it`.
+    //
+    // The podcast session carries both the direction and the colour match plan
+    // and the react map is on another session, which is what makes this a
+    // falsification rather than a smoke test: one advance has to move exactly
+    // the criteria that read aggregates derived from THAT session, and leave
+    // the react criterion alone.
+    // -----------------------------------------------------------------------
+    const { changeCaptureSessionStatus } = await import(
+      '../../src/v2/domain/capture-session.ts'
+    )
+    const podcastBefore = world.podcast.session
+    const podcastHeadBefore = await client.v2CaptureSessionHead.findFirstOrThrow({
+      where: { workspaceId: W, sessionId: world.ids.podcastSession },
+    })
+    const advanced = changeCaptureSessionStatus(podcastBefore, {
+      status: podcastBefore.status === 'needs-input' ? 'analyzing' : 'needs-input',
+      lineage: {
+        commandId: 'f4016-command-advance-session',
+        operation: 'change-status',
+        actorKind: 'human',
+        actorId: 'operator-ana',
+        occurredAt: at(600).toISOString(),
+        note: null,
+      },
+    })
+    assert.equal(advanced.version, podcastBefore.version + 1)
+    await sessionRepository.appendVersion({
+      session: advanced,
+      expectedVersion: podcastBefore.version,
+      occurredAt: at(600).toISOString(),
+    })
+    const stale = await run('f4016-world-key-session-advanced')
+    for (const [criterion, code] of [
+      ['active-speaker-and-demonstration-directed', 'direction-persisted'],
+      ['colour-match-precedes-creative-lut', 'match-plan-persisted'],
+    ]) {
+      const item = criterionOf(stale.gate, criterion)
+        .checks.find((entry) => entry.code === code)
+      assert.equal(item.passed, false, `${code} passed over a session that moved past it`)
+      assert.equal(
+        item.failureReason,
+        'evidence-stale',
+        `${code} named ${item.failureReason}, which sends the operator to fix the content instead of re-running`,
+      )
+      assert.match(
+        item.detail,
+        new RegExp(`session version ${podcastBefore.version}, and the session is at ${advanced.version}`),
+      )
+    }
+    assert.equal(
+      criterionOf(stale.gate, 'react-edited-with-piecewise-map').passed,
+      true,
+      'a react map on another session was swept up by the podcast session moving',
+    )
+    console.log(
+      `[E2E-F4.016] session ${world.ids.podcastSession} v${podcastBefore.version}->v${advanced.version}: `
+      + `${failing(stale.gate).join(', ')} failed`,
+    )
+    await client.v2CaptureSessionVersion.deleteMany({
+      where: { workspaceId: W, sessionId: world.ids.podcastSession, version: advanced.version },
+    })
+    await client.v2CaptureSessionHead.update({
+      where: { id: podcastHeadBefore.id },
+      data: {
+        version: podcastHeadBefore.version,
+        sessionHash: podcastHeadBefore.sessionHash,
+        status: podcastHeadBefore.status,
+        updatedAt: podcastHeadBefore.updatedAt,
+      },
+    })
+    const healthyAfterFence = await run('f4016-world-key-session-restored')
+    assert.equal(
+      healthyAfterFence.gate.report.satisfied,
+      10,
+      'the world did not come back after the session was put back',
+    )
+
+    // -----------------------------------------------------------------------
     // Nine deletions, one row each. After the k-th, exactly the first k
     // criteria are unmet and the rest still answer for themselves.
     // -----------------------------------------------------------------------

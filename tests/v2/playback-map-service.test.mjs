@@ -528,7 +528,13 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   assert.ok(ruleIds.includes('playback:seek'), `markers were ${ruleIds.join(', ')}`)
   // The provenance fields say what produced this, and do not impersonate a run.
   assert.equal(compiled.plan.directorRunId, `react-playback:${built.map.mapId}`)
-  assert.equal(compiled.plan.director.decisions.length, 0)
+  // The decision log is the compiler's own reasoning, not a critic's: see the
+  // dedicated test below for what it has to contain.
+  assert.equal(
+    compiled.plan.director.decisions.length,
+    compiled.plan.videoTracks[0].clips.length + 3,
+    'one decision per compiled piece plus the summary, the seam rule and the audio bed',
+  )
 
   // The falsifier for "the compiler linearised the playback". A map read as a
   // straight run through the reference would produce clips whose reference
@@ -560,6 +566,95 @@ test('T-F4.015 the compiled plan runs the reaction, never the reference, and pas
   assert.equal(again.replayed, true)
   assert.equal(again.planHash, compiled.planHash)
   assert.equal(kit.snapshots.rows.length, 1)
+})
+
+test('T-F4.015 the compiled react plan carries a decision per piece, and none of them impersonates a critic', async () => {
+  // The gap this closes. F4.012 compiles a multicam cut and fills
+  // `director.decisions` from `buildAngleDecisions`; the react compile filled
+  // the same field with a frozen empty array, so a react cut was the one Wave 20
+  // cut whose angle choices no run log explained. Measured before the fix, on
+  // this fixture: `compiled.plan.director.decisions.length` was 0 while the map
+  // held nine resolved pieces.
+  //
+  // What this proves that a shape assertion would not: every decision is
+  // ACCEPTED by `validateDirectorDecisions`, the same authority the direction
+  // goes through, so the log carries a confidence band and a decision type it
+  // did not write itself; every piece is named; and the provenance fields still
+  // refuse to look like a Director run, which is the one thing the log must not
+  // buy at the cost of.
+  const fixture = world()
+  const kit = wire(fixture)
+  const built = await kit.build({ actor, sessionId: SESSION, ...baseOf(fixture.session) })
+  const head = await kit.read({
+    workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+  })
+  await kit.anchor({
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    baseVersionId: head.versionRef,
+    baseHash: built.map.mapHash,
+    anchor: {
+      anchorId: 'anchor-ana-1',
+      reactionTick: built.map.uncovered[0].range.start,
+      referenceTick: null,
+      mode: 'commentary-only',
+    },
+  })
+  const compiled = await kit.compile({
+    ...(await mapFenceOf(kit)),
+    actor,
+    sessionId: SESSION,
+    reactionTrackId: REACTION_TRACK,
+    projectVersionId: 'version-react-1',
+    objective: 'discovery',
+    planFps: rational(BigInt(30), BigInt(1)),
+  })
+  const map = (await kit.read({
+    workspaceId: WORKSPACE, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+  })).map
+  const decisions = compiled.plan.director.decisions
+
+  // `validateDirectorDecisions` derives these three from the category and the
+  // confidence; a hand-written log could not have them, and a caller cannot
+  // supply them.
+  assert.ok(decisions.every((decision) => typeof decision.confidenceBand === 'string'))
+  assert.ok(decisions.every((decision) => decision.confidenceDetail.confidenceHash.length === 64))
+  assert.deepEqual(
+    [...new Set(decisions.map((decision) => decision.decisionType))].sort(),
+    ['asset-selection', 'cut'],
+    'an angle and a transition are graded as cuts; the audio bed is an asset selection',
+  )
+
+  // Every piece is named, and the choice is the recording the piece implies.
+  const angles = decisions.filter((decision) => decision.reason.startsWith('Piece '))
+  assert.equal(angles.length, map.pieces.length)
+  for (const piece of map.pieces) {
+    const decision = decisions.find((entry) => entry.reason.startsWith(`Piece ${piece.pieceId} `))
+    assert.ok(decision, `piece ${piece.pieceId} has no decision`)
+    assert.equal(decision.confidence, piece.confidence)
+    assert.equal(
+      decision.choice,
+      piece.referenceRange === null ? map.reactionMedia.assetId : map.referenceMedia.assetId,
+    )
+    assert.ok(decision.alternatives.length === 1, 'the rejected recording is named')
+  }
+
+  // The paused stretch is the interesting one: it chooses the reactor and says
+  // the reference produced no time, which is exactly the claim ADR-135 exists
+  // to keep a compiler from inventing.
+  const paused = map.pieces.find((piece) => piece.mode === 'paused')
+  const pausedDecision = decisions.find((entry) => entry.reason.startsWith(`Piece ${paused.pieceId} `))
+  assert.equal(pausedDecision.choice, map.reactionMedia.assetId)
+  assert.match(pausedDecision.reason, /the reference produced no time here/)
+
+  // The log does not buy its justification by impersonating a run.
+  assert.equal(compiled.plan.directorRunId, `react-playback:${map.mapId}`)
+  assert.ok(!decisions.some((decision) => decision.id.startsWith('director-run-')))
+  console.log(
+    `[T-F4.015] ${decisions.length} decisions over ${map.pieces.length} pieces, `
+    + `bands ${[...new Set(decisions.map((decision) => decision.confidenceBand))].sort().join('/')}`,
+  )
 })
 
 test('T-F4.015 a second delivery rate is a second plan, and the objective is not a rate', async () => {

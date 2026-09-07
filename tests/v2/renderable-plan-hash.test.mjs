@@ -14,10 +14,11 @@ import {
  * only worth as much as the hash covers, and the first version of it covered a
  * projection: id, ids, fps, duration, the audio timeline hash, sources, clips,
  * transitions, markers, lineage refs and retained ranges. Everything else —
- * `director.decisions` above all, which `renderable-edit-plan.ts` says a reader
- * must never be able to believe — sat outside it, so an UPDATE that injected a
- * critic's approval and a burned-in CTA recomputed to the same digest and read
- * back clean. Measured on this fixture before the fix: identical hashes.
+ * `director.decisions` above all, which is the compiler's own reasoning and
+ * must never become somebody else's — sat outside it, so an UPDATE that
+ * injected a critic's approval and a burned-in CTA recomputed to the same
+ * digest and read back clean. Measured on this fixture before the fix:
+ * identical hashes.
  *
  * The two properties below are in tension and both are load-bearing:
  * the hash has to change for every field a tamperer would want to change, and
