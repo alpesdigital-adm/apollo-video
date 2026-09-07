@@ -1536,14 +1536,17 @@ guardado dentro do hash da decisão, com a sua razão. Uma janela sem nenhum
 ângulo elegível não recebe ângulo: vira um intervalo descoberto, a direção fica
 com `manualReviewRequired` e a compilação recusa transformá-la em clipes. Dois
 ângulos com evidência a menos de 0,1 um do outro não são ordenados — a direção
-segura o plano corrente e avisa; fala simultânea medida dobra essa margem. Uma
+segura o plano corrente e avisa; qualquer observação de fala simultânea que
+cruze a janela dobra essa margem, declarada ou medida (spec 05 §29.4). Uma
 seleção protegida por uma pessoa nunca é substituída em silêncio: elegível, ela
 vence; inelegível, o aviso nomeia as rejeições que a impediram. O chamador não
 manda score, elegibilidade, medição nem aprovação — um pedido que traga
 qualquer um deles é recusado pelo nome.
 
-Um ângulo é um clipe: a compilação resolve cada plano contra o mapa de relógio
-da faixa escolhida e emite `EditorialCutClip`. Medido com FFmpeg real: uma
+Um ângulo é um clipe, e um de cada vez: a compilação resolve cada plano contra
+o mapa de relógio da faixa escolhida e emite `EditorialCutClip`. Professor e
+tela são **cortados** entre si, nunca compostos — o caminho editorial não tem
+picture-in-picture nem freeze (spec 05 §34.4). Medido com FFmpeg real: uma
 direção de duas câmeras rendeu 2 clipes sobre 3 fontes, 300 quadros, 10,000 s,
 h264/aac, e a inspeção de pixel confirmou a troca de ângulo (vermelho aos
 2,50 s, azul aos 7,50 s); duas câmeras a cadências diferentes (30/1 e 25/1 num

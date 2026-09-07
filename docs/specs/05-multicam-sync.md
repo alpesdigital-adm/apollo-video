@@ -773,7 +773,12 @@ disso, `insufficient`.
   Ela nunca é substituída em silêncio.
 - Dois candidatos com evidência a menos de `ambiguityMargin` um do outro não são
   ordenados: a direção segura o ângulo corrente e emite
-  `ambiguous-active-speaker`. Fala simultânea **medida** dobra a margem.
+  `ambiguous-active-speaker`. **Qualquer** observação de `concurrent-speech` que
+  cruze a janela dobra a margem, e a proveniência não entra nessa conta:
+  `multicam-direction.ts:1394-1395` só pergunta se existe alguma, e
+  `observationsOverlapping` (`multicam-evidence.ts:392-400`) filtra por `kinds` e
+  `trackId`, não por `evaluatorKind`. Uma observação `declared` alarga a margem
+  tanto quanto uma `measured`.
 - O chamador não fornece nada disso. Um pedido que traga score, elegibilidade,
   medição, aprovação ou `manualReviewRequired` é recusado pelo nome
   (`DIRECTION_CALLER_SUPPLIED_DERIVATION`), não ignorado.
@@ -797,7 +802,13 @@ com `renderPolicy: 'deferred'`, `impactSchema: 'multicam-direction-impact/v1'` e
 `deferralReason: 'director-run'`: um plano vira clipe quando um DirectorRun o
 compila, e não quando o comando é aceito.
 
-Um ângulo **é** um clipe. A compilação (`multicam-shot-compilation/v1`) resolve
+Um ângulo **é** um clipe — e um de cada vez. Professor e tela nunca aparecem
+juntos na imagem: o critério `teacher-and-screen-synchronised` da §33.1 entrega
+um **corte** entre os dois, não uma composição, porque o caminho editorial não
+tem picture-in-picture nem freeze (§34.4). É a limitação que um operador que
+peça exatamente esse cenário encontra primeiro.
+
+A compilação (`multicam-shot-compilation/v1`) resolve
 cada plano para o intervalo de origem da faixa escolhida, monta
 `EditorialCutClip` e recusa cadências de origem que o plano não possa cortar —
 medido em `tests/v2/multicam-direction-render.integration.mjs`: com câmera A a

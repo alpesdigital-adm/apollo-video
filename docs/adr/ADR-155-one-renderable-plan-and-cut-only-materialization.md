@@ -10,7 +10,7 @@
 Dois derivados da Wave 20 produzem cortes que nada conseguia renderizar: o mapa
 de playback do react (F4.015) e a síntese multi-range (F4.016). `DirectedEditPlan`
 é o único plano que o caminho de render aceita, e `validateDirectedEditPlan`
-(`director-run.ts:335`) é a única coisa que declara um plano renderizável.
+(`director-run.ts:349`) é a única coisa que declara um plano renderizável.
 
 Sem uma decisão, cada derivação teria criado o seu próprio tipo de plano: duas
 formas, dois validadores, e um renderer que precisa descobrir qual dos dois
@@ -71,4 +71,6 @@ para que quem abrir o resultado saiba antes de estranhar.
 **O que fica em aberto.** Freeze e picture-in-picture continuam fora do caminho
 editorial. Enquanto continuarem, `retainedSourceRanges` lista o que sobrevive da
 referência em segundos dela, e a reação não aparece ali — ela não é um intervalo
-de origem retido, é a linha do tempo.
+de origem retido, é a linha do tempo. A mesma ausência aparece fora do react: a
+direção multicâmera entrega professor e tela em corte, um ângulo de cada vez, e
+nunca compostos (spec 05 §29.5).
