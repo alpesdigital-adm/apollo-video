@@ -88,6 +88,38 @@ const API_ENVIRONMENT = process.env.APOLLO_API_ENVIRONMENT ?? 'sandbox'
 process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
 
 /**
+ * The request-anomaly floor, raised for the same reason the podcast and
+ * teacher journeys raise it — and for a reason this journey looked immune to.
+ *
+ * The detector is not a call counter. `evaluateGovernanceAnomalies` only emits
+ * `REQUEST_RATE_ANOMALY` when `usage.baselineRequests > 0`
+ * (`governance-anomaly.ts:152`), and `baselineRequests` is the count of
+ * admissions in `[now - 300 s, now - 60 s)` — strictly OLDER than the signal
+ * window (`governance-admission-repository.ts:435-452`). A run that finishes
+ * inside one 60 s window therefore has no baseline at all and cannot trip it,
+ * whatever it does; a run that outlives 60 s gets a baseline made of its own
+ * first minute, and the threshold collapses to the floor
+ * (`max(requestMinimum, ceil(baseline * 3 / 5))`, `governance-anomaly.ts:105-115`),
+ * so admission number `floor + 1` in the second window is refused.
+ *
+ * Measured on this branch, PostgreSQL 16 on 127.0.0.1:55744:
+ * - this journey writes **30** admissions and took 10.8 s / 18.7 s / 20.7 s
+ *   (N=3) — under the window, which is why it passed 3/3 unguarded here and
+ *   why the guard looked unnecessary;
+ * - a probe seeding 25 admissions older than 60 s and then calling one
+ *   governed route was refused `429 GOVERNANCE_LIMIT_EXCEEDED` at call **21**
+ *   with the shipped floor of 20, and admitted 40/40 with this floor of 400.
+ *
+ * So the difference from the podcast and teacher journeys is DURATION, not
+ * call count: they render with FFmpeg and always outlive the window, this one
+ * usually does not — until a loaded runner makes it, which is what the audit
+ * measured (one 429 in N=2 on a virgin database). 30 is far below 400, so the
+ * floor cannot hide a journey that genuinely burst: only the floor moves,
+ * `requestsPerMinute` and the quotas keep their shipped defaults.
+ */
+process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
+
+/**
  * Invoke a published route the way Next would.
  *
  * `params` is handed over as a promise because that is the shape every route
