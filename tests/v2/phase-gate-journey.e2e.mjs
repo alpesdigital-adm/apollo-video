@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  openJourneyObjectStore,
+} from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
@@ -118,6 +123,33 @@ process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
  * `requestsPerMinute` and the quotas keep their shipped defaults.
  */
 process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
+
+/**
+ * Local disk or versioned MinIO, read from the runtime env.
+ *
+ * This journey used to name no driver at all, which meant the default: it ran
+ * against a local disk and the briefing's "PostgreSQL 16 and versioned object
+ * storage" was true of neither half here. It now runs under whichever driver
+ * the workflow selects, and CI runs it under `s3` on the Compose MinIO.
+ *
+ * What that proves is stated rather than implied. The gate reads ROWS and the
+ * module graph: ten criteria over coverage, clock maps, diagnostics, colour
+ * plans, final-export operations and media MANIFESTS — the manifest, never the
+ * file. `buildGateWorld` writes no bytes anywhere, in either mode
+ * (`multicam-longform-gate-world.mjs:1017-1075` creates `v2MediaArtifact` and
+ * `v2MediaArtifactManifest` rows and stops), and the artifacts the report cites
+ * carry synthetic digests no real file could have. So the s3 run cannot say
+ * "the gate read its evidence out of MinIO"; it says the gate reaches the same
+ * verdict with the object-storage composition root wired, and the bucket is
+ * EMPTY at the end.
+ *
+ * That emptiness is the falsifiable half. The day a criterion starts opening a
+ * file — a probe re-derived from bytes, an export verified against its object —
+ * this assertion fails and somebody has to decide whether the gate should be
+ * doing that, instead of it happening silently on a developer's disk.
+ */
+const storageDriver = journeyStorageDriver()
+process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
 
 /**
  * Invoke a published route the way Next would.
@@ -268,6 +300,7 @@ test(
 
     const clean = () => cleanGateWorld({ client, workspaceIds: WORKSPACES })
     const lease = await acquireGateFixtureLease()
+    const objectStore = await openJourneyObjectStore()
 
     t.after(async () => {
       // Reported, not rethrown: a cleanup failure that masks the assertion
@@ -277,6 +310,9 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.error('object storage cleanup failed:', error?.message ?? error)
+      })
       await client.$disconnect()
       await lease.release()
     })
@@ -981,6 +1017,17 @@ test(
     assert.equal(outstanding.status, 200, outstanding.text)
     assert.equal(outstanding.payload.data.approved, true)
     assert.deepEqual(outstanding.payload.data.outstanding, [])
+
+    // What object storage saw: nothing. See the note on `storageDriver` — the
+    // gate is a reader of rows and of the module graph, and this is the
+    // assertion that will notice the day it stops being one.
+    if (objectStore) {
+      assert.deepEqual(
+        await objectStore.keys(),
+        [],
+        'the phase gate reads rows and manifests, never bytes, so its bucket must stay empty',
+      )
+    }
 
     console.log(
       `E2E-F4.016 phase gate journey: ${gates.length} evaluations through /v1 — approved ${approved.report.satisfied}/10 ` +
