@@ -1857,10 +1857,10 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > `teacher-screen-journey.e2e.mjs`, `insufficient-evidence-journey.e2e.mjs`,
 > `capture-sync-worker-persistence.e2e.mjs` e `wave20-operator-browser.e2e.mjs`.
 > Registro: spec 05 §29, §27.1 e §34; ADR-153.
-> **Integração final, deploy e aceite do proprietário não aconteceram**, e é
-> só por isso que nenhuma caixa acima está marcada. As jornadas de produto e
-> de navegador citadas rodam no CI; não foram executadas nesta máquina
-> (spec 05 §34.6).
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar active speaker e momentos de demonstração/tela. Evidência T-FR-150.
 - [ ] Definir angle candidates por coverage, qualidade, contexto e continuidade. Evidência T-FR-150.
@@ -1878,10 +1878,10 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > `wave20-persistence.test.mjs`, `wave20-public-contract.test.mjs` e
 > `wave20-persistence-journey.e2e.mjs`. Registro: spec 05 §30 e §34; ADR-153,
 > ADR-154.
-> **Integração final, deploy e aceite do proprietário não aconteceram**, e é
-> só por isso que nenhuma caixa acima está marcada. As jornadas de produto e
-> de navegador citadas rodam no CI; não foram executadas nesta máquina
-> (spec 05 §34.6).
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Estimar diferenças de white balance, exposure e resposta entre câmeras. Evidência T-FR-183.
 - [ ] Aplicar match antes da creative LUT. Evidência T-FR-183.
@@ -1899,10 +1899,10 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > `project-proxy-render-worker.test.mjs`, `wave20-persistence.test.mjs`,
 > `wave20-public-contract.test.mjs` e `wave20-persistence-journey.e2e.mjs`.
 > Registro: spec 05 §31 e §34; ADR-157.
-> **Integração final, deploy e aceite do proprietário não aconteceram**, e é
-> só por isso que nenhuma caixa acima está marcada. As jornadas de produto e
-> de navegador citadas rodam no CI; não foram executadas nesta máquina
-> (spec 05 §34.6).
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar clipping, cast, skin tone fora do alvo e mismatch localizado. Evidência T-FR-184.
 - [ ] Avaliar antes/depois do output transform sem confundir intenção criativa. Evidência T-FR-184.
@@ -1919,10 +1919,10 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > `wave20-persistence-journey.e2e.mjs`; `E2E-F4.015` em `playback-map.e2e.mjs` e
 > `react-playback-journey.e2e.mjs`. Registro: spec 05 §32 e §34; ADR-152,
 > ADR-155.
-> **Integração final, deploy e aceite do proprietário não aconteceram**, e é
-> só por isso que nenhuma caixa acima está marcada. As jornadas de produto e
-> de navegador citadas rodam no CI; não foram executadas nesta máquina
-> (spec 05 §34.6).
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Detectar no vídeo de reação os intervalos em que o conteúdo de referência toca, pausa, volta ou avança. Evidência: T-F4.015 e ADR-135.
 - [ ] Modelar playback pieces entre reference media e session time. Evidência: T-F4.015 e ADR-135.
@@ -1943,10 +1943,10 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 > ADR-155, ADR-156. Um gate aprovado em PostgreSQL não é implantação nem aceite:
 > ele diz que as dez condições estão satisfeitas num banco desta máquina, e nada
 > mais.
-> **Integração final, deploy e aceite do proprietário não aconteceram**, e é
-> só por isso que nenhuma caixa acima está marcada. As jornadas de produto e
-> de navegador citadas rodam no CI; não foram executadas nesta máquina
-> (spec 05 §34.6).
+>
+> **Integração final, deploy e aceite do proprietário não aconteceram**, e é só
+> por isso que nenhuma caixa acima está marcada. Quais dessas suítes foram
+> executadas nesta máquina e quais rodam só no CI está na spec 05 §34.6.
 
 - [ ] Sincronizar podcast com dois participantes e áudios distintos. Evidência: T-F4.016 e ADR-135.
 - [ ] Sincronizar professor e captura de tela com durações diferentes. Evidência: T-F4.016 e ADR-135.
