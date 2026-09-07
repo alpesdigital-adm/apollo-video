@@ -302,6 +302,16 @@ export async function buildGateWorld({
   otherWorkspaceId = null,
   otherProjectId = null,
   otherClientId = null,
+  /**
+   * Who compiles the two renderable plans criteria 4 and 6 need.
+   *
+   * `'repository'` keeps the seeded world complete, which is what every suite
+   * that wants an approvable gate asks for. `'omit'` leaves both plans out so a
+   * caller can write them through the published routes instead — the proof that
+   * the compile hop is reachable from outside a test, which it was not until
+   * `playback-map/plan` and `editorial-syntheses/{id}/render-plan` existed.
+   */
+  renderablePlans = 'repository',
 }) {
   const workspaceIds = [workspaceId, ...(otherWorkspaceId ? [otherWorkspaceId] : [])]
   await cleanGateWorld({ client, workspaceIds })
@@ -600,7 +610,7 @@ export async function buildGateWorld({
     snapshots,
     clock: reactClock,
   })
-  await compileReact({
+  if (renderablePlans === 'repository') await compileReact({
     actor: reactActor,
     sessionId: ids.reactSession,
     reactionTrackId: 'track-reaction',
@@ -691,7 +701,7 @@ export async function buildGateWorld({
   const compileSynthesis = compileSynthesisRenderPlanService({
     syntheses, sources: renderSources, snapshots, clock: () => new Date(at(51)),
   })
-  await compileSynthesis({
+  if (renderablePlans === 'repository') await compileSynthesis({
     workspaceId,
     projectId,
     synthesisId: synthesis.synthesis.id,
@@ -990,6 +1000,7 @@ export async function buildGateWorld({
   })
 
   return {
+    renderablePlans,
     ids,
     exportIds,
     artifacts,

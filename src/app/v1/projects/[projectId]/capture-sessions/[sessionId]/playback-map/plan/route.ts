@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireScope } from '@/v2/application/authenticate-api-client'
 import { DomainError } from '@/v2/domain/errors'
-import { createReactPlaybackMapServices } from '@/v2/infrastructure/repository-factory'
+import { createReactPlaybackPlanCompileService } from '@/v2/infrastructure/repository-factory'
 import { authenticateExternalRequest } from '@/v2/public-api/authentication'
 import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
 import { presentSuccess } from '@/v2/public-api/presenters'
@@ -43,7 +43,7 @@ export async function POST(
       throw new DomainError('INVALID_ARGUMENT', 'Request body must be valid JSON')
     }
     const body = parseCompilePlaybackPlanBody(rawBody)
-    const result = await createReactPlaybackMapServices().compile({
+    const result = await createReactPlaybackPlanCompileService()({
       actor: { workspaceId: actor.workspaceId, kind: 'api-client', id: actor.clientId },
       sessionId,
       reactionTrackId: body.reactionTrackId,
