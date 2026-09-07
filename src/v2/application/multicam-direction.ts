@@ -382,7 +382,7 @@ function sessionRangeForSourceMs(input: {
  *
  * Every part, not `track.sourceAssetId` — which is documented as "the asset
  * that gives the track its identity, its FIRST part's source"
- * (`capture-session.ts:178-179`). A recorder that stopped and restarted
+ * (`domain/capture-session.ts:199-200`). A recorder that stopped and restarted
  * produces a second file on the same track (`addCaptureSessionTrackPart`), and
  * a lookup by track identity alone would neither ask for that file's
  * diarization nor recognise a run that arrived for it — dropping the run with
@@ -1046,8 +1046,8 @@ export function buildAngleDecisions(direction: Readonly<MulticamDirection>, dire
   // (`capture-session.ts:50`), so the id is folded rather than interpolated
   // raw — a decision that cannot be validated cannot be logged.
   //
-  // Unreachable today, and left in on purpose: `sync-diagnostic.ts:151` uses a
-  // NARROWER id grammar than `capture-session.ts:50` and refuses the same `/`,
+  // Unreachable today, on purpose: `domain/sync-diagnostic.ts:130` uses a
+  // NARROWER id grammar than `domain/capture-session.ts:50` and refuses that `/`,
   // so a session id containing one can have no diagnostic and therefore cannot
   // be directed at all. That divergence between two authority modules is
   // reported rather than relied on; the day it is reconciled, this keeps
