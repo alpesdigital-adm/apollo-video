@@ -866,8 +866,9 @@ indexa os estágios por tipo (`color-and-export.ts:550-552`), então uma camada
 declarada `[technical, creative-lut, match, output]` passava na construção, era
 reordenada na leitura e renderizada numa ordem que o plano guardado não
 descrevia: a declaração e o pipeline divergiam, e nada recusava. A guarda
-`assertMatchStagePosition` existia, mas o único chamador de produção montava
-camadas de um transform só, onde ela nunca pode falhar. Hoje ela roda dentro de
+`assertMatchStagePosition` existia, mas o único chamador de produção montava — e
+ainda monta — camadas de um transform só
+(`multicam-match-plan.ts:1279-1296,1300`), onde ela nunca pode falhar. Hoje ela roda dentro de
 `normalizeLayer` (`color-and-export.ts:407-424`), que é por onde passa **toda**
 camada de todo `ColorPlan`: a global e cada override de source, câmera e
 segmento. A recusa carrega `{ position, after }`.
