@@ -1091,3 +1091,104 @@ test('T-F4.016 falsification 9: deleting one row of evidence fails the gate, and
     + `no reference is refused as ${emptyPass.code}`,
   )
 })
+
+/**
+ * The direct-multicam composition root, read as source.
+ *
+ * The behavioural half of this guarantee is
+ * `multicam-direction-composition.integration.mjs`, which builds the real
+ * dependency set and looks at the classes in it. It cannot run in this gate:
+ * `repository-factory.ts` pulls modules with TypeScript parameter properties
+ * that Node's strip-only loader refuses, so it runs under `tsx` in a CI step of
+ * its own. This rule is the half that runs everywhere, and it exists because
+ * the hole it closes was measured: with `silence:` deleted from the root,
+ * `typecheck`, `lint`, `lint:code`, every case in `tests/v2/*.test.mjs` and the
+ * silence media suite all stayed green, because the field is optional on
+ * `DeriveMulticamEvidenceDependencies` and the factory's only importers are the
+ * two `/v1` route files.
+ */
+const COMPOSITION_EVIDENCE_WIRING = Object.freeze([
+  ['silence: createMulticamSilenceEvidenceProvider(', 'the listening pass'],
+  ['visual: createMulticamVisualEvidenceProvider(', 'the looking pass'],
+  ['media: createCaptureMediaResolver(', 'the verified materializer'],
+  ['diarization: createMulticamDiarizationSource(', 'the persisted speech'],
+])
+
+/** One exported function's text, from its signature to the `}` in column 0. */
+function exportedBodyOf(source, name) {
+  const start = source.indexOf(`export function ${name}(`)
+  if (start < 0) return undefined
+  const end = source.indexOf('\n}\n', start)
+  return end < 0 ? source.slice(start) : source.slice(start, end + 2)
+}
+
+function multicamCompositionViolations(source) {
+  const violations = []
+  const builder = exportedBodyOf(source, 'multicamDirectionCompositionDependencies')
+  if (builder === undefined) return ['multicamDirectionCompositionDependencies is no longer exported']
+  for (const [fragment, what] of COMPOSITION_EVIDENCE_WIRING) {
+    if (!builder.includes(fragment)) violations.push(`the assembled evidence set no longer carries ${what}`)
+  }
+  const root = exportedBodyOf(source, 'createDirectMulticamSessionService')
+  if (root === undefined) return [...violations, 'createDirectMulticamSessionService is no longer exported']
+  if (!root.includes('multicamDirectionCompositionDependencies(')) {
+    violations.push('createDirectMulticamSessionService must take its dependencies from multicamDirectionCompositionDependencies, or the builder is a set nobody uses')
+  }
+  if (/deriveMulticamEvidenceService\(\s*\{/.test(root)) {
+    violations.push('createDirectMulticamSessionService must not rebuild the evidence dependency literal in place')
+  }
+  return violations
+}
+
+test('T-F4.012 falsification 10: a composition root without the listening pass is refused, and the wired one is not', () => {
+  const source = codeOf('src/v2/infrastructure/repository-factory.ts')
+  assert.deepEqual(
+    multicamCompositionViolations(source),
+    [],
+    'the shipped composition root assembles both FFmpeg passes and the root takes them from it',
+  )
+
+  // Exactly the edit that was measured to leave everything green.
+  const unwired = source.replace('silence: createMulticamSilenceEvidenceProvider(environment),', '')
+  assert.notEqual(unwired, source, 'the line this case exists for is still there to be removed')
+  assert.deepEqual(
+    multicamCompositionViolations(unwired),
+    ['the assembled evidence set no longer carries the listening pass'],
+    'and removing it is refused by name',
+  )
+
+  // The sibling hole, closed in the same rule: the visual provider had shipped
+  // wired and unexecuted for a whole wave before anything measured it.
+  assert.deepEqual(
+    multicamCompositionViolations(source.replace('visual: createMulticamVisualEvidenceProvider(environment),', '')),
+    ['the assembled evidence set no longer carries the looking pass'],
+  )
+
+  // A builder nobody calls proves nothing about production, so the root has to
+  // keep deriving from it...
+  const detached = source.replace(
+    'multicamDirectionCompositionDependencies(environment, clock)',
+    '{ evidence: {}, sessions: undefined }',
+  )
+  assert.notEqual(detached, source, 'the root still calls the builder')
+  assert.match(
+    multicamCompositionViolations(detached).join(' | '),
+    /must take its dependencies from multicamDirectionCompositionDependencies/,
+  )
+
+  // ...and must not quietly build a second, different set beside it.
+  const rebuilt = source.replace(
+    'deriveEvidence: deriveMulticamEvidenceService(evidence),',
+    'deriveEvidence: deriveMulticamEvidenceService({ sessions, directions, clock }),',
+  )
+  assert.notEqual(rebuilt, source, 'the root still passes the assembled set through')
+  assert.match(
+    multicamCompositionViolations(rebuilt).join(' | '),
+    /must not rebuild the evidence dependency literal in place/,
+  )
+
+  console.log(
+    `falsification-10 composition: ${COMPOSITION_EVIDENCE_WIRING.length} adapters required in the assembled set, `
+    + '4 doctored sources refused (silence, visual, detached builder, rebuilt literal), shipped source clean',
+  )
+})

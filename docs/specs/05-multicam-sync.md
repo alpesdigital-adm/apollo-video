@@ -678,6 +678,54 @@ fonte, 240 quadros cada): campo de cor estático 0 bps, slideshow trocando a cad
 dois segundos 4 bps, padrão em movimento 103 bps, zoom de mandelbrot 137 bps,
 ruído de quadro inteiro 3151 bps.
 
+**Quais espécies alguém realmente observa (2026-09-07).** Cinco têm adaptador
+ligado em `createDirectMulticamSessionService`: `active-speaker` e
+`concurrent-speech` da diarização persistida, `screen-activity` e
+`technical-quality` dos pixels
+(`ffmpeg-multicam-visual-evidence-provider.ts`), e `silence` das amostras
+(`ffmpeg-multicam-silence-provider.ts`, `ffmpeg/silencedetect+astats`:
+`silencedetect=noise=-50dB:d=0.700` diz **onde**, `astats` sobre blocos de
+100 ms diz **quão baixo**, e o teto reportado é o bloco inteiro mais alto
+dentro do trecho — nunca a média, que subestimaria uma pausa com uma batida
+dentro). `reaction` o produtor sabe emitir, e a porta `MulticamPerceptionSource`
+não tem adaptador, então em produção não existe.
+
+**Medida não é lida.** `silence` entra no hash do conjunto e no banco, e
+**nenhuma regra de `DIRECTION_RULES` a lê** — `grep silence` em
+`src/v2/domain/multicam-direction.ts` não devolve linha. Uma observação de
+silêncio não muda decisão de corte nenhuma; é medição registrada, não entrada da
+direção. As outras duas espécies do mesmo lote são lidas, e é por isso que a
+diferença importa: `concurrent-speech` dobra a margem de ambiguidade (§29.4) e
+`technical-quality` produz `quality-below-floor`. Ligar silêncio a uma regra é
+trabalho não começado.
+
+`demonstration` e `attention` **não são produzidas por nada**, e o motivo não é
+o que esta spec dizia antes. O repositório **tem** porta de visão
+(`ImageVisionProvider`, com `ocr`, `faces` e `objects`) e dois adaptadores:
+Tesseract (`APOLLO_TESSERACT_PATH`) e Google Cloud Vision pedindo
+`FACE_DETECTION` e `OBJECT_LOCALIZATION`
+(`APOLLO_IMAGE_ENTITY_PROVIDER=google-cloud-vision`), compostos por
+`createConfiguredImageVisionProvider`. O que falta são três coisas concretas:
+(i) os dois só recebem **imagem parada**, pela ingestão de mídia — não existe
+caminho de quadro de gravação materializada até essa porta; (ii) caixa de rosto
+e caixa de objeto num quadro não são mão demonstrando ao longo do tempo; e
+(iii) `FACE_DETECTION` devolve caixa e confiança, o adaptador não pede nem lê
+ângulo de cabeça, e caixa de rosto não é direção do olhar. Chamar movimento de
+tela de "demonstração" poria o nome errado num número real — a mesma recusa que
+o passe visual faz sobre nitidez. O preço está em §29.3:
+`demonstration-prefers-screen` decide por uma tela compartilhada e nunca pode
+decidir por uma demonstração física numa câmera. A escolha entre financiar
+modelo de mão/gaze mais o caminho de vídeo até a porta de visão e declarar as
+duas fora de escopo é do proprietário; ver PRD FR-150.
+
+O passe de silêncio ouve toda faixa cujo `syncAudioPolicy` não seja `none` — a
+declaração da própria faixa —, não os papéis de vídeo: um microfone nunca é
+ângulo e uma câmera com áudio de sync ainda tem o que ser ouvido. Cada parte é
+materializada **uma vez** e serve às duas passagens, porque o driver S3 baixa a
+gravação inteira a cada `resolve`. Um arquivo sem faixa de áudio devolve
+`measuredBlockCount: 0` e é **reportado** em `skipped`, nunca registrado como
+trecho silencioso: nada ouvido e nada soando são fatos opostos.
+
 ### 29.2 Candidatos
 
 Um candidato é derivado por faixa e por janela. `ANGLE_CONTEXTS` é
@@ -1175,6 +1223,28 @@ Recusas nomeadas: `PLAYBACK_EVIDENCE_INSUFFICIENT`, `PLAYBACK_MAP_UNRESOLVED`,
 `PLAYBACK_SESSION_NOT_REACT`, `PLAYBACK_REACTION_TRACK_AMBIGUOUS`,
 `PLAYBACK_TRACK_NOT_SINGLE_PART`, `PLAYBACK_MAP_NOT_FOUND`.
 
+**Quantos detectores existem, de quatro declarados (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` é `audio-fingerprint`, `player-visual`,
+`ocr-timestamp` e `manual-anchor`. Dois produzem peça:
+`audio-fingerprint`, pelo correlator de `ffmpeg-playback-fingerprint.ts`, e
+`manual-anchor`, por `applyPlaybackAnchor` quando uma pessoa responde um trecho
+descoberto. `player-visual` e `ocr-timestamp` **não têm detector nenhum** e não
+são baratos de escrever: o primeiro é detecção de interface dentro do quadro
+(barra de progresso, botão, estado do player, que muda a cada versão de cada
+player); o segundo **não** esbarra em falta de motor de OCR — o repositório tem
+Tesseract atrás de `ImageVisionProvider` — e sim em duas outras coisas: essa
+porta só recebe imagem parada da ingestão de mídia, sem caminho vindo de quadro
+de gravação, e virar texto reconhecido em posição de playhead é trabalho de
+região e template por player.
+
+O vocabulário continua com quatro valores de propósito — o agregado precisa
+conseguir registrar uma peça que veio da interface do player sem fingir que um
+correlator a produziu — e enquanto ninguém escreve os dois detectores o efeito
+é o já descrito acima: player escondido vira trecho descoberto com
+`manual-anchor-required`, e uma pessoa responde. Financiar um detector visual
+ou assumir que react com player escondido é sempre trabalho manual é decisão
+do proprietário; ver PRD FR-145.
+
 ### 32.3 Materialização é só corte
 
 A compilação transforma o mapa num plano renderizável cuja linha do tempo é a
@@ -1241,7 +1311,7 @@ o que falhou e "AC-003: failed" manda o operador a uma tabela.
 | `active-speaker-and-demonstration-directed` | direção multicâmera cortada por falante ativo e por demonstração, com regra e justificativa por plano | `direction-persisted`, `active-speaker-rule-fired`, `demonstration-rule-fired`, `decisions-carry-justification` |
 | `contextual-multi-range-synthesis` | síntese multi-range de cerca de 120 s que guarda a sua prova de contexto e cai dentro da tolerância declarada | `synthesis-persisted`, `target-duration-is-120s`, `duration-within-tolerance`, `multiple-ranges-preserved`, `context-proof-recorded` |
 | `colour-match-precedes-creative-lut` | o match de câmeras é um plano de estágio `match` e resolve antes da LUT criativa | `match-plan-persisted`, `transforms-are-match-stage`, `match-precedes-creative-lut` |
-| `colour-critic-resolved` | o crítico de cor chegou a um veredito que fecha, sem questão dura em aberto | `critic-report-persisted`, `verdict-resolved`, `no-open-hard-issue` |
+| `colour-critic-resolved` | o crítico de cor chegou a um veredito que fecha sozinho — `approve` ou `bounded-correction` — sem questão dura em aberto; `human-review` pede uma pessoa e por isso não fecha | `critic-report-persisted`, `verdict-resolved`, `no-open-hard-issue` |
 | `final-mp4-inspectable` | o MP4 entregue existe como artifact cujo hash, codec, dimensões, taxa e duração foram **medidos** e não declarados | `final-export-promoted`, `output-codec-recorded`, `output-probe-measured`, `artifact-hash-matches-attempt` |
 | `no-legacy-runtime-dependency` | o grafo de módulos atrás de tudo acima foi varrido e não importa runtime legado nem persistência de compatibilidade | `module-graph-scanned`, `no-legacy-runtime-import`, `no-compatibility-persistence` |
 
@@ -1345,7 +1415,7 @@ F4.016 no `TODO.md` está marcada.
 
 | Seção | Módulo de domínio | Evidência |
 |---|---|---|
-| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts` | T-FR-150 (33 casos), T-F4.012 (21 casos de serviço) |
+| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts`, `ffmpeg-multicam-silence-provider.ts` | T-FR-150 (33 casos), T-F4.012 (24 casos de serviço, 2 de mídia em `multicam-silence-evidence.integration.mjs`, 1 de raiz de composição em `multicam-direction-composition.integration.mjs`) |
 | §30 Match de cor | `color-measurement.ts`, `multicam-match-plan.ts` | T-FR-183/T-FR-184 (43 casos), T-F4.013/T-F4.014 (30 casos de serviço) |
 | §31 Crítico de cor | `color-critic-report.ts` | T-FR-184, `color-visual-evaluations.integration.mjs` (7 avaliações) |
 | §32 React PlaybackMap | `playback-map.ts`, `playback-mode.ts` | T-F4.015 (31 casos + 16 de serviço) |
@@ -1455,6 +1525,25 @@ há teste que meça esse teto.
   motivo registrado na §27.3: `MarkerDetection` guarda os ids das observações,
   não o pico e o segundo pico que a fusão mediu.
 - **`spoken-code` continua sem reconhecedor de fala.**
+- **`demonstration` e `attention` continuam sem produtor.** As duas espécies são
+  modeladas, validadas pelo agregado e aceitas pelo `CHECK` da migração, e nada
+  as observa. Não por falta de visão computacional no repositório — há
+  `ImageVisionProvider` com Tesseract e com Google Cloud Vision
+  (`FACE_DETECTION`, `OBJECT_LOCALIZATION`) —, mas porque essa porta só recebe
+  imagem parada da ingestão, ninguém liga quadro de gravação nela, e nem caixa
+  de objeto é mão demonstrando nem caixa de rosto é olhar. Preço:
+  `demonstration-prefers-screen` decide por tela compartilhada e nunca por
+  demonstração física numa câmera. `expressão`, que a linha de FR-150 pede, nem
+  espécie de evidência é. Decisão de escopo do proprietário (§29.1, PRD FR-150).
+- **`silence` é medido e não é lido.** O adaptador existe e persiste, e nenhuma
+  regra de `DIRECTION_RULES` consulta a espécie: a observação entra no hash e
+  não entra na decisão (§29.1).
+- **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
+  `PLAYBACK_DETECTION_METHODS`. O que falta ao segundo não é motor de OCR — o
+  repositório tem Tesseract atrás de `ImageVisionProvider` — e sim o caminho de
+  quadro de vídeo até essa porta e o trabalho de região por player (§32.2).
+  Enquanto não existirem, player escondido é trecho `manual-anchor-required`
+  para uma pessoa responder (PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os

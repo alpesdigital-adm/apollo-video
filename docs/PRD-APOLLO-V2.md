@@ -1494,6 +1494,35 @@ vocabulário de fronteira da Wave 18 entra por spread, acrescido de `pause`,
 (referência 30,00 s, reação 60,00 s): 119 janelas, 69 travadas, 8 peças, 1
 trecho que só uma pessoa pode responder, erro de fronteira de 0 ou 15 quadros
 por peça, e o mesmo `mapHash` em duas execuções. Ver ADR-152.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).**
+`PLAYBACK_DETECTION_METHODS` tem quatro valores e só dois produzem peça em
+produção: `audio-fingerprint`, que o correlator FFmpeg mede, e `manual-anchor`,
+que uma pessoa registra por `applyPlaybackAnchor`. Os outros dois nunca foram
+implementados e não são baratos:
+
+- **`player-visual`** significa ler a posição do player dentro do quadro da
+  reação — barra de progresso, botão de play, estado da interface. Isso é
+  detecção de UI em vídeo (template matching ou um modelo treinado por player),
+  e cada player muda de aparência entre versões.
+- **`ocr-timestamp`** significa ler o relógio que o player desenha. Motor de OCR
+  o repositório **tem**: a porta `ImageVisionProvider` já roda Tesseract
+  (`tesseract-image-vision-provider.ts`, ligado por `APOLLO_TESSERACT_PATH`) e o
+  worker de ingestão a usa. O que não existe é o resto do detector, e é a parte
+  cara: não há caminho de quadro de vídeo materializado até essa porta — ela só
+  recebe imagem parada vinda da ingestão —, e transformar texto reconhecido em
+  posição de playhead é trabalho de região e template por player, porque cada um
+  desenha o relógio onde e como quiser.
+
+Nenhum dos dois é uma lacuna escondida no código: o vocabulário existe para que
+o agregado consiga registrar uma peça que veio da interface do player sem
+fingir que um correlator a produziu, e enquanto ninguém escreve o detector o
+efeito prático é o já documentado — um player escondido vira trecho descoberto
+com `manual-anchor-required`, e uma pessoa responde. A decisão do proprietário
+é entre financiar um detector visual (dependência nova, manutenção por player,
+custo por minuto) e assumir que react com player escondido é sempre trabalho
+manual.
+
 ### FR-146 — Sync audio separado
 
 Scratch audio pode servir para sync e ser descartado no mix final.
@@ -1553,6 +1582,64 @@ h264/aac, e a inspeção de pixel confirmou a troca de ângulo (vermelho aos
 plano de 30/1) são recusadas pela compilação com as taxas que o `ffprobe` leu.
 Superfície `/v1` com cinco capabilities e tela de operador em
 `/multicam-direction`. Deploy e aceite pendentes.
+
+**Não entregue, nomeado aqui em vez de calado (2026-09-07).** Das oito
+espécies, **cinco** têm adaptador ligado na raiz de composição: falante ativo e
+fala simultânea vêm da diarização persistida, atividade de tela e qualidade
+técnica vêm dos pixels, e silêncio vem das amostras
+(`ffmpeg/silencedetect+astats`, medido: um tom contínuo não produz trecho
+nenhum, uma pausa de 2,95 s a −77,04 dBFS produz exatamente ela, zeros digitais
+produzem o piso de −120 dBFS). A **sexta**, reação, o produtor sabe emitir e a
+porta `MulticamPerceptionSource` não tem adaptador nenhum, então em produção
+ela é ausência — nunca zero.
+
+**Medido não é o mesmo que lido.** Silêncio é observado, entra no hash da
+evidência e é persistido, e **nenhuma regra de `DIRECTION_RULES` o lê**:
+`grep silence src/v2/domain/multicam-direction.ts` não devolve linha nenhuma.
+Uma observação de silêncio muda o hash do conjunto e não muda decisão de corte
+alguma — é medição registrada, não entrada da direção. Isso o separa de fala
+simultânea (que dobra a margem de ambiguidade, §29.4) e de qualidade técnica
+(que produz `quality-below-floor`), as duas outras espécies de adaptador, que
+são lidas. Ligar silêncio a uma regra — segurar plano numa pausa, cortar para
+reação quando ninguém fala — é trabalho não começado e não decidido.
+
+**Duas** espécies continuam modeladas, validadas pelo agregado e aceitas pelo
+banco sem que nada as observe:
+
+- **demonstração** exigiria detecção de mãos e objetos. O repositório tem porta
+  de visão e dois adaptadores — Tesseract para OCR e Google Cloud Vision pedindo
+  `FACE_DETECTION` e `OBJECT_LOCALIZATION` —, e nenhum dos dois responde a
+  pergunta: os dois leem **imagem parada** vinda da ingestão de mídia, ninguém
+  liga quadro de gravação nessa porta, e uma caixa em volta de um objeto num
+  quadro não é uma mão demonstrando alguma coisa ao longo do tempo. Chamar
+  movimento de tela de "demonstração" poria o nome errado num número real — a
+  mesma recusa que o passe visual já faz sobre nitidez. A consequência está
+  escrita onde ela dói: a regra `demonstration-prefers-screen` decide por uma
+  tela compartilhada e **nunca** pode decidir por uma demonstração física numa
+  câmera, porque em produção não existe observação de uma.
+- **atenção** exigiria olhar (gaze). `FACE_DETECTION` devolve caixa de rosto e
+  confiança — o adaptador não pede nem lê ângulo de cabeça —, e caixa de rosto
+  não é direção do olhar. Nenhum adaptador aqui estima gaze.
+
+E **expressão**, que a linha do requisito acima pede, não é sequer uma espécie
+de evidência: não está em `MULTICAM_EVIDENCE_KINDS` e nunca esteve. Ler
+expressão facial é mais um modelo de visão, não um parâmetro de FFmpeg — e o
+adaptador de Cloud Vision daqui pede só `FACE_DETECTION` e
+`OBJECT_LOCALIZATION` e lê só caixa e confiança, então nem as verossimilhanças
+de expressão que a API sabe devolver chegam a este repositório. A linha
+do requisito fica como está — ela continua sendo o requisito — e o que muda é
+que a entrega agora diz que essa parte não foi feita, em vez de enumerar oito
+espécies e deixar o leitor concluir que a lista respondia à linha inteira.
+
+As três custam a mesma decisão, e ela é do proprietário. O preço não é "adotar
+visão computacional do zero" — a porta e dois adaptadores já estão aqui; é
+adotar **modelos que estes não têm** (mão em ação, gaze, expressão facial),
+**ligar quadro de vídeo à porta de visão**, que hoje só recebe imagem parada, e
+pagar o segundo passe sobre a mídia já materializada, com licença e custo por
+minuto. A alternativa é declarar demonstração física, atenção e expressão fora
+do escopo e apagar a palavra da linha do requisito. Nada foi começado, e nada
+aqui aproxima uma coisa da outra.
+
 
 ---
 

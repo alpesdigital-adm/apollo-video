@@ -3,7 +3,7 @@ import type { CaptureTrackPart } from '../../domain/capture-session.ts'
 /**
  * What the direction reads to build a `MulticamEvidenceSet` (F4.012, spec 05 §20).
  *
- * Four narrow ports rather than the four repositories they are served by. The
+ * Five narrow ports rather than the repositories they are served by. The
  * evidence producer needs "the diarization segments for these artifacts" and
  * "the visual statistics of these windows", not the ability to persist a
  * diarization run or to reach the artifact registry; a wide dependency would
@@ -96,6 +96,80 @@ export interface MulticamVisualEvidenceProvider {
     windows: readonly Readonly<MulticamVisualWindow>[]
     signal?: AbortSignal
   }): Promise<readonly Readonly<MulticamVisualMeasurement>[]>
+}
+
+/** One stretch of one file to LISTEN to, already materialized on disk by the caller. */
+export interface MulticamAudioWindow {
+  readonly trackId: string
+  readonly partId: string
+  readonly sourceArtifactId: string
+  /** Absolute path handed out by the media resolver; released by the caller in `finally`. */
+  readonly path: string
+  /** Milliseconds relative to the start of the file. */
+  readonly sourceStartMs: number
+  readonly sourceEndMs: number
+}
+
+/**
+ * One stretch inside a window during which the level never rose above
+ * `ceilingDbfs`.
+ *
+ * `ceilingDbfs` is an upper BOUND that was measured, not an average that was
+ * computed: the loudest analysis block inside the stretch when at least one
+ * block had a finite level, and otherwise the detection threshold the whole
+ * stretch stayed under. Both readings are true statements about the samples,
+ * and neither invents a level for digital silence, for which dBFS has no
+ * finite value. It is never positive.
+ */
+export interface MulticamSilentStretch {
+  /** Milliseconds relative to the start of the FILE, like the window itself. */
+  readonly startMs: number
+  readonly endMs: number
+  readonly ceilingDbfs: number
+}
+
+/**
+ * What one listening pass found, with absence kept as absence.
+ *
+ * `measuredBlockCount === 0` says the decode produced no audio at all — a file
+ * with no audio stream, or a window past its end. It does NOT say the window
+ * was silent: the producer drops it and reports it, because a window nobody
+ * could listen to and a window that was quiet are opposite facts
+ * (`ffmpeg-audio-sync-signal-source.ts:743-750` draws the same line).
+ */
+export interface MulticamSilenceMeasurement {
+  readonly trackId: string
+  readonly partId: string
+  readonly sourceArtifactId: string
+  readonly sourceStartMs: number
+  readonly sourceEndMs: number
+  /** How many level blocks the decode produced. Zero means nothing was heard, not that nothing sounded. */
+  readonly measuredBlockCount: number
+  /** How long one level block is. Part of the reading: a 100 ms block cannot resolve a 40 ms gap. */
+  readonly blockMs: number
+  /** The level a stretch had to stay under, and the minimum time it had to stay there. */
+  readonly thresholdDbfs: number
+  readonly minimumSilenceMs: number
+  readonly stretches: readonly Readonly<MulticamSilentStretch>[]
+  /** How it was measured, e.g. `ffmpeg/silencedetect+astats`. */
+  readonly method: string
+  /** Where to look it up again: the artifact and the exact window inside it. */
+  readonly evidenceRef: string
+}
+
+/**
+ * Where `silence` evidence comes from.
+ *
+ * Separate from the visual provider rather than folded into it because the two
+ * answer about different tracks: a microphone is never an angle and a screen
+ * share rarely carries speech, so one port would force every caller to
+ * materialize both kinds of media for whichever half it wanted.
+ */
+export interface MulticamSilenceEvidenceProvider {
+  measure(input: {
+    windows: readonly Readonly<MulticamAudioWindow>[]
+    signal?: AbortSignal
+  }): Promise<readonly Readonly<MulticamSilenceMeasurement>[]>
 }
 
 /**

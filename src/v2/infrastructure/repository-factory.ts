@@ -65,7 +65,11 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
 import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
-import type { MulticamDiarizationSource, MulticamVisualEvidenceProvider } from '../application/ports/multicam-evidence-sources.ts'
+import type {
+  MulticamDiarizationSource,
+  MulticamSilenceEvidenceProvider,
+  MulticamVisualEvidenceProvider,
+} from '../application/ports/multicam-evidence-sources.ts'
 import type { MulticamDirectionCommandRepository } from '../application/ports/multicam-direction-command-repository.ts'
 import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
 import type {
@@ -247,6 +251,7 @@ import {
   deriveMulticamMatchPlanService,
   readMulticamMatchPlanService,
 } from '../application/multicam-color-match.ts'
+import type { DeriveMulticamEvidenceDependencies } from '../application/multicam-direction.ts'
 import {
   deriveMulticamEvidenceService,
   directMulticamSessionService,
@@ -282,6 +287,7 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
 import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { FfmpegMulticamSilenceProvider } from './analysis/ffmpeg-multicam-silence-provider.ts'
 import { FfmpegMulticamVisualEvidenceProvider } from './analysis/ffmpeg-multicam-visual-evidence-provider.ts'
 import { PrismaMulticamDiarizationSource } from './prisma/multicam-diarization-source.ts'
 import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
@@ -2336,14 +2342,19 @@ export function createMulticamDirectionCommandRepository(): MulticamDirectionCom
 /**
  * The persisted diarization the direction reads as speech evidence.
  *
- * This factory, `createMulticamDirectionCommandRepository` above and
- * `createMulticamVisualEvidenceProvider` below have no call site: there is no
- * HTTP route and no worker for `direct-multicam-session` yet, so the wiring
- * exists and nothing pulls it. The adapters themselves are executed — the
- * diarization source against real rows in `multicam-direction.e2e.mjs`, the
- * visual provider against real pixels in
- * `multicam-visual-evidence.integration.mjs` — but the composition root is a
- * named integration need rather than something the tests can claim.
+ * This comment used to say that this factory,
+ * `createMulticamDirectionCommandRepository` above and
+ * `createMulticamVisualEvidenceProvider` below had no call site because no HTTP
+ * route existed for `direct-multicam-session`. Two do:
+ * `src/app/v1/projects/[projectId]/capture-sessions/[sessionId]/direction/`
+ * `route.ts` and its `protected-selections/route.ts`, both through
+ * `createDirectMulticamSessionService`. What was still true until phase 9 is
+ * that nothing EXECUTED that assembly — see
+ * `multicamDirectionCompositionDependencies` below. The adapters themselves are
+ * executed on their own: the diarization source against real rows in
+ * `multicam-direction.e2e.mjs`, the visual provider against real pixels in
+ * `multicam-visual-evidence.integration.mjs`, the silence provider against real
+ * samples in `multicam-silence-evidence.integration.mjs`.
  */
 export function createMulticamDiarizationSource(): MulticamDiarizationSource {
   return new PrismaMulticamDiarizationSource(resolveV2Client())
@@ -2362,6 +2373,25 @@ export function createMulticamVisualEvidenceProvider(
 ): MulticamVisualEvidenceProvider {
   const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_VISUAL_TIMEOUT_MS)
   return new FfmpegMulticamVisualEvidenceProvider({
+    ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
+    ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  })
+}
+
+/**
+ * The FFmpeg pass that listens for silence.
+ *
+ * Only the timeout and the binary are configurable. The threshold and the
+ * minimum duration are the definition of the measurement, so they stay in
+ * `MULTICAM_SILENCE_DEFAULTS` where a deployment cannot move them: an
+ * environment variable that lowers the bar for "silent" would change what the
+ * evidence says while every observation kept claiming it was measured.
+ */
+export function createMulticamSilenceEvidenceProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): MulticamSilenceEvidenceProvider {
+  const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_SILENCE_TIMEOUT_MS)
+  return new FfmpegMulticamSilenceProvider({
     ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
     ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
   })
@@ -2676,6 +2706,13 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
  * perception over produces no reaction observations at all, which the direction
  * reads as "nobody measured" and answers by holding the current angle.
  *
+ * The silence provider IS wired here, and that is the whole point of it being
+ * here: `silence` was a modelled, validated and persisted evidence kind that no
+ * adapter produced, so a production run could never emit one. `demonstration`
+ * and `attention` are still in that state and cannot be lifted out of it with
+ * FFmpeg — see PRD FR-150 and spec 05 §29.1, where both are recorded as not
+ * delivered rather than left to look wired.
+ *
  * Deliberately separate from `createMulticamDirectionReadServices` below. This
  * one builds an FFmpeg provider and a media materializer that need a configured
  * artifact root; a route that only reads a stored direction must not be able to
@@ -2685,25 +2722,60 @@ export function createDirectMulticamSessionService(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const { evidence, ...session } = multicamDirectionCompositionDependencies(environment, clock)
+  return directMulticamSessionService({
+    ...session,
+    deriveEvidence: deriveMulticamEvidenceService(evidence),
+    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
+    createEventId: randomUUID,
+  })
+}
+
+/**
+ * The dependency set above, built and returned instead of only being spread
+ * into a closure — so that something can read it.
+ *
+ * This split exists because of a measured hole, not for tidiness. The whole
+ * point of wiring `silence` here is "a production run could never emit one, and
+ * now it can", and until this function existed nothing in the repository
+ * executed the assembly that carries it: `createDirectMulticamSessionService`
+ * is imported only by the two `/v1` route files, `silence` is optional on
+ * `DeriveMulticamEvidenceDependencies`, and deleting the line that supplies it
+ * left typecheck, both lints, every case in `tests/v2` and the silence media
+ * suite green. `multicam-direction-composition.integration.mjs` now builds this
+ * set and looks at the classes in it, and falsification 10 of
+ * `wave20-falsification.test.mjs` refuses a source where the listening pass —
+ * or the visual one, which had the same hole — has left it.
+ *
+ * `evidence` is a member rather than a flattened field because the two halves
+ * have different readers: `directMulticamSessionService` takes the
+ * repositories, `deriveMulticamEvidenceService` takes the adapters, and the
+ * three things they share (`sessions`, `directions`, `clock`) are shared on
+ * purpose.
+ */
+export function multicamDirectionCompositionDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
   const directions = createMulticamDirectionRepository()
   const sessions = createCaptureSessionRepository()
-  return directMulticamSessionService({
+  const evidence: DeriveMulticamEvidenceDependencies = {
+    sessions,
+    directions,
+    diarization: createMulticamDiarizationSource(),
+    visual: createMulticamVisualEvidenceProvider(environment),
+    silence: createMulticamSilenceEvidenceProvider(environment),
+    media: createCaptureMediaResolver(environment),
+    clock,
+  }
+  return Object.freeze({
     sessions,
     diagnostics: createSyncDiagnosticRepository(),
     protocols: createCaptureProtocolRepository(),
     directions,
     commands: createMulticamDirectionCommandRepository(),
-    deriveEvidence: deriveMulticamEvidenceService({
-      sessions,
-      directions,
-      diarization: createMulticamDiarizationSource(),
-      visual: createMulticamVisualEvidenceProvider(environment),
-      media: createCaptureMediaResolver(environment),
-      clock,
-    }),
+    evidence: Object.freeze(evidence),
     clock,
-    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
-    createEventId: randomUUID,
   })
 }
 

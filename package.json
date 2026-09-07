@@ -80,6 +80,8 @@
     "test:integration:sync-marker-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/sync-marker-render.integration.mjs",
     "test:integration:multicam-direction-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/multicam-direction-render.integration.mjs",
     "test:integration:multicam-visual-evidence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/multicam-visual-evidence.integration.mjs",
+    "test:integration:multicam-silence-evidence": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/multicam-silence-evidence.integration.mjs",
+    "test:integration:multicam-composition": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON node_modules/tsx/dist/cli.mjs --test tests/v2/multicam-direction-composition.integration.mjs",
     "test:integration:playback-map-fingerprint": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/playback-map-fingerprint.integration.mjs",
     "test:integration:synthesis-render": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/synthesis-render.integration.mjs",
     "test:integration:capture-sync-worker": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/v2/capture-sync-worker.integration.mjs",
