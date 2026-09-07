@@ -251,6 +251,7 @@ import {
   deriveMulticamMatchPlanService,
   readMulticamMatchPlanService,
 } from '../application/multicam-color-match.ts'
+import type { DeriveMulticamEvidenceDependencies } from '../application/multicam-direction.ts'
 import {
   deriveMulticamEvidenceService,
   directMulticamSessionService,
@@ -2716,26 +2717,60 @@ export function createDirectMulticamSessionService(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
 ) {
+  const { evidence, ...session } = multicamDirectionCompositionDependencies(environment, clock)
+  return directMulticamSessionService({
+    ...session,
+    deriveEvidence: deriveMulticamEvidenceService(evidence),
+    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
+    createEventId: randomUUID,
+  })
+}
+
+/**
+ * The dependency set above, built and returned instead of only being spread
+ * into a closure — so that something can read it.
+ *
+ * This split exists because of a measured hole, not for tidiness. The whole
+ * point of wiring `silence` here is "a production run could never emit one, and
+ * now it can", and until this function existed nothing in the repository
+ * executed the assembly that carries it: `createDirectMulticamSessionService`
+ * is imported only by the two `/v1` route files, `silence` is optional on
+ * `DeriveMulticamEvidenceDependencies`, and deleting the line that supplies it
+ * left typecheck, both lints, every case in `tests/v2` and the silence media
+ * suite green. `multicam-direction-composition.integration.mjs` now builds this
+ * set and looks at the classes in it, and falsification 10 of
+ * `wave20-falsification.test.mjs` refuses a source where the listening pass —
+ * or the visual one, which had the same hole — has left it.
+ *
+ * `evidence` is a member rather than a flattened field because the two halves
+ * have different readers: `directMulticamSessionService` takes the
+ * repositories, `deriveMulticamEvidenceService` takes the adapters, and the
+ * three things they share (`sessions`, `directions`, `clock`) are shared on
+ * purpose.
+ */
+export function multicamDirectionCompositionDependencies(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+) {
   const directions = createMulticamDirectionRepository()
   const sessions = createCaptureSessionRepository()
-  return directMulticamSessionService({
+  const evidence: DeriveMulticamEvidenceDependencies = {
+    sessions,
+    directions,
+    diarization: createMulticamDiarizationSource(),
+    visual: createMulticamVisualEvidenceProvider(environment),
+    silence: createMulticamSilenceEvidenceProvider(environment),
+    media: createCaptureMediaResolver(environment),
+    clock,
+  }
+  return Object.freeze({
     sessions,
     diagnostics: createSyncDiagnosticRepository(),
     protocols: createCaptureProtocolRepository(),
     directions,
     commands: createMulticamDirectionCommandRepository(),
-    deriveEvidence: deriveMulticamEvidenceService({
-      sessions,
-      directions,
-      diarization: createMulticamDiarizationSource(),
-      visual: createMulticamVisualEvidenceProvider(environment),
-      silence: createMulticamSilenceEvidenceProvider(environment),
-      media: createCaptureMediaResolver(environment),
-      clock,
-    }),
+    evidence: Object.freeze(evidence),
     clock,
-    createId: (prefix: string) => `${prefix}-${randomUUID()}`,
-    createEventId: randomUUID,
   })
 }
 
