@@ -1241,7 +1241,7 @@ o que falhou e "AC-003: failed" manda o operador a uma tabela.
 | `active-speaker-and-demonstration-directed` | direção multicâmera cortada por falante ativo e por demonstração, com regra e justificativa por plano | `direction-persisted`, `active-speaker-rule-fired`, `demonstration-rule-fired`, `decisions-carry-justification` |
 | `contextual-multi-range-synthesis` | síntese multi-range de cerca de 120 s que guarda a sua prova de contexto e cai dentro da tolerância declarada | `synthesis-persisted`, `target-duration-is-120s`, `duration-within-tolerance`, `multiple-ranges-preserved`, `context-proof-recorded` |
 | `colour-match-precedes-creative-lut` | o match de câmeras é um plano de estágio `match` e resolve antes da LUT criativa | `match-plan-persisted`, `transforms-are-match-stage`, `match-precedes-creative-lut` |
-| `colour-critic-resolved` | o crítico de cor chegou a um veredito que fecha, sem questão dura em aberto | `critic-report-persisted`, `verdict-resolved`, `no-open-hard-issue` |
+| `colour-critic-resolved` | o crítico de cor chegou a um veredito que fecha sozinho — `approve` ou `bounded-correction` — sem questão dura em aberto; `human-review` pede uma pessoa e por isso não fecha | `critic-report-persisted`, `verdict-resolved`, `no-open-hard-issue` |
 | `final-mp4-inspectable` | o MP4 entregue existe como artifact cujo hash, codec, dimensões, taxa e duração foram **medidos** e não declarados | `final-export-promoted`, `output-codec-recorded`, `output-probe-measured`, `artifact-hash-matches-attempt` |
 | `no-legacy-runtime-dependency` | o grafo de módulos atrás de tudo acima foi varrido e não importa runtime legado nem persistência de compatibilidade | `module-graph-scanned`, `no-legacy-runtime-import`, `no-compatibility-persistence` |
 

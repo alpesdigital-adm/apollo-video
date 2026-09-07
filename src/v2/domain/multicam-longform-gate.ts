@@ -154,7 +154,14 @@ export const MULTICAM_LONGFORM_CRITERION_STATEMENTS = Object.freeze({
   'colour-match-precedes-creative-lut':
     'The camera match is a match-stage plan and resolves before the creative LUT, so the grade is not graded.',
   'colour-critic-resolved':
-    'The colour critic reached a verdict that closes: approved, bounded correction, or a human review with no hard issue left open.',
+    // 'human-review' is what COLOR_CRITIC_CAUSE_ACTIONS returns when the
+    // evidence was unavailable or the correction could not be derived
+    // (color-critic-report.ts:137-141): it is the critic asking for a person,
+    // not a record that a person came. Nothing in the report says a review
+    // happened, so the reader accepts only 'approve' and 'bounded-correction'
+    // (multicam-longform-gate-repository.ts:158-162) and this sentence used to
+    // promise a third door the gate does not open.
+    'The colour critic reached a verdict that closes on its own — approved, or a bounded correction — with no hard issue left open. A verdict that asks for a human does not close it.',
   'final-mp4-inspectable':
     'The delivered MP4 exists as an artifact whose hash, codec, dimensions, frame rate and duration were measured rather than declared.',
   'no-legacy-runtime-dependency':
