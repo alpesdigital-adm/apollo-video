@@ -175,12 +175,21 @@ const UNITS = Object.freeze(DECADES.slice(0, 10))
  * identification was never ambiguous, only the calibration was local.
  *
  * A ratio says what the assertion means without naming a machine's noise
- * floor: the winning marker must be at least five times closer than the one
- * that came second. A frame that blended two markers sits near 1.0 and is
- * still refused; an encoder that shifts every colour equally does not move the
+ * floor: a frame that blended two markers sits near parity and is refused,
+ * while an encoder that shifts every colour the same way does not move the
  * ratio at all.
+ *
+ * The margin above parity is the one judgement call left, so here are the
+ * numbers it sits between. A reading is ambiguous at 1.0 — equally close to
+ * two markers — and that is the failure this assertion exists to catch. The
+ * author's machine reads its own markers at better than 0.01. A GitHub runner,
+ * whose encoder puts the same frames 25.0 away from their marker instead of
+ * 1.0, read minute 0 at 0.24. "Twice as close as the runner-up" sits clear of
+ * that observed worst case and still far from parity; a first attempt at five
+ * times was tighter than a real encoder, which is how the runner's figure came
+ * to be measured rather than assumed.
  */
-const MARKER_AMBIGUITY_CEILING = 0.2
+const MARKER_AMBIGUITY_CEILING = 0.5
 
 /**
  * Six windows over a source, together exactly 120 s, each wholly inside one
