@@ -75,11 +75,25 @@ jobs:
             package-lock.json
             remotion/package-lock.json
 
-      # AGENTS.md lists `git diff --check` among the commands that must pass
-      # before work is called finished, and until this step existed no CI job
-      # ran it: `grep -rn "diff --check" .github/ scripts/ package.json` came
-      # back empty while the checked-out tree carried seven blank lines at end
-      # of file. A gate nobody runs is a sentence in a document.
+      # `git diff --check` is required by TODO.md, which lists it among the
+      # commands that must pass before a slice is called finished — "typecheck,
+      # `git diff --check`, audits sem vulnerabilidades, migration validation,
+      # bundle Remotion e build Next.js passam" — and repeats it in two more
+      # acceptance lists. Four reports under `docs/quality` then record it as
+      # approved: proof-mode-v1.md, batch-edit-v1.md, batch-partial-retry-v1.md
+      # and source-deconstruction-v1.md.
+      #
+      # It is NOT one of the nine gates AGENTS.md enumerates. An earlier
+      # version of this comment attributed the requirement there, in the one
+      # sentence written to show the gate was mandated rather than invented;
+      # `grep -n "diff --check" AGENTS.md` returns nothing.
+      #
+      # Every one of those documents reports the check as having passed on
+      # somebody's machine, and until this step existed nothing made the next
+      # machine repeat it: `grep -rn "diff --check" .github/ scripts/
+      # package.json` came back empty while the checked-out tree carried seven
+      # blank lines at end of file. A gate nobody runs is a sentence in a
+      # document.
       #
       # `lint:whitespace` diffs against `4b825dc…`, git's empty tree, so every
       # line in the repository is read as added and the whole tree is checked —

@@ -117,21 +117,30 @@ const parseWorkflow = (workflow) => {
 
   const parsed = steps.map(({ job: owner, lines }) => {
     const body = lines.join('\n')
-    const name = /^ {6}- name: (.+)$/.exec(lines[0])?.[1]?.trim() ?? null
     const npmScripts = [...body.matchAll(/npm run ([a-z0-9:._-]+)/g)].map((match) => match[1])
     const suiteFiles = [...body.matchAll(SUITE_FILE)].map((match) => match[0])
 
+    // The `- ` line carries the step's first key, so `- uses: actions/checkout`
+    // reads the same as a `uses:` written under a `- name:`.
     const attrs = new Map()
+    const opener = /^ {6}- ([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[0])
+    if (opener) attrs.set(opener[1], opener[2].trim())
     for (const line of lines.slice(1)) {
       const attribute = /^ {8}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line)
       if (attribute) attrs.set(attribute[1], attribute[2].trim())
     }
+    const name = attrs.get('name') ?? null
 
+    // Blank lines and `#` comments are skipped rather than treated as the end
+    // of the block. Breaking on a comment silently dropped every variable
+    // written below one — six steps in this workflow explain a bucket or a
+    // storage driver right above the value, and their `V2_DATABASE_URL` sits
+    // under that explanation.
     const env = new Map()
     const envAt = lines.findIndex((line) => /^ {8}env:\s*$/.test(line))
     if (envAt >= 0) {
       for (const line of lines.slice(envAt + 1)) {
-        if (line.trim() === '') continue
+        if (line.trim() === '' || /^\s*#/.test(line)) continue
         const entry = /^ {10}([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(line)
         if (!entry) break
         env.set(entry[1], entry[2].trim())
@@ -170,6 +179,16 @@ test('T-F4.016 every mandatory product journey has a CI step, its own gate and a
 
   assert.ok(jobs.length > 0, 'parsed no jobs out of ci.yml; the parser and the workflow have diverged')
   assert.ok(steps.length > 0, 'parsed no steps out of ci.yml; the parser and the workflow have diverged')
+
+  // Everything below is only as true as the parse. A GitHub step always runs
+  // either a command or an action, and always belongs to a job, so anything
+  // parsed without those is the parser reading list items that are not steps —
+  // which is exactly what an earlier version did to `- main` under
+  // `on.push.branches`, at the same six-space indentation a step uses.
+  const notSteps = steps
+    .filter((step) => !step.job || (!step.attrs.has('run') && !step.attrs.has('uses')))
+    .map((step) => step.name ?? step.attrs.keys().next().value ?? '(unreadable)')
+  assert.deepEqual(notSteps, [], `parsed these as CI steps though they run nothing: ${notSteps.join(', ')}`)
 
   assert.equal(
     MANDATORY_JOURNEYS.length,
