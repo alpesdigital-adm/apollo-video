@@ -626,4 +626,3 @@ test('T-FR-175 the sidecar is downloaded through the existing media download gra
 
 // Referenced so the unused-import guard cannot hide a broken manifest helper.
 assert.equal(typeof createMediaArtifactManifestV2, 'function')
-
