@@ -39,7 +39,10 @@ import type {
   RenderSourceRepository,
   ResolvedRenderSource,
 } from './ports/render-source-repository.ts'
-import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
+import type {
+  RenderablePlanSnapshotRepository,
+  StoredRenderablePlanSnapshot,
+} from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
   calculateRenderablePlanHash,
@@ -162,6 +165,15 @@ export interface ReactPlaybackPlanResult {
   readonly replayed: boolean
   /** The map version the plan was compiled from. */
   readonly mapVersion: number
+  /**
+   * The stored row, as the repository read it back.
+   *
+   * Carried out of the service rather than reassembled by a caller so that the
+   * published surface presents what PostgreSQL holds — origin, source hash,
+   * source version, `createdAt` — instead of a projection a route composed and
+   * that could drift from the row a later reader opens.
+   */
+  readonly snapshot: Readonly<StoredRenderablePlanSnapshot>
 }
 
 function versionRef(sessionId: string, reactionTrackId: string, version: number): string {
@@ -778,6 +790,9 @@ export function compileReactPlaybackPlanService(dependencies: {
     actor: SyncActor
     sessionId: string
     reactionTrackId: string
+    /** The map version the caller read, as `<sessionId>:playback:<trackId>:v<n>`. */
+    baseVersionId: string
+    baseHash: string
     projectVersionId: string
     objective: StrategicObjectiveId
     desiredAction?: Readonly<DesiredActionInput>
@@ -792,6 +807,26 @@ export function compileReactPlaybackPlanService(dependencies: {
       throw new DomainError(
         'PLAYBACK_MAP_NOT_FOUND',
         `Capture session ${input.sessionId} has no playback map for ${input.reactionTrackId}`,
+      )
+    }
+    // The map version the caller decided against, not merely whatever is head
+    // now. Without this the compile was the only playback command with no
+    // fence, and the session check below does not stand in for it: a rebuild
+    // against a *newer* session produces a new map version whose
+    // `sessionVersion` matches the session perfectly, so an operator who read
+    // v2 and pressed compile would silently be handed a plan for a v3 cut they
+    // never saw. Same shape as the anchor fence, so a UI following
+    // `PLAYBACK_MAP_VERSION_STALE` reloads the map and retries.
+    const expectedMapVersionId = versionRef(input.sessionId, input.reactionTrackId, map.version)
+    if (input.baseVersionId !== expectedMapVersionId || input.baseHash !== map.mapHash) {
+      throw new DomainError(
+        'PLAYBACK_MAP_VERSION_STALE',
+        `The playback map for ${input.sessionId}/${input.reactionTrackId} has moved to version ${map.version}; re-read it and retry`,
+        {
+          currentVersionId: expectedMapVersionId,
+          currentVersion: map.version,
+          currentHash: map.mapHash,
+        },
       )
     }
     const session = await dependencies.sessions.readHead({
@@ -1073,6 +1108,7 @@ export function compileReactPlaybackPlanService(dependencies: {
       planHash: persisted.snapshot.planHash,
       replayed: persisted.replayed,
       mapVersion: map.version,
+      snapshot: persisted.snapshot,
     })
   }
 }

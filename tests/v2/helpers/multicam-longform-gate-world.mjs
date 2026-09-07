@@ -604,6 +604,10 @@ export async function buildGateWorld({
     actor: reactActor,
     sessionId: ids.reactSession,
     reactionTrackId: 'track-reaction',
+    // The map version the anchor produced: the compile is fenced on the pair,
+    // like every other playback command.
+    baseVersionId: `${ids.reactSession}:playback:track-reaction:v${resolvedReact.map.version}`,
+    baseHash: resolvedReact.map.mapHash,
     projectVersionId: versionId,
     objective: 'discovery',
     planFps: rational(30n, 1n),

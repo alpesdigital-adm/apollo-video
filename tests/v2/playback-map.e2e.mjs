@@ -375,8 +375,29 @@ test(
     }).then(() => null, (error) => error)
     assert.equal(denied?.code, 'PLAYBACK_MAP_NOT_FOUND')
 
+    // The map pair the compile is fenced on: version 2, the one the anchor
+    // produced and the only one that is resolved enough to compile.
+    const resolvedFence = {
+      baseVersionId: `${SESSION}:playback:${REACTION_TRACK}:v${resolved.map.version}`,
+      baseHash: resolved.map.mapHash,
+    }
+    const stalePlan = await compile({
+      actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      baseVersionId: head.versionRef, baseHash: first.map.mapHash,
+      projectVersionId: VERSION_A, objective: 'discovery',
+      planFps: rational(BigInt(30), BigInt(1)),
+    }).then(() => null, (error) => error)
+    assert.equal(stalePlan?.code, 'PLAYBACK_MAP_VERSION_STALE')
+    assert.equal(stalePlan.details.currentVersion, 2)
+    assert.equal(
+      await client.v2RenderablePlanSnapshot.count({ where: { workspaceId: A } }),
+      0,
+      'a compile refused by the fence must not leave a snapshot behind',
+    )
+
     const compiled = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     })
@@ -416,6 +437,7 @@ test(
     // Recompiling is a replay: the same derivation at the same hash is one row.
     const again = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     })
@@ -624,6 +646,7 @@ test(
     await client.v2ProjectMediaAsset.delete({ where: { id: referenceLink.id } })
     const unresolvable = await compile({
       actor, sessionId: SESSION, reactionTrackId: REACTION_TRACK,
+      ...resolvedFence,
       projectVersionId: VERSION_A, objective: 'discovery',
       planFps: rational(BigInt(30), BigInt(1)),
     }).then(() => null, (error) => error)

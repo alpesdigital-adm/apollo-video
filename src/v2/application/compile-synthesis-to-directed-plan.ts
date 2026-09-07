@@ -9,7 +9,10 @@ import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 import type { EditorialSynthesisRepository } from './ports/editorial-synthesis-repository.ts'
 import type { RenderSourceRepository } from './ports/render-source-repository.ts'
-import type { RenderablePlanSnapshotRepository } from './ports/renderable-plan-snapshot-repository.ts'
+import type {
+  RenderablePlanSnapshotRepository,
+  StoredRenderablePlanSnapshot,
+} from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
   calculateRenderablePlanHash,
@@ -310,6 +313,12 @@ export function compileSynthesisRenderPlanService(dependencies: {
     plan: Readonly<DirectedEditPlan>
     planHash: string
     replayed: boolean
+    /**
+     * The stored row, as the repository read it back. Carried out of the
+     * service so the published surface presents what PostgreSQL holds rather
+     * than a projection a route composed beside it.
+     */
+    snapshot: Readonly<StoredRenderablePlanSnapshot>
   }>> => {
     const stored = await dependencies.syntheses.read({
       workspaceId: input.workspaceId,
@@ -386,6 +395,7 @@ export function compileSynthesisRenderPlanService(dependencies: {
       plan: persisted.snapshot.plan,
       planHash: persisted.snapshot.planHash,
       replayed: persisted.replayed,
+      snapshot: persisted.snapshot,
     })
   }
 }
