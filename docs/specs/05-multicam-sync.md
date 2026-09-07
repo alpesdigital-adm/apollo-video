@@ -849,6 +849,42 @@ A ordem não é uma convenção deste módulo — `createColorPlan` **recusa** u
 camada que declare a LUT criativa antes do match, com `COLOR_STAGE_VIOLATION`.
 Igualar câmeras depois de graduar seria graduar o grau.
 
+**Isto mudou na Wave 20, e o que havia antes era pior do que "sem regra".** Até
+o commit `e1d5dec1`, a camada fora de ordem era **aceita**. `resolveColorPlan`
+indexa os estágios por tipo (`color-and-export.ts:550-552`), então uma camada
+declarada `[technical, creative-lut, match, output]` passava na construção, era
+reordenada na leitura e renderizada numa ordem que o plano guardado não
+descrevia: a declaração e o pipeline divergiam, e nada recusava. A guarda
+`assertMatchStagePosition` existia, mas o único chamador de produção montava
+camadas de um transform só, onde ela nunca pode falhar. Hoje ela roda dentro de
+`normalizeLayer` (`color-and-export.ts:407-424`), que é por onde passa **toda**
+camada de todo `ColorPlan`: a global e cada override de source, câmera e
+segmento. A recusa carrega `{ position, after }`.
+
+**O que isso faz com quem chama.** Um corpo que declare a LUT criativa antes do
+match e que antes respondia 200 hoje responde **422 `COLOR_STAGE_VIOLATION`**,
+categoria `policy`, `retryable: false` (`PUBLIC_ERROR_CATALOG`, lido em
+2026-09-06). Vale para `POST /v1/projects/{projectId}/color-pipeline-compilations`
+— `createColorPipelineCompilation` chama `resolveColorPlan`, que começa por
+`createColorPlan` (`color-and-export.ts:524`) — e para
+`POST /v1/projects/{projectId}/color-plan`, que chega ao mesmo construtor por
+`createProjectColorPlan` (`application/project-color-plans.ts:159`,
+`domain/project-color-plan.ts:54`). A rota de compilação tem asserção de
+jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1220-1245` e em
+`teacher-screen-journey.e2e.mjs:794-821` conferem o código, a categoria e o
+`retryable` do envelope. Essas duas jornadas **não** foram executadas nesta
+máquina (§34.5); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
+código, não medição.
+
+**E um plano já guardado na ordem antiga deixa de reidratar.** A leitura repassa
+o plano pelo mesmo construtor: `parseProjectColorPlan`
+(`project-color-plan.ts:74-101`) reconstrói o agregado com
+`createProjectColorPlan`, então a guarda dispara também na leitura. Não há
+migração de dados para isso, e este documento não afirma que exista. Nenhuma
+linha assim existe em fixture ou seed deste repositório — se alguma existir num
+ambiente implantado, ela para de ser legível, e ninguém mediu isso porque não há
+ambiente implantado.
+
 O provedor é `apollo-match`, em duas versões declaradas em
 `MATCH_PROVIDER_VERSIONS`:
 
