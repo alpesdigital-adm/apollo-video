@@ -253,4 +253,3 @@ Produção validada em 2026-07-27 na revisão final `c083986`:
 - 2 runs, 1 ativo, 4 chunks e 8 tier executions persistidos;
 - zero runs/chunks materializados;
 - media artifacts permaneceram em 7 antes/depois.
-

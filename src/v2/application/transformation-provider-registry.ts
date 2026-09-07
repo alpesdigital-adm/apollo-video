@@ -65,4 +65,3 @@ export async function readTransformationProviderHealthService(input: {
 }): Promise<readonly Readonly<TransformationProviderHealth>[]> {
   return input.repository.readLatestHealth(input)
 }
-

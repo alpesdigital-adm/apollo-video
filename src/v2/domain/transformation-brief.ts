@@ -259,4 +259,3 @@ export function createTransformationBriefFromStoryPlan(input: {
     createdAt: input.createdAt,
   })
 }
-
