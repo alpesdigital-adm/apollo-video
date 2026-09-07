@@ -78,5 +78,5 @@ escolher entre os dois.
 
 **O que fica em aberto.** `rate` numa peça vem da correlação daquela peça, e não
 de um ajuste de drift da sessão: `fitClockDrift` continua sem escritor
-(spec 05 §34.3). Uma peça cuja taxa não foi medida diz `rate: null` e o mapa
+(spec 05 §34.4). Uma peça cuja taxa não foi medida diz `rate: null` e o mapa
 carrega o aviso `rate-unmeasured`.

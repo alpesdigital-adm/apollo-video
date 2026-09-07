@@ -873,7 +873,7 @@ categoria `policy`, `retryable: false` (`PUBLIC_ERROR_CATALOG`, lido em
 jornada: `E2E-F4.012` em `podcast-multicam-journey.e2e.mjs:1220-1245` e em
 `teacher-screen-journey.e2e.mjs:794-821` conferem o código, a categoria e o
 `retryable` do envelope. Essas duas jornadas **não** foram executadas nesta
-máquina (§34.5); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
+máquina (§34.6); rodam no CI. Pela rota de ColorPlan a recusa é leitura de
 código, não medição.
 
 **E um plano já guardado na ordem antiga deixa de reidratar.** A leitura repassa
@@ -1377,7 +1377,60 @@ estritamente menor (razão de pico 2,4882 → confiança 0,8755, `auto-apply`;
 razão 1,4037 → confiança 0,6555, `review`). Uma câmera sem microfone não produz
 observação alguma — não produz zero.
 
-### 34.3 O que continua faltando
+### 34.3 O renderer editorial: o custo de um corte deixou de ser o tamanho da fonte
+
+`FfmpegEditorialProxyRenderer` dava a cada clipe um `trim=start_frame=…` sobre
+**uma** entrada — a fonte inteira. O FFmpeg decodifica todo quadro da entrada e
+segura os quadros enquanto qualquer ramo do grafo ainda puder querer um, então o
+custo de um corte era o tamanho da FONTE e não o do que ele guarda. Hoje cada
+clipe tem a sua própria entrada `-ss`/`-t` sobre o mesmo arquivo já normalizado
+em cor, e o `trim` corta a partir do quadro 0 dessa entrada
+(`ffmpeg-editorial-proxy-renderer.ts:732-760`). O `-ss` começa meio quadro cedo e
+o `-t` leva um quadro de folga, para que um período de quadro que não divida em
+microssegundos jamais arredonde para depois do primeiro quadro do clipe; o `trim`
+segue cortando o intervalo exato.
+
+**O áudio continua na entrada não-buscada, de propósito.** `atrim` é exato ao
+sample e uma busca só pode cair num limite de pacote; buscar o áudio também
+mudou 5624 dos 5635 quadros de áudio, e o objetivo da mudança é que os bytes
+**não** se movam.
+
+**Medido pelo autor da mudança**, registrado na mensagem do commit `4416e57b` e
+**não re-executado ao escrever este documento**:
+
+| Master | Clipes | Antes | Depois |
+|---|---|---|---|
+| 600 s | 6 | 111,3 s | 12,9 s, saída byte a byte idêntica (sha256 `8f11166c…`, 5 932 461 bytes) |
+| 7200 s | 6 | morto em 1856,5 s com 11,9 GB, `RENDER_EXECUTION_FAILED { killed: true, signal: 'SIGTERM' }` pelo timeout de 30 min do próprio renderer (`ffmpeg-editorial-proxy-renderer.ts:860`) | 38,9 s, abaixo de 3,6 GB, 7 075 824 bytes |
+
+Duas horas com dois minutos de saída é a Jornada 6 do brief — "extrair um
+conteúdo de dois minutos de uma live de duas horas"
+(`docs/PRD-APOLLO-V2.md:117`). O caminho de manchete do produto não terminava
+antes desta wave.
+
+**Medido aqui, com o mecanismo isolado.** Não é o renderer: é o par de grafos
+que ele emite, reduzido a vídeo. Fonte `testsrc2` 320x180 a 30 fps com 600,0 s,
+seis clipes de 600 quadros começando nos quadros 0/3000/6000/9000/12000/15000,
+libx264 `ultrafast`, N=3 por forma, nesta máquina em 2026-09-06:
+
+- uma entrada não-buscada + `trim=start_frame=…`: 49,82 / 43,01 / 41,86 s
+  (média 44,90 s, desvio-padrão 4,30 s);
+- seis entradas `-ss`/`-t` + `trim=start_frame=0`: 0,95 / 0,96 / 0,98 s
+  (média 0,96 s, desvio-padrão 0,02 s);
+- as seis saídas são o mesmo arquivo: 10 862 893 bytes, sha256
+  `20d40e898ea0c2f53965bb5f12b90e50c545d0cde8adfc94a88b53b5f671b6f0`.
+
+A razão de 47x desta bancada não é a razão do produto — ela não tem áudio,
+legenda nem overlay, e a fonte tem 600 s e não 7200 s. O que ela demonstra é o
+que a mudança afirma: o custo seguia o tamanho da fonte e deixou de seguir, com
+a saída inalterada.
+
+**O que ficou por consertar.** Os 3,6 GB que sobram no caso de 7200 s são a mesma
+patologia do lado do áudio, limitada pelo tamanho do quadro de áudio em vez do de
+imagem. Foi aceito como preço de manter os samples exatos, não corrigido, e não
+há teste que meça esse teto.
+
+### 34.4 O que continua faltando
 
 - **Drift continua sem ser ajustado.** `fitClockDrift` e `capture_drift_fits`
   seguem sem escritor; o diagnóstico segue relatando `driftPpm: null`, que é
@@ -1394,7 +1447,7 @@ observação alguma — não produz zero.
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os
   números das §§29–31 vieram de fixtures geradas.
 
-### 34.4 Round trip contra PostgreSQL
+### 34.5 Round trip contra PostgreSQL
 
 `npm run test:e2e:wave20-persistence` no mesmo cluster (2 testes, 2 passes,
 7,9 s) mede as três coisas que um duplo em memória não mede:
@@ -1410,7 +1463,7 @@ observação alguma — não produz zero.
   relatório de crítico com 12 dimensões, mapa de playback com 8 peças na v1 e 9
   na v2.
 
-### 34.5 O que não foi medido neste passe
+### 34.6 O que não foi medido neste passe
 
 Este documento foi escrito com `npm test` (2147 testes, 2147 passes, saída 0),
 seis suítes de integração de mídia da Wave 20 e quatro suítes de banco contra um
