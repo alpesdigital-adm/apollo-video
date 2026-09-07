@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,13 @@ import { promisify } from 'node:util'
 import ffmpegStatic from 'ffmpeg-static'
 import { NextRequest } from 'next/server'
 
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageEnvironment,
+  journeyStorageLabel,
+  openJourneyObjectStore,
+} from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
@@ -96,6 +104,16 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const RUN = process.env.APOLLO_INSUFFICIENT_EVIDENCE_E2E === '1'
 const SKIP = RUN ? false : 'set APOLLO_INSUFFICIENT_EVIDENCE_E2E=1 with a migrated V2_DATABASE_URL'
+/**
+ * Local disk or versioned MinIO, chosen by the runtime env the composition root
+ * reads — never pinned in this file. This journey is one of the three that
+ * genuinely resolves artifact bytes: the sync worker opens all four recordings
+ * to look for a signal, and the whole point of the suite is that it finds none.
+ * A refusal reached because the store was unreachable would be the same word
+ * for a different fact, which is why the s3 path is exercised rather than
+ * assumed equivalent.
+ */
+const storageDriver = journeyStorageDriver()
 
 const execFileAsync = promisify(execFile)
 const FFMPEG = ffmpegStatic ?? 'ffmpeg'
@@ -265,12 +283,22 @@ test(
       'this E2E is restricted to a disposable local PostgreSQL',
     )
     process.env.APOLLO_API_ENVIRONMENT = 'production'
-    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
 
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-insufficient-evidence-'))
+    const root = await mkdtemp(join(tmpdir(), 'apollo-insufficient-evidence-'))
+    const artifactRoot = join(root, 'artifacts')
+    // What FFmpeg writes. In local mode these ARE the stored artifacts; in s3
+    // mode they are the fixture this suite uploads, kept outside the artifact
+    // root so an assertion can prove no key resolves to a local file and the
+    // worker's four reads can only have come out of MinIO.
+    const sourceRoot = storageDriver === 's3' ? join(root, 'sources') : artifactRoot
+    const workRoot = join(root, 'work')
+    for (const directory of [artifactRoot, sourceRoot, workRoot]) {
+      await mkdir(directory, { recursive: true })
+    }
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
-    process.env.APOLLO_V2_RENDER_WORK_ROOT = join(artifactRoot, '.work')
-    await mkdir(process.env.APOLLO_V2_RENDER_WORK_ROOT, { recursive: true })
+    process.env.APOLLO_V2_RENDER_WORK_ROOT = workRoot
+    const objectStore = await openJourneyObjectStore()
 
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -352,7 +380,10 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
-      await rm(artifactRoot, { recursive: true, force: true }).catch((error) => {
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.error('object storage cleanup failed:', error?.message ?? error)
+      })
+      await rm(root, { recursive: true, force: true }).catch((error) => {
         console.error('artifact root cleanup failed:', error?.message ?? error)
       })
       await client.$disconnect().catch(() => undefined)
@@ -361,7 +392,7 @@ test(
     await clean()
 
     // ---- the four recordings ----------------------------------------------
-    const captureDirectory = join(artifactRoot, 'capture')
+    const captureDirectory = join(sourceRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
     const master = masterSamples()
     await writeFile(join(captureDirectory, 'master.pcm'), toPcm(master))
@@ -425,6 +456,24 @@ test(
       { assetId: 'ie-asset-cam-b', key: 'capture/camera-b.mp4', file: cameraBFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
       { assetId: 'ie-asset-scratch', key: 'capture/scratch.m4a', file: scratchFile, mediaType: 'audio', container: 'm4a', role: 'selected-insert' },
     ]
+    // In s3 mode the four recordings go into the run's own versioned bucket
+    // under exactly these keys, and the artifact root is proven to hold none of
+    // them: the sync worker resolves every part through
+    // `S3ArtifactSourceMaterializer`, so a leftover local copy would let this
+    // journey reach its refusal without object storage ever being read.
+    if (objectStore) {
+      for (const recording of recordings) {
+        await objectStore.put(recording.key, join(sourceRoot, ...recording.key.split('/')))
+      }
+      assert.deepEqual(await objectStore.keys(), recordings.map(({ key }) => key).sort())
+      for (const recording of recordings) {
+        assert.equal(
+          existsSync(join(artifactRoot, ...recording.key.split('/'))),
+          false,
+          `${recording.key} must not also sit in the artifact root while MinIO is the store of record`,
+        )
+      }
+    }
     for (const recording of recordings) {
       await client.v2MediaArtifact.create({
         data: {
@@ -629,8 +678,10 @@ test(
           cwd: REPOSITORY_ROOT,
           env: {
             ...process.env,
-            APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
-            APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+            // The same store this process opened, not a second one: a worker
+            // left on the local driver would look for a signal on a disk the
+            // parent never wrote to, and answer the refusal for a wrong reason.
+            ...journeyStorageEnvironment({ driver: storageDriver, artifactRoot, workRoot }),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: process.platform === 'win32',
@@ -1046,7 +1097,8 @@ test(
       `${anchorsPlaced} anchors over ${anchorPlan.length} tracks -> pass 2 insufficient=${secondOutcome.insufficient} ` +
       `method=[${afterTracks.map((entry) => entry.selectedMethod).join(',')}] ` +
       `diagnostic v${cleared.version} status=${cleared.status} confidence=${cleared.globalConfidence} ` +
-      `autoEdit=${cleared.autoEdit.allowed}; direction ${directed.status} shots=${cut.direction.shotCount} uncovered=0`,
+      `autoEdit=${cleared.autoEdit.allowed}; direction ${directed.status} shots=${cut.direction.shotCount} uncovered=0; ` +
+      `${journeyStorageLabel(storageDriver)}`,
     )
   },
 )

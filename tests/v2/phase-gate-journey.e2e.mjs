@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageLabel,
+  openJourneyObjectStore,
+} from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
@@ -86,6 +92,83 @@ const TIMEOUT = 15 * 60_000
  */
 const API_ENVIRONMENT = process.env.APOLLO_API_ENVIRONMENT ?? 'sandbox'
 process.env.APOLLO_API_ENVIRONMENT = API_ENVIRONMENT
+
+/**
+ * The request-anomaly floor, raised for the same reason the podcast and
+ * teacher journeys raise it — and for a reason this journey looked immune to.
+ *
+ * The detector is not a call counter. `evaluateGovernanceAnomalies` only emits
+ * `REQUEST_RATE_ANOMALY` when `usage.baselineRequests > 0`
+ * (`governance-anomaly.ts:152`), and `baselineRequests` is the count of
+ * admissions in `[now - 300 s, now - 60 s)` — strictly OLDER than the signal
+ * window (`governance-admission-repository.ts:435-452`). A run that finishes
+ * inside one 60 s window therefore has no baseline at all and cannot trip it,
+ * whatever it does; a run that outlives 60 s gets a baseline made of its own
+ * first minute, and the threshold collapses to the floor
+ * (`max(requestMinimum, ceil(baseline * 3 / 5))`, `governance-anomaly.ts:105-115`),
+ * so admission number `floor + 1` in the second window is refused.
+ *
+ * Measured on this branch, PostgreSQL 16 on 127.0.0.1:55744:
+ * - this journey writes **30** admissions and took 10.8 s / 18.7 s / 20.7 s
+ *   (N=3) — under the window, which is why it passed 3/3 unguarded here and
+ *   why the guard looked unnecessary;
+ * - a probe seeding 25 admissions older than 60 s and then calling one
+ *   governed route was refused `429 GOVERNANCE_LIMIT_EXCEEDED` at call **21**
+ *   with the shipped floor of 20, and admitted 40/40 with this floor of 400.
+ *
+ * So the difference from the podcast and teacher journeys is DURATION, not
+ * call count: they render with FFmpeg and always outlive the window, this one
+ * usually does not — until a loaded runner makes it, which is what the audit
+ * measured (one 429 in N=2 on a virgin database). 30 is far below 400, so the
+ * floor cannot hide a journey that genuinely burst: only the floor moves,
+ * `requestsPerMinute` and the quotas keep their shipped defaults.
+ */
+process.env.APOLLO_GOVERNANCE_ANOMALY_REQUEST_MINIMUM = '400'
+
+/**
+ * Local disk or versioned MinIO, read from the runtime env.
+ *
+ * This journey used to name no driver at all, which meant the default: it ran
+ * against a local disk and the briefing's "PostgreSQL 16 and versioned object
+ * storage" was true of neither half here. It now runs under whichever driver
+ * the workflow selects, and CI runs it under `s3` on the Compose MinIO.
+ *
+ * What that proves is stated rather than implied. The gate reads ROWS and the
+ * module graph: ten criteria over coverage, clock maps, diagnostics, colour
+ * plans, final-export operations and media MANIFESTS — the manifest, never the
+ * file. `buildGateWorld` writes no bytes anywhere, in either mode
+ * (`multicam-longform-gate-world.mjs:1017-1075` creates `v2MediaArtifact` and
+ * `v2MediaArtifactManifest` rows and stops), and the artifacts the report cites
+ * carry synthetic digests no real file could have.
+ *
+ * So what the s3 run proves is narrower than "the gate read its evidence out of
+ * MinIO", and narrower than "the gate ran on the object-storage composition
+ * root" too: no route this journey imports ever constructs artifact storage at
+ * all. Measured — `createArtifact|Materializer|ContentStorage|VerifiedMedia|
+ * RenderInput` has zero hits across the six route modules imported below, and
+ * this suite sets neither `APOLLO_V2_ARTIFACT_ROOT` nor
+ * `APOLLO_V2_RENDER_WORK_ROOT`, one of which the composition root demands the
+ * moment anything asks it for storage in either mode
+ * (`local-artifact-content-storage.ts:87`, `repository-factory.ts:1252-1257`).
+ * The whole S3 conversation in an s3 run is this suite's own CreateBucket,
+ * PutBucketVersioning, GetBucketVersioning, ListObjectVersions and DeleteBucket.
+ *
+ * Stated plainly, then: the gate reaches the same verdict whichever driver the
+ * environment names — it is indifferent to it — and the bucket it was handed is
+ * EMPTY at the end.
+ *
+ * That emptiness is the falsifiable half, and what it falsifies is a WRITE. The
+ * day a criterion starts putting bytes anywhere — an export promoted, a probe
+ * cached — the assertion at the end of this journey fails. A criterion that
+ * starts READING a file never reaches that assertion: under s3 it dies first
+ * with PERSISTENCE_NOT_CONFIGURED, "Render work root is required for S3
+ * artifact materialization", because neither this suite nor the CI step that
+ * runs it configures one. Two different failures, one decision behind them —
+ * whether the gate should be touching bytes at all — and this is what each of
+ * them looks like, instead of it happening silently on a developer's disk.
+ */
+const storageDriver = journeyStorageDriver()
+process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
 
 /**
  * Invoke a published route the way Next would.
@@ -236,6 +319,7 @@ test(
 
     const clean = () => cleanGateWorld({ client, workspaceIds: WORKSPACES })
     const lease = await acquireGateFixtureLease()
+    const objectStore = await openJourneyObjectStore()
 
     t.after(async () => {
       // Reported, not rethrown: a cleanup failure that masks the assertion
@@ -245,6 +329,9 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.error('object storage cleanup failed:', error?.message ?? error)
+      })
       await client.$disconnect()
       await lease.release()
     })
@@ -950,6 +1037,18 @@ test(
     assert.equal(outstanding.payload.data.approved, true)
     assert.deepEqual(outstanding.payload.data.outstanding, [])
 
+    // What object storage saw: nothing. See the note on `storageDriver` — no
+    // route here constructs artifact storage at all, so this is the assertion
+    // that notices the day a criterion starts WRITING bytes. One that starts
+    // READING them fails earlier and louder, on the work root nobody configured.
+    if (objectStore) {
+      assert.deepEqual(
+        await objectStore.keys(),
+        [],
+        'the phase gate reads rows and manifests, never bytes, so its bucket must stay empty',
+      )
+    }
+
     console.log(
       `E2E-F4.016 phase gate journey: ${gates.length} evaluations through /v1 — approved ${approved.report.satisfied}/10 ` +
       `(fingerprint ${approved.report.fingerprint.slice(0, 12)}, ${artifacts.payload.data.artifacts.length} artifacts cited), ` +
@@ -958,7 +1057,8 @@ test(
       `tampered synthesis -> ${tamperedReport.satisfied}/10 evidence-unverified, ` +
       `restored -> ${restoredSynthesis.payload.data.gate.report.satisfied}/10; ` +
       '5 bodies carrying a verdict refused 422 INVALID_ARGUMENT with 0 rows written; ' +
-      `4 more conditions broken one at a time: ${conditions.join(', ')}`,
+      `4 more conditions broken one at a time: ${conditions.join(', ')}; ` +
+      `${journeyStorageLabel(storageDriver)}, bucket keys ${objectStore ? (await objectStore.keys()).length : 'n/a'}`,
     )
   },
 )

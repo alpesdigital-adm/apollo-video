@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageEnvironment,
+  journeyStorageLabel,
+  openJourneyObjectStore,
+  storedArtifactPath,
+} from './helpers/journey-object-storage.mjs'
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 /**
@@ -99,6 +108,12 @@ const ffmpegPath = require('ffmpeg-static')
 const ffprobePath = require('ffprobe-static').path
 
 const RUN = process.env.APOLLO_TEACHER_SCREEN_E2E === '1'
+/**
+ * Local disk or versioned MinIO, chosen by the runtime env the composition root
+ * reads — never pinned in this file. Read once, at load, so the worker child
+ * gets the same store this process opened.
+ */
+const storageDriver = journeyStorageDriver()
 
 const FPS = 30
 /** One tick is one frame, so a session instant and an output frame are the same integer. */
@@ -192,12 +207,27 @@ test(
     // the real clock. This journey renders, so a lesson filmed in 2029 could
     // never be cut.
     const at = (second) => new Date(Date.parse('2026-02-03T09:00:00.000Z') + second * 1_000)
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-teacher-screen-e2e-'))
+    const root = await mkdtemp(join(tmpdir(), 'apollo-teacher-screen-e2e-'))
+    const artifactRoot = join(root, 'artifacts')
+    // What FFmpeg writes. In local mode these ARE the stored artifacts; in s3
+    // mode they are the fixture this suite uploads, kept outside the artifact
+    // root so the assertion below can prove no source key resolves to a local
+    // file and every byte the direction read came out of MinIO.
+    const sourceRoot = storageDriver === 's3' ? join(root, 'sources') : artifactRoot
+    const workRoot = join(root, 'work')
+    const readbackRoot = join(root, 'readback')
+    for (const directory of [artifactRoot, sourceRoot, workRoot, readbackRoot]) {
+      await mkdir(directory, { recursive: true })
+    }
     // The direction route builds an FFmpeg visual provider and a media
     // materializer from the environment, so this process needs the artifact
     // root too — not just the worker child.
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
-    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    process.env.APOLLO_V2_RENDER_WORK_ROOT = workRoot
+    // Read, never pinned: the assignment that used to sit here made "runs
+    // against versioned object storage" impossible to falsify.
+    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
+    const objectStore = await openJourneyObjectStore()
     // A lesson's worth of `/v1` calls arrives in one burst from a workspace
     // created seconds earlier, and the request-anomaly detector compares a
     // burst against a baseline that does not exist yet (`requestMinimum` 20
@@ -260,7 +290,10 @@ test(
       } catch (error) {
         console.log(`teacher-screen cleanup reported: ${error?.message ?? error}`)
       }
-      await rm(artifactRoot, { recursive: true, force: true }).catch((error) => {
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.log(`teacher-screen object storage cleanup reported: ${error?.message ?? error}`)
+      })
+      await rm(root, { recursive: true, force: true }).catch((error) => {
         console.log(`teacher-screen artifact root cleanup reported: ${error?.message ?? error}`)
       })
       await prisma.$disconnect()
@@ -268,7 +301,7 @@ test(
     await clean()
 
     // ---- the two recordings, generated here and never committed -----------
-    const mediaDirectory = join(artifactRoot, 'capture')
+    const mediaDirectory = join(sourceRoot, 'capture')
     const teacherVoice = helpers.sweepSamples({ seconds: SECONDS })
     const screenSeconds = SECONDS - Math.ceil(SCREEN_LAG_SECONDS)
     const cameraPcm = join(mediaDirectory, 'teacher.pcm')
@@ -282,8 +315,8 @@ test(
 
     const cameraKey = 'capture/teacher-camera.mp4'
     const screenKey = 'capture/screen-capture.mp4'
-    const cameraFile = helpers.artifactPath(artifactRoot, cameraKey)
-    const screenFile = helpers.artifactPath(artifactRoot, screenKey)
+    const cameraFile = helpers.artifactPath(sourceRoot, cameraKey)
+    const screenFile = helpers.artifactPath(sourceRoot, screenKey)
     const cameraBytes = await helpers.encodeRecording({
       ffmpegPath,
       outputPath: cameraFile,
@@ -329,6 +362,26 @@ test(
     assert.ok(cameraStreams.some((stream) => stream.codec_type === 'audio'), 'the camera carries its own audio')
     assert.ok(screenStreams.some((stream) => stream.codec_type === 'audio'), 'the screen capture carries audio')
     const producerDigest = await helpers.binaryDigest(ffprobePath)
+
+    // ---- the storage of record --------------------------------------------
+    // In s3 mode both recordings are PUT into the run's own versioned bucket
+    // under the keys the media rows carry, and the artifact root is then proven
+    // to hold neither: the sync worker and the direction resolve sources
+    // through `S3ArtifactSourceMaterializer`, so a local copy at the artifact
+    // path would let this journey pass without object storage ever being read.
+    if (objectStore) {
+      for (const key of [cameraKey, screenKey]) {
+        await objectStore.put(key, helpers.artifactPath(sourceRoot, key))
+      }
+      assert.deepEqual(await objectStore.keys(), [cameraKey, screenKey].slice().sort())
+      for (const key of [cameraKey, screenKey]) {
+        assert.equal(
+          existsSync(helpers.artifactPath(artifactRoot, key)),
+          false,
+          `${key} must not also sit in the artifact root while MinIO is the store of record`,
+        )
+      }
+    }
 
     // ---- the world the ingest pipeline would have left --------------------
     await helpers.createWorkspaceRow({ prisma, workspaceId, name: 'Teacher and screen journey', createdAt: at(0) })
@@ -497,8 +550,9 @@ test(
     assert.equal(requested.data.run.state, 'queued')
 
     const workerEnvironment = {
-      APOLLO_V2_ARTIFACT_ROOT: artifactRoot,
-      APOLLO_V2_ARTIFACT_STORAGE_DRIVER: 'local',
+      // The same store this process opened, not a second one: a worker left on
+      // the local driver would render from a disk the parent never wrote to.
+      ...journeyStorageEnvironment({ driver: storageDriver, artifactRoot, workRoot }),
       // The render worker seals its recipe parameters before it writes a
       // manifest; without a key it refuses to start rather than storing them
       // in the clear.
@@ -900,7 +954,13 @@ test(
       where: { workspaceId, id: outputArtifactId },
       select: { artifactKey: true },
     })
-    const outputPath = helpers.artifactPath(artifactRoot, outputArtifact.artifactKey)
+    // In s3 mode this is a version-bound GET out of MinIO rather than a path on
+    // this machine, so the bytes measured below are the bytes the store holds.
+    const outputPath = await storedArtifactPath(objectStore, {
+      artifactRoot,
+      artifactKey: outputArtifact.artifactKey,
+      readbackRoot,
+    })
     const outputSha256 = helpers.sha256Of(await readFile(outputPath))
     const outputByteSize = Number(publishedArtifact.data.artifact.byteSize)
     assert.equal(
@@ -1030,7 +1090,8 @@ test(
       `duration=${Number(outputVideo.duration).toFixed(3)}s ${outputVideo.width}x${outputVideo.height} ` +
       `vcodec=${outputVideo.codec_name} acodec=${outputAudio.codec_name} bytes=${outputByteSize} ` +
       `mp4sha256=${outputSha256.slice(0, 16)} ` +
-      `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}]` +
+      `pixels=[${Object.entries(sampled).map(([label, pixel]) => `${label}@${sampleSeconds[label].toFixed(2)}s(r${pixel.red.toFixed(0)},g${pixel.green.toFixed(0)},b${pixel.blue.toFixed(0)})`).join(' ')}] ` +
+      `${journeyStorageLabel(storageDriver)}` +
       `${retainedPath ? ` retained=${retainedPath}` : ''}`,
     )
   },

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -10,6 +11,13 @@ import { promisify } from 'node:util'
 
 import ffmpegStatic from 'ffmpeg-static'
 import { NextRequest } from 'next/server'
+
+import {
+  closeJourneyObjectStore,
+  journeyStorageDriver,
+  journeyStorageLabel,
+  openJourneyObjectStore,
+} from './helpers/journey-object-storage.mjs'
 
 import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
@@ -91,6 +99,25 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
 
 const RUN = process.env.APOLLO_REACT_PLAYBACK_JOURNEY_E2E === '1'
 const SKIP = RUN ? false : 'set APOLLO_REACT_PLAYBACK_JOURNEY_E2E=1 with a migrated V2_DATABASE_URL'
+/**
+ * Local disk or versioned MinIO, chosen by the runtime env — never pinned here.
+ *
+ * `POST /v1/.../playback-map` resolves the two recordings through
+ * `CaptureMediaResolver`, so this journey does read artifact bytes, and the
+ * first s3 run said so loudly: with an empty bucket the build answered
+ * `500 INTERNAL_ERROR` where the suite expects `409
+ * MEDIA_ARTIFACT_IDENTITY_MISMATCH`, because the reference track's
+ * materialization failed before the identity comparison the assertion is about
+ * was ever reached. The two recordings are therefore uploaded, and the refusal
+ * assertion becomes a statement about the resolver rather than about which
+ * disk the file happened to be on.
+ *
+ * What object storage still does NOT cover here is the render: nothing under
+ * `src/app/v1` or `scripts/` consumes a `RenderablePlanSnapshot`, so the MP4
+ * comes from an `FfmpegEditorialProxyRenderer` this test hands local source
+ * paths to. That gap is the header's, not the driver's, and it is unchanged.
+ */
+const storageDriver = journeyStorageDriver()
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -109,7 +136,7 @@ const SAMPLE_RATE = 16_000
 const TICKS_PER_SECOND = 90_000
 const FPS = 30
 const REFERENCE_SECONDS = 30
-const REACTION_SECONDS = 60
+const REACTION_SECONDS = 70
 
 const seconds = (value) => BigInt(Math.round(value * TICKS_PER_SECOND))
 const ticksToSeconds = (ticks) => Number(BigInt(ticks)) / TICKS_PER_SECOND
@@ -135,6 +162,27 @@ const TRUTH = Object.freeze([
   { mode: 'seek', from: 49, to: 53, reference: 19 },
   { mode: 'hidden', from: 53, to: 57, reference: 23 },
   { mode: 'playing', from: 57, to: 60, reference: 27 },
+  // The rewind — the MODE, not the `'rewind'` discontinuity reason the replay
+  // above also carries.
+  //
+  // The briefing names rewind as a state this fixture has to cover, and until
+  // now it did not. `deriveReactionPlaybackMap` calls a backward move a
+  // `replay` when the range it lands on is already covered by everything played
+  // so far, and a `rewind` only when it is not (playback-map.ts:1256-1259) — so
+  // the difference is neither the direction nor the distance. The backward move
+  // at 41 s goes to reference 8 and stops at 15.5, inside the played union, and
+  // is a replay. This one goes back to 16 and runs on to 26.5, past the 23.5
+  // the seek reached: the reactor rewinds and then watches THROUGH into ground
+  // nobody had seen. Measured, the played union entering this segment is
+  // [0, 23.5] u [26.5, 29.5], and [16, 26.5] is inside neither.
+  //
+  // Ten seconds, and stopping short of the reference's end on purpose: the last
+  // run's reference range is `referenceStart + reactionSpan` capped at the
+  // reference duration (playback-map.ts:1237-1243), and a capped range spans
+  // fewer reference frames than timeline frames — which `compilePlaybackToShots`
+  // refuses outright ("piece piece-009 spans 420 reference frames over 435
+  // timeline frames", measured while writing this).
+  { mode: 'rewind', from: 60, to: 70, reference: 16 },
 ])
 
 const PAUSE_SECONDS = 18 - 10
@@ -350,12 +398,19 @@ test(
       'this E2E is restricted to a disposable local PostgreSQL',
     )
     process.env.APOLLO_API_ENVIRONMENT = 'production'
-    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = 'local'
+    process.env.APOLLO_V2_ARTIFACT_STORAGE_DRIVER = storageDriver
 
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'apollo-react-journey-'))
+    const root = await mkdtemp(join(tmpdir(), 'apollo-react-journey-'))
+    const artifactRoot = join(root, 'artifacts')
+    // What FFmpeg writes. In local mode these ARE the stored artifacts; in s3
+    // mode they are the fixture uploaded below, kept outside the artifact root
+    // so no key resolves to a local file.
+    const sourceRoot = storageDriver === 's3' ? join(root, 'sources') : artifactRoot
+    for (const directory of [artifactRoot, sourceRoot]) await mkdir(directory, { recursive: true })
     process.env.APOLLO_V2_ARTIFACT_ROOT = artifactRoot
-    process.env.APOLLO_V2_RENDER_WORK_ROOT = join(artifactRoot, '.work')
+    process.env.APOLLO_V2_RENDER_WORK_ROOT = join(root, 'work')
     await mkdir(process.env.APOLLO_V2_RENDER_WORK_ROOT, { recursive: true })
+    const objectStore = await openJourneyObjectStore()
 
     const { createApiClientService } = await import('../../src/v2/application/create-api-client.ts')
     const { nodeApiCredentialCrypto } = await import('../../src/v2/infrastructure/security/api-credential.ts')
@@ -428,7 +483,10 @@ test(
       } catch (error) {
         console.error('cleanup failed:', error?.message ?? error)
       }
-      await rm(artifactRoot, { recursive: true, force: true }).catch((error) => {
+      await closeJourneyObjectStore(objectStore).catch((error) => {
+        console.error('object storage cleanup failed:', error?.message ?? error)
+      })
+      await rm(root, { recursive: true, force: true }).catch((error) => {
         console.error('artifact root cleanup failed:', error?.message ?? error)
       })
       await client.$disconnect().catch(() => undefined)
@@ -437,7 +495,10 @@ test(
     await clean()
 
     // ---- the two recordings, encoded here and never committed ---------------
-    const captureDirectory = join(artifactRoot, 'capture')
+    // In s3 mode `sourceRoot` sits outside the artifact root and the two files
+    // are uploaded below, so the build route can only have read them out of
+    // MinIO.
+    const captureDirectory = join(sourceRoot, 'capture')
     await mkdir(captureDirectory, { recursive: true })
     const referenceSamples = buildReferenceSamples()
     // Kept, not discarded: this is what the delivered MP4's audio is measured
@@ -472,6 +533,22 @@ test(
       reactionSeconds > referenceSeconds * 1.9,
       `the reaction (${reactionSeconds}s) must not be the reference (${referenceSeconds}s)`,
     )
+
+    // ---- the storage of record ---------------------------------------------
+    if (objectStore) {
+      for (const [key, file] of [
+        ['capture/reference.mp4', referenceFile],
+        ['capture/reaction.mp4', reactionFile],
+      ]) {
+        await objectStore.put(key, file.path)
+        assert.equal(
+          existsSync(join(artifactRoot, ...key.split('/'))),
+          false,
+          `${key} must not also sit in the artifact root while MinIO is the store of record`,
+        )
+      }
+      assert.deepEqual(await objectStore.keys(), ['capture/reaction.mp4', 'capture/reference.mp4'])
+    }
 
     // ---- the world the routes read -----------------------------------------
     await new PrismaWorkspaceRepository(client).create(createWorkspace({
@@ -744,7 +821,7 @@ test(
     const modes = pieces.map((piece) => piece.mode)
     assert.deepEqual(
       modes,
-      ['playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek', 'playing'],
+      ['playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek', 'playing', 'rewind'],
       `the derived modes were ${modes.join(', ')}`,
     )
 
@@ -783,6 +860,31 @@ test(
     const seek = pieces.find((piece) => piece.mode === 'seek')
     assert.equal(seek.discontinuityReason, 'seek')
     assert.ok(BigInt(seek.referenceRange.start) > BigInt(replay.referenceRange.end))
+
+    // The rewind: backward like the replay, and a different answer because it
+    // reaches reference time nothing had played. Both carry
+    // `discontinuityReason: 'rewind'`; only the MODE separates "watched it
+    // again" from "went back for the part they skipped", and asserting the
+    // reason alone — which is all this journey used to do — cannot tell them
+    // apart.
+    const rewind = pieces.find((piece) => piece.mode === 'rewind')
+    assert.ok(rewind, `no piece came back as a rewind: ${modes.join(', ')}`)
+    assert.equal(rewind.direction, 'backward')
+    assert.equal(rewind.discontinuityReason, 'rewind')
+    assert.notEqual(rewind.pieceId, replay.pieceId, 'the replay and the rewind must be two pieces')
+    assert.ok(
+      BigInt(rewind.referenceRange.end) > BigInt(seek.referenceRange.end),
+      'a rewind that stops inside played ground is a replay',
+    )
+    const playedBeforeRewind = pieces
+      .filter((piece) => piece.pieceId !== rewind.pieceId && piece.referenceRange !== null)
+      .map((piece) => piece.referenceRange)
+    assert.ok(
+      !playedBeforeRewind.some((played) =>
+        BigInt(played.start) <= BigInt(rewind.referenceRange.start) &&
+        BigInt(rewind.referenceRange.end) <= BigInt(played.end)),
+      'no single played range may contain the rewind, or the domain would have called it a replay',
+    )
 
     // No piece asserts reference time the reference does not have.
     for (const piece of pieces) {
@@ -968,7 +1070,7 @@ test(
     }
     const pathByArtifactId = new Map(recordings.map((recording) => [recording.artifactId, recording.file.path]))
     const renderer = new FfmpegEditorialProxyRenderer({
-      workRoot: join(artifactRoot, 'render-work'),
+      workRoot: join(root, 'render-work'),
       ffmpegPath: FFMPEG,
     })
     const operationId = 'react-playback-journey-render'
@@ -1031,13 +1133,16 @@ test(
 
     // ---- the footage, not the container ------------------------------------
     //
-    // Everything above holds for 1800 frames of anything. A plan that cut the
-    // right lengths from the wrong moments renders a file with the same frame
-    // count, the same duration, the same codecs and the same dimensions — and a
-    // different sha256 nobody may pin, because the digest is FFmpeg-build
-    // dependent and this suite runs on Windows and on the ubuntu runner. So the
-    // output is measured against the two things the fixture knows: the
-    // reaction's own audio, and which source each stretch must have come from.
+    // Everything above holds for `reactionFrames` frames of anything — the count
+    // asserted on the plan above, named rather than typed, because the last time
+    // this fixture's length changed the typed number stayed behind at 1800. A
+    // plan that cut the right lengths from the wrong moments renders a file with
+    // the same frame count, the same duration, the same codecs and the same
+    // dimensions — and a different sha256 nobody may pin, because the digest is
+    // FFmpeg-build dependent and this suite runs on Windows and on the ubuntu
+    // runner. So the output is measured against the two things the fixture
+    // knows: the reaction's own audio, and which source each stretch must have
+    // come from.
     const deliveredAudio = decodeAudio(rendered.outputPath)
     let audioEnergy = 0
     for (const sample of deliveredAudio) audioEnergy += sample * sample
@@ -1051,6 +1156,7 @@ test(
     const resolvedPaused = resolvedPieces.find((piece) => piece.mode === 'paused')
     const resolvedCommentary = resolvedPieces.find((piece) => piece.mode === 'commentary-only')
     const resolvedReplay = resolvedPieces.find((piece) => piece.mode === 'replay')
+    const resolvedRewind = resolvedPieces.find((piece) => piece.mode === 'rewind')
     const firstPlaying = resolvedPieces.find((piece) => piece.mode === 'playing')
 
     // Audio: the compiler's own assumption is that every shot carries the
@@ -1086,6 +1192,7 @@ test(
       { label: 'commentary-only', second: midpointOf(resolvedCommentary), source: 'reaction' },
       { label: 'playing', second: midpointOf(firstPlaying), source: 'reference' },
       { label: 'replay', second: midpointOf(resolvedReplay), source: 'reference' },
+      { label: 'rewind', second: midpointOf(resolvedRewind), source: 'reference' },
     ].map((probe) => ({ ...probe, ...frameStatistics(rendered.outputPath, probe.second) }))
     for (const probe of pixelProbes) {
       if (probe.source === 'reaction') {
@@ -1099,6 +1206,14 @@ test(
         probe.sd > 40,
         `at ${probe.second.toFixed(2)}s (${probe.label}) the picture is flat, so it is not the reference: sd ${probe.sd.toFixed(2)}`,
       )
+    }
+
+    // What object storage holds at the end: the two recordings this journey
+    // uploaded and nothing else. Nothing in a react playback map is promoted as
+    // a derived artifact today, and a third key appearing here would mean
+    // something started writing without anybody deciding it should.
+    if (objectStore) {
+      assert.deepEqual(await objectStore.keys(), ['capture/reaction.mp4', 'capture/reference.mp4'])
     }
 
     // The file itself, kept only when a run asks for it. The renderer's own
@@ -1164,7 +1279,11 @@ test(
       `+ ${map.uncovered.length} uncovered; pause ${spanSeconds(paused).toFixed(3)}s vs known ${PAUSE_SECONDS}s ` +
       `(erro ${(pauseError * FPS).toFixed(1)} frames, tolerancia ${BOUNDARY_TOLERANCE_FRAMES}); ` +
       `commentary ${spanSeconds(commentary).toFixed(3)}s referenceRange=null; ` +
-      `replay ${replay.direction}/${replay.discontinuityReason}; seek ${seek.discontinuityReason}; ` +
+      `replay ${replay.mode}/${replay.direction}/${replay.discontinuityReason} ref ` +
+      `${ticksToSeconds(replay.referenceRange.start).toFixed(1)}-${ticksToSeconds(replay.referenceRange.end).toFixed(1)}s; ` +
+      `rewind ${rewind.mode}/${rewind.direction}/${rewind.discontinuityReason} ref ` +
+      `${ticksToSeconds(rewind.referenceRange.start).toFixed(1)}-${ticksToSeconds(rewind.referenceRange.end).toFixed(1)}s; ` +
+      `seek ${seek.discontinuityReason}; ` +
       `anchor v${resolvedMap.version} status=${resolvedMap.status} resolved the hole at reference ` +
       `${ticksToSeconds(anchoredPiece.referenceRange.start).toFixed(3)}s vs known ${hidden.reference}s ` +
       `(erro ${anchoredReferenceErrorFrames.toFixed(2)} frames) via ${anchoredPiece.detectionMethod}, ` +
@@ -1176,7 +1295,8 @@ test(
       `${video.width}x${video.height} / ${rendered.byteSize} bytes / sha256 ${outputSha256.slice(0, 16)}; ` +
       `audio rms ${audioRms.toFixed(4)}, reaction lag ` +
       `[${audioProbes.map((probe) => `${probe.label} ${probe.lagSeconds.toFixed(3)}s r=${probe.score.toFixed(3)}`).join(', ')}]; ` +
-      `pixels [${pixelProbes.map((probe) => `${probe.label} sd=${probe.sd.toFixed(2)} mean=${probe.mean.toFixed(1)}`).join(', ')}]` +
+      `pixels [${pixelProbes.map((probe) => `${probe.label} sd=${probe.sd.toFixed(2)} mean=${probe.mean.toFixed(1)}`).join(', ')}]; ` +
+      `${journeyStorageLabel(storageDriver)}` +
       `${retainedPath ? ` / retained at ${retainedPath}` : ''}`,
     )
   },

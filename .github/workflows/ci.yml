@@ -692,6 +692,98 @@ jobs:
           APOLLO_V2_S3_BUCKET: apollo-blockplan-${{ github.run_id }}-${{ github.run_attempt }}
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-block-plan-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      # The Wave 20 product journeys run in the `quality` job, which has
+      # PostgreSQL and no MinIO, and every one of them used to pin
+      # APOLLO_V2_ARTIFACT_STORAGE_DRIVER=local inside the test file — so the
+      # briefing's "PostgreSQL 16 AND versioned object storage" was true of
+      # neither half. The driver now comes from the environment, and these two
+      # steps are the half that was missing: the journey with the heaviest
+      # media path and the journey that decides whether the phase ships, both
+      # against the versioned MinIO this job already runs.
+      #
+      # They run HERE and stay in `quality` too, on purpose: the `quality` runs
+      # keep proving the local driver, and a difference between the two answers
+      # is the signal worth having.
+      - name: Provision the isolated capture journey database
+        run: |
+          docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres createdb -U "$POSTGRES_USER" apollo_v2_e2e_capture
+          npm run db:v2:migrate:deploy
+        env:
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-capture-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 20 podcast multicam journey against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:podcast-multicam-journey
+        env:
+          APOLLO_PODCAST_MULTICAM_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_PODCAST_MULTICAM_OUTPUT: ${{ runner.temp }}/podcast-multicam-journey-s3
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          # Exclusive per-run bucket: the journey creates it, enables
+          # versioning, proves zero orphan objects and deletes it afterwards.
+          APOLLO_V2_S3_BUCKET: apollo-podcast-${{ github.run_id }}-${{ github.run_attempt }}
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2_e2e_capture?schema=public&application_name=apollo-video-e2e-podcast-multicam-s3-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run Wave 20 phase gate journey against PostgreSQL and versioned MinIO
+        run: npm run test:e2e:phase-gate-journey
+        env:
+          APOLLO_PHASE_GATE_E2E: "1"
+          APOLLO_API_ENVIRONMENT: production
+          APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3
+          APOLLO_V2_S3_ENDPOINT: http://127.0.0.1:59000
+          APOLLO_V2_S3_REGION: us-east-1
+          APOLLO_V2_S3_ACCESS_KEY_ID: ${{ env.MINIO_ROOT_USER }}
+          APOLLO_V2_S3_SECRET_ACCESS_KEY: ${{ env.MINIO_ROOT_PASSWORD }}
+          APOLLO_V2_S3_FORCE_PATH_STYLE: "true"
+          APOLLO_V2_S3_ALLOW_INSECURE_HTTP: "true"
+          # The gate reads rows and manifests, never bytes — no route it
+          # serves constructs artifact storage at all — so this bucket exists
+          # to be asserted EMPTY at the end, which is what makes that sentence
+          # falsifiable rather than a comment. No APOLLO_V2_RENDER_WORK_ROOT on
+          # purpose: a criterion that starts reading bytes fails here with
+          # PERSISTENCE_NOT_CONFIGURED instead of quietly succeeding.
+          APOLLO_V2_S3_BUCKET: apollo-phase-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_v2?schema=public&application_name=apollo-video-e2e-phase-gate-s3-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Verify zero orphan capture journey backends and buckets
+        if: always()
+        run: |
+          set -euo pipefail
+          compose="docker compose -f infra/postgres/compose.yml -f infra/object-storage/compose.yml"
+          for name in apollo-video-e2e-podcast-multicam-s3-ci apollo-video-e2e-phase-gate-s3-ci; do
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              backends="$($compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select count(*) from pg_stat_activity where application_name = '$name'")"
+              if test "$backends" = 0; then break; fi
+              sleep 1
+            done
+            echo "$name backends: $backends"
+            test "$backends" = 0
+          done
+          for bucket in "apollo-podcast-${{ github.run_id }}-${{ github.run_attempt }}" "apollo-phase-gate-${{ github.run_id }}-${{ github.run_attempt }}"; do
+            if $compose exec -T minio mc ls "local/$bucket" >/dev/null 2>&1; then
+              echo "run-exclusive bucket $bucket still exists after cleanup" >&2
+              exit 1
+            fi
+          done
+
+      # Read back with ffprobe and sampled for pixels by the journey itself
+      # before this runs, so the upload is for a person. Separate from the
+      # `quality` job's copy on purpose: this is the file the object-storage
+      # run delivered, and comparing the two is the point.
+      - name: Publish the versioned-storage podcast journey MP4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-podcast-journey-s3-${{ github.sha }}
+          path: ${{ runner.temp }}/podcast-multicam-journey-s3
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run synthetic master cross-project reuse E2E against /v1 and PostgreSQL
         run: npm run test:e2e:synthetic-master-reuse
         env:
