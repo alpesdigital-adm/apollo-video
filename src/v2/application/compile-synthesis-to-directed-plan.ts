@@ -15,7 +15,7 @@ import type {
 } from './ports/renderable-plan-snapshot-repository.ts'
 import {
   assembleDirectedEditPlan,
-  calculateRenderablePlanHash,
+  renderablePlanSnapshotOf,
   type RenderablePlanMarker,
   type RenderablePlanSeam,
   type RenderablePlanSource,
@@ -375,20 +375,16 @@ export function compileSynthesisRenderPlanService(dependencies: {
       createdAt,
     })
     const persisted = await dependencies.snapshots.persist({
-      snapshot: {
+      snapshot: renderablePlanSnapshotOf({
         workspaceId: input.workspaceId,
         projectId: input.projectId,
-        planId: plan.id,
         origin: 'multi-range-synthesis',
         sourceId: stored.synthesis.id,
         sourceHash: stored.synthesis.synthesisHash,
+        // A synthesis is one immutable cut, not a chain.
         sourceVersion: null,
-        fps: plan.fps,
-        durationFrames: plan.durationFrames,
-        clipCount: plan.videoTracks[0]?.clips.length ?? 0,
         plan,
-        planHash: calculateRenderablePlanHash(plan),
-      },
+      }),
       createdAt,
     })
     return Object.freeze({

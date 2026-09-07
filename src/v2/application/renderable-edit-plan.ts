@@ -10,6 +10,7 @@ import {
   type DirectedEditPlan,
   type DirectedTransition,
 } from '../domain/director-run.ts'
+import type { RenderablePlanSnapshot } from './ports/renderable-plan-snapshot-repository.ts'
 import { assertDomain } from '../domain/errors.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
@@ -317,5 +318,48 @@ export function calculateRenderablePlanHash(plan: Readonly<DirectedEditPlan>): s
     schemaVersion: 'renderable-edit-plan-hash/v2',
     compilerVersion: RENDERABLE_PLAN_COMPILER_VERSION,
     plan: document,
+  })
+}
+
+/**
+ * The row a compiled plan is stored as, derived from the plan itself.
+ *
+ * Every measured field — the frame rate, the duration, the clip count, the
+ * hash — is read off the document rather than passed in beside it. Both
+ * compilers assembled this by hand and each one could have disagreed with its
+ * own plan: a `clipCount` taken from a local array while the plan carried a
+ * different track, a `durationFrames` copied before a refusal changed it. The
+ * caller names only what the plan cannot know about itself — which workspace
+ * and project it belongs to, and which aggregate at which hash decided it.
+ */
+export function renderablePlanSnapshotOf(input: {
+  readonly workspaceId: string
+  readonly projectId: string
+  readonly origin: RenderablePlanOrigin
+  readonly sourceId: string
+  readonly sourceHash: string
+  /** The chain position where the source is versioned; null where it is not. */
+  readonly sourceVersion: number | null
+  readonly plan: Readonly<DirectedEditPlan>
+}): Readonly<RenderablePlanSnapshot> {
+  const track = input.plan.videoTracks.find((entry) => entry.kind === 'base-video')
+  assertDomain(
+    track !== undefined && track.clips.length > 0,
+    'INVALID_RENDER_INPUT',
+    `plan ${input.plan.id} carries no base video track to store`,
+  )
+  return Object.freeze({
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    planId: input.plan.id,
+    origin: input.origin,
+    sourceId: input.sourceId,
+    sourceHash: input.sourceHash,
+    sourceVersion: input.sourceVersion,
+    fps: input.plan.fps,
+    durationFrames: input.plan.durationFrames,
+    clipCount: track!.clips.length,
+    plan: input.plan,
+    planHash: calculateRenderablePlanHash(input.plan),
   })
 }
