@@ -127,6 +127,21 @@ const COMPILE_PLAYBACK_KEYS = Object.freeze([
  * decision rather than a measurement — it crosses as `"num/den"` because a
  * frame rate of 30000/1001 is not 29.97 and rounding it in transit would put a
  * drift nobody chose into every timeline.
+ *
+ * Because it is the caller's, it is part of the stored plan's identity: the
+ * snapshot repository keys on (derivation, source hash, project version,
+ * delivery rate), so a second rate is a second plan rather than a collision.
+ * It was not, until the review of this lane: a caller who compiled a map at
+ * 30/1 and then asked for 25/1 was answered 409 PERSISTENCE_CONFLICT, with
+ * nothing in the schema, the description or the error details saying the rate
+ * was the reason or what to do about it.
+ *
+ * `objective` is the other caller choice and is deliberately NOT in that key.
+ * It reaches the plan only as a desired action, this compile sends no
+ * destination with it, and the three objectives that need none — discovery,
+ * awareness, warming — all produce the same `continue-viewing` action. So the
+ * objective cannot change the compiled document; the five that would change it
+ * are refused INVALID_ARGUMENT before a plan is assembled at all.
  */
 export function parseCompilePlaybackPlanBody(raw: unknown): ParsedCompilePlaybackPlanBody {
   const body = record(raw, 'body')

@@ -1,0 +1,50 @@
+-- F4.015 — the delivery rate belongs to the plan's identity.
+--
+-- `20260905150000_renderable_plan_snapshots` keyed a compiled plan on
+-- (workspace, origin, source, source hash, project version) and called it "one
+-- derivation, at one hash, for one project version, compiles to one plan". It
+-- does not. The published compile
+-- (`POST /v1/projects/{projectId}/capture-sessions/{sessionId}/playback-map/plan`)
+-- lets the caller choose `planFps`, and the frame rate is the timebase every
+-- clip in the plan is expressed in: the same map at 25/1 and at 30/1 are two
+-- different documents with two different `planHash` values under one key.
+--
+-- Measured before the change, with the in-memory repository that copies this
+-- key (`playback-map-service.test.mjs`): a first compile of the fixture map at
+-- 30/1 stored a 1200-frame plan; a second compile of the SAME map version into
+-- the SAME project version at 25/1 was refused PERSISTENCE_CONFLICT — a 409
+-- whose details named neither the frame rate nor any way forward, and which no
+-- schema, example or capability description warned about. One delivery rate
+-- per (map version, project version) was a rule nobody wrote down and nobody
+-- chose.
+--
+-- `fps` was already a column, projected out of the plan by
+-- `renderablePlanSnapshotOf`. It now carries the weight it always had.
+--
+-- The objective is deliberately NOT in this key. It reaches the plan only
+-- through `desiredActionRef`, which stores the action KIND, and the three
+-- objectives a compile can deliver without a destination — discovery,
+-- awareness, warming — all map to `continue-viewing`. Measured on the same
+-- fixture: compiling at 30/1 for `discovery` and then for `awareness` produced
+-- the identical plan hash and replayed the stored row. Putting the objective in
+-- the key would have split that one plan into two rows carrying the same
+-- `planHash`, which the `(workspaceId, planHash)` unique below refuses — a
+-- conflict manufactured out of a replay. When a compile learns to accept a
+-- desired action of its own, the action kind is what joins this key.
+--
+-- What still conflicts is what the conflict branch always claimed to be about:
+-- the same source, at the same hash, for the same project version, at the same
+-- delivery rate, compiling to a DIFFERENT plan. That is a compiler that moved
+-- under a stored row, or a row edited underneath it, and overwriting the plan
+-- somebody already rendered would erase the evidence of what was rendered.
+
+DROP INDEX "renderable_plan_snapshots_source_key";
+
+-- `fps` is DOUBLE PRECISION and this is the one place it is compared for
+-- equality. `renderable_plan_snapshots_plan_check` deliberately refuses to
+-- compare it against the JSON, because that would be an equality between a
+-- stored double and a re-parsed one. Here both sides are the same column,
+-- written once by the compiler and never re-derived, so the comparison is
+-- between a double and itself.
+-- CreateIndex
+CREATE UNIQUE INDEX "renderable_plan_snapshots_source_key" ON "renderable_plan_snapshots"("workspaceId", "origin", "sourceId", "sourceHash", "projectVersionId", "fps");

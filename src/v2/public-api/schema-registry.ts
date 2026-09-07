@@ -27285,9 +27285,23 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         // project versions is two plans, which is why it is part of the
         // snapshot's natural key.
         projectVersionId: idSchema,
+        // What the cut is for. It reaches the plan as a desired action, and
+        // this compile sends no destination with it, so only the objectives
+        // that need none — `discovery`, `awareness`, `warming` — can be
+        // delivered; the other five are refused INVALID_ARGUMENT naming the
+        // destination they would require. All three produce the same
+        // `continue-viewing` action, so the objective never changes the
+        // compiled document and is not part of the snapshot's natural key.
         objective: strategicObjectiveSchema,
         // The delivery frame rate, exact. 30000/1001 is not 29.97, and a
         // rounded number here would put a drift nobody chose into the timeline.
+        //
+        // It is part of the snapshot's natural key, because it is the timebase
+        // every clip is expressed in: compiling one map version into one
+        // project version at 25/1 and again at 30/1 produces two plans, each
+        // with its own `planId` and `planHash`, and neither supersedes the
+        // other. Repeating a compile at a rate already stored replays that
+        // plan and answers 200.
         planFps: rationalSchema,
       },
     },
@@ -27302,10 +27316,15 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       // No fence and no frame rate. A synthesis is one immutable
       // content-addressed cut, so there is no later version of it to be stale
       // against, and it already fixed its frame rate exactly — a second answer
-      // here would contradict the aggregate.
+      // here would contradict the aggregate. With no rate to choose, the
+      // request contributes only the project version to the plan's identity,
+      // and a repeat compile always replays.
       required: ['projectVersionId', 'objective'],
       properties: {
         projectVersionId: idSchema,
+        // Same restriction as the react compile: no destination travels with
+        // the objective, so `discovery`, `awareness` and `warming` are the
+        // three this compile can deliver.
         objective: strategicObjectiveSchema,
       },
     },

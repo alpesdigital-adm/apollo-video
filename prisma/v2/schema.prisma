@@ -10010,7 +10010,7 @@ model V2RenderablePlanSnapshot {
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, planHash])
-  @@unique([workspaceId, origin, sourceId, sourceHash, projectVersionId], map: "renderable_plan_snapshots_source_key")
+  @@unique([workspaceId, origin, sourceId, sourceHash, projectVersionId, fps], map: "renderable_plan_snapshots_source_key")
   @@index([workspaceId, projectId, createdAt(sort: Desc)])
   @@index([workspaceId, origin, sourceId, createdAt(sort: Desc)])
   @@map("renderable_plan_snapshots")
