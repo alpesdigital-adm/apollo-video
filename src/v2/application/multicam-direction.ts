@@ -93,22 +93,40 @@ import { calculateVersionHash, stableSerialize } from './version-hash.ts'
  * `MULTICAM_EVIDENCE_KINDS`: `active-speaker` and `concurrent-speech` from
  * diarization, `screen-activity` and `technical-quality` from the pixels,
  * `silence` from the samples, `reaction` from persisted perception. The two it
- * cannot are `demonstration` and `attention`, and neither is an oversight:
- * recognising a physical demonstration needs hand and object detection, and
- * `attention` needs gaze, and this repository has FFmpeg and no vision model of
- * any kind. They are named as NOT DELIVERED in PRD FR-150 and spec 05 §29.1
- * rather than approximated from something FFmpeg does measure — calling screen
- * motion a demonstration would put the wrong name on a real number, the same
- * refusal `ffmpeg-multicam-visual-evidence-provider.ts` makes about sharpness.
+ * cannot are `demonstration` and `attention`, and neither is an oversight.
+ * State the reason accurately, because the owner prices the decision from it:
+ * this repository DOES carry vision — the `ImageVisionProvider` port with a
+ * Tesseract OCR adapter and a Google Cloud Vision adapter asking for
+ * `FACE_DETECTION` and `OBJECT_LOCALIZATION`, composed by
+ * `createConfiguredImageVisionProvider` and wired into the media ingest worker.
+ * What is missing is three specific things: that port is handed STILL IMAGES by
+ * ingestion and nothing routes a materialized recording's frames into it; a box
+ * around an object in one frame is not a hand demonstrating something over
+ * time; and `FACE_DETECTION` returns a box and a confidence — the adapter
+ * neither requests nor reads head-pose angles — which is not gaze. They are
+ * named as NOT DELIVERED in PRD FR-150 and spec 05 §29.1 rather than
+ * approximated from something FFmpeg does measure — calling screen motion a
+ * demonstration would put the wrong name on a real number, the same refusal
+ * `ffmpeg-multicam-visual-evidence-provider.ts` makes about sharpness.
  * The consequence is written down where it bites: `demonstration-prefers-screen`
  * can fire for a screen share, and can never fire for a physical demonstration
  * on a camera track, because no production observation of one exists.
+ *
+ * **Emitted is not the same as read.** `silence` reaches the set, the hash and
+ * the database, and no rule in `DIRECTION_RULES` consults it — `grep silence`
+ * over `domain/multicam-direction.ts` returns nothing. A silence observation
+ * changes the evidence hash and changes no cut. The other two adapter-backed
+ * kinds are read, which is why the distinction is worth stating:
+ * `concurrent-speech` doubles the ambiguity margin and `technical-quality`
+ * produces `quality-below-floor`. Wiring silence into a rule is work nobody has
+ * started.
  *
  * **What is not wired yet, stated rather than implied.** Two things this module
  * consumes have no production caller in the repository:
  *
  * - `MulticamPerceptionSource` has no adapter. `repository-factory.ts` builds a
- *   diarization source and a visual provider and nothing for perception, so the
+ *   diarization source, a visual provider and a silence provider, and nothing
+ *   for perception, so the
  *   `reaction` observations below and the `reactionIntensityFloorBps` that
  *   filters them are exercised by tests and by nothing else. That is the honest
  *   state — a session nobody ran perception over produces no reaction evidence

@@ -690,15 +690,33 @@ dentro do trecho — nunca a média, que subestimaria uma pausa com uma batida
 dentro). `reaction` o produtor sabe emitir, e a porta `MulticamPerceptionSource`
 não tem adaptador, então em produção não existe.
 
-`demonstration` e `attention` **não são produzidas por nada**, e não dá para
-produzi-las com o que o repositório tem: demonstração física exige detecção de
-mãos e objetos, atenção exige olhar, e as dependências de mídia aqui são
-`ffmpeg-static` e `ffprobe-static`. Chamar movimento de tela de "demonstração"
-poria o nome errado num número real — a mesma recusa que o passe visual faz
-sobre nitidez. O preço está em §29.3: `demonstration-prefers-screen` decide por
-uma tela compartilhada e nunca pode decidir por uma demonstração física numa
-câmera. A escolha entre adotar um modelo de visão e declarar as duas fora de
-escopo é do proprietário; ver PRD FR-150.
+**Medida não é lida.** `silence` entra no hash do conjunto e no banco, e
+**nenhuma regra de `DIRECTION_RULES` a lê** — `grep silence` em
+`src/v2/domain/multicam-direction.ts` não devolve linha. Uma observação de
+silêncio não muda decisão de corte nenhuma; é medição registrada, não entrada da
+direção. As outras duas espécies do mesmo lote são lidas, e é por isso que a
+diferença importa: `concurrent-speech` dobra a margem de ambiguidade (§29.4) e
+`technical-quality` produz `quality-below-floor`. Ligar silêncio a uma regra é
+trabalho não começado.
+
+`demonstration` e `attention` **não são produzidas por nada**, e o motivo não é
+o que esta spec dizia antes. O repositório **tem** porta de visão
+(`ImageVisionProvider`, com `ocr`, `faces` e `objects`) e dois adaptadores:
+Tesseract (`APOLLO_TESSERACT_PATH`) e Google Cloud Vision pedindo
+`FACE_DETECTION` e `OBJECT_LOCALIZATION`
+(`APOLLO_IMAGE_ENTITY_PROVIDER=google-cloud-vision`), compostos por
+`createConfiguredImageVisionProvider`. O que falta são três coisas concretas:
+(i) os dois só recebem **imagem parada**, pela ingestão de mídia — não existe
+caminho de quadro de gravação materializada até essa porta; (ii) caixa de rosto
+e caixa de objeto num quadro não são mão demonstrando ao longo do tempo; e
+(iii) `FACE_DETECTION` devolve caixa e confiança, o adaptador não pede nem lê
+ângulo de cabeça, e caixa de rosto não é direção do olhar. Chamar movimento de
+tela de "demonstração" poria o nome errado num número real — a mesma recusa que
+o passe visual faz sobre nitidez. O preço está em §29.3:
+`demonstration-prefers-screen` decide por uma tela compartilhada e nunca pode
+decidir por uma demonstração física numa câmera. A escolha entre financiar
+modelo de mão/gaze mais o caminho de vídeo até a porta de visão e declarar as
+duas fora de escopo é do proprietário; ver PRD FR-150.
 
 O passe de silêncio ouve toda faixa cujo `syncAudioPolicy` não seja `none` — a
 declaração da própria faixa —, não os papéis de vídeo: um microfone nunca é
@@ -1213,8 +1231,11 @@ Recusas nomeadas: `PLAYBACK_EVIDENCE_INSUFFICIENT`, `PLAYBACK_MAP_UNRESOLVED`,
 descoberto. `player-visual` e `ocr-timestamp` **não têm detector nenhum** e não
 são baratos de escrever: o primeiro é detecção de interface dentro do quadro
 (barra de progresso, botão, estado do player, que muda a cada versão de cada
-player); o segundo exige um motor de OCR, e as dependências de mídia deste
-repositório são `ffmpeg-static` e `ffprobe-static`.
+player); o segundo **não** esbarra em falta de motor de OCR — o repositório tem
+Tesseract atrás de `ImageVisionProvider` — e sim em duas outras coisas: essa
+porta só recebe imagem parada da ingestão de mídia, sem caminho vindo de quadro
+de gravação, e virar texto reconhecido em posição de playhead é trabalho de
+região e template por player.
 
 O vocabulário continua com quatro valores de propósito — o agregado precisa
 conseguir registrar uma peça que veio da interface do player sem fingir que um
@@ -1394,7 +1415,7 @@ F4.016 no `TODO.md` está marcada.
 
 | Seção | Módulo de domínio | Evidência |
 |---|---|---|
-| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts`, `ffmpeg-multicam-silence-provider.ts` | T-FR-150 (33 casos), T-F4.012 (24 casos de serviço, 2 de mídia em `multicam-silence-evidence.integration.mjs`) |
+| §29 Direção multicâmera | `multicam-direction.ts`, `multicam-evidence.ts`, `camera-identity.ts`, `ffmpeg-multicam-silence-provider.ts` | T-FR-150 (33 casos), T-F4.012 (24 casos de serviço, 2 de mídia em `multicam-silence-evidence.integration.mjs`, 1 de raiz de composição em `multicam-direction-composition.integration.mjs`) |
 | §30 Match de cor | `color-measurement.ts`, `multicam-match-plan.ts` | T-FR-183/T-FR-184 (43 casos), T-F4.013/T-F4.014 (30 casos de serviço) |
 | §31 Crítico de cor | `color-critic-report.ts` | T-FR-184, `color-visual-evaluations.integration.mjs` (7 avaliações) |
 | §32 React PlaybackMap | `playback-map.ts`, `playback-mode.ts` | T-F4.015 (31 casos + 16 de serviço) |
@@ -1506,15 +1527,23 @@ há teste que meça esse teto.
 - **`spoken-code` continua sem reconhecedor de fala.**
 - **`demonstration` e `attention` continuam sem produtor.** As duas espécies são
   modeladas, validadas pelo agregado e aceitas pelo `CHECK` da migração, e nada
-  as observa: demonstração física exige detecção de mãos e objetos, atenção
-  exige olhar, e as dependências de mídia aqui são `ffmpeg-static` e
-  `ffprobe-static`. Preço: `demonstration-prefers-screen` decide por tela
-  compartilhada e nunca por demonstração física numa câmera. `expressão`, que a
-  linha de FR-150 pede, nem espécie de evidência é. Decisão de escopo do
-  proprietário (§29.1, PRD FR-150).
+  as observa. Não por falta de visão computacional no repositório — há
+  `ImageVisionProvider` com Tesseract e com Google Cloud Vision
+  (`FACE_DETECTION`, `OBJECT_LOCALIZATION`) —, mas porque essa porta só recebe
+  imagem parada da ingestão, ninguém liga quadro de gravação nela, e nem caixa
+  de objeto é mão demonstrando nem caixa de rosto é olhar. Preço:
+  `demonstration-prefers-screen` decide por tela compartilhada e nunca por
+  demonstração física numa câmera. `expressão`, que a linha de FR-150 pede, nem
+  espécie de evidência é. Decisão de escopo do proprietário (§29.1, PRD FR-150).
+- **`silence` é medido e não é lido.** O adaptador existe e persiste, e nenhuma
+  regra de `DIRECTION_RULES` consulta a espécie: a observação entra no hash e
+  não entra na decisão (§29.1).
 - **`player-visual` e `ocr-timestamp` continuam sem detector.** Dois dos quatro
-  `PLAYBACK_DETECTION_METHODS`; enquanto não existirem, player escondido é
-  trecho `manual-anchor-required` para uma pessoa responder (§32.2, PRD FR-145).
+  `PLAYBACK_DETECTION_METHODS`. O que falta ao segundo não é motor de OCR — o
+  repositório tem Tesseract atrás de `ImageVisionProvider` — e sim o caminho de
+  quadro de vídeo até essa porta e o trabalho de região por player (§32.2).
+  Enquanto não existirem, player escondido é trecho `manual-anchor-required`
+  para uma pessoa responder (PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os
