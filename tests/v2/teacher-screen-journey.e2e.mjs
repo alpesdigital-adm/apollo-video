@@ -36,7 +36,9 @@ import { PrismaClient } from '../../generated/prisma-v2/index.js'
  *   the file itself, and only the busy window produces a `screen-activity`
  *   observation at all — a still picture measures zero, and zero activity is
  *   the ABSENCE of an observation rather than an observation of stillness
- *   (`application/multicam-direction.ts:576-578`).
+ *   (`application/multicam-direction.ts:654-663`, the `activityBps > 0` guard
+ *   on the push; this citation read 576-578 and pointed at the window-ceiling
+ *   comment even before the module was edited).
  * - **The direction returns to the camera when the demonstration ends.** The
  *   shot after the busy window is the teacher's camera again, and the seam
  *   lands where the measured activity stops — at the file's busy stretch
@@ -463,7 +465,8 @@ test(
     // `sourceAssetId` IS the media artifact id. The compiled clips carry it
     // straight through as `sourceArtifactId`, and the direction refuses a plan
     // that cuts a recording the project does not link as available media
-    // (`multicam-direction.ts:1221-1227`).
+    // (`application/multicam-direction.ts:1355-1368`,
+    // `MEDIA_ARTIFACT_SOURCE_NOT_FOUND`).
     const trackPart = ({ trackId, artifactId, sha256, endTicks }) => ({
       partId: `part-${trackId}`,
       ordinal: 0,
@@ -1063,7 +1066,9 @@ test(
 
     // ---- gap 2, measured: what the protocol says about this session -------
     // Run last on purpose. A stored evaluation constrains every later direction
-    // (`multicam-direction.ts:1171`), so evaluating first would have made this
+    // (`application/multicam-direction.ts:1299-1305`, where an evaluation is
+    // kept only when its `sessionVersion` matches), so evaluating first would
+    // have made this
     // journey about a refusal rather than about the demonstration. The verdict
     // is asserted so the missing markers are a number in the record.
     const evaluation = await helpers.callRouteOk(protocolEvaluationsRoute.POST, {

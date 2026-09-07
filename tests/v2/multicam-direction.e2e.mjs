@@ -740,7 +740,8 @@ test(
     // ---------------------------------------------------------------------
     // Every predicate in `commitOrReplay` could be deleted with this suite
     // green, because the only fence it exercised is the service-level one at
-    // `multicam-direction.ts:980` — which fires first and stops the request
+    // `application/multicam-direction.ts:1255-1260` — which fires first and
+    // stops the request
     // from ever reaching the transaction. These call the repository directly
     // with a bundle whose world moved underneath it, which is the state a
     // concurrent writer actually leaves. Each refusal happens before the

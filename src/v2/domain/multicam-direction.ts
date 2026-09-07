@@ -612,10 +612,9 @@ function contextForTrack(track: Readonly<CaptureTrack>, speakerCameras: Readonly
  * Two independent fields have to agree before a track's audio may be laid
  * under a shot. `includeInFinalMix` is the operator's intent, and the session
  * only gates it by role (`capture-session.ts:383-387`); `syncAudioPolicy` is
- * what the audio actually IS — `'none'` says these bytes carry neither sync nor
- * final content, `'sync-only'` says they exist to line clocks up
- * (`SYNC_AUDIO_POLICIES`, `capture-session.ts:114-119`). `'none' +
- * includeInFinalMix: true` is a legal
+ * what the audio IS — `'none'` carries neither sync nor final content,
+ * `'sync-only'` says they exist to line clocks up (`SYNC_AUDIO_POLICIES`,
+ * `capture-session.ts:114-119`). `'none' + includeInFinalMix: true` is a legal
  * session, so reading intent alone would put a reference tone or an empty
  * channel under every shot while a `'final-candidate'` microphone sat unused.
  * A track is a bed only when it is marked for the mix AND its audio is

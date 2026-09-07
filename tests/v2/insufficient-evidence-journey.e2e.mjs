@@ -456,7 +456,8 @@ test(
     // Artifact id and capture asset id are the same string on purpose: the
     // compile step looks a probed cadence up by `track.sourceAssetId` against
     // the project's media links, which are keyed by artifact id
-    // (`multicam-direction.ts:1195-1205`).
+    // (`application/multicam-direction.ts:1338-1340`, the `probedRates` map
+    // keyed by `link.artifactId`).
     const recordings = [
       { assetId: 'ie-asset-master', key: 'capture/master.m4a', file: masterFile, mediaType: 'audio', container: 'm4a', role: 'source-master' },
       { assetId: 'ie-asset-cam-a', key: 'capture/camera-a.mp4', file: cameraAFile, mediaType: 'video', container: 'mp4', role: 'selected-insert' },
