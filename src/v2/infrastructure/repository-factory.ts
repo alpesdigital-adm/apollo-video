@@ -65,7 +65,11 @@ import type { TreatmentPlanRepository } from '../application/ports/treatment-pla
 import type { CaptureProtocolRepository } from '../application/ports/capture-protocol-repository.ts'
 import type { SyncDiagnosticRepository } from '../application/ports/sync-diagnostic-repository.ts'
 import type { ColorCriticReportRepository } from '../application/ports/color-critic-report-repository.ts'
-import type { MulticamDiarizationSource, MulticamVisualEvidenceProvider } from '../application/ports/multicam-evidence-sources.ts'
+import type {
+  MulticamDiarizationSource,
+  MulticamSilenceEvidenceProvider,
+  MulticamVisualEvidenceProvider,
+} from '../application/ports/multicam-evidence-sources.ts'
 import type { MulticamDirectionCommandRepository } from '../application/ports/multicam-direction-command-repository.ts'
 import type { MulticamDirectionRepository } from '../application/ports/multicam-direction-repository.ts'
 import type {
@@ -282,6 +286,7 @@ import { PrismaTreatmentPlanRepository } from './prisma/treatment-plan-repositor
 import { PrismaCaptureProtocolRepository } from './prisma/capture-protocol-repository.ts'
 import { PrismaSyncDiagnosticRepository } from './prisma/sync-diagnostic-repository.ts'
 import { PrismaColorCriticReportRepository } from './prisma/color-critic-report-repository.ts'
+import { FfmpegMulticamSilenceProvider } from './analysis/ffmpeg-multicam-silence-provider.ts'
 import { FfmpegMulticamVisualEvidenceProvider } from './analysis/ffmpeg-multicam-visual-evidence-provider.ts'
 import { PrismaMulticamDiarizationSource } from './prisma/multicam-diarization-source.ts'
 import { PrismaMulticamDirectionCommandRepository } from './prisma/multicam-direction-command-repository.ts'
@@ -2367,6 +2372,25 @@ export function createMulticamVisualEvidenceProvider(
   })
 }
 
+/**
+ * The FFmpeg pass that listens for silence.
+ *
+ * Only the timeout and the binary are configurable. The threshold and the
+ * minimum duration are the definition of the measurement, so they stay in
+ * `MULTICAM_SILENCE_DEFAULTS` where a deployment cannot move them: an
+ * environment variable that lowers the bar for "silent" would change what the
+ * evidence says while every observation kept claiming it was measured.
+ */
+export function createMulticamSilenceEvidenceProvider(
+  environment: NodeJS.ProcessEnv = process.env,
+): MulticamSilenceEvidenceProvider {
+  const timeoutMs = Number(environment.APOLLO_V2_MULTICAM_SILENCE_TIMEOUT_MS)
+  return new FfmpegMulticamSilenceProvider({
+    ...(environment.APOLLO_V2_FFMPEG_PATH?.trim() ? { ffmpegPath: environment.APOLLO_V2_FFMPEG_PATH.trim() } : {}),
+    ...(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+  })
+}
+
 export function createCameraColorMeasurementRepository(): CameraColorMeasurementRepository {
   return new PrismaCameraColorMeasurementRepository(resolveV2Client())
 }
@@ -2676,6 +2700,13 @@ export function createReactPlaybackMapServices(environment: NodeJS.ProcessEnv = 
  * perception over produces no reaction observations at all, which the direction
  * reads as "nobody measured" and answers by holding the current angle.
  *
+ * The silence provider IS wired here, and that is the whole point of it being
+ * here: `silence` was a modelled, validated and persisted evidence kind that no
+ * adapter produced, so a production run could never emit one. `demonstration`
+ * and `attention` are still in that state and cannot be lifted out of it with
+ * FFmpeg — see PRD FR-150 and spec 05 §29.1, where both are recorded as not
+ * delivered rather than left to look wired.
+ *
  * Deliberately separate from `createMulticamDirectionReadServices` below. This
  * one builds an FFmpeg provider and a media materializer that need a configured
  * artifact root; a route that only reads a stored direction must not be able to
@@ -2698,6 +2729,7 @@ export function createDirectMulticamSessionService(
       directions,
       diarization: createMulticamDiarizationSource(),
       visual: createMulticamVisualEvidenceProvider(environment),
+      silence: createMulticamSilenceEvidenceProvider(environment),
       media: createCaptureMediaResolver(environment),
       clock,
     }),

@@ -59,8 +59,10 @@ import type {
 import type { MulticamDirectionRepository } from './ports/multicam-direction-repository.ts'
 import type {
   CaptureTrackMediaResolver,
+  MulticamAudioWindow,
   MulticamDiarizationSource,
   MulticamPerceptionSource,
+  MulticamSilenceEvidenceProvider,
   MulticamVisualEvidenceProvider,
   MulticamVisualWindow,
 } from './ports/multicam-evidence-sources.ts'
@@ -86,6 +88,21 @@ import { calculateVersionHash, stableSerialize } from './version-hash.ts'
  * only half the caller's: the note is theirs, the identity is the authenticated
  * actor's, and the two are concatenated rather than one replacing the other
  * (CONTRACT §2, "evidenceRef = actor + nota do chamador").
+ *
+ * **Which evidence kinds this producer can actually emit.** Six of the eight in
+ * `MULTICAM_EVIDENCE_KINDS`: `active-speaker` and `concurrent-speech` from
+ * diarization, `screen-activity` and `technical-quality` from the pixels,
+ * `silence` from the samples, `reaction` from persisted perception. The two it
+ * cannot are `demonstration` and `attention`, and neither is an oversight:
+ * recognising a physical demonstration needs hand and object detection, and
+ * `attention` needs gaze, and this repository has FFmpeg and no vision model of
+ * any kind. They are named as NOT DELIVERED in PRD FR-150 and spec 05 §29.1
+ * rather than approximated from something FFmpeg does measure — calling screen
+ * motion a demonstration would put the wrong name on a real number, the same
+ * refusal `ffmpeg-multicam-visual-evidence-provider.ts` makes about sharpness.
+ * The consequence is written down where it bites: `demonstration-prefers-screen`
+ * can fire for a screen share, and can never fire for a physical demonstration
+ * on a camera track, because no production observation of one exists.
  *
  * **What is not wired yet, stated rather than implied.** Two things this module
  * consumes have no production caller in the repository:
@@ -364,6 +381,17 @@ export interface DeriveMulticamEvidenceDependencies {
   diarization: MulticamDiarizationSource
   visual: MulticamVisualEvidenceProvider
   media: CaptureTrackMediaResolver
+  /**
+   * The listening pass, when the deployment has one.
+   *
+   * Optional so a suite that asserts on the visual limb does not have to stand
+   * up an FFmpeg audio pass it never reads — not because production may go
+   * without it: `createDirectMulticamSessionService` wires
+   * `FfmpegMulticamSilenceProvider` unconditionally. Omitted, the set carries no
+   * `silence` observation at all, which is "nobody listened" and not "it was
+   * quiet".
+   */
+  silence?: MulticamSilenceEvidenceProvider
   perception?: MulticamPerceptionSource
   clock: () => Date
   /** How long one visual measurement window is. Server policy, never a request field. */
@@ -501,9 +529,19 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
       }
     }
 
-    // (b) + (c) Screen activity and technical quality, from the pixels.
+    // (b) + (c) + (e) Screen activity, technical quality and silence, from the
+    // bytes. One sweep and one materialization per part, not one per pass: the
+    // S3 driver downloads the whole recording on every `resolve`, so listening
+    // to a camera that was already looked at must not cost a second copy of it.
     for (const track of session.tracks) {
-      if (!VIDEO_ANGLE_ROLES.includes(track.role)) continue
+      const wantsPixels = VIDEO_ANGLE_ROLES.includes(track.role)
+      // `syncAudioPolicy` is the track's own statement about carrying audio;
+      // `'none'` is the only value that says it does not. A camera whose audio
+      // is sync-only still has audio to listen to, and a microphone is never an
+      // angle — which is exactly why the two passes are selected separately
+      // rather than both hanging off the video roles.
+      const wantsAudio = dependencies.silence !== undefined && track.syncAudioPolicy !== 'none'
+      if (!wantsPixels && !wantsAudio) continue
       for (const part of track.parts) {
         const durationMs = Number(convertTick({ tick: part.coverage.end - part.coverage.start, from: part.timebase, to: MS_TIMEBASE }))
         if (!Number.isSafeInteger(durationMs) || durationMs <= 0) {
@@ -545,7 +583,7 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
               `the sweep stopped at its ceiling of ${maxWindows} window(s); ${durationMs - cursor} ms of this part were not measured`,
             )
           }
-          const measured = windows.length === 0
+          const measured = windows.length === 0 || !wantsPixels
             ? []
             : await dependencies.visual.measure({ windows, ...(request.signal ? { signal: request.signal } : {}) })
           for (const measurement of measured) {
@@ -602,6 +640,72 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
               })
             } else {
               note(measurement.evidenceRef, 'the pass measured no quality dimension')
+            }
+          }
+
+          // (e) Silence, from the samples of the same windows.
+          //
+          // The measurement is a stretch, not a window: `silencedetect` says
+          // where the level stayed under the threshold for long enough, and only
+          // that stretch becomes an observation. A window that was never quiet
+          // produces nothing at all — the absence a direction reads as "nobody
+          // said this was silent", which is the honest reading and not a
+          // `levelDbfs` of zero, a value that would mean full scale.
+          const audioWindows: readonly Readonly<MulticamAudioWindow>[] = windows
+          const heard = audioWindows.length === 0 || !wantsAudio || !dependencies.silence
+            ? []
+            : await dependencies.silence.measure({
+              windows: audioWindows,
+              ...(request.signal ? { signal: request.signal } : {}),
+            })
+          for (const measurement of heard) {
+            if (measurement.measuredBlockCount === 0) {
+              // Not "it was silent": nothing was heard at all. A camera with no
+              // audio stream and a camera in a quiet room are opposite facts,
+              // and only one of them is evidence about the room.
+              note(measurement.evidenceRef, 'the decode produced no audio')
+              continue
+            }
+            for (const stretch of measurement.stretches) {
+              const range = sessionRangeForSourceMs({
+                session,
+                track,
+                part,
+                map: mapBySource.get(track.sourceAssetId) ?? null,
+                startMs: stretch.startMs,
+                endMs: stretch.endMs,
+              })
+              if (!range) {
+                note(
+                  `${measurement.evidenceRef}:${Math.round(stretch.startMs)}`,
+                  'the silent stretch does not map onto one piece of the session clock',
+                )
+                continue
+              }
+              observations.push({
+                // The part ordinal is in the id because the milliseconds are
+                // not: a stretch is timed from the start of ITS OWN file, so
+                // two parts of a restarted recorder both offer a stretch at
+                // 0 ms and an id built from the track and the millisecond alone
+                // would collide. `createMulticamEvidenceSet` refuses a
+                // duplicate id outright, so the collision is a failed
+                // derivation, not a lost observation.
+                observationId: `silence-${track.trackId}-p${part.ordinal}-${Math.round(stretch.startMs)}`.slice(0, 127),
+                trackId: track.trackId,
+                range,
+                kind: 'silence',
+                // The ceiling the samples respected, never a level invented for
+                // them: the loudest whole block inside the stretch, or the
+                // adapter's floor when every block was digital silence.
+                value: Object.freeze({ kind: 'silence' as const, levelDbfs: stretch.ceilingDbfs }),
+                confidence: 1,
+                provenance: Object.freeze({
+                  method: measurement.method.slice(0, 128),
+                  evaluatorKind: 'measured' as const,
+                  evidenceRef: `${measurement.evidenceRef}:${Math.round(stretch.startMs)}-${Math.round(stretch.endMs)}`.slice(0, 512),
+                  producedAt,
+                }),
+              })
             }
           }
         } finally {
