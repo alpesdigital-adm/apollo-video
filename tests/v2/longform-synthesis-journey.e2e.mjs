@@ -165,13 +165,22 @@ const UNITS = Object.freeze(DECADES.slice(0, 10))
 /**
  * How far a sampled band may sit from the colour it is read as.
  *
- * The closest pair in either palette is 127 apart, so anything under 63.5 is
- * inside the decision boundary; the measured drift across full runs is 1.0, so
- * 20 absorbs encoder noise by a factor of twenty and still refuses a frame
- * that blended two markers. A tolerance wide enough to reach the next marker
- * would be decoration on top of the exact equality below it.
+ * How decisive a marker reading has to be, as a ratio and not as a distance.
+ *
+ * It used to be an absolute distance of 20, chosen because the closest pair in
+ * either palette is 127 apart (so the decision boundary is 63.5) and the drift
+ * measured on the author's machine was 1.0. That number did not survive a
+ * different encoder: a GitHub runner read the same frames 25.0 away and the
+ * assertion failed, while the exact-minute equality beside it passed — the
+ * identification was never ambiguous, only the calibration was local.
+ *
+ * A ratio says what the assertion means without naming a machine's noise
+ * floor: the winning marker must be at least five times closer than the one
+ * that came second. A frame that blended two markers sits near 1.0 and is
+ * still refused; an encoder that shifts every colour equally does not move the
+ * ratio at all.
  */
-const MARKER_TOLERANCE = 20
+const MARKER_AMBIGUITY_CEILING = 0.2
 
 /**
  * Six windows over a source, together exactly 120 s, each wholly inside one
@@ -292,16 +301,20 @@ function bandColourAt(path, second, top) {
 function nearestMarker(colour, palette) {
   let best = 0
   let bestDistance = Infinity
+  let runnerUpDistance = Infinity
   for (const [index, entry] of palette.entries()) {
     const measured = Math.sqrt(
       colour.reduce((total, value, channel) => total + (value - entry.rgb[channel]) ** 2, 0),
     )
     if (measured < bestDistance) {
+      runnerUpDistance = bestDistance
       bestDistance = measured
       best = index
+    } else if (measured < runnerUpDistance) {
+      runnerUpDistance = measured
     }
   }
-  return { index: best, distance: bestDistance }
+  return { index: best, distance: bestDistance, runnerUpDistance }
 }
 
 /** Which minute of the master a frame carries, read off its two bands. */
@@ -311,6 +324,12 @@ function minuteAt(path, second) {
   return {
     minute: decade.index * 10 + unit.index,
     distance: Math.max(decade.distance, unit.distance),
+    // How decisive the reading was: the worse of the two bands' ratios between
+    // the marker that won and the marker that came second.
+    ambiguity: Math.max(
+      decade.distance / decade.runnerUpDistance,
+      unit.distance / unit.runnerUpDistance,
+    ),
   }
 }
 
@@ -478,8 +497,10 @@ async function driveJourney(t, {
       const measured = minuteAt(masterPath, minute * 60 + 30)
       assert.equal(measured.minute, minute, `minute ${minute} of the master carries the wrong marker`)
       assert.ok(
-        measured.distance < MARKER_TOLERANCE,
-        `minute ${minute} of the master drifted by ${measured.distance.toFixed(1)}`,
+        measured.ambiguity < MARKER_AMBIGUITY_CEILING,
+        `minute ${minute} of the master reads only `
+        + `${(1 / measured.ambiguity).toFixed(1)}x closer to its own marker than to the next `
+        + `(absolute drift ${measured.distance.toFixed(1)})`,
       )
     }
 
@@ -852,8 +873,11 @@ async function driveJourney(t, {
         `output clip ${index} at ${middle}s carries minute ${measured.minute}'s marker, not minute ${WINDOWS[index].minute}'s`,
       )
       assert.ok(
-        measured.distance < MARKER_TOLERANCE,
-        `marker colour drifted by ${measured.distance.toFixed(1)}, past the ${MARKER_TOLERANCE} the encoder has ever needed`,
+        measured.ambiguity < MARKER_AMBIGUITY_CEILING,
+        `the marker read at this frame is only ${(1 / measured.ambiguity).toFixed(1)}x closer to `
+        + `minute ${measured.minute}'s colour than to the next marker's, under the `
+        + `${(1 / MARKER_AMBIGUITY_CEILING).toFixed(0)}x this reading has to clear `
+        + `(absolute drift ${measured.distance.toFixed(1)})`,
       )
     }
     assert.deepEqual(identified, WINDOWS.map((window) => window.minute))
