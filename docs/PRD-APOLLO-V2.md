@@ -1623,7 +1623,10 @@ banco sem que nada as observe:
 
 E **expressão**, que a linha do requisito acima pede, não é sequer uma espécie
 de evidência: não está em `MULTICAM_EVIDENCE_KINDS` e nunca esteve. Ler
-expressão facial é mais um modelo de visão, não um parâmetro de FFmpeg. A linha
+expressão facial é mais um modelo de visão, não um parâmetro de FFmpeg — e o
+adaptador de Cloud Vision daqui pede só `FACE_DETECTION` e
+`OBJECT_LOCALIZATION` e lê só caixa e confiança, então nem as verossimilhanças
+de expressão que a API sabe devolver chegam a este repositório. A linha
 do requisito fica como está — ela continua sendo o requisito — e o que muda é
 que a entrega agora diz que essa parte não foi feita, em vez de enumerar oito
 espécies e deixar o leitor concluir que a lista respondia à linha inteira.
