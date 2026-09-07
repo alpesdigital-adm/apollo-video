@@ -62,11 +62,24 @@ a razão azul/verde da câmera B passou de 0,916081 para 1,046333 contra uma
 referência de 1,047486 — de 12,54 % de erro para 0,11 % — com ganho aplicado de
 1,143444. Com três câmeras, o erro de vermelho caiu de 17,03 % para 1,05 %.
 
-**O que piora.** A whitelist do processador FFmpeg precisa ser estendida para
-que uma transformação v2 seja renderizável: esta tabela é o contrato, não a
-implementação do renderer. Enquanto um plano v2 não for aceito pelo processador,
-ele é um plano que descreve uma correção que o render ainda não aplica — e é por
-isso que a versão está declarada em vez de implícita.
+**O que piora.** A whitelist do processador FFmpeg foi estendida nesta wave, e
+os números do parágrafo acima só existem por causa disso.
+`ffmpeg-color-pipeline-processor.ts:137-188` lê `implementation.version`, confere
+cada chave de `parameters` contra `MATCH_PROVIDER_VERSIONS[version].parameters`,
+valida `red-gain`/`green-gain`/`blue-gain` contra `MATCH_PARAMETER_BOUNDS.gain` e
+devolve `colorchannelmixer=rr=…:gg=…:bb=…,eq=…` (linha 187). O ganho aplicado de
+1,143444 está muito fora de `whiteBalanceGainTolerance = 0,02`, de modo que o
+plano que a avaliação visual renderizou era v2, não v1.
+`tests/v2/color-match-service.test.mjs:897` (`T-F4.013 apollo-match v2 renders a
+colorchannelmixer before the eq`) afirma a cadeia exata.
+
+O custo que sobra é o de duas versões vivas no mesmo provedor. `parametersHash` e
+`pipelineHash` são calculados sobre todo o objeto de parâmetros, então uma
+compilação que hasheou como v1 tem de continuar renderizando exatamente o que a
+v1 renderizava — são dois caminhos de render para manter em sincronia, não um. E
+a versão é um contrato entre plano e processador: um plano v2 que chegue a um
+build anterior a esta wave é recusado com `INVALID_RENDER_INPUT` (linha 143), não
+renderizado por aproximação.
 
 **O que fica em aberto.** A dimensão `skin` que FR-183 nomeia é **medida**
 (matiz do croma médio da banda de pele) mas não entra em nenhuma transformação:
