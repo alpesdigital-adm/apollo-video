@@ -1550,6 +1550,32 @@ há teste que meça esse teto.
   para uma pessoa responder (PRD FR-145).
 - **Freeze e picture-in-picture não existem.** A materialização de um react é só
   corte (§32.3); a spec §16 descreve o mapa, não uma composição.
+- **Quatro das seis jornadas obrigatórias nunca tocam armazenamento de objetos
+  versionado.** O briefing pede "PostgreSQL 16 **e** armazenamento de objetos
+  versionado"; só duas jornadas provam as duas metades, e é honesto dizer quais.
+  `grep -n "APOLLO_V2_ARTIFACT_STORAGE_DRIVER: s3" .github/workflows/ci.yml`
+  devolve sete passos, e os de jornada obrigatória são dois: `Run Wave 20
+  podcast multicam journey against PostgreSQL and versioned MinIO` (linha 760) e
+  `Run Wave 20 phase gate journey against PostgreSQL and versioned MinIO` (778),
+  ambos no job `local-infrastructure`, cada um com bucket exclusivo por run.
+  - **Provam as duas metades:** `podcast-multicam-journey` (as quatro gravações
+    entram no bucket versionado e o render as lê de volta por `materialize`) e
+    `phase-gate-journey` (roda contra o bucket e o afirma **vazio** no fim,
+    porque nenhuma rota do gate constrói armazenamento de artefato — é uma
+    afirmação falsificável, não um comentário).
+  - **Provam só PostgreSQL:** `teacher-screen-journey`, `react-playback-journey`
+    e `insufficient-evidence-journey` leem o driver do ambiente e rodariam sob
+    `s3` sem alterar uma linha; nenhum passo do CI lhes dá um, então rodam uma
+    vez cada, no job `quality`, sobre disco local. `longform-synthesis-journey`
+    não tem armazenamento de artefato no caminho: os bytes chegam ao renderer
+    por `sources: [{ path: masterPath }]` de um `mkdtemp` da própria suíte, e o
+    cabeçalho do arquivo já dizia isso — era o único dos quatro que dizia.
+  - A regra que impede isto de voltar a ser prosa:
+    `mandatory-journey-ci-wiring.test.mjs` monta a lista das jornadas com passo
+    `s3` e afirma que ela é exatamente `{podcast, phase gate}`. Ligar uma quarta
+    jornada ao MinIO é mudança bem-vinda que precisa editar essa asserção, este
+    parágrafo e as linhas FR-150/F4.015/F4.016 da traçabilidade junto.
+
 - **Os limiares de §26 continuam sem calibração contra material real.** Todos os
   números das §§29–31 vieram de fixtures geradas.
 

@@ -112,6 +112,17 @@ const RUN = process.env.APOLLO_TEACHER_SCREEN_E2E === '1'
  * Local disk or versioned MinIO, chosen by the runtime env the composition root
  * reads — never pinned in this file. Read once, at load, so the worker child
  * gets the same store this process opened.
+ *
+ * **In CI this is always local disk.** `grep -n
+ * "npm run test:e2e:teacher-screen-journey" .github/workflows/ci.yml` returns
+ * one line, 456, in the `quality` job, whose step sets no
+ * APOLLO_V2_ARTIFACT_STORAGE_DRIVER — so this journey proves PostgreSQL 16 and
+ * not the briefing's other half. The `s3` path here is capability, not
+ * coverage: reading the driver from the environment means a step that supplies
+ * one needs no edit to this file. Said plainly because "chosen by the runtime
+ * env" reads like a claim that both are chosen somewhere, and only the podcast
+ * and phase gate journeys get an `s3` step (spec 05 §34.4, and the equality
+ * asserted in `mandatory-journey-ci-wiring.test.mjs`).
  */
 const storageDriver = journeyStorageDriver()
 

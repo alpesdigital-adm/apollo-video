@@ -106,12 +106,19 @@ const RUN = process.env.APOLLO_INSUFFICIENT_EVIDENCE_E2E === '1'
 const SKIP = RUN ? false : 'set APOLLO_INSUFFICIENT_EVIDENCE_E2E=1 with a migrated V2_DATABASE_URL'
 /**
  * Local disk or versioned MinIO, chosen by the runtime env the composition root
- * reads — never pinned in this file. This journey is one of the three that
- * genuinely resolves artifact bytes: the sync worker opens all four recordings
- * to look for a signal, and the whole point of the suite is that it finds none.
- * A refusal reached because the store was unreachable would be the same word
- * for a different fact, which is why the s3 path is exercised rather than
- * assumed equivalent.
+ * reads — never pinned in this file. This journey genuinely resolves artifact
+ * bytes: the sync worker opens all four recordings to look for a signal, and
+ * the whole point of the suite is that it finds none. A refusal reached because
+ * the store was unreachable would be the same word for a different fact, which
+ * is why the `s3` path is written to work rather than assumed equivalent.
+ *
+ * **No CI step exercises it.** An earlier version of this note said the s3 path
+ * "is exercised", which was never true here: `grep -n
+ * "npm run test:e2e:insufficient-evidence-journey" .github/workflows/ci.yml`
+ * returns one line, 390, in the `quality` job, whose step sets no
+ * APOLLO_V2_ARTIFACT_STORAGE_DRIVER. This journey proves PostgreSQL 16 only.
+ * Writing the s3 path is capability; running it is coverage, and only the
+ * podcast and phase gate journeys have it (spec 05 §34.4).
  */
 const storageDriver = journeyStorageDriver()
 
