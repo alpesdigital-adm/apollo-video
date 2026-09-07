@@ -269,9 +269,11 @@ export const DEFAULT_COLOR_CRITIC_POLICY = Object.freeze({
   /** Below this share of the contrast it had before, the stage flattened the image. */
   contrastRegressionRatio: 0.7,
   /**
-   * The largest cast a creative intent may declare as acceptable — twice the
-   * `hard` cast threshold. Without a ceiling, `castAllowedDelta` is the caller
-   * writing the verdict: declaring a big enough allowance turns any cast at
+   * The largest cast a creative intent may declare as acceptable. It is NOT a
+   * multiple of the `hard` cast threshold above: that is 0.08 and this is 3.1x
+   * it, not twice — the wrong ratio stood here long enough to be copied into
+   * two documents. Without a ceiling, `castAllowedDelta` is the caller writing
+   * the verdict: declaring a big enough allowance turns any cast at
    * all into `documented-intent`/`approve`, which CONTRACT §2 and §6 forbid.
    * A look that needs more than this is a grade, and a human signs it off.
    * The number is `maxProposedGain - 1`: a declared look may shift a channel

@@ -1027,8 +1027,13 @@ um de `COLOR_CRITIC_SUBJECT_KINDS` (`source`, `camera`, `range`, `output`).
   `proposedSaturationRange` [0,67; 1,5]; `contrastRegressionRatio` 0,7;
   `exposureGamma` 2,2; `skinTargetHueDegrees` 136,13.
 - `maxDeclaredCastAllowance = 0,25` é o teto do que uma intenção criativa pode
-  declarar como cast aceitável — o dobro do limiar `hard` de `cast`, e igual a
-  `maxProposedGain - 1`. Sem teto, o chamador escreveria o próprio veredito:
+  declarar como cast aceitável, e é `maxProposedGain - 1`: um look declarado
+  pode deslocar a razão entre canais no máximo o que o estágio `match` teria
+  permissão de aplicar para desfazê-lo. Não é múltiplo do limiar `hard` de
+  `cast`, que vale 0,08 (`color-critic-report.ts:244`) — o teto é 3,1 vezes
+  esse limiar, e quem estiver orçando quanto cast uma declaração desculpa
+  precisa do número, não da razão. Sem teto, o chamador escreveria o próprio
+  veredito:
   bastaria declarar uma tolerância grande o suficiente para transformar qualquer
   cast em `documented-intent`/`approve`.
 

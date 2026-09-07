@@ -54,9 +54,12 @@ destruída.** `COLOR_CRITIC_IRREVERSIBLE_DIMENSIONS` — clipping, blacks
 esmagados, pele fora da banda, deriva de cor de marca, inconsistência HDR/SDR —
 não são desfeitas por ganho nenhum do estágio `match`, e portanto nenhuma
 declaração as desculpa. E o que a declaração **pode** desculpar tem teto:
-`maxDeclaredCastAllowance = 0,25`, o dobro do limiar `hard` de `cast` e igual a
-`maxProposedGain - 1`. Um look que precise de mais do que isso é uma graduação,
-e um humano assina.
+`maxDeclaredCastAllowance = 0,25`, que é `maxProposedGain - 1`: um look
+declarado pode deslocar a razão entre canais no máximo o que o estágio `match`
+teria permissão de aplicar para desfazê-lo. O teto não é múltiplo do limiar
+`hard` de `cast` — esse vale 0,08 (`color-critic-report.ts:244`), e 0,25 é 3,1
+vezes ele, não duas. Um look que precise de mais do que isso é uma graduação, e
+um humano assina.
 
 **Correção automática exige a banda `high`.**
 `COLOR_CRITIC_BOUNDED_CORRECTION_MINIMUM_CONFIDENCE = 0,85`, e
