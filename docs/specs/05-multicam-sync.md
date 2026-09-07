@@ -1203,10 +1203,24 @@ mão.
 ### 33.2 De onde vem a evidência
 
 `MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES` é um conjunto fechado de vinte e
-quatro tipos de linha que uma checagem pode ter lido, de `workspace` a
-`module-graph-audit`, cada um nomeando uma tabela que as migrações das Waves
-18/19/20 criaram. "evidence-ref: o que o leitor quiser" é como um gate deixa de
-ser auditável.
+quatro nomes de evidência que uma checagem pode ter lido, de `workspace` a
+`module-graph-audit`. Vinte e três nomeiam uma tabela do schema v2 —
+`workspaces`, `projects`, `project_versions`, `capture_session_versions`,
+`capture_protocols`, `capture_protocol_evaluations`, `sync_diagnostics`,
+`capture_sync_evidence`, `capture_track_coverages`, `capture_clock_maps`,
+`playback_maps`, `playback_pieces`, `multicam_directions`,
+`multicam_shot_decisions`, `editorial_syntheses`, `multicam_match_plans`,
+`camera_match_transforms`, `project_color_plans`, `color_critic_reports`,
+`renderable_plan_snapshots`, `project_final_export_operations`,
+`media_artifacts`, `media_artifact_manifests` — e não todas foram criadas nas
+Waves 18/19/20: `workspaces` vem da migração inicial `20260712210000_init`. O
+vigésimo quarto, `module-graph-audit`, **não** é tabela: `grep module_graph
+prisma/v2/schema.prisma` devolve zero linhas, e a referência que o gate constrói
+é `{ type: 'module-graph-audit', id: 'legacy-runtime-audit:<scannedAt>', hash:
+auditHash }` (`multicam-longform-gate.ts:807-811`) — o resultado de uma
+varredura, não uma linha. É o mesmo fato que a nota sobre o critério 10 registra
+adiante. "evidence-ref: o que o leitor quiser" é como um gate deixa de ser
+auditável.
 
 `MULTICAM_LONGFORM_FAILURE_REASONS` são cinco, porque a próxima ação do operador
 é diferente em cada uma: `evidence-missing` (grave de novo),

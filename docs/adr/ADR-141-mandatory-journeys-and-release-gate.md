@@ -14,9 +14,11 @@ Wave 20. Ele gerava os ids `T-J.001` a `T-J.009` a partir de
 `completeJourneyFixture`, que construía toda etapa com `passed: true` e em
 seguida afirmava que ela havia passado — o antipadrão que o `AGENTS.md` L126
 nomeia, um teste que reproduz a própria implementação. Como o arquivo terminava
-em `.test.mjs`, ele rodava dentro do `npm test` e do CI, e por isso o ponteiro
-de evidência de `TODO.md:2433` ("Evidência: T-J.007") era satisfeito por um
-literal de string sobre uma fixture que não podia falhar.
+em `.test.mjs`, ele rodava dentro do `npm test` e do CI, e por isso os quatro
+ponteiros de evidência de `TODO.md` §J.007 ("Evidência: T-J.007" —
+`TODO.md:2430-2433` antes do commit `a4f12a2f`, hoje substituídos pela nota que
+começa em `TODO.md:2430`) eram satisfeitos por um literal de string sobre uma
+fixture que não podia falhar.
 `src/v2/application/release-risk-control.ts`, terceiro vocabulário paralelo de
 "phase gate", foi removido no mesmo commit.
 

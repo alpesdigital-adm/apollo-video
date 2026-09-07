@@ -12,8 +12,10 @@ O repositório já tinha aprendido, caro, o que um gate não pode ser. Os módul
 removidos no commit `e8ba18e6`, geravam os ids `T-J.001…T-J.009` a partir de uma
 fixture que construía toda etapa com `passed: true` e em seguida afirmava que
 ela passara. Como o arquivo terminava em `.test.mjs`, aquilo rodava dentro do
-`npm test` e do CI, e o ponteiro de evidência de `TODO.md:2433` ("T-J.007") era
-satisfeito por um literal de string sobre uma fixture que não podia falhar.
+`npm test` e do CI, e os quatro ponteiros de evidência de `TODO.md` §J.007
+("T-J.007" — `TODO.md:2430-2433` antes do commit `a4f12a2f`, hoje substituídos
+pela nota que começa em `TODO.md:2430`) eram satisfeitos por um literal de
+string sobre uma fixture que não podia falhar.
 
 Um gate cujo chamador fornece o veredito não é um gate. Um gate que lê o próprio
 resultado de uma coluna que ninguém confere também não é.
@@ -29,9 +31,13 @@ nada além do escopo da pergunta.**
   (`insufficient-evidence-requires-manual`), não números de série: quem lê
   "AC-003: failed" tem de ir a uma tabela.
 - **O conjunto de evidências é fechado.**
-  `MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES` tem vinte e quatro tipos, cada um
-  nomeando uma tabela que as migrações das Waves 18/19/20 criaram.
-  "evidence-ref: o que o leitor quiser" é como um gate deixa de ser auditável.
+  `MULTICAM_LONGFORM_EVIDENCE_RESOURCE_TYPES` tem vinte e quatro nomes: vinte e
+  três nomeiam uma tabela do schema v2 (de `workspaces`, criada na migração
+  inicial `20260712210000_init`, a `renderable_plan_snapshots`, criada nesta
+  wave), e `module-graph-audit` nomeia a varredura do grafo de módulos, que é a
+  única evidência que não é linha de banco — `grep module_graph
+  prisma/v2/schema.prisma` devolve zero linhas. "evidence-ref: o que o leitor
+  quiser" é como um gate deixa de ser auditável.
 - **Cinco motivos de falha**, porque a próxima ação do operador é diferente em
   cada um: `evidence-missing`, `evidence-unverified`, `evidence-not-measured`,
   `requirement-unmet`, `evidence-stale`.
@@ -67,9 +73,14 @@ aplicadas do zero:
   que carregavam um veredito foram recusados com 422 e zero linhas escritas.**
 
 **O que piora.** Avaliar o gate custa uma varredura de banco e uma varredura do
-grafo de módulos: 58 s a 75 s por execução nas medições acima. Não é uma
-consulta de painel, e é por isso que o resultado é persistido como registro
-imutável e a tela lê o último em vez de reavaliar.
+grafo de módulos. **O custo por avaliação não foi medido.** O que foi medido são
+as duas suítes inteiras: `test:e2e:multicam-longform-gate` levou 72,9 s para 3
+testes e `test:e2e:phase-gate-journey` levou 58,7 s para 13 avaliações pelas
+rotas `/v1` — e esses relógios também cobrem subir o cluster, aplicar
+`db:v2:migrate:deploy` do zero e construir o mundo. A segunda medição implica um
+teto de 4,5 s por avaliação, não um custo. De todo modo não é uma consulta de
+painel, e é por isso que o resultado é persistido como registro imutável e a
+tela lê o último em vez de reavaliar.
 
 **O que fica em aberto.** Um gate aprovado não é implantação nem aceite. As dez
 condições estarem satisfeitas em PostgreSQL diz que o produto faz o que ADR-135
