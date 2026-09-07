@@ -49,13 +49,13 @@ export const MATCH_PROVIDER = 'apollo-match' as const
 /**
  * The `apollo-match` provider versions.
  *
- * v1 is what the FFmpeg processor accepts today (`ffmpeg-color-pipeline-
- * processor.ts:107-110`): an `eq` filter. v2 adds per-channel gains for white
- * balance, to be rendered as `colorchannelmixer=rr=<red-gain>:gg=<green-gain>:
- * bb=<blue-gain>` before the same `eq`. The version token is part of
- * `implementation.version`, so a v2 transform hashes differently from a v1
- * one and existing v1 compilations are untouched. Extending the processor
- * whitelist is integration work; this table is the contract it implements.
+ * v1 is an `eq` filter. v2 adds per-channel gains for white balance, rendered
+ * as `colorchannelmixer=rr=<red-gain>:gg=<green-gain>:bb=<blue-gain>` before
+ * the same `eq`. The FFmpeg processor implements BOTH — it reads this table
+ * (`ffmpeg-color-pipeline-processor.ts:137-188`, emitting the mixer at :187),
+ * so the two cannot drift apart by editing one of them. The version token is
+ * part of `implementation.version`, so a v2 transform hashes differently from a
+ * v1 one and existing v1 compilations are untouched.
  *
  * The gain parameter names are `red-gain`/`green-gain`/`blue-gain`, not the
  * camelCase spellings the deltas use, because `createColorPlan` validates
