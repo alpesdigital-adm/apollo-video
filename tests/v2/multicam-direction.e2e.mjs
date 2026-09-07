@@ -123,9 +123,37 @@ test(
         producedAt: fixtureInstant(0),
       },
     })
+    /**
+     * A silence observation, because `silence` used to be a kind nothing wrote.
+     *
+     * `levelDbfs` is negative, which is the value the column's `CHECK` and the
+     * aggregate's validator both have an opinion about, and it is a DOUBLE that
+     * has to survive JSON on the way down and back. The kind was modelled,
+     * validated and accepted by `multicam_observations_kind_check` while no
+     * producer in the repository emitted one, so nothing had ever put such a row
+     * in a table.
+     */
+    const quiet = (trackId, [from, to], levelDbfs) => ({
+      observationId: `obs-quiet-${trackId}-${from}`,
+      trackId,
+      range: createTickInterval(fixtureSeconds(from), fixtureSeconds(to)),
+      kind: 'silence',
+      value: { kind: 'silence', levelDbfs },
+      confidence: 1,
+      provenance: {
+        method: 'ffmpeg/silencedetect+astats',
+        evaluatorKind: 'measured',
+        evidenceRef: `media-artifact:asset-mic-a:${from * 1_000}-${to * 1_000}:audio`,
+        producedAt: fixtureInstant(0),
+      },
+    })
     const evidence = createMulticamEvidenceSet({
       session: world.session,
-      observations: [speaks('track-mic-a', [1, 25], 'cluster-a'), speaks('track-mic-b', [25, 50], 'cluster-b')],
+      observations: [
+        speaks('track-mic-a', [1, 25], 'cluster-a'),
+        speaks('track-mic-b', [25, 50], 'cluster-b'),
+        quiet('track-mic-a', [50, 55], -74.82),
+      ],
       generatedAt: fixtureInstant(60),
     })
     const direction = directMulticam({
@@ -206,6 +234,29 @@ test(
     )
     assert.equal(head.direction.shots[0].chosen.eligible, true)
     assert.deepEqual([...head.direction.shots[0].chosen.rejectionReasons], [])
+
+    // ---------------------------------------------------------------------
+    // The silence observation is a row, and it comes back as the number it was
+    // ---------------------------------------------------------------------
+    const silenceRows = await client.v2MulticamObservation.findMany({
+      where: { workspaceId, kind: 'silence' },
+      select: { id: true, kind: true, valueJson: true, method: true, evaluatorKind: true },
+      orderBy: { id: 'asc' },
+    })
+    assert.equal(silenceRows.length, 1, 'the silence observation is a row the database accepted')
+    assert.deepEqual(
+      JSON.parse(silenceRows[0].valueJson),
+      { kind: 'silence', levelDbfs: -74.82 },
+      'and the measured ceiling survived JSON with its sign and its decimals',
+    )
+    assert.equal(silenceRows[0].method, 'ffmpeg/silencedetect+astats', 'naming the pass that measured it')
+    assert.equal(silenceRows[0].evaluatorKind, 'measured')
+    const hydratedEvidence = await repository.readEvidenceSet({ workspaceId, evidenceHash: evidence.evidenceHash })
+    assert.ok(hydratedEvidence, 'the set is readable by its own hash')
+    const hydratedSilence = hydratedEvidence.observations.filter((observation) => observation.kind === 'silence')
+    assert.equal(hydratedSilence.length, 1)
+    assert.equal(hydratedSilence[0].value.levelDbfs, -74.82, 'hydration re-derives the level, not a rounded copy of it')
+    assert.equal(hydratedSilence[0].range.end - hydratedSilence[0].range.start > 0n, true, 'and its ticks are bigint on the way back')
 
     const storedCandidates = await client.v2MulticamAngleCandidate.count({ where: { workspaceId } })
     const storedRejected = await client.v2MulticamAngleCandidate.count({ where: { workspaceId, eligible: false } })
