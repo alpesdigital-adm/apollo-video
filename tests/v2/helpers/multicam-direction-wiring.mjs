@@ -265,11 +265,60 @@ export function fakeVisual({ activityBps = 103, stabilityBps = 9_100, exposureBp
   }
 }
 
+/**
+ * A listening pass that answers about the windows it was handed.
+ *
+ * `deaf` names the tracks whose file carries no audio: those come back with
+ * `measuredBlockCount: 0` and no stretch, which is "nothing was heard" and must
+ * not become "it was silent". Every other window reports one stretch over its
+ * middle third, so a stretch is always strictly inside its window and the
+ * producer's mapping onto the session clock is exercised rather than skipped.
+ */
+export function fakeSilence({ deaf = [], ceilingDbfs = -71.5 } = {}) {
+  const seen = []
+  return {
+    seen,
+    async measure({ windows }) {
+      seen.push(...windows)
+      return windows.map((window) => {
+        const span = window.sourceEndMs - window.sourceStartMs
+        const silent = deaf.includes(window.trackId)
+        return {
+          trackId: window.trackId,
+          partId: window.partId,
+          sourceArtifactId: window.sourceArtifactId,
+          sourceStartMs: window.sourceStartMs,
+          sourceEndMs: window.sourceEndMs,
+          measuredBlockCount: silent ? 0 : Math.round(span / 100),
+          blockMs: 100,
+          thresholdDbfs: -50,
+          minimumSilenceMs: 700,
+          stretches: silent
+            ? []
+            : [{
+              startMs: window.sourceStartMs + Math.round(span / 3),
+              endMs: window.sourceStartMs + Math.round((2 * span) / 3),
+              ceilingDbfs,
+            }],
+          method: 'fixture/silencedetect',
+          evidenceRef: `media-artifact:${window.sourceArtifactId}:${window.sourceStartMs}-${window.sourceEndMs}:audio`,
+        }
+      })
+    },
+  }
+}
+
 export function fakeMedia() {
   const released = []
+  // Every `resolve`, not every distinct part: the point of counting is that two
+  // passes over one part materialize it ONCE, and a set would hide a second
+  // download of the same recording.
+  const resolved = []
   return {
     released,
+    resolved,
     async resolve({ part }) {
+      resolved.push(part.partId)
       return {
         path: `C:/materialized/${part.sourceAssetId}.mp4`,
         release: async () => { released.push(part.sourceAssetId) },
@@ -334,6 +383,7 @@ export function wire(options = {}) {
     diarization: options.diarization ?? fakeDiarization(),
     visual,
     media,
+    ...(options.silence ? { silence: options.silence } : {}),
     ...(options.perception ? { perception: options.perception } : {}),
     clock: () => new Date('2029-04-01T09:05:00.000Z'),
     evidenceWindowMs: options.evidenceWindowMs ?? 60_000,

@@ -612,9 +612,17 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
             // Zero activity is not an observation of stillness: it is the
             // absence of activity, and the evidence kind refuses the zero
             // outright (`multicam-evidence.ts:157-166`).
+            //
+            // The ids below carry the part ordinal because the milliseconds do
+            // not: a window is timed from the start of ITS OWN file, so both
+            // parts of a restarted recorder offer a window at 0 ms. Without the
+            // ordinal the whole derivation was refused —
+            // `observation screen-track-screen-0 is duplicated` — for every
+            // session with a recorder restart, which is one of the fixtures the
+            // contract calls mandatory.
             if (track.role === 'screen' && measurement.activityBps !== null && measurement.activityBps > 0) {
               observations.push({
-                observationId: `screen-${track.trackId}-${measurement.sourceStartMs}`.slice(0, 127),
+                observationId: `screen-${track.trackId}-p${part.ordinal}-${measurement.sourceStartMs}`.slice(0, 127),
                 trackId: track.trackId,
                 range,
                 kind: 'screen-activity',
@@ -630,7 +638,7 @@ export function deriveMulticamEvidenceService(dependencies: DeriveMulticamEviden
             }
             if (Object.values(dimensions).some((value) => value !== null)) {
               observations.push({
-                observationId: `quality-${track.trackId}-${measurement.sourceStartMs}`.slice(0, 127),
+                observationId: `quality-${track.trackId}-p${part.ordinal}-${measurement.sourceStartMs}`.slice(0, 127),
                 trackId: track.trackId,
                 range,
                 kind: 'technical-quality',

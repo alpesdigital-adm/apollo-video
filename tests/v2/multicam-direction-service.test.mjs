@@ -7,6 +7,7 @@ import {
   actor,
   baseDirectedPlan,
   CLIENT,
+  fakeSilence,
   PROJECT,
   request,
   SESSION,
@@ -34,8 +35,15 @@ import {
  * change to WHAT was read rather than to how it was reported. It moves only
  * when a fixture or a derivation rule deliberately moves, and then it moves in
  * the same commit as the reason.
+ *
+ * Moved on 2026-09-07: the screen-activity and technical-quality observation
+ * ids gained the part ordinal. They were `<kind>-<trackId>-<sourceStartMs>`,
+ * and window milliseconds restart at zero on every part, so a track with two
+ * parts after a recorder restart produced two observations with one id and
+ * `createMulticamEvidenceSet` refused the entire derivation as duplicated. The
+ * ids are inside the hash, so this number moved with them.
  */
-const PINNED_EVIDENCE_HASH = '1cb6ca9bc6da3ac801f2c61976ff66f6f992a0cd5ccbf1f8d999461d4b3299f4'
+const PINNED_EVIDENCE_HASH = 'a757acbbdbc8b2a63913e6a9c4fa1aef43edbd354bf8e95289a59d19689c98d9'
 
 test('T-F4.012 the command derives evidence, direction, plan and version from ids and a fence alone', async () => {
   const wired = wire()
@@ -635,4 +643,99 @@ test('T-F4.012 a capture session of another project cannot re-cut this project t
   // The same request against the session that does belong here still runs.
   const same = wire()
   assert.equal((await same.execute(request())).direction.sessionId, SESSION)
+})
+test('T-F4.012 silence is an observation only when something listened, and never a zero', async () => {
+  // Before: `silence` was in MULTICAM_EVIDENCE_KINDS, in the migration CHECK
+  // and in the aggregate's validator, and no adapter in the repository produced
+  // one. This is the seam that changed, so it is asserted from both sides.
+  const deaf = wire()
+  const withoutEars = await deaf.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  assert.equal(
+    withoutEars.set.observations.filter((observation) => observation.kind === 'silence').length,
+    0,
+    'a deployment with no listening pass says nothing about silence — absence, not a level of zero',
+  )
+
+  const listening = fakeSilence()
+  const wired = wire({ silence: listening })
+  const result = await wired.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  const silence = result.set.observations.filter((observation) => observation.kind === 'silence')
+  assert.ok(silence.length > 0, 'a deployment that listens produces silence observations')
+  assert.ok(
+    silence.every((observation) => observation.value.kind === 'silence' && observation.value.levelDbfs === -71.5),
+    'and each carries the ceiling the pass measured, not the threshold it was looking for',
+  )
+  assert.ok(
+    silence.every((observation) => observation.provenance.evaluatorKind === 'measured'
+      && observation.provenance.method === 'fixture/silencedetect'
+      && /:audio:[0-9]+-[0-9]+$/.test(observation.provenance.evidenceRef)),
+    'and names the pass that produced it and the exact stretch inside the file',
+  )
+  assert.ok(
+    silence.every((observation) => observation.range.end > observation.range.start),
+    'every stretch is a forward half-open interval in session ticks',
+  )
+
+  // The microphones are heard and are never candidates: an audio-only role is
+  // not a video angle, so the two passes see different tracks on purpose.
+  const heardTracks = [...new Set(listening.seen.map((window) => window.trackId))].sort()
+  assert.ok(heardTracks.includes('track-mic-a') && heardTracks.includes('track-mic-b'), 'microphones are listened to')
+  const lookedAt = [...new Set(wired.visual.seen.map((window) => window.trackId))].sort()
+  assert.ok(!lookedAt.includes('track-mic-a'), 'and are never looked at')
+
+  // One materialization per part even though two passes read it. The S3 driver
+  // downloads the whole recording per resolve.
+  const parts = wired.world.session.tracks.flatMap((track) => track.parts.map((part) => part.partId))
+  assert.equal(wired.media.resolved.length, parts.length, 'each part is materialized exactly once for both passes')
+  assert.equal(wired.media.released.length, parts.length, 'and released exactly once')
+})
+
+test('T-F4.012 a file with no audio is reported as unheard, not recorded as silent', async () => {
+  const listening = fakeSilence({ deaf: ['track-camera-b'] })
+  const wired = wire({ silence: listening })
+  const result = await wired.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  assert.equal(
+    result.set.observations.filter((observation) => observation.kind === 'silence' && observation.trackId === 'track-camera-b').length,
+    0,
+    'a track whose decode produced no audio contributes no silence observation',
+  )
+  const notes = result.skipped.filter((entry) => entry.reason === 'the decode produced no audio')
+  assert.ok(notes.length > 0, 'and the drop is reported rather than silent')
+  assert.ok(
+    notes.every((entry) => entry.source.includes('asset-cam-b')),
+    'naming the artifact and window nobody could listen to',
+  )
+  assert.ok(
+    result.set.observations.some((observation) => observation.kind === 'silence' && observation.trackId === 'track-camera-a'),
+    'while the tracks that were heard still report',
+  )
+})
+
+test('T-F4.012 a recorder restart produces two windows at zero milliseconds and two distinct observations', async () => {
+  // Window milliseconds are counted from the start of THEIR OWN file, so both
+  // parts of a restarted track offer a window at 0 ms. The ids used to be
+  // `<kind>-<trackId>-<sourceStartMs>`, so the second one collided with the
+  // first and createMulticamEvidenceSet refused the whole derivation with
+  // `observation screen-track-screen-0 is duplicated` — every session with a
+  // recorder restart, which spec 05 §23 calls a mandatory fixture.
+  const world = buildDirectableMulticamWorld({
+    workspaceId: WORKSPACE,
+    projectId: PROJECT,
+    sessionId: SESSION,
+    endSecond: 300,
+    restart: { trackId: 'track-screen', stopSecond: 100, resumeSecond: 120, assetId: 'asset-screen-2' },
+  })
+  const screen = world.session.tracks.find((track) => track.trackId === 'track-screen')
+  assert.equal(screen.parts.length, 2, 'the fixture really did restart the recorder')
+
+  const wired = wire({ world, silence: fakeSilence() })
+  const result = await wired.deriveEvidence({ workspaceId: WORKSPACE, projectId: PROJECT, sessionId: SESSION })
+  const ids = result.set.observations.map((observation) => observation.observationId)
+  assert.equal(new Set(ids).size, ids.length, 'no two observations share an id')
+  for (const prefix of ['screen-track-screen', 'quality-track-screen', 'silence-track-screen']) {
+    const both = ids.filter((id) => id.startsWith(`${prefix}-p`))
+    assert.ok(both.some((id) => id.startsWith(`${prefix}-p0-`)), `${prefix} reports the first file`)
+    assert.ok(both.some((id) => id.startsWith(`${prefix}-p1-`)), `${prefix} reports the file written after the restart`)
+  }
+  console.log(`restart observations=${ids.length} unique=${new Set(ids).size} screenParts=${screen.parts.length}`)
 })
