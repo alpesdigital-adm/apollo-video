@@ -135,7 +135,7 @@ const SAMPLE_RATE = 16_000
 const TICKS_PER_SECOND = 90_000
 const FPS = 30
 const REFERENCE_SECONDS = 30
-const REACTION_SECONDS = 60
+const REACTION_SECONDS = 70
 
 const seconds = (value) => BigInt(Math.round(value * TICKS_PER_SECOND))
 const ticksToSeconds = (ticks) => Number(BigInt(ticks)) / TICKS_PER_SECOND
@@ -161,6 +161,27 @@ const TRUTH = Object.freeze([
   { mode: 'seek', from: 49, to: 53, reference: 19 },
   { mode: 'hidden', from: 53, to: 57, reference: 23 },
   { mode: 'playing', from: 57, to: 60, reference: 27 },
+  // The rewind — the MODE, not the `'rewind'` discontinuity reason the replay
+  // above also carries.
+  //
+  // The briefing names rewind as a state this fixture has to cover, and until
+  // now it did not. `deriveReactionPlaybackMap` calls a backward move a
+  // `replay` when the range it lands on is already covered by everything played
+  // so far, and a `rewind` only when it is not (playback-map.ts:1256-1259) — so
+  // the difference is neither the direction nor the distance. The backward move
+  // at 41 s goes to reference 8 and stops at 15.5, inside the played union, and
+  // is a replay. This one goes back to 16 and runs on to 26.5, past the 23.5
+  // the seek reached: the reactor rewinds and then watches THROUGH into ground
+  // nobody had seen. Measured, the played union entering this segment is
+  // [0, 23.5] u [26.5, 29.5], and [16, 26.5] is inside neither.
+  //
+  // Ten seconds, and stopping short of the reference's end on purpose: the last
+  // run's reference range is `referenceStart + reactionSpan` capped at the
+  // reference duration (playback-map.ts:1237-1243), and a capped range spans
+  // fewer reference frames than timeline frames — which `compilePlaybackToShots`
+  // refuses outright ("piece piece-009 spans 420 reference frames over 435
+  // timeline frames", measured while writing this).
+  { mode: 'rewind', from: 60, to: 70, reference: 16 },
 ])
 
 const PAUSE_SECONDS = 18 - 10
@@ -799,7 +820,7 @@ test(
     const modes = pieces.map((piece) => piece.mode)
     assert.deepEqual(
       modes,
-      ['playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek', 'playing'],
+      ['playing', 'paused', 'playing', 'commentary-only', 'playing', 'replay', 'seek', 'playing', 'rewind'],
       `the derived modes were ${modes.join(', ')}`,
     )
 
@@ -838,6 +859,31 @@ test(
     const seek = pieces.find((piece) => piece.mode === 'seek')
     assert.equal(seek.discontinuityReason, 'seek')
     assert.ok(BigInt(seek.referenceRange.start) > BigInt(replay.referenceRange.end))
+
+    // The rewind: backward like the replay, and a different answer because it
+    // reaches reference time nothing had played. Both carry
+    // `discontinuityReason: 'rewind'`; only the MODE separates "watched it
+    // again" from "went back for the part they skipped", and asserting the
+    // reason alone — which is all this journey used to do — cannot tell them
+    // apart.
+    const rewind = pieces.find((piece) => piece.mode === 'rewind')
+    assert.ok(rewind, `no piece came back as a rewind: ${modes.join(', ')}`)
+    assert.equal(rewind.direction, 'backward')
+    assert.equal(rewind.discontinuityReason, 'rewind')
+    assert.notEqual(rewind.pieceId, replay.pieceId, 'the replay and the rewind must be two pieces')
+    assert.ok(
+      BigInt(rewind.referenceRange.end) > BigInt(seek.referenceRange.end),
+      'a rewind that stops inside played ground is a replay',
+    )
+    const playedBeforeRewind = pieces
+      .filter((piece) => piece.pieceId !== rewind.pieceId && piece.referenceRange !== null)
+      .map((piece) => piece.referenceRange)
+    assert.ok(
+      !playedBeforeRewind.some((played) =>
+        BigInt(played.start) <= BigInt(rewind.referenceRange.start) &&
+        BigInt(rewind.referenceRange.end) <= BigInt(played.end)),
+      'no single played range may contain the rewind, or the domain would have called it a replay',
+    )
 
     // No piece asserts reference time the reference does not have.
     for (const piece of pieces) {
@@ -1106,6 +1152,7 @@ test(
     const resolvedPaused = resolvedPieces.find((piece) => piece.mode === 'paused')
     const resolvedCommentary = resolvedPieces.find((piece) => piece.mode === 'commentary-only')
     const resolvedReplay = resolvedPieces.find((piece) => piece.mode === 'replay')
+    const resolvedRewind = resolvedPieces.find((piece) => piece.mode === 'rewind')
     const firstPlaying = resolvedPieces.find((piece) => piece.mode === 'playing')
 
     // Audio: the compiler's own assumption is that every shot carries the
@@ -1141,6 +1188,7 @@ test(
       { label: 'commentary-only', second: midpointOf(resolvedCommentary), source: 'reaction' },
       { label: 'playing', second: midpointOf(firstPlaying), source: 'reference' },
       { label: 'replay', second: midpointOf(resolvedReplay), source: 'reference' },
+      { label: 'rewind', second: midpointOf(resolvedRewind), source: 'reference' },
     ].map((probe) => ({ ...probe, ...frameStatistics(rendered.outputPath, probe.second) }))
     for (const probe of pixelProbes) {
       if (probe.source === 'reaction') {
@@ -1227,7 +1275,11 @@ test(
       `+ ${map.uncovered.length} uncovered; pause ${spanSeconds(paused).toFixed(3)}s vs known ${PAUSE_SECONDS}s ` +
       `(erro ${(pauseError * FPS).toFixed(1)} frames, tolerancia ${BOUNDARY_TOLERANCE_FRAMES}); ` +
       `commentary ${spanSeconds(commentary).toFixed(3)}s referenceRange=null; ` +
-      `replay ${replay.direction}/${replay.discontinuityReason}; seek ${seek.discontinuityReason}; ` +
+      `replay ${replay.mode}/${replay.direction}/${replay.discontinuityReason} ref ` +
+      `${ticksToSeconds(replay.referenceRange.start).toFixed(1)}-${ticksToSeconds(replay.referenceRange.end).toFixed(1)}s; ` +
+      `rewind ${rewind.mode}/${rewind.direction}/${rewind.discontinuityReason} ref ` +
+      `${ticksToSeconds(rewind.referenceRange.start).toFixed(1)}-${ticksToSeconds(rewind.referenceRange.end).toFixed(1)}s; ` +
+      `seek ${seek.discontinuityReason}; ` +
       `anchor v${resolvedMap.version} status=${resolvedMap.status} resolved the hole at reference ` +
       `${ticksToSeconds(anchoredPiece.referenceRange.start).toFixed(3)}s vs known ${hidden.reference}s ` +
       `(erro ${anchoredReferenceErrorFrames.toFixed(2)} frames) via ${anchoredPiece.detectionMethod}, ` +

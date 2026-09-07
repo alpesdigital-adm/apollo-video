@@ -54,7 +54,7 @@ const TICKS_PER_SECOND = 90_000
 const TIMEBASE = timebaseFromRate(TICKS_PER_SECOND)
 const FPS = 30
 const REFERENCE_SECONDS = 30
-const REACTION_SECONDS = 60
+const REACTION_SECONDS = 70
 
 const seconds = (value) => BigInt(Math.round(value * TICKS_PER_SECOND))
 const digest = (character) => character.repeat(64)
@@ -79,6 +79,63 @@ const TRUTH = Object.freeze([
   { mode: 'seek', from: 49, to: 53, reference: 19 },
   { mode: 'hidden', from: 53, to: 57, reference: 23 },
   { mode: 'playing', from: 57, to: 60, reference: 27 },
+  // The rewind — the MODE, not the `'rewind'` discontinuity reason the replay
+  // above also carries.
+  //
+  // `PLAYBACK_MODES` has six values and this fixture reached five of them.
+  // `deriveReactionPlaybackMap` calls a backward move a `replay` when the range
+  // it lands on is already covered by everything played so far, and a `rewind`
+  // only when it is not (playback-map.ts:1256-1259) — so the difference is not
+  // the direction and not the distance. The backward move at 41 s goes back to
+  // reference 8 and stops at 15.5, inside the played union, and is a replay.
+  // This one goes back to 16 and runs on to 27, which is past the 23.5 the seek
+  // reached: the reactor rewinds and then watches THROUGH into ground nobody
+  // had seen. Measured, the played union entering this segment is [0, 23.5],
+  // and [16, 27] is not inside it.
+  //
+  // Eleven seconds, not three: a rewind that stopped short of 23.5 would be
+  // classified a replay and this segment would prove nothing.
+  { mode: 'rewind', from: 60, to: 70, reference: 16 },
+  // A second pause, so the rewind is not the last piece.
+  //
+  // The last run is the one that extends to the end of the reaction media, and
+  // that half-second of extra reach is what makes its reference range end
+  // exactly at the measured thirty seconds — which is what
+  // `reference-exhausted` and the lying-duration falsification below both
+  // depend on. A rewind in that position instead gets its reference range
+  // CAPPED at the reference duration, and a capped range spans fewer reference
+  // frames than timeline frames, which `compilePlaybackToShots` rightly refuses
+  // as something a straight cut cannot express.
+  // The rewind, which is NOT the replay above and had no carrier until now.
+  //
+  // `PLAYBACK_MODES` has six values and this fixture reached five of them: the
+  // backward move at 41 s lands inside reference ground already played, so
+  // `deriveReactionPlaybackMap` calls it a `replay` (playback-map.ts:1256-1259)
+  // and `rewind` — the MODE, as opposed to the `'rewind'` discontinuity reason
+  // both of them carry — was unreachable from any recording this repository
+  // produced.
+  //
+  // The difference is not the direction. It is whether the range landed on is
+  // already covered by what has been played, and the segments above leave a
+  // HOLE: reference 16..19 is skipped by the seek at 49 s and never revisited,
+  // so the played union going into this segment is [0,16] u [19,23] u [27,30].
+  // Going back to reference 16 for fourteen seconds reaches [16,30], which no
+  // played interval contains — the reactor rewinds to the bit they skipped and
+  // then watches on through. That is the ordinary meaning of the word, and it
+  // is now a recording rather than a row in a table.
+  //
+  // Ten seconds, and it stops at reference 26.5 rather than running to 30, for
+  // a reason worth writing down: the reference range of the LAST run is
+  // `referenceStart + reactionSpan`, capped at the reference duration
+  // (playback-map.ts:1237-1243). A rewind that reaches the end of the reference
+  // gets capped, a capped range spans fewer reference frames than timeline
+  // frames, and `compilePlaybackToShots` then refuses the whole map — measured:
+  // "piece piece-009 spans 420 reference frames over 435 timeline frames".
+  // Landing on exactly the duration instead would mean tuning the fixture to
+  // the half-second the detector happens to place this boundary at on one
+  // FFmpeg build, which is the kind of number that passes here and fails on a
+  // runner.
+  { mode: 'rewind', from: 60, to: 74, reference: 16 },
 ])
 
 const POLICY = createPlaybackPolicy({
@@ -322,7 +379,7 @@ function mediaFor(probedReferenceSeconds, probedReactionSeconds) {
 
 const framesOf = (ticks) => Number(ticks) / (TICKS_PER_SECOND / FPS)
 
-test('T-F4.015 a real react recording resolves into playing, paused, commentary, replay, seek and a stretch only a person can answer', async (t) => {
+test('T-F4.015 a real react recording resolves into playing, paused, commentary, replay, seek, rewind and a stretch only a person can answer', async (t) => {
   const workRoot = await mkdtemp(join(tmpdir(), 'apollo-playback-fingerprint-'))
   t.after(async () => {
     // AGENTS.md: an ephemeral artefact of a test is cleaned up by the test that
@@ -402,13 +459,14 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
     'seek',
     'uncovered/manual-anchor-required',
     'playing',
+    'rewind',
   ])
   assert.ok(
     worstFrames <= BOUNDARY_TOLERANCE_FRAMES,
     `worst boundary error ${worstFrames} frames exceeds the declared ${BOUNDARY_TOLERANCE_FRAMES}`,
   )
 
-  const [opening, paused, resumed, commentary, resumedAgain, replay, seek, tail] = map.pieces
+  const [opening, paused, resumed, commentary, resumedAgain, replay, seek, tail, rewound] = map.pieces
 
   // During the pause the reference does not advance, and playback resumes from
   // the tick it left — measured in frames, not asserted in prose.
@@ -436,6 +494,29 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
 
   assert.equal(seek.discontinuityReason, 'seek')
   assert.ok(seek.referenceRange.start > replay.referenceRange.end)
+
+  // And back into the ground the seek skipped: a REWIND, which the replay above
+  // is not. Both are backward and both carry `discontinuityReason: 'rewind'`;
+  // the mode is what separates "watched it again" from "went back for the part
+  // they had not watched", and only the second one reaches reference time no
+  // played interval covers.
+  assert.equal(rewound.mode, 'rewind')
+  assert.equal(rewound.direction, 'backward')
+  assert.equal(rewound.discontinuityReason, 'rewind')
+  assert.ok(rewound.referenceRange.start < tail.referenceRange.start, 'the reference went back')
+  // What makes it a rewind rather than a replay, in the domain's own terms: no
+  // interval played BEFORE it contains the range it landed on.
+  const playedBeforeRewind = [opening, resumed, resumedAgain, replay, seek, tail]
+    .map((piece) => piece.referenceRange)
+  assert.ok(
+    !playedBeforeRewind.some((played) =>
+      played.start <= rewound.referenceRange.start && rewound.referenceRange.end <= played.end),
+    'a rewind whose range was already played is a replay, and this fixture would prove nothing',
+  )
+  assert.ok(
+    rewound.referenceRange.end > seek.referenceRange.end,
+    'the rewind has to run past the ground the seek reached, or the domain calls it a replay',
+  )
 
   // Every window the detector refused reports confidence in the ABSENCE, never
   // the peak-over-runner-up ratio of the match it rejected. Measured here rather
@@ -597,9 +678,14 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
   // The lie made concrete: the last piece extended to play reference time only a
   // sixty-second reference would have. The same body is refused under the
   // measured thirty seconds and accepted under the copied sixty.
+  // The LAST piece, read off the map rather than named: `tail` stopped being it
+  // when the rewind was appended, and slicing the last one off while re-adding
+  // `tail` produced two pieces with the same id instead of the overreach this
+  // block is about.
+  const last = map.pieces[map.pieces.length - 1]
   const overreaching = [
     ...map.pieces.slice(0, -1),
-    { ...tail, rate: null, referenceRange: createTickInterval(tail.referenceRange.start, media.reaction.durationTicks) },
+    { ...last, rate: null, referenceRange: createTickInterval(last.referenceRange.start, media.reaction.durationTicks) },
   ]
   const assemble = (referenceMedia) => () => createPlaybackMap({
     mapId: 'playback-map-lie-checked',
@@ -624,11 +710,16 @@ test('T-F4.015 a real react recording resolves into playing, paused, commentary,
     assemble({ ...media.reference, durationTicks: media.reaction.durationTicks }),
     'only the copied duration makes the overreaching piece legal, which is what makes the lie a lie',
   )
-  // And the lie changes the answer: the honest map knows the last piece runs to
-  // the end of the reference, the lying one does not.
-  assert.ok(map.warnings.includes('reference-exhausted'))
-  assert.ok(!lied.warnings.includes('reference-exhausted'))
+  // And the lie changes the answer. The two maps carry the same pieces and
+  // differ in the reference they were derived against, which the hash covers:
+  // the declared duration is part of the map's identity, not a note beside it.
   assert.notEqual(lied.mapHash, map.mapHash)
+  // No piece reaches the end of the reference any more — the recording ends
+  // mid-rewind at reference 26.5 — so neither map warns. Asserted rather than
+  // left unsaid, because `reference-exhausted` used to be this fixture's answer
+  // and its absence is now a property of the truth table above.
+  assert.ok(!map.warnings.includes('reference-exhausted'))
+  assert.ok(!lied.warnings.includes('reference-exhausted'))
 
   // ------------------------------------------------------------------
   // Falsification (c): contradictory evidence in one window.
