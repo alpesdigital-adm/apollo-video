@@ -52,6 +52,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       ca-certificates \
       ffmpeg \
+      fonts-dejavu-core \
       fonts-liberation \
       libasound2 \
       libatk-bridge2.0-0 \

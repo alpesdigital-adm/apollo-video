@@ -111,7 +111,7 @@ test('production image materializes the Remotion bundle and runtime media binari
   assert.ok(nextBuild > remotionBuild, 'the Remotion bundle must be built before the application image')
   assert.ok(runtimeCopy > remotionBuild, 'the built Remotion tree is not copied into the runtime stage')
   assert.match(dockerfile, /ensureBrowser\(\{logLevel:'error'\}\)/)
-  for (const dependency of ['libnss3', 'libgbm1', 'libasound2', 'fonts-liberation']) {
+  for (const dependency of ['libnss3', 'libgbm1', 'libasound2', 'fonts-dejavu-core', 'fonts-liberation']) {
     assert.ok(dockerfile.includes(dependency), `${dependency} is required by the bundled Remotion browser`)
   }
   for (const setting of [
