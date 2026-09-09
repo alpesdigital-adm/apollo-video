@@ -3074,7 +3074,7 @@
       ]
     },
     {
-      "uiAction": "src/components/WorkspaceSelector.tsx:45",
+      "uiAction": "src/components/WorkspaceSelector.tsx:47",
       "capabilityId": "apollo.sessions.read",
       "capabilityVersion": "2.0.0",
       "endpoint": "GET /v1/session",
@@ -3089,7 +3089,7 @@
       ]
     },
     {
-      "uiAction": "src/components/WorkspaceSelector.tsx:83",
+      "uiAction": "src/components/WorkspaceSelector.tsx:85",
       "capabilityId": "apollo.sessions.switch-workspace",
       "capabilityVersion": "1.0.0",
       "endpoint": "POST /v1/session/workspace",

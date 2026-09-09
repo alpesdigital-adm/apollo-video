@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface WorkspaceOption {
   memberId: string
@@ -30,6 +31,7 @@ async function invalidateWorkspaceClientState(targetWorkspaceId: string): Promis
 }
 
 export default function WorkspaceSelector() {
+  const router = useRouter()
   const [current, setCurrent] = useState('')
   const [workspaces, setWorkspaces] = useState<WorkspaceOption[]>([])
   const [state, setState] = useState<'loading' | 'ready' | 'switching' | 'error'>('loading')
@@ -46,7 +48,7 @@ export default function WorkspaceSelector() {
         const payload = await response.json() as SessionEnvelope
         if (response.status === 401) {
           const returnTo = `${window.location.pathname}${window.location.search}`
-          window.location.assign(`/login?next=${encodeURIComponent(returnTo)}`)
+          router.replace(`/login?next=${encodeURIComponent(returnTo)}`)
           return
         }
         if (!response.ok) throw new Error(payload.error?.message ?? 'Não foi possível ler o workspace.')
@@ -73,7 +75,7 @@ export default function WorkspaceSelector() {
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [])
+  }, [router])
 
   async function switchWorkspace(workspaceId: string) {
     if (!workspaceId || workspaceId === current || state === 'switching') return
@@ -89,7 +91,8 @@ export default function WorkspaceSelector() {
       const payload = await response.json() as SessionEnvelope
       if (!response.ok) throw new Error(payload.error?.message ?? 'Não foi possível trocar o workspace.')
       await invalidateWorkspaceClientState(workspaceId)
-      window.location.assign('/')
+      router.replace('/')
+      router.refresh()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Não foi possível trocar o workspace.')
       setState('error')
