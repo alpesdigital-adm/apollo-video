@@ -43,6 +43,13 @@ export interface StoredRenderablePlanSnapshot extends RenderablePlanSnapshot {
 }
 
 export interface RenderablePlanSnapshotRepository {
+  readByPlan(input: {
+    workspaceId: string
+    projectId: string
+    planId: string
+    planHash: string
+  }): Promise<Readonly<StoredRenderablePlanSnapshot> | null>
+
   /**
    * Store a compiled plan.
    *

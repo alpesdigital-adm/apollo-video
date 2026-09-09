@@ -204,8 +204,25 @@ export class PrismaProxyReviewRepository implements ProxyReviewRepository {
         if (
           existing.workspaceId !== input.workspaceId ||
           existing.projectId !== input.projectId ||
-          existing.reviewHash !== input.review.reviewHash
+          existing.projectVersionId !== input.review.projectVersionId ||
+          existing.proxyArtifactId !== input.review.proxyArtifactId ||
+          existing.proxyManifestId !== input.review.proxyManifestId ||
+          existing.inputHash !== input.review.inputHash ||
+          existing.outputSpecId !== input.review.outputSpecId ||
+          existing.rangeCacheKey !== input.review.rangeCacheKey ||
+          existing.specJson !== stableSerialize(input.review.spec) ||
+          existing.status !== input.review.status ||
+          existing.technicalIssuesJson !== stableSerialize(input.review.technicalIssues) ||
+          existing.criticIssuesJson !== stableSerialize(input.review.criticIssues) ||
+          existing.formatQualityJson !== (input.review.formatQuality ? stableSerialize(input.review.formatQuality) : null) ||
+          existing.warningsAcknowledged !== input.review.warningsAcknowledged ||
+          existing.finalAllowed !== input.review.finalAllowed ||
+          existing.uploadReceivedAt.toISOString() !== input.review.uploadReceivedAt
         ) throw new DomainError('PERSISTENCE_CONFLICT', 'Proxy review identity did not converge')
+        // Render completion latency is observation metadata and may differ when
+        // a durable operation retries after the review was committed but before
+        // later side effects settle. The operation-bound review is otherwise
+        // byte-for-byte equivalent, so its first persisted observation wins.
         return hydrateProxyReview(existing)
       }
       const createdAt = new Date(input.createdAt)

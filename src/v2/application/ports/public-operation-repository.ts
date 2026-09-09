@@ -36,6 +36,15 @@ export interface ProjectProxyRenderOperationContext {
   outputArtifactId: string
   outputManifestId: string
   originalFileName: string
+  renderableSnapshot?: Readonly<{
+    planId: string
+    planHash: string
+    origin: 'localization' | 'music-led-montage'
+    sourceId: string
+    sourceHash: string
+    variantId: string
+    format: string
+  }>
 }
 
 export interface ProjectProxyReuseOperationContext {
@@ -235,6 +244,7 @@ export interface PublicOperationRepository {
     now: string
     leaseUntil: string
     workspaceId?: string
+    operationId?: string
     type?: PublicOperation['type']
   }): Promise<ClaimedPublicOperationRecord | null>
   heartbeat(input: PublicOperationLeaseCommand & {

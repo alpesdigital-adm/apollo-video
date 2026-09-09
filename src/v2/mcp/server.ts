@@ -28,7 +28,7 @@ const MAX_OBSERVED_PREFLIGHTS = 128
 export const MCP_PREFLIGHT_BINDINGS = Object.freeze([Object.freeze({
   sourceCapabilityId: 'apollo.batches.edit-preflights.create',
   targetCapabilityId: 'apollo.batches.edit-preflights.commit',
-})])
+}), Object.freeze({ sourceCapabilityId: 'apollo.projects.localization-runs.preflight', targetCapabilityId: 'apollo.projects.localization-runs.request' })])
 
 const BATCH_EDIT_PREFLIGHT_BINDING = MCP_PREFLIGHT_BINDINGS[0]
 
@@ -108,6 +108,7 @@ function sha256(value: string): string {
 }
 
 interface ObservedPreflight {
+  readonly kind?: 'batch-edit' | 'localization'
   readonly tokenHash: string
   readonly targetCapabilityId: string
   readonly batchId: string
@@ -116,6 +117,18 @@ interface ObservedPreflight {
   readonly expectedScopeHash: string
   readonly issuedAt: string
   readonly expiresAt: string
+}
+
+function observedLocalizationPreflight(tool: AgentToolDescriptor, payload: unknown, observedAt: Date): ObservedPreflight | undefined {
+  const binding = MCP_PREFLIGHT_BINDINGS[1]
+  if (!binding || tool.apollo.capabilityId !== binding.sourceCapabilityId || typeof payload !== 'object' || payload === null) return undefined
+  const data = (payload as Record<string, unknown>).data
+  if (typeof data !== 'object' || data === null) return undefined
+  const token = (data as Record<string, unknown>).commitToken, value = (data as Record<string, unknown>).preflight
+  if (typeof token !== 'string' || typeof value !== 'object' || value === null) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.projectId !== 'string' || typeof record.variantId !== 'string' || typeof record.id !== 'string' || typeof record.preflightHash !== 'string' || typeof record.variantHash !== 'string' || typeof record.expiresAt !== 'string' || Date.parse(record.expiresAt) <= observedAt.getTime()) return undefined
+  return Object.freeze({ kind: 'localization', tokenHash: sha256(token), targetCapabilityId: binding.targetCapabilityId, batchId: record.projectId, preflightId: record.id, expectedPreflightHash: record.preflightHash, expectedScopeHash: record.variantHash, issuedAt: observedAt.toISOString(), expiresAt: record.expiresAt })
 }
 
 function observedBatchEditPreflight(
@@ -175,10 +188,10 @@ function evidenceFromObservedPreflight(
   const record = observed.get(sha256(token))
   if (
     !record || record.targetCapabilityId !== tool.apollo.capabilityId ||
-    record.batchId !== (path as Record<string, unknown>).batchId ||
-    record.preflightId !== (path as Record<string, unknown>).preflightId ||
+    record.batchId !== (record.kind === 'localization' ? (path as Record<string, unknown>).projectId : (path as Record<string, unknown>).batchId) ||
+    record.preflightId !== (record.kind === 'localization' ? (body as Record<string, unknown>).preflightId : (path as Record<string, unknown>).preflightId) ||
     record.expectedPreflightHash !== (body as Record<string, unknown>).expectedPreflightHash ||
-    record.expectedScopeHash !== (body as Record<string, unknown>).expectedScopeHash ||
+    record.expectedScopeHash !== (record.kind === 'localization' ? (body as Record<string, unknown>).expectedHash : (body as Record<string, unknown>).expectedScopeHash) ||
     Date.parse(record.expiresAt) <= now.getTime()
   ) return undefined
   return Object.freeze({
@@ -407,7 +420,7 @@ export async function createApolloMcpServer(dependencies: ApolloMcpServerDepende
           _meta: { 'apollo/data-boundary': tool.apollo.dataBoundary },
         }
       }
-      const observed = observedBatchEditPreflight(tool, result.payload, now)
+      const observed = observedBatchEditPreflight(tool, result.payload, now) ?? observedLocalizationPreflight(tool, result.payload, now)
       if (observed) {
         for (const [key, value] of observedPreflights) {
           if (Date.parse(value.expiresAt) <= now.getTime()) observedPreflights.delete(key)

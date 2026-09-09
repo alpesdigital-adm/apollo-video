@@ -22,8 +22,8 @@ Critério vigente para `[x]`:
 
 Estado auditado após o gate F2.029, o fechamento estrutural de F0.035, as três primeiras entregas de F0.036, ColorPlan F2.027, Export matrix F2.028 e as entregas de cor comprovadas de F2.025/F2.026, com a jornada integral do MVP Core, o gate de reutilização e produção em lote e o control plane de transformação F3.013–F3.016/F3.018 operando sobre PostgreSQL V2, API pública e implantação em produção:
 
-- **383 de 1.259 microtarefas verificadas como efetivamente entregues (30,4%, arredondamento conservador)**;
-- **876 microtarefas abertas ou aguardando nova comprovação**;
+- **380 de 1.259 microtarefas verificadas como efetivamente entregues (30,18%)**;
+- **879 microtarefas abertas ou aguardando nova comprovação**;
 - o total aumentou em quatro itens desde a auditoria original: três itens de autenticação e um item que separa ingestão do master da edição editorial; nenhuma tarefa anterior foi apagada para melhorar o percentual;
 - os gates do MVP Core F1 e de reutilização/lote F2 foram aprovados; o slice de
   transformação F3.013–F3.018 foi aceito, mas o gate sintético F3, F4–F5 e o
@@ -1961,6 +1961,16 @@ Backup pré-deploy validado por `pg_restore`: SHA-256 `7303d74e8ff8...`.
 ## 7. Fase 5 — Localização e áudio avançado
 
 **Gate da fase:** um projeto aprovado gera variantes PT-BR/EN/ES com áudio, timing, legenda, assets textuais e mix próprios; música/SFX respeitam narrativa, beat, rights e critic audiovisual.
+
+**Wave 21 — estado parcial, sem fechamento de caixas:** existem API/UI V2 para
+canônico, perfil compacto e variante, preflight pago fail-closed com
+`maxOutputTokens`, teto, ator e rights atuais, além de análise musical por
+worker/PG e golden FFmpeg. O runtime localizado comprovado é somente
+`subtitles-only` com uma identidade, um clip e `rate=1`; timeline editada e os
+modos voz local/upload/TTS/avatar/lip-sync continuam abertos. Word timing exato
+existe para a fonte; cues traduzidos são estimativas por bloco. Beats são
+medidos, downbeats não e sections são heurísticas. Não houve aceite visual nem
+deploy; o progresso auditado permanece 380/1.259 e nenhuma caixa abaixo muda.
 
 ### F5.001 — Music-led montage [FR-094]
 

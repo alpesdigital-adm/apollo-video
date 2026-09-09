@@ -960,13 +960,17 @@ test('T-F4.016 the compiled-plan answer is the stored row, and it publishes what
   for (const field of ['planHash', 'sourceId', 'sourceHash', 'sourceVersion']) {
     assert.ok(plan.required.includes(field), `the answer must carry ${field}`)
   }
-  assert.deepEqual(plan.properties.origin.enum, [...RENDERABLE_PLAN_ORIGINS])
+  // Published v1 is immutable. New Wave 21 origins use their own contracts;
+  // growing the internal domain enum must never silently widen this response.
+  const publishedV1Origins = ['react-playback', 'multi-range-synthesis']
+  assert.deepEqual(plan.properties.origin.enum, publishedV1Origins)
+  assert.ok(publishedV1Origins.every((origin) => RENDERABLE_PLAN_ORIGINS.includes(origin)))
   // Null is a legal answer for a source with no chain, and it is the synthesis
   // example that proves the schema allows it rather than a comment saying so.
   const examples = PUBLIC_SCHEMA_EXAMPLES['apollo://schemas/renderable-plan-compiled/v1']
   assert.equal(examples.length, 2, 'both origins must publish an example')
   const byOrigin = Object.fromEntries(examples.map((entry) => [entry.data.plan.origin, entry.data.plan]))
-  assert.deepEqual(Object.keys(byOrigin).sort(), [...RENDERABLE_PLAN_ORIGINS].sort())
+  assert.deepEqual(Object.keys(byOrigin).sort(), [...publishedV1Origins].sort())
   assert.equal(byOrigin['multi-range-synthesis'].sourceVersion, null)
   assert.equal(typeof byOrigin['react-playback'].sourceVersion, 'number')
   // The assumptions are the honest part of an automated cut and they travel.

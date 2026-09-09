@@ -1217,7 +1217,7 @@ test('T-F4.015 a session id at the domain limit still yields a map id the domain
 
 test('T-F4.015 the migration CHECK names exactly the origins the compilers can produce', () => {
   const sql = readFileSync(
-    'prisma/v2/migrations/20260905150000_renderable_plan_snapshots/migration.sql',
+    'prisma/v2/migrations/20260908183000_wave21_music_led_montage/migration.sql',
     'utf8',
   )
   const clause = /"origin" IN \(([^)]+)\)/.exec(sql)

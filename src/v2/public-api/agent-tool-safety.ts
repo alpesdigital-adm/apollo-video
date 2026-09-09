@@ -706,6 +706,29 @@ export function createFoundationAgentToolSafety(
       impact: 'bounded', confirmation: 'none',
       reason: 'Persists one immutable fail-closed phase-gate record derived only from server-read PostgreSQL rows and a module-graph scan; it accepts no evidence, changes no media or aggregate, and starts no provider or render work.',
     },
+    'apollo.localization-profiles.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates an immutable locale policy snapshot and starts no provider, render or media operation.',
+    },
+    'apollo.projects.localization-variants.create': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Creates a draft against exact canonical, source hash and persisted rights; it starts no provider or render operation.',
+    },
+    'apollo.projects.localization-runs.request': {
+      impact: 'broad', confirmation: 'preflight-token',
+      reason: 'Queues provider-backed translation for an exact immutable draft; cost and external dispatch require a bound preflight token.',
+    },
+    'apollo.projects.localization-media.request': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Queues a bounded local media compilation against exact variant, artifact hash and rights snapshot authority.',
+    },
+    'apollo.projects.music-montages.compile': {
+      impact: 'bounded', confirmation: 'none',
+      reason: 'Compiles a deterministic edit from persisted analysis and current media authority, atomically publishing its renderer snapshot without provider dispatch.',
+    },
+    'apollo.projects.music-analyses.request': { impact: 'bounded', confirmation: 'none', reason: 'Queues local deterministic FFmpeg analysis only after current project, byte identity and music rights authority are bound.' },
+    'apollo.projects.music-analyses.cancel': { impact: 'bounded', confirmation: 'none', reason: 'Stops one bounded analysis request and invalidates its worker lease without modifying source media.' },
+    'apollo.projects.music-analyses.retry': { impact: 'bounded', confirmation: 'none', reason: 'Requeues one failed local analysis under a fixed three-attempt ceiling and preserves its source fingerprint.' },
   })
 }
 

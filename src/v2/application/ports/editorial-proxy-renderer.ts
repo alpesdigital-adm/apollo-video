@@ -1,5 +1,5 @@
 import type { EditorialCutClip } from '../apply-editorial-cut-command.ts'
-import type { DirectedCtaOverlay, DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
+import type { DirectedCtaOverlay, DirectedMusicTrack, DirectedSubtitleCue, DirectedTransition } from '../../domain/director-run.ts'
 import type { RenderElementMap } from '../../domain/review-system.ts'
 import type { ColorPipelineCompilation } from '../../domain/color-pipeline-compilation.ts'
 import type { RenderPlacementPlanV1 } from '../../domain/render-placement-plan.ts'
@@ -20,9 +20,9 @@ import type { ProjectColorPlan } from '../../domain/project-color-plan.ts'
  * 1.10.0 binds each ColorPlan target to its exact resolved pipeline and materialized creative-LUT
  * intensity. Final recipe 1.5.0 carries the same target-scoped color lineage.
  */
-export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.10.0'
-export const EDITORIAL_PROXY_RECIPE_VERSION = '1.10.0'
-export const EDITORIAL_FINAL_RECIPE_VERSION = '1.5.0'
+export const FFMPEG_EDITORIAL_RENDERER_VERSION = '1.11.0'
+export const EDITORIAL_PROXY_RECIPE_VERSION = '1.11.0'
+export const EDITORIAL_FINAL_RECIPE_VERSION = '1.6.0'
 
 /** Absolute path + digest of one asset a drawable placement is allowed to read. */
 export interface EditorialPlacementAsset {
@@ -62,6 +62,7 @@ export interface EditorialProxyRenderer {
     subtitleCues?: readonly Readonly<DirectedSubtitleCue>[]
     ctaOverlays?: readonly Readonly<DirectedCtaOverlay>[]
     transitions?: readonly Readonly<DirectedTransition>[]
+    backgroundMusic?: Readonly<DirectedMusicTrack>
     composition?: Readonly<{ foregroundScale: number; verticalPosition: number }>
     /** Content-addressed placement geometry; drawable entries require a matching `placementAssets` row. */
     placementPlan?: Readonly<RenderPlacementPlanV1>

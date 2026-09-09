@@ -11,11 +11,13 @@ import {
   succeedPublicOperation,
 } from '../../src/v2/domain/public-operation.ts'
 import { projectProxyRenderInputHash } from '../../src/v2/application/project-render-sources.ts'
-import { enqueueProjectProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
+import { calculateVersionHash } from '../../src/v2/application/version-hash.ts'
+import { enqueueProjectProxyRenderService, enqueueRenderableSnapshotProxyRenderService } from '../../src/v2/application/enqueue-project-proxy-render.ts'
 import { createExternalAuditContext, materializeActorAuditContext } from '../../src/v2/application/authenticate-api-client.ts'
 import { createManualCommandImpact } from '../../src/v2/domain/command-impact.ts'
 import { stableSerialize } from '../../src/v2/domain/canonical-hash.ts'
 import { PrismaPublicOperationRepository } from '../../src/v2/infrastructure/prisma/public-operation-repository.ts'
+import { PrismaRenderablePlanSnapshotRepository } from '../../src/v2/infrastructure/prisma/renderable-plan-snapshot-repository.ts'
 import { runNextProjectProxyRenderOperationService } from '../../src/v2/application/run-project-proxy-render-worker.ts'
 import { EDITORIAL_PROXY_RECIPE_VERSION } from '../../src/v2/application/ports/editorial-proxy-renderer.ts'
 import { SUBTITLE_ANCHOR_PERCEPTION_FIXTURES, subtitleAnchorDecisionFor } from '../../src/v2/domain/subtitle-anchor-plan.ts'
@@ -52,7 +54,7 @@ function createClock() {
   return () => new Date((current += 100))
 }
 
-function createOperations(immutableSource = source()) {
+function createOperations(immutableSource = source(), contextOverride = {}) {
   let operation = createQueuedPublicOperation({
     id: 'operation-project-proxy-test',
     workspaceId: 'workspace-project-proxy-test',
@@ -84,6 +86,7 @@ function createOperations(immutableSource = source()) {
     outputArtifactId: 'artifact-project-proxy-output',
     outputManifestId: 'manifest-project-proxy-output',
     originalFileName: 'source-editorial.mp4',
+    ...contextOverride,
   })
   const record = () => ({ operation, context })
   const matches = (input) => lease && lease.owner === input.leaseOwner &&
@@ -279,6 +282,39 @@ test('project proxy worker materializes, attaches and settles the exact immutabl
   assert.deepEqual(calls, { attached: 1, cleaned: 1, lutCleaned: 1, persisted: 1, mapped: 1, reviewed: 1, cataloged: 1 })
 })
 
+test('snapshot proxy worker rehydrates the fenced plan and attaches without mutating project version state', async () => {
+  const immutableSource = source()
+  const renderableSnapshot = Object.freeze({
+    planId: 'plan-localization-worker-test', planHash: '1'.repeat(64), origin: 'localization',
+    sourceId: 'localization-run-worker-test', sourceHash: '2'.repeat(64),
+    variantId: 'localization-variant-worker-test', format: '9:16',
+  })
+  const inputHash = calculateVersionHash({
+    type: 'renderable-snapshot-proxy/v1', renderInputHash: projectProxyRenderInputHash({ source: immutableSource, colorPipelineBindings }),
+    snapshot: renderableSnapshot,
+  })
+  const operations = createOperations(immutableSource, { renderableSnapshot, inputHash })
+  let snapshotAttached = 0
+  const base = dependencies(operations, { projects: {
+    async readImmutableSource() { throw new Error('project EditPlan must not be the snapshot proxy source') },
+    async readRenderableSnapshotSource(input) {
+      assert.deepEqual(input, {
+        workspaceId: 'workspace-project-proxy-test', projectId: 'project-proxy-test',
+        planId: renderableSnapshot.planId, planHash: renderableSnapshot.planHash, format: renderableSnapshot.format,
+      })
+      return immutableSource
+    },
+    async attachCompletedOutput() { throw new Error('snapshot proxy must not settle project Director/invalidation state') },
+    async attachCompletedSnapshotOutput(input) {
+      snapshotAttached += 1
+      assert.equal(input.variantId, renderableSnapshot.variantId)
+    },
+  } })
+  const outcome = await runNextProjectProxyRenderOperationService(base.deps)('worker-snapshot-proxy-test')
+  assert.deepEqual(outcome, { operationId: 'operation-project-proxy-test', status: 'succeeded' })
+  assert.equal(snapshotAttached, 1)
+})
+
 test('project proxy worker does not attach an output after losing its lease', async () => {
   const operations = createOperations()
   const base = dependencies(operations)
@@ -452,6 +488,61 @@ test('proxy enqueue fails closed when a committed Command result is no longer cu
     }),
     (error) => error.code === 'VERSION_CONFLICT' && error.details.currentProjectVersionId === 'project-version-proxy-test',
   )
+})
+
+test('renderable snapshot proxy enqueue binds exact immutable source, variant, format and hashes', async () => {
+  const immutableSource = source()
+  let persisted
+  const request = {
+    workspaceId: 'workspace-project-proxy-test',
+    projectId: 'project-proxy-test',
+    planId: 'plan-localization-test',
+    planHash: '1'.repeat(64),
+    origin: 'localization',
+    sourceId: 'localization-run-test',
+    sourceHash: '2'.repeat(64),
+    variantId: 'localization-variant-test',
+    format: '9:16',
+    actor: proxyActor(),
+    idempotencyKey: 'localization-snapshot-proxy-test',
+  }
+  const result = await enqueueRenderableSnapshotProxyRenderService({
+    snapshots: { async readByPlan() { return {
+      planId: request.planId, planHash: request.planHash, origin: request.origin,
+      sourceId: request.sourceId, sourceHash: request.sourceHash,
+      plan: { localeVariantRefs: [request.variantId] },
+    } } },
+    projects: { async readRenderableSnapshotSource(input) {
+      assert.deepEqual(input, {
+        workspaceId: request.workspaceId, projectId: request.projectId,
+        planId: request.planId, planHash: request.planHash, format: request.format,
+      })
+      return immutableSource
+    } },
+    colorPipelines: { async listForSource() { return [{ compilation: colorCompilation }] } },
+    operations: {
+      async findReplay() { return null },
+      async createOrReplay(input) { persisted = input; return { ...input, replayed: false } },
+    },
+    clock: () => new Date('2026-09-08T20:15:00.000Z'),
+    createId: (kind) => `${kind}-snapshot-proxy-test`,
+  })(request)
+  assert.equal(result.operation.status, 'queued')
+  assert.deepEqual(persisted.context.renderableSnapshot, {
+    planId: request.planId, planHash: request.planHash, origin: request.origin,
+    sourceId: request.sourceId, sourceHash: request.sourceHash,
+    variantId: request.variantId, format: request.format,
+  })
+  assert.notEqual(persisted.context.inputHash, projectProxyRenderInputHash({ source: immutableSource, colorPipelineBindings }))
+})
+
+test('renderable snapshot lookup never spreads transport-only format into Prisma where', async () => {
+  let where
+  const repository = new PrismaRenderablePlanSnapshotRepository({ v2RenderablePlanSnapshot: {
+    async findFirst(input) { where = input.where; return null },
+  } })
+  await repository.readByPlan({ workspaceId: 'workspace-test', projectId: 'project-test', planId: 'plan-test', planHash: 'a'.repeat(64), format: '16:9' })
+  assert.deepEqual(where, { workspaceId: 'workspace-test', projectId: 'project-test', planId: 'plan-test', planHash: 'a'.repeat(64) })
 })
 
 test('T-FR-233 Prisma atomically revalidates and records a completed proxy cache hit', async () => {

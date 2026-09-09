@@ -7285,6 +7285,31 @@ const w20GateOutstandingExample = {
 
 export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>> =
   Object.freeze({
+    'apollo://schemas/localization-canonical-list/v1': [{ data: { versions: [{ id: 'canonical-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', revision: 1, blocks: [], approvedAt: '2026-09-08T12:00:00.000Z', contentHash: 'a'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-candidate-list/v1': [{ data: { candidates: [{ alignmentId: 'alignment-1', alignmentHash: 'a'.repeat(64), batchId: 'batch-1', projectVersionId: 'version-1', sourceLocale: 'pt-BR', blocks: [] }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-profile-list/v1': [{ data: { profiles: [{ id: 'profile-en-us', targetLocale: 'en-US', market: 'US', allowedModes: ['subtitles-only'], profileHash: 'b'.repeat(64) }] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-variant-list/v1': [{ data: { variants: [] }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-variant-read/v1': [{ data: { variant: {} }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-profile-create-input/v1': [{ targetLocale: 'en-US', market: 'US', allowedModes: ['subtitles-only'] }],
+    'apollo://schemas/localization-profile-create-output/v1': [{ data: { profile: { id: 'profile-en-us', workspaceId: 'workspace-1', targetLocale: 'en-US', market: 'US', allowedModes: ['subtitles-only'], profileHash: 'b'.repeat(64) }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-canonical-create-input/v1': [{ projectVersionId: 'version-1', alignmentId: 'alignment-1', expectedAlignmentHash: 'a'.repeat(64), protectionsByBlock: {} }],
+    'apollo://schemas/localization-canonical-create-output/v1': [{ data: { canonical: { id: 'canonical-1' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-variant-create-input/v1': [{ canonicalId: 'canonical-1', profileId: 'profile-en-us', sourceArtifactId: 'artifact-1', expectedSourceSha256: 'c'.repeat(64), preferredMode: 'subtitles-only', formats: ['9:16'] }],
+    'apollo://schemas/localization-variant-create-output/v1': [{ data: { variant: { id: 'variant-1' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-run-preflight-input/v1': [{ expectedRevision: 1, expectedHash: 'd'.repeat(64) }],
+    'apollo://schemas/localization-run-preflight-output/v1': [{ data: { preflight: { id: 'localization-preflight-1', preflightHash: 'e'.repeat(64), maximumOutputTokens: 1024, estimatedCostMicros: 1200, maximumCostMicros: 5000, currency: 'USD', expiresAt: '2026-09-09T02:05:00.000Z' }, commitToken: 'x'.repeat(80), replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-run-request-input/v2': [{ expectedRevision: 1, expectedHash: 'd'.repeat(64), preflightId: 'localization-preflight-1', expectedPreflightHash: 'e'.repeat(64), commitToken: 'x'.repeat(80) }],
+    'apollo://schemas/localization-run-request-output/v1': [{ data: { run: { id: 'localization-run-1', status: 'requested' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-translation-review-input/v1': [{ expectedRevision: 2, expectedHash: 'e'.repeat(64), localizedBlocks: [{ blockId: 'canonical-block-1', text: 'Translated text', protectedValues: { price: '$100' } }] }],
+    'apollo://schemas/localization-translation-review-output/v1': [{ data: { variant: { id: 'variant-1', status: 'audio' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/music-montage-compile-input/v1': [{ projectVersionId: 'version-1', analysisId: 'analysis-1', locale: 'pt-BR', objective: 'awareness', sources: [{ id: 'source-1', artifactId: 'artifact-1', durationSeconds: 12 }], visualSegments: [{ id: 'segment-1', sourceId: 'source-1', sourceArtifactId: 'artifact-1', sourceRangeMs: [0, 5000], preferredDurationMs: 3000 }] }],
+    'apollo://schemas/music-montage-run-output/v1': [{ data: { run: { id: 'music-montage-1' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/music-montage-read-output/v1': [{ data: { run: { id: 'music-montage-1' } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-media-request-input/v1': [{ expectedRevision: 3, expectedVariantHash: 'f'.repeat(64), source: { kind: 'original-audio', artifactId: 'artifact-audio-1', artifactSha256: 'a'.repeat(64), rightsSnapshotId: 'rights-1' } }],
+    'apollo://schemas/localization-media-request-output/v1': [{ data: { run: { id: 'localization-media-1', status: 'requested' }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-media-read-output/v1': [{ data: { run: { id: 'localization-media-1', status: 'awaiting-human-approval' } }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/localization-media-approval-input/v1': [{ approved: true, expectedRunRevision: 2, expectedRunHash: 'b'.repeat(64), note: 'Preview reviewed.' }],
+    'apollo://schemas/localization-media-approval-output/v1': [{ data: { run: { id: 'localization-media-1', status: 'approved' } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/create-transformation-brief-request/v1': [transformationBriefRequestExample],
     'apollo://schemas/transformation-brief-created/v1': [{
       data: { brief: transformationBriefExample, replayed: false }, meta: { apiVersion: 'v1' },
@@ -14322,6 +14347,7 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         },
       },
     ],
+    'apollo://schemas/error-envelope/v5': [{ error: { code: 'LOCALIZATION_VARIANT_NOT_FOUND', message: 'Localization variant not found', category: 'validation', retryable: false, requestId: 'request-localization-example-1' } }],
     // -----------------------------------------------------------------------
     // Wave 20 — F4.012 multicam direction
     // -----------------------------------------------------------------------
@@ -14619,6 +14645,9 @@ export const PUBLIC_SCHEMA_EXAMPLES: Readonly<Record<string, readonly unknown[]>
         meta: { apiVersion: 'v1' },
       },
     ],
+    'apollo://schemas/music-analysis-request-input/v1': [{ projectVersionId: 'project-version-example', artifactId: 'music-artifact-example' }],
+    'apollo://schemas/music-analysis-request-output/v1': [{ data: { run: { id: 'music-analysis-run-example', status: 'queued', analysisId: null, analysisHash: null }, replayed: false }, meta: { apiVersion: 'v1' } }],
+    'apollo://schemas/music-analysis-read-output/v1': [{ data: { run: { id: 'music-analysis-run-example', status: 'completed', analysisId: 'music-analysis-example', analysisHash: 'a'.repeat(64) } }, meta: { apiVersion: 'v1' } }],
     'apollo://schemas/openapi-document/v1': [
       {
         openapi: '3.1.0',

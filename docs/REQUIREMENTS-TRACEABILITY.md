@@ -459,6 +459,19 @@ aberta apenas para separation e comparação direta com crop/cover/reject.
 | FR-191 | LocalizationVariant | S8 | D0,D3,D9 | locale possui assets/plano/status | integration |
 | FR-192 | Timings próprios | S8 | D3,D9 | alignment novo recompila timeline | property |
 | FR-193 | Modos de áudio | S6,S8 | D4,D7,D9 | TTS/local/upload autorizado | integration |
+
+Nota Wave 21 (parcial): FR-190/191 possuem criação autenticada por API e UI de
+canônico, perfil compacto e variante, com persistência V2. FR-192 preserva o
+word alignment exato da fonte, mas os cues traduzidos ainda são estimativas
+proporcionais por bloco. FR-193 comprova somente `subtitles-only` para uma
+fonte/identidade, um clip e `rate=1`; demais modos e timeline editada seguem
+abertos. FR-094 possui worker/API/PG e golden FFmpeg, com beats medidos,
+downbeats não medidos e sections heurísticas. O preflight pago é fail-closed e
+vincula `maxOutputTokens`, custo máximo, ator e rights atuais. A baseline de
+contrato aprovou uma expansão estritamente aditiva de 20 capabilities e 29
+schemas: os 349 objetos públicos de capability e os 609 objetos públicos de
+schema anteriores permaneceram deep-identical. Esta evidência não equivale a
+aceite, deploy ou gate F5.
 | FR-194 | LocaleProfile | S8 | D0,D7,D9 | glossary/CTA/font/RTL | integration |
 | FR-195 | Assets localizáveis | S3,S8 | D1,D2,D9 | OCR decide share/localize/reject | eval |
 | FR-196 | Crítico de localização | S1,S8 | D2,D9 | fidelity/pronunciation/lips/subtitle | eval |

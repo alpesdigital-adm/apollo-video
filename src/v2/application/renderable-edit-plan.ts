@@ -7,6 +7,7 @@ import {
 } from '../domain/desired-action.ts'
 import {
   validateDirectedEditPlan,
+  createDirectedAudioTimelineHash,
   validateDirectorDecisions,
   type DirectedEditPlan,
   type DirectorDecisionInput,
@@ -14,9 +15,9 @@ import {
 } from '../domain/director-run.ts'
 import type { RenderablePlanSnapshot } from './ports/renderable-plan-snapshot-repository.ts'
 import { assertDomain } from '../domain/errors.ts'
-import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
 import type { StrategicObjectiveId } from '../domain/strategic-objective.ts'
 import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
+import type { DirectedMusicTrack } from '../domain/director-run.ts'
 
 /**
  * One renderable plan shape for every Wave 20 compiler (F4.015, F4.016 cond. 6).
@@ -61,6 +62,8 @@ import type { EditorialCutClip } from './apply-editorial-cut-command.ts'
 export const RENDERABLE_PLAN_ORIGINS = Object.freeze([
   'react-playback',
   'multi-range-synthesis',
+  'music-led-montage',
+  'localization',
 ] as const)
 export type RenderablePlanOrigin = (typeof RENDERABLE_PLAN_ORIGINS)[number]
 
@@ -148,6 +151,7 @@ export interface AssembleDirectedEditPlanInput {
    * justifies its cut somewhere else.
    */
   readonly decisions?: readonly Readonly<DirectorDecisionInput>[]
+  readonly backgroundMusic?: Readonly<DirectedMusicTrack>
   readonly assumptions: readonly string[]
   readonly createdAt: string
 }
@@ -242,13 +246,13 @@ export function assembleDirectedEditPlan(
       kind: 'base-video' as const,
       clips: Object.freeze(input.clips.map((clip) => Object.freeze({ ...clip }))),
     })]),
-    audioTimelineHash: createEditorialAudioTimelineHash({ fps: input.fps, clips: input.clips }),
+    audioTimelineHash: createDirectedAudioTimelineHash({ fps: input.fps, clips: input.clips, musicTracks: input.backgroundMusic ? [input.backgroundMusic] : [] }),
     desiredActionRef,
     // No CTA overlay and no captions: neither compiler has copy to place, and an
     // empty overlay is the honest counterpart of a caption nobody wrote.
     overlayTracks: Object.freeze([]),
     subtitleTracks: Object.freeze([]),
-    audioTracks: Object.freeze([]),
+    audioTracks: Object.freeze(input.backgroundMusic ? [Object.freeze({ ...input.backgroundMusic })] : []),
     effectTracks: Object.freeze([]),
     transitions,
     markers: Object.freeze((input.markers ?? []).map((marker) => Object.freeze({

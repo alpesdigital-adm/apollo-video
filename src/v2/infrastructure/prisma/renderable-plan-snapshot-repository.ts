@@ -130,6 +130,19 @@ export class PrismaRenderablePlanSnapshotRepository implements RenderablePlanSna
     this.client = client
   }
 
+  async readByPlan(input: { workspaceId: string; projectId: string; planId: string; planHash: string }) {
+    const row = await this.client.v2RenderablePlanSnapshot.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        planId: input.planId,
+        planHash: input.planHash,
+      },
+      select: SNAPSHOT_SELECT,
+    })
+    return row ? hydrate(row) : null
+  }
+
   async persist(input: {
     snapshot: Readonly<RenderablePlanSnapshot>
     createdAt: string

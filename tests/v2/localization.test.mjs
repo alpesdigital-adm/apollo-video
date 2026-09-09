@@ -1,10 +1,161 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {chooseLocalizedAudioMode,createLocalizationVariant,critiqueLocalization,localizedTimingPlan,planLocalizedVisualAssets,planMusicLedMontage,rebaseLocalization,resolveLocaleProfile,transitionLocalization,validateLocaleProfile,validateLocalizedScript} from '../../src/v2/domain/localization.ts';
-const source={id:'b1',sourceLocale:'pt-BR',intent:'sale',text:'Custa R$ 10 em 15/07.',claims:[{text:'Custa R$ 10',qualifier:'hoje',attribution:'tabela',protected:true}],cta:{action:'buy',destination:'https://x'},dependencies:[],sourceRangeMs:[0,5000],alignment:[]};
-test('T-FR-094 music-led montage snaps to confident beat without cutting words or over-editing',()=>{const result=planMusicLedMontage({analysis:{beatsMs:[0,1000,2000,3000,4000,5000],downbeatsMs:[0,4000],sections:[{name:'intro',rangeMs:[0,5000],energy:.5}],confidence:.9},candidateCutsMs:[950,2050,3050],protectedSpeechRanges:[[1800,2200]],snapToleranceMs:100,maxCutsPer10s:4});assert.deepEqual(result.cutsMs,[1000,3000]);assert.equal(result.overEdited,false);assert.equal(planMusicLedMontage({analysis:{beatsMs:[],downbeatsMs:[],sections:[],confidence:.2},candidateCutsMs:[1],protectedSpeechRanges:[],snapToleranceMs:1,maxCutsPer10s:1}).mode,'narrative-led-fallback');});
-test('T-FR-190 canonical script protects claims, qualifiers, CTA and approved ranges',()=>{const localized={...source,sourceLocale:'en-US',text:'Costs $10 on July 15.',claims:[{...source.claims[0],text:'Costs $10'}]};assert.equal(validateLocalizedScript(source,localized).claims[0].qualifier,'hoje');assert.throws(()=>validateLocalizedScript(source,{...localized,claims:[{...localized.claims[0],qualifier:'sempre'}]}));});
-test('T-FR-191 EN/ES variants have isolated state/jobs/approval and rebase without copying masters',()=>{let en=createLocalizationVariant({canonicalVersionId:'v1',locale:'en-US',formats:['9:16'],masterRefs:['m']});const es=createLocalizationVariant({canonicalVersionId:'v1',locale:'es-ES',formats:['9:16'],masterRefs:['m']});en=transitionLocalization(en,'translating');assert.equal(es.status,'draft');assert.deepEqual(en.masterRefs,['m']);assert.equal(rebaseLocalization({...en,status:'approved'},'v2').status,'draft');});
-test('T-FR-192 localized audio owns alignment and reflows ±15% instead of stretching speech',()=>{const near=localizedTimingPlan({source,localizedText:'Costs ten dollars today',localizedDurationMs:5500,policy:{maxStretch:.15,allowCopyAdaptation:true}});assert.equal(near.action,'reflow-timeline');assert.equal(near.audioStretch,false);const far=localizedTimingPlan({source,localizedText:'Much longer localized sentence here',localizedDurationMs:7000,policy:{maxStretch:.15,allowCopyAdaptation:true}});assert.equal(far.action,'adapt-copy-and-reflow');assert.ok(far.recompile.includes('subtitles'));});
-test('T-FR-193 audio mode respects profile, consent, provider and disclosure with subtitles fallback',()=>{const selected=chooseLocalizedAudioMode({preferred:['lip-sync','authorized-tts'],profileModes:['lip-sync','authorized-tts'],consent:false,localeSupported:true,providerModes:['lip-sync','authorized-tts'],disclosureRequired:true,originalAudioId:'pt'});assert.equal(selected.selected,'authorized-tts');assert.ok(selected.disclosure);const fallback=chooseLocalizedAudioMode({preferred:['lip-sync'],profileModes:['lip-sync'],consent:false,localeSupported:true,providerModes:['lip-sync'],disclosureRequired:false,originalAudioId:'pt'});assert.equal(fallback.selected,'subtitles-only');});
-test('T-FR-194 locale profiles merge versioned overrides, detect glossary conflicts and RTL glyphs',()=>{const profile={id:'pt',version:1,locale:'pt-BR',region:'BR',glossary:{lead:'lead'},doNotTranslate:[],tone:'direct',ctaConventions:{buy:'Compre'},numberFormat:'pt-BR',dateFormat:'dd/MM/yyyy',currency:'BRL',legalText:[],fonts:[{family:'Inter',glyphs:['latin']}],direction:'ltr',lineBreak:'word'};assert.equal(resolveLocaleProfile(profile,{tone:'warm',version:2}).version,2);assert.equal(validateLocaleProfile({...profile,locale:'ar',direction:'rtl'}).valid,false);assert.equal(validateLocaleProfile({...profile,glossary:{lead:'cliente'},doNotTranslate:['lead']}).valid,false);});
-test('T-FR-195 visible text regions choose share/localize/regenerate/reject with derivative lineage',()=>{const regions=['card','screenshot','logo','interface','irrelevant'].map((kind,i)=>({id:`r${i}`,text:'Text',box:{x:0,y:0,width:1,height:1},importance:i===0?'critical':'supporting',kind}));const plan=planLocalizedVisualAssets(regions,{translate:true,rights:true,backgroundEditable:true});assert.deepEqual(plan.map(x=>x.action),['localize','localize','share','localize','share']);assert.equal(plan[0].preserveBackground,true);assert.ok(plan[0].derivative);});
-test('T-FR-196 critic localizes block/word/frame and selects retranslation, TTS retry or reflow',()=>{const result=critiqueLocalization({locale:'en-US',mode:'authorized-tts',blocks:[{id:'b1',fidelity:.9,claimPreserved:false,glossary:.95,pronunciation:.9,lipSync:.9,typography:.9,subtitleTiming:.9,wordIssues:['price'],frameIssues:[12]}]});assert.equal(result.passed,false);assert.equal(result.issues[0].action,'retranslate');assert.deepEqual(result.issues[0].frames,[12]);});
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  createCanonicalScriptVersion,
+  durationDeviation,
+  resolveLocalizedAudioMode,
+  validateLocalizedBlocks,
+  validateMeasuredAlignment,
+} from "../../src/v2/domain/localization.ts";
+const canonical = createCanonicalScriptVersion({
+  id: "canonical-001",
+  workspaceId: "workspace-001",
+  projectId: "project-001",
+  projectVersionId: "version-001",
+  sourceLocale: "pt-BR",
+  revision: 1,
+  approvedByClientId: "client-001",
+  approvedAt: "2026-09-08T12:00:00.000Z",
+  blocks: [
+    {
+      id: "canonical-block-001",
+      sourceScriptBlockId: "script-block-1",
+      role: "offer",
+      sourceLocale: "pt-BR",
+      text: "Somente R$ 27 até sexta em https://x.test",
+      sourceRangeMs: [1000, 5000],
+      sourceAlignmentId: "alignment-001",
+      claims: [
+        { id: "price", text: "R$ 27", qualifier: "Somente", protected: true },
+      ],
+      qualifiers: [{ id: "only", text: "Somente" }],
+      protectedFacts: [{ id: "deadline", text: "sexta" }],
+      cta: { action: "buy", destination: "https://x.test" },
+      dependencies: [],
+      adaptationLevel: "meaning-preserving",
+    },
+  ],
+});
+test("T-FR-190 protects semantic claims, qualifiers, facts and CTA destinations", () => {
+  assert.throws(
+    () =>
+      validateLocalizedBlocks(canonical, [
+        {
+          blockId: "canonical-block-001",
+          text: "Only $270 until Friday at https://x.test",
+          protectedValues: { price: "$27", only: "Only", deadline: "Friday" },
+          reviewStatus: "human-approved",
+        },
+      ]),
+    /Protected semantic value/,
+  );
+  assert.doesNotThrow(() =>
+    validateLocalizedBlocks(canonical, [
+      {
+        blockId: "canonical-block-001",
+        text: "Only $27 until Friday. Buy: https://x.test",
+        protectedValues: { price: "$27", only: "Only", deadline: "Friday" },
+        reviewStatus: "human-approved",
+      },
+    ]),
+  );
+});
+test("T-FR-192 only accepts measured monotonic alignment", () => {
+  assert.equal(
+    validateMeasuredAlignment(
+      [
+        { word: "hello", startMs: 90, endMs: 230, confidence: 0.97 },
+        { word: "world", startMs: 410, endMs: 780, confidence: 0.92 },
+      ],
+      900,
+    ).length,
+    2,
+  );
+  assert.throws(
+    () =>
+      validateMeasuredAlignment(
+        [
+          { word: "a", startMs: 0, endMs: 500, confidence: 1 },
+          { word: "b", startMs: 400, endMs: 900, confidence: 1 },
+        ],
+        900,
+      ),
+    /monotonic/,
+  );
+});
+test("T-FR-192 forces reflow above fifteen percent", () => {
+  assert.equal(
+    durationDeviation(canonical, [
+      { blockId: "canonical-block-001", durationMs: 4400 },
+    ]).thresholdExceeded,
+    false,
+  );
+  assert.equal(
+    durationDeviation(canonical, [
+      { blockId: "canonical-block-001", durationMs: 4800 },
+    ]).thresholdExceeded,
+    true,
+  );
+});
+test("T-FR-192 rejects duplicate, extra and invalid duration inputs", () => {
+  assert.throws(
+    () =>
+      durationDeviation(canonical, [
+        { blockId: "canonical-block-001", durationMs: 4000 },
+        { blockId: "other", durationMs: 99999 },
+      ]),
+    /exactly once/,
+  );
+  assert.throws(
+    () =>
+      durationDeviation(
+        canonical,
+        [{ blockId: "canonical-block-001", durationMs: 4000 }],
+        Number.NaN,
+      ),
+    /threshold/,
+  );
+});
+test("T-FR-193 unavailable or unauthorized mode fails closed", () => {
+  assert.throws(
+    () =>
+      resolveLocalizedAudioMode({
+        preferred: "lip-sync",
+        allowedModes: ["lip-sync", "subtitles-only"],
+        providerCapabilities: [],
+        localeSupported: true,
+        voiceAuthorized: true,
+        visualAuthorized: true,
+        testimonial: false,
+        disclosureRequired: false,
+      }),
+    /not authorized or available/,
+  );
+  assert.throws(
+    () =>
+      resolveLocalizedAudioMode({
+        preferred: "authorized-tts",
+        allowedModes: ["authorized-tts"],
+        providerCapabilities: ["authorized-tts"],
+        localeSupported: true,
+        voiceAuthorized: false,
+        visualAuthorized: true,
+        testimonial: false,
+        disclosureRequired: true,
+      }),
+    /not authorized or available/,
+  );
+  assert.equal(
+    resolveLocalizedAudioMode({
+      preferred: "subtitles-only",
+      allowedModes: ["subtitles-only"],
+      providerCapabilities: [],
+      localeSupported: true,
+      voiceAuthorized: false,
+      visualAuthorized: false,
+      testimonial: true,
+      disclosureRequired: false,
+    }).mode,
+    "subtitles-only",
+  );
+});

@@ -44,6 +44,7 @@ test('service-account identity owns canonical grants, environments and credentia
     artifacts: ['read', 'render', 'rights', 'write'],
     clients: ['admin'],
     media: ['write'],
+    localization: ['read', 'run'],
     operations: ['cancel', 'read', 'retry'],
     projects: ['approve', 'read', 'write'],
     webhooks: ['admin'],

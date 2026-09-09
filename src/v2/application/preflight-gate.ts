@@ -14,6 +14,10 @@ export const PREFLIGHT_ACTION_POLICIES = Object.freeze({
     actionClass: 'variable-generation' as const,
     reason: 'Confirms expansion beyond the bounded variant portfolio default',
   }),
+  'localization-translation.enqueue': Object.freeze({
+    actionClass: 'variable-generation' as const,
+    reason: 'Consumes one cost-bounded confirmation before external translation can be dispatched',
+  }),
   'final-export-matrix.commit': Object.freeze({
     actionClass: 'final-matrix' as const,
     reason: 'Commits a multi-format final render or export matrix',

@@ -1,12 +1,12 @@
 {
   "schemaVersion": "ui-capability-parity-report/v1",
   "summary": {
-    "uiActions": 155,
-    "capabilities": 138,
-    "endpoints": 138,
-    "registeredCapabilities": 349,
-    "operableCapabilities": 349,
-    "publicContractCapabilities": 349,
+    "uiActions": 167,
+    "capabilities": 149,
+    "endpoints": 149,
+    "registeredCapabilities": 369,
+    "operableCapabilities": 369,
+    "publicContractCapabilities": 369,
     "internalOnlyCapabilities": 0,
     "unjustifiedCapabilities": 0,
     "unboundActions": 0,
@@ -796,6 +796,252 @@
         "governanceDefaultLimitsFromEnvironment",
         "requireScope",
         "setProjectColorPlanService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:277",
+      "capabilityId": "apollo.projects.localization-canonicals.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/canonical-script-versions",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationQueries",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:280",
+      "capabilityId": "apollo.projects.localization-candidates.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/canonical-script-versions/candidates",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationQueries",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:283",
+      "capabilityId": "apollo.projects.localization-variants.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/projects/{projectId}/localization-variants",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationQueries",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:286",
+      "capabilityId": "apollo.localization-profiles.list",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "GET /v1/localization-profiles",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationQueries",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:289",
+      "capabilityId": "apollo.projects.workspace.read",
+      "capabilityVersion": "10.0.0",
+      "endpoint": "GET /v1/projects/{projectId}",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "readProjectWorkspaceService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:352",
+      "capabilityId": "apollo.projects.list",
+      "capabilityVersion": "4.0.0",
+      "endpoint": "GET /v1/projects",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "listProjectsService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:482",
+      "capabilityId": "apollo.projects.localization-canonicals.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/canonical-script-versions",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createCanonicalLocalizationService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:530",
+      "capabilityId": "apollo.projects.localization-variants.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationVariantService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:576",
+      "capabilityId": "apollo.localization-profiles.create",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/localization-profiles",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "createLocalizationProfileService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:619",
+      "capabilityId": "apollo.projects.localization-translations.review",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/translation-review",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "requireScope",
+        "reviewLocalizationTranslationService"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:661",
+      "capabilityId": "apollo.projects.localization-runs.preflight",
+      "capabilityVersion": "1.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/translation-preflight",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "preflightLocalizationRunService",
+        "requireScope"
+      ],
+      "tests": [
+        "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
+        "tests/v2/capability-registry.test.mjs:T-F0-034-shared-service-boundary",
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "uiAction": "src/app/localization/page.tsx:704",
+      "capabilityId": "apollo.projects.localization-runs.request",
+      "capabilityVersion": "2.0.0",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/runs",
+      "applicationServices": [
+        "admitGovernedCapabilityService",
+        "authenticateApiClientService",
+        "authenticateUiSessionService",
+        "governanceAnomalyPolicyFromEnvironment",
+        "governanceDefaultLimitsFromEnvironment",
+        "materializeActorAuditContext",
+        "requestLocalizationRunService",
+        "requireScope"
       ],
       "tests": [
         "tests/v2/capability-registry.test.mjs:T-F0-034-ui-capability-binding",
@@ -6930,6 +7176,226 @@
       "endpoint": "GET /v1/multicam-longform-gate/criteria",
       "inputSchemaRef": null,
       "outputSchemaRef": "apollo://schemas/multicam-longform-gate-criteria/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-canonicals.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/canonical-script-versions",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-canonical-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-canonicals.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/canonical-script-versions",
+      "inputSchemaRef": "apollo://schemas/localization-canonical-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-canonical-create-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-candidates.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/canonical-script-versions/candidates",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-candidate-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.localization-profiles.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/localization-profiles",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-profile-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.localization-profiles.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/localization-profiles",
+      "inputSchemaRef": "apollo://schemas/localization-profile-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-profile-create-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-variants.list",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/localization-variants",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-variant-list/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-variants.create",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants",
+      "inputSchemaRef": "apollo://schemas/localization-variant-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-variant-create-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-variants.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/localization-variants/{variantId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-variant-read/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-runs.preflight",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/translation-preflight",
+      "inputSchemaRef": "apollo://schemas/localization-run-preflight-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-run-preflight-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-runs.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/runs",
+      "inputSchemaRef": "apollo://schemas/localization-run-request-input/v2",
+      "outputSchemaRef": "apollo://schemas/localization-run-request-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-translations.review",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/translation-review",
+      "inputSchemaRef": "apollo://schemas/localization-translation-review-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-translation-review-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-montages.compile",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/music-montages",
+      "inputSchemaRef": "apollo://schemas/music-montage-compile-input/v1",
+      "outputSchemaRef": "apollo://schemas/music-montage-run-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-montages.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/music-montages/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/music-montage-read-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-analyses.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/music-analyses",
+      "inputSchemaRef": "apollo://schemas/music-analysis-request-input/v1",
+      "outputSchemaRef": "apollo://schemas/music-analysis-request-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-analyses.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/music-analyses/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-analyses.cancel",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/music-analyses/{runId}/cancel",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.music-analyses.retry",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/music-analyses/{runId}/retry",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-media.request",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/media-runs",
+      "inputSchemaRef": "apollo://schemas/localization-media-request-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-media-request-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-media.read",
+      "exposure": "public",
+      "endpoint": "GET /v1/projects/{projectId}/localization-variants/{variantId}/media-runs/{runId}",
+      "inputSchemaRef": null,
+      "outputSchemaRef": "apollo://schemas/localization-media-read-output/v1",
+      "internalOnlySurfaceId": null,
+      "tests": [
+        "tests/v2/public-contracts.test.mjs:public-contract-registry"
+      ]
+    },
+    {
+      "capabilityId": "apollo.projects.localization-media.approve",
+      "exposure": "public",
+      "endpoint": "POST /v1/projects/{projectId}/localization-variants/{variantId}/media-runs/{runId}/approval",
+      "inputSchemaRef": "apollo://schemas/localization-media-approval-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-media-approval-output/v1",
       "internalOnlySurfaceId": null,
       "tests": [
         "tests/v2/public-contracts.test.mjs:public-contract-registry"

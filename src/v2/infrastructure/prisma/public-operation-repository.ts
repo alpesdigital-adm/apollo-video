@@ -769,6 +769,15 @@ function hydrateRecord(row: StoredOperation): PublicOperationRecord {
         outputArtifactId: projectRenderDetail!.outputArtifactId,
         outputManifestId: projectRenderDetail!.outputManifestId,
         originalFileName: projectRenderDetail!.originalFileName,
+        ...(projectRenderDetail!.renderablePlanHash ? { renderableSnapshot: {
+          planId: projectRenderDetail!.renderablePlanId!,
+          planHash: projectRenderDetail!.renderablePlanHash,
+          origin: projectRenderDetail!.renderableOrigin as 'localization' | 'music-led-montage',
+          sourceId: projectRenderDetail!.renderableSourceId!,
+          sourceHash: projectRenderDetail!.renderableSourceHash!,
+          variantId: projectRenderDetail!.renderableVariantId!,
+          format: projectRenderDetail!.renderableFormat!,
+        } } : {}),
       } : isFinalExport ? {
         kind: 'project-final-export' as const,
         projectId: finalExportDetail!.projectId,
@@ -1262,6 +1271,13 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
         projectRenderContext.outputArtifactId !== input.operation.target.id ||
         projectRenderContext.outputManifestId !== mediaTarget?.manifestId ||
         projectRenderContext.originalFileName.trim().length < 1 || projectRenderContext.originalFileName.length > 240
+        || (projectRenderContext.renderableSnapshot !== undefined && (
+          ![projectRenderContext.renderableSnapshot.planId, projectRenderContext.renderableSnapshot.sourceId, projectRenderContext.renderableSnapshot.variantId].every((value) => ID_PATTERN.test(value)) ||
+          !SHA256_PATTERN.test(projectRenderContext.renderableSnapshot.planHash) ||
+          !SHA256_PATTERN.test(projectRenderContext.renderableSnapshot.sourceHash) ||
+          !['localization', 'music-led-montage'].includes(projectRenderContext.renderableSnapshot.origin) ||
+          projectRenderContext.renderableSnapshot.format.trim().length === 0
+        ))
       )) ||
       (projectReuseContext && (
         input.operation.projectId !== projectReuseContext.projectId ||
@@ -1381,11 +1397,11 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
           ingestUploadKind = upload.kind as 'video' | 'audio' | 'image'
         }
         if (projectRenderContext) {
-          const [source, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
+          const [source, renderableSnapshot, colorPipelines] = await Promise.all([transaction.v2Project.findFirst({
             where: { id: projectRenderContext.projectId, workspaceId: input.operation.workspaceId },
             include: {
               versions: {
-                where: { id: projectRenderContext.projectVersionId, editPlanSnapshotId: projectRenderContext.editPlanSnapshotId },
+                where: { id: projectRenderContext.projectVersionId, ...(projectRenderContext.renderableSnapshot ? {} : { editPlanSnapshotId: projectRenderContext.editPlanSnapshotId }) },
                 take: 1,
               },
               mediaAssets: {
@@ -1394,12 +1410,22 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
                 take: 1,
               },
             },
-          }), transaction.v2ColorPipelineCompilation.findMany({
+          }), projectRenderContext.renderableSnapshot ? transaction.v2RenderablePlanSnapshot.findFirst({ where: {
+            workspaceId: input.operation.workspaceId,
+            projectId: projectRenderContext.projectId,
+            projectVersionId: projectRenderContext.projectVersionId,
+            planId: projectRenderContext.renderableSnapshot.planId,
+            planHash: projectRenderContext.renderableSnapshot.planHash,
+            origin: projectRenderContext.renderableSnapshot.origin,
+            sourceId: projectRenderContext.renderableSnapshot.sourceId,
+            sourceHash: projectRenderContext.renderableSnapshot.sourceHash,
+          } }) : Promise.resolve(null), transaction.v2ColorPipelineCompilation.findMany({
             where: { workspaceId: input.operation.workspaceId, projectId: projectRenderContext.projectId,
               id: { in: projectRenderContext.colorPipelineBindings.map((binding) => binding.compilationId) } },
             select: { id: true, sourceArtifactId: true, sourceManifestId: true, compilationHash: true, pipelineHash: true },
           })])
           if (!source || source.versions.length !== 1 || source.mediaAssets.length !== 1 || source.mediaAssets[0]!.artifact.manifests.length !== 1 ||
+            (projectRenderContext.renderableSnapshot !== undefined && !renderableSnapshot) ||
             colorPipelines.length !== projectRenderContext.colorPipelineBindings.length ||
             projectRenderContext.colorPipelineBindings.some((binding) => !colorPipelines.some((row) =>
               row.id === binding.compilationId && row.sourceArtifactId === binding.sourceArtifactId &&
@@ -1715,6 +1741,15 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
               outputArtifactId: context.outputArtifactId,
               outputManifestId: context.outputManifestId,
               originalFileName: context.originalFileName,
+              ...(projectRenderContext?.renderableSnapshot ? {
+                renderablePlanHash: projectRenderContext.renderableSnapshot.planHash,
+                renderablePlanId: projectRenderContext.renderableSnapshot.planId,
+                renderableOrigin: projectRenderContext.renderableSnapshot.origin,
+                renderableSourceId: projectRenderContext.renderableSnapshot.sourceId,
+                renderableSourceHash: projectRenderContext.renderableSnapshot.sourceHash,
+                renderableVariantId: projectRenderContext.renderableSnapshot.variantId,
+                renderableFormat: projectRenderContext.renderableSnapshot.format,
+              } : {}),
               ...(projectReuseContext ? {
                 reusedFromOperationId: projectReuseContext.reusedFromOperationId,
                 reuseCommandId: projectReuseContext.commandId,
@@ -1839,6 +1874,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     now: string
     leaseUntil: string
     workspaceId?: string
+    operationId?: string
     type?: PublicOperation['type']
   }): Promise<ClaimedPublicOperationRecord | null> {
     if (!ID_PATTERN.test(input.leaseOwner)) {
@@ -1853,6 +1889,7 @@ export class PrismaPublicOperationRepository implements PublicOperationRepositor
     return this.client.$transaction(async (transaction) => {
       const candidates = await transaction.v2PublicOperation.findMany({
         where: {
+          ...(input.operationId ? { id: input.operationId } : {}),
           ...(input.type ? { type: input.type } : {}),
           ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
           OR: [

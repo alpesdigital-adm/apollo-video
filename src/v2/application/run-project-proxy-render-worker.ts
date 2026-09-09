@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { createMediaArtifactManifestV2 } from '../domain/media-artifact.ts'
 import { DomainError } from '../domain/errors.ts'
 import { createEditorialAudioTimelineHash } from '../domain/production-modes.ts'
+import { createDirectedAudioTimelineHash } from '../domain/director-run.ts'
 import { readOutputFormatPreset } from '../domain/output-format-registry.ts'
 import type { OutputAspectRatio } from '../domain/output-spec.ts'
 import { createRenderPlacementPlan, validateRenderPlacementPlan, type RenderPlacementRequestV1 } from '../domain/render-placement-plan.ts'
@@ -35,6 +36,7 @@ import { evaluateRenderedProxy, type ProxyQualityIssue } from './render-workflow
 import { projectProxyRenderInputHash } from './project-render-sources.ts'
 import { calculatePublicOperationRetryDelayMs, type PublicOperationWorkerOutcome } from './run-public-operation-worker.ts'
 import { loadBoundRenderColorPipelines } from './resolve-render-color-pipelines.ts'
+import { calculateVersionHash } from './version-hash.ts'
 
 const NON_RETRYABLE_CODES = new Set(['INVALID_RENDER_INPUT', 'RENDER_OUTPUT_INVALID', 'PERSISTENCE_CONFLICT', 'PERSISTENCE_NOT_CONFIGURED'])
 
@@ -67,6 +69,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   retryBaseDelayMs?: number
   retryMaxDelayMs?: number
   telemetry?: OperationTelemetrySink
+  onFailureDiagnostic?: (diagnostic: Readonly<{ operationId: string; error: unknown }>) => void
   /**
    * F4.014. When a deployment has the colour critic wired, the rendered proxy
    * is judged before its review is written and the verdict lands as issues on
@@ -108,14 +111,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
   ) throw new DomainError('INVALID_PUBLIC_OPERATION', 'Project render worker lease configuration is invalid')
   const leaseWindow = (now: Date) => new Date(now.getTime() + leaseDurationMs).toISOString()
 
-  return async function runNext(leaseOwner: string): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+  return async function runNext(
+    leaseOwner: string,
+    target: Readonly<{ workspaceId?: string; operationId?: string; signal?: AbortSignal }> = {},
+  ): Promise<Readonly<PublicOperationWorkerOutcome> | null> {
+    if (target.signal?.aborted) throw target.signal.reason ?? new Error('Project proxy rendering aborted')
     const claimedAt = clock()
-    const claimed = await dependencies.operations.claimNext({ leaseOwner, now: claimedAt.toISOString(), leaseUntil: leaseWindow(claimedAt), type: 'project-proxy-render' })
+    const claimed = await dependencies.operations.claimNext({ leaseOwner, now: claimedAt.toISOString(), leaseUntil: leaseWindow(claimedAt), type: 'project-proxy-render', ...(target.workspaceId ? { workspaceId: target.workspaceId } : {}), ...(target.operationId ? { operationId: target.operationId } : {}) })
     if (!claimed) return null
     if (claimed.context.kind !== 'project-proxy-render') throw new DomainError('PERSISTENCE_CONFLICT', 'Project render worker claimed an incompatible operation')
     const { operation, context } = claimed
     const attempt = claimed.lease.attempt
     const abortController = new AbortController()
+    const abortFromTarget = () => abortController.abort(target.signal?.reason)
+    target.signal?.addEventListener('abort', abortFromTarget, { once: true })
     let stopped = false
     let leaseLost = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -163,10 +172,18 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
     }
     try {
       scheduleHeartbeat()
-      const source = await dependencies.projects.readImmutableSource({
-        workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
-        editPlanSnapshotId: context.editPlanSnapshotId, sourceArtifactId: context.sourceArtifactId, sourceManifestId: context.sourceManifestId,
-      })
+      const source = context.renderableSnapshot
+        ? await dependencies.projects.readRenderableSnapshotSource({
+            workspaceId: operation.workspaceId,
+            projectId: context.projectId,
+            planId: context.renderableSnapshot.planId,
+            planHash: context.renderableSnapshot.planHash,
+            format: context.renderableSnapshot.format,
+          })
+        : await dependencies.projects.readImmutableSource({
+            workspaceId: operation.workspaceId, projectId: context.projectId, projectVersionId: context.projectVersionId,
+            editPlanSnapshotId: context.editPlanSnapshotId, sourceArtifactId: context.sourceArtifactId, sourceManifestId: context.sourceManifestId,
+          })
       if (!source) throw new DomainError('PERSISTENCE_CONFLICT', 'Immutable project render source disappeared')
       const clips = source.editPlan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
       const colorPlan = await dependencies.colorPlans.readEffectiveForVersion({
@@ -187,10 +204,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         operationId: operation.id, compilations: [...colorPipelines.values()],
         ...(colorPlan ? { executions: colorPlan.compiled.targets } : {}),
       })
-      const immutableInputHash = projectProxyRenderInputHash({
-        source,
-        colorPipelineBindings: context.colorPipelineBindings,
-      })
+      const baseInputHash = projectProxyRenderInputHash({ source, colorPipelineBindings: context.colorPipelineBindings })
+      const immutableInputHash = context.renderableSnapshot
+        ? calculateVersionHash({ type: 'renderable-snapshot-proxy/v1', snapshot: context.renderableSnapshot, renderInputHash: baseInputHash })
+        : baseInputHash
       if (
         immutableInputHash !== context.inputHash ||
         source.editPlan.movementPolicy.automaticZoom || clips.length < 1 ||
@@ -202,7 +219,10 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       )
       const transitions = 'transitions' in source.editPlan ? source.editPlan.transitions : []
       const composition = 'composition' in source.editPlan ? source.editPlan.composition : undefined
-      const audioTimelineHash = createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
+      const musicTracks = 'audioTracks' in source.editPlan && Array.isArray(source.editPlan.audioTracks) ? source.editPlan.audioTracks : []
+      const audioTimelineHash = musicTracks.length > 0
+        ? createDirectedAudioTimelineHash({ fps: source.editPlan.fps, clips, musicTracks })
+        : createEditorialAudioTimelineHash({ fps: source.editPlan.fps, clips })
       if ('audioTimelineHash' in source.editPlan && source.editPlan.audioTimelineHash !== audioTimelineHash) throw new DomainError('INVALID_RENDER_INPUT', 'Persisted Director audio timeline identity changed before proxy render')
       // ---- Materialized geometry, decided and validated before the renderer is asked to run ----
       const outputPreset = readOutputFormatPreset(source.format as OutputAspectRatio)
@@ -296,6 +316,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         lutPaths: materializedLut.lutPaths,
         ...(colorPlan ? { colorPlan } : {}),
         clips, audioTimelineHash, fps: source.editPlan.fps, format: source.format, subtitleCues,
+        ...('audioTracks' in source.editPlan && source.editPlan.audioTracks[0] ? { backgroundMusic: source.editPlan.audioTracks[0] } : {}),
         ...(ctaOverlays.length ? { ctaOverlays } : {}),
         transitions, ...(composition ? { composition } : {}),
         placementPlan,
@@ -445,12 +466,20 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
         createdAt: clock().toISOString(),
       })
       if (!(await heartbeat())) throw new DomainError('RENDER_EXECUTION_FAILED', 'Project render lease was lost')
-      await dependencies.projects.attachCompletedOutput({
+      const attachOutput = context.renderableSnapshot
+        ? dependencies.projects.attachCompletedSnapshotOutput({
+            workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
+            variantId: context.renderableSnapshot.variantId, outputArtifactId: context.outputArtifactId,
+            outputManifestId: context.outputManifestId, originalFileName: context.originalFileName,
+            createdAt: clock().toISOString(),
+          })
+        : dependencies.projects.attachCompletedOutput({
         workspaceId: operation.workspaceId, operationId: operation.id, projectId: context.projectId,
         projectVersionId: context.projectVersionId, variantId: source.format,
         outputArtifactId: context.outputArtifactId, outputManifestId: context.outputManifestId,
         originalFileName: context.originalFileName, createdAt: clock().toISOString(),
       })
+      await attachOutput
       const reviewedAt = clock().toISOString()
       const review = evaluateRenderedProxy({
         projectVersionId: context.projectVersionId,
@@ -503,6 +532,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: 'succeeded' as const })
     } catch (error) {
       stopHeartbeat()
+      dependencies.onFailureDiagnostic?.(Object.freeze({ operationId: operation.id, error }))
       if (leaseLost) return Object.freeze({ operationId: operation.id, status: 'lease-lost' as const })
       const failedAt = clock()
       const failure = safeFailure(error)
@@ -513,6 +543,7 @@ export function runNextProjectProxyRenderOperationService(dependencies: {
       return Object.freeze({ operationId: operation.id, status: failed.operation.status === 'retrying' ? 'retrying' as const : 'failed' as const })
     } finally {
       stopHeartbeat()
+      target.signal?.removeEventListener('abort', abortFromTarget)
       // Every port that wrote media for this operation gets released here, the
       // colour critic included: its "before" intermediate is a full re-encode of
       // every video source and it writes two PNGs per camera. `allSettled`

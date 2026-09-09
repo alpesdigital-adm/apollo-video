@@ -8,6 +8,10 @@ RENDER_WORKER="${APOLLO_RENDER_WORKER_CONTAINER:-${CONTAINER}-render-worker}"
 WEBHOOK_WORKER="${APOLLO_WEBHOOK_WORKER_CONTAINER:-${CONTAINER}-webhook-worker}"
 LONG_FORM_WORKER="${APOLLO_LONG_FORM_WORKER_CONTAINER:-${CONTAINER}-long-form-worker}"
 PROVIDER_WORKER="${APOLLO_PROVIDER_WORKER_CONTAINER:-${CONTAINER}-provider-worker}"
+CAPTURE_SYNC_WORKER="${APOLLO_CAPTURE_SYNC_WORKER_CONTAINER:-${CONTAINER}-capture-sync-worker}"
+MUSIC_ANALYSIS_WORKER="${APOLLO_MUSIC_ANALYSIS_WORKER_CONTAINER:-${CONTAINER}-music-analysis-worker}"
+LOCALIZATION_TRANSLATION_WORKER="${APOLLO_LOCALIZATION_TRANSLATION_WORKER_CONTAINER:-${CONTAINER}-localization-translation-worker}"
+LOCALIZATION_MEDIA_WORKER="${APOLLO_LOCALIZATION_MEDIA_WORKER_CONTAINER:-${CONTAINER}-localization-media-worker}"
 APP_ROOT="${APOLLO_APP_ROOT:-/apps/apollo-video}"
 ENV_FILE="${APOLLO_ENV_FILE:-${APP_ROOT}/.env}"
 DOMAIN="${APOLLO_DOMAIN:-apollo.alpesd.com.br}"
@@ -21,7 +25,7 @@ for directory in tmp artifacts render-outputs; do
 done
 install -d -o 1000 -g 1000 "${APP_ROOT}/tmp/provider-results"
 
-docker run --rm \
+DEPLOYMENT_CONFIGURATION="$(docker run --rm \
   --env-file "${ENV_FILE}" \
   "${IMAGE}" \
   node -e '
@@ -56,7 +60,104 @@ docker run --rm \
       console.error("Long-form provider credentials are not configured");
       process.exit(1);
     }
-  '
+    const boundedInteger = (name, minimum, maximum) => {
+      const value = Number(process.env[name]);
+      if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+        console.error(name + " must be an integer between " + minimum + " and " + maximum);
+        process.exit(1);
+      }
+      return value;
+    };
+    const memoryLimit = (name, fallback) => {
+      const value = (process.env[name] ?? fallback).trim().toLowerCase();
+      if (!/^[1-9][0-9]*[mg]$/.test(value)) {
+        console.error(name + " must be a positive Docker memory limit ending in m or g");
+        process.exit(1);
+      }
+      return value;
+    };
+    const cpuLimit = (name, fallback) => {
+      const value = (process.env[name] ?? fallback).trim();
+      const numeric = Number(value);
+      if (!/^([0-9]+)([.][0-9]+)?$/.test(value) || !Number.isFinite(numeric) || numeric <= 0 || numeric > 8) {
+        console.error(name + " must be a positive CPU limit no greater than 8");
+        process.exit(1);
+      }
+      return value;
+    };
+    const localizationFlag = (process.env.APOLLO_LOCALIZATION_WORKER_ENABLED ?? "false").trim().toLowerCase();
+    if (localizationFlag !== "true" && localizationFlag !== "false") {
+      console.error("APOLLO_LOCALIZATION_WORKER_ENABLED must be true or false");
+      process.exit(1);
+    }
+    if (localizationFlag === "true") {
+      let localizationBaseUrl;
+      try {
+        localizationBaseUrl = new URL(process.env.APOLLO_LOCALIZATION_PROVIDER_BASE_URL ?? "");
+      } catch {
+        console.error("APOLLO_LOCALIZATION_PROVIDER_BASE_URL must be a valid absolute URL");
+        process.exit(1);
+      }
+      if (
+        localizationBaseUrl.protocol !== "https:" ||
+        localizationBaseUrl.username ||
+        localizationBaseUrl.password ||
+        localizationBaseUrl.search ||
+        localizationBaseUrl.hash
+      ) {
+        console.error("APOLLO_LOCALIZATION_PROVIDER_BASE_URL must be a clean HTTPS base URL");
+        process.exit(1);
+      }
+      if ((process.env.APOLLO_LOCALIZATION_PROVIDER_API_KEY ?? "").length < 20) {
+        console.error("APOLLO_LOCALIZATION_PROVIDER_API_KEY is not configured");
+        process.exit(1);
+      }
+      if (!(process.env.APOLLO_LOCALIZATION_PROVIDER_MODEL ?? "").trim()) {
+        console.error("APOLLO_LOCALIZATION_PROVIDER_MODEL is not configured");
+        process.exit(1);
+      }
+      if (!/^[A-Z]{3}$/.test((process.env.APOLLO_LOCALIZATION_PRICE_CURRENCY ?? "").trim().toUpperCase())) {
+        console.error("APOLLO_LOCALIZATION_PRICE_CURRENCY must be an ISO-style three-letter code");
+        process.exit(1);
+      }
+      boundedInteger("APOLLO_LOCALIZATION_PROVIDER_TIMEOUT_MS", 1_000, 600_000);
+      boundedInteger("APOLLO_LOCALIZATION_PROVIDER_MAX_RESPONSE_BYTES", 1_024, 8 * 1024 * 1024);
+      boundedInteger("APOLLO_LOCALIZATION_PROVIDER_MAX_COMPLETION_TOKENS", 1, 32_768);
+      boundedInteger("APOLLO_LOCALIZATION_EXECUTION_TIMEOUT_MS", 1_000, 599_000);
+      boundedInteger("APOLLO_LOCALIZATION_PRICE_MICROS_PER_1K_INPUT_CHARS", 0, Number.MAX_SAFE_INTEGER);
+      boundedInteger("APOLLO_LOCALIZATION_PRICE_MICROS_PER_1K_OUTPUT_TOKENS", 0, Number.MAX_SAFE_INTEGER);
+      boundedInteger("APOLLO_LOCALIZATION_MAX_COST_MICROS", 0, Number.MAX_SAFE_INTEGER);
+      boundedInteger("APOLLO_LOCALIZATION_PREFLIGHT_TTL_MS", 10_000, 900_000);
+    }
+    const captureLease = process.env.APOLLO_V2_CAPTURE_SYNC_LEASE_MS?.trim()
+      ? boundedInteger("APOLLO_V2_CAPTURE_SYNC_LEASE_MS", 300_000, 3_600_000)
+      : 300_000;
+    process.stdout.write([
+      localizationFlag,
+      captureLease,
+      memoryLimit("APOLLO_CAPTURE_SYNC_WORKER_MEMORY", "768m"),
+      cpuLimit("APOLLO_CAPTURE_SYNC_WORKER_CPUS", "1"),
+      memoryLimit("APOLLO_MUSIC_ANALYSIS_WORKER_MEMORY", "768m"),
+      cpuLimit("APOLLO_MUSIC_ANALYSIS_WORKER_CPUS", "1"),
+      memoryLimit("APOLLO_LOCALIZATION_TRANSLATION_WORKER_MEMORY", "512m"),
+      cpuLimit("APOLLO_LOCALIZATION_TRANSLATION_WORKER_CPUS", "0.5"),
+      memoryLimit("APOLLO_LOCALIZATION_MEDIA_WORKER_MEMORY", "2g"),
+      cpuLimit("APOLLO_LOCALIZATION_MEDIA_WORKER_CPUS", "2"),
+    ].join("|"));
+  ')"
+
+IFS='|' read -r \
+  LOCALIZATION_WORKER_ENABLED \
+  CAPTURE_SYNC_LEASE_MS \
+  CAPTURE_SYNC_WORKER_MEMORY \
+  CAPTURE_SYNC_WORKER_CPUS \
+  MUSIC_ANALYSIS_WORKER_MEMORY \
+  MUSIC_ANALYSIS_WORKER_CPUS \
+  LOCALIZATION_TRANSLATION_WORKER_MEMORY \
+  LOCALIZATION_TRANSLATION_WORKER_CPUS \
+  LOCALIZATION_MEDIA_WORKER_MEMORY \
+  LOCALIZATION_MEDIA_WORKER_CPUS \
+  <<< "${DEPLOYMENT_CONFIGURATION}"
 
 COMMON_RUNTIME=(
   --restart unless-stopped
@@ -65,6 +166,12 @@ COMMON_RUNTIME=(
   --add-host host.docker.internal:host-gateway
   --network easypanel
   --env APOLLO_V2_PROVIDER_WORK_ROOT="${PROVIDER_WORK_ROOT}"
+  --env APOLLO_V2_CAPTURE_SYNC_LEASE_MS="${CAPTURE_SYNC_LEASE_MS}"
+  --env APOLLO_V2_FFMPEG_PATH=/usr/bin/ffmpeg
+  --env APOLLO_FFMPEG_PATH=/usr/bin/ffmpeg
+  --env FFMPEG_PATH=/usr/bin/ffmpeg
+  --env APOLLO_FFPROBE_PATH=/usr/bin/ffprobe
+  --env FFPROBE_PATH=/usr/bin/ffprobe
   -v "${APP_ROOT}/tmp:/app/tmp"
   -v "${APP_ROOT}/artifacts:/app/artifacts"
   -v "${APP_ROOT}/render-outputs:/app/render-outputs"
@@ -122,6 +229,10 @@ remove_container "${RENDER_WORKER}"
 remove_container "${WEBHOOK_WORKER}"
 remove_container "${LONG_FORM_WORKER}"
 remove_container "${PROVIDER_WORKER}"
+remove_container "${CAPTURE_SYNC_WORKER}"
+remove_container "${MUSIC_ANALYSIS_WORKER}"
+remove_container "${LOCALIZATION_TRANSLATION_WORKER}"
+remove_container "${LOCALIZATION_MEDIA_WORKER}"
 
 docker run -d \
   --name "${CONTAINER}" \
@@ -202,6 +313,40 @@ docker run -d \
   "${IMAGE}" \
   ./node_modules/.bin/tsx scripts/run-v2-provider-worker.mjs
 
+docker run -d \
+  --name "${CAPTURE_SYNC_WORKER}" \
+  --memory "${CAPTURE_SYNC_WORKER_MEMORY}" \
+  --cpus "${CAPTURE_SYNC_WORKER_CPUS}" \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  ./node_modules/.bin/tsx scripts/run-v2-capture-sync-worker.mjs
+
+docker run -d \
+  --name "${MUSIC_ANALYSIS_WORKER}" \
+  --memory "${MUSIC_ANALYSIS_WORKER_MEMORY}" \
+  --cpus "${MUSIC_ANALYSIS_WORKER_CPUS}" \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  ./node_modules/.bin/tsx scripts/run-v2-music-analysis-worker.mjs
+
+if [[ "${LOCALIZATION_WORKER_ENABLED}" == "true" ]]; then
+  docker run -d \
+    --name "${LOCALIZATION_TRANSLATION_WORKER}" \
+    --memory "${LOCALIZATION_TRANSLATION_WORKER_MEMORY}" \
+    --cpus "${LOCALIZATION_TRANSLATION_WORKER_CPUS}" \
+    "${COMMON_RUNTIME[@]}" \
+    "${IMAGE}" \
+    ./node_modules/.bin/tsx scripts/run-v2-localization-translation-worker.mjs
+fi
+
+docker run -d \
+  --name "${LOCALIZATION_MEDIA_WORKER}" \
+  --memory "${LOCALIZATION_MEDIA_WORKER_MEMORY}" \
+  --cpus "${LOCALIZATION_MEDIA_WORKER_CPUS}" \
+  "${COMMON_RUNTIME[@]}" \
+  "${IMAGE}" \
+  ./node_modules/.bin/tsx scripts/run-v2-localization-media-worker.mjs
+
 for attempt in $(seq 1 30); do
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${CONTAINER}")"
   if [[ "${health}" == "healthy" ]]; then
@@ -214,13 +359,27 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 
+WORKERS=(
+  "${INGEST_WORKER}"
+  "${RENDER_WORKER}"
+  "${WEBHOOK_WORKER}"
+  "${LONG_FORM_WORKER}"
+  "${PROVIDER_WORKER}"
+  "${CAPTURE_SYNC_WORKER}"
+  "${MUSIC_ANALYSIS_WORKER}"
+  "${LOCALIZATION_MEDIA_WORKER}"
+)
+if [[ "${LOCALIZATION_WORKER_ENABLED}" == "true" ]]; then
+  WORKERS+=("${LOCALIZATION_TRANSLATION_WORKER}")
+fi
+
 test "$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER}")" = "healthy"
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}" "${PROVIDER_WORKER}"; do
+for worker in "${WORKERS[@]}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
 done
 
 sleep 20
-for worker in "${INGEST_WORKER}" "${RENDER_WORKER}" "${WEBHOOK_WORKER}" "${LONG_FORM_WORKER}" "${PROVIDER_WORKER}"; do
+for worker in "${WORKERS[@]}"; do
   test "$(docker inspect --format '{{.State.Running}}' "${worker}")" = "true"
   test "$(docker inspect --format '{{.RestartCount}}' "${worker}")" = "0"
 done

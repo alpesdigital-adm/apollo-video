@@ -30,7 +30,7 @@ interface CapabilityEnvelope {
  * operable pages with their own state machine, not catalogues. Giving one of
  * them a hub entry here would add a second, weaker view of the same thing.
  */
-const HUBS: Record<Exclude<AppShellDestinationId, 'projects' | 'batches' | 'capture-sessions'>, {
+const HUBS: Record<Exclude<AppShellDestinationId, 'projects' | 'batches' | 'capture-sessions' | 'localization'>, {
   eyebrow: string
   title: string
   description: string
@@ -64,7 +64,7 @@ const HUBS: Record<Exclude<AppShellDestinationId, 'projects' | 'batches' | 'capt
 }
 
 export default function WorkspaceCapabilityHub({ section }: Readonly<{
-  section: Exclude<AppShellDestinationId, 'projects' | 'batches' | 'capture-sessions'>
+  section: Exclude<AppShellDestinationId, 'projects' | 'batches' | 'capture-sessions' | 'localization'>
 }>) {
   const hub = HUBS[section]
   const [capabilities, setCapabilities] = useState<Capability[]>([])

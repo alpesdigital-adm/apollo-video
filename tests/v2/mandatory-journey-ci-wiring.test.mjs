@@ -410,7 +410,11 @@ const KNOWN_UNRUN_SUITES = [
   { file: 'tests/v2/prisma-mvp-core-gate.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-production-batch.integration.mjs', reason: PHASE_1_3 },
   { file: 'tests/v2/prisma-project-duplication.integration.mjs', reason: PHASE_1_3 },
-  { file: 'tests/v2/prisma-proxy-review.integration.mjs', reason: NO_SCRIPT },
+  {
+    file: 'tests/v2/prisma-proxy-review.integration.mjs',
+    reason: NO_SCRIPT,
+    citedBy: ['docs/specs/08-localization-and-audio.md'],
+  },
   { file: 'tests/v2/prisma-quality-iteration.integration.mjs', reason: PHASE_1_3 },
   {
     file: 'tests/v2/prisma-review-annotation.integration.mjs',

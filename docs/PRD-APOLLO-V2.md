@@ -1889,6 +1889,18 @@ Não reutilizar timestamps do idioma original.
 
 ### FR-193 — Modos de áudio
 
+**Evidência parcial Wave 21:** contratos/API/UI V2 persistem roteiro canônico,
+perfil compacto e variante por locale; tradução paga exige preflight vinculado
+a revisão/hash, ator e rights atuais, provider/model, `maxOutputTokens`, custo
+estimado e teto. O runtime de mídia comprovado é apenas `subtitles-only`, com
+uma fonte/identidade, um clip e `rate=1`. Voz local, upload, TTS, avatar,
+lip-sync e remapeamento de timeline editada permanecem abertos. Timing de fonte
+usa word alignment exato; cues traduzidos são estimativas proporcionais por
+bloco, não alignment medido. A análise/montagem musical passou por API, worker,
+PostgreSQL e FFmpeg real, porém downbeats não são medidos, sections são
+heurísticas e não houve aceite visual ou deploy. Nenhum requisito F5 é dado
+como concluído por esta nota.
+
 TTS/voice clone autorizado, voz local ou áudio traduzido enviado.
 
 ### FR-194 — LocaleProfile

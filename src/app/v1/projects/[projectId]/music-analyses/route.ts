@@ -1,0 +1,10 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { materializeActorAuditContext, requireScope } from '@/v2/application/authenticate-api-client'
+import { requestMusicAnalysisService } from '@/v2/application/music-analysis-worker'
+import { createMusicAnalysisRuntime } from '@/v2/infrastructure/repository-factory'
+import { assertExternalMutationOrigin, authenticateExternalRequest } from '@/v2/public-api/authentication'
+import { publicApiHeaders, resolveRequestId, respondPublicError } from '@/v2/public-api/errors'
+import { presentSuccess } from '@/v2/public-api/presenters'
+import { parseMusicAnalysisBody, presentMusicAnalysisRun } from '@/v2/public-api/music-analysis-contract'
+export const dynamic = 'force-dynamic'
+export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) { const requestId = resolveRequestId(request); try { const actor = await authenticateExternalRequest(request); requireScope(actor, 'projects:write'); assertExternalMutationOrigin(request, actor); const { projectId } = await context.params; const body = parseMusicAnalysisBody(await request.json()); const runtime = createMusicAnalysisRuntime(); const result = await requestMusicAnalysisService({ runs: runtime.runs })({ ...body, workspaceId: actor.workspaceId, projectId, actorClientId: actor.clientId, idempotencyKey: request.headers.get('idempotency-key')?.trim() ?? '', authenticationAudit: materializeActorAuditContext(actor) }); return NextResponse.json(presentSuccess({ run: presentMusicAnalysisRun(result.run), replayed: result.replayed }), { status: result.replayed ? 200 : 202, headers: publicApiHeaders(requestId) }) } catch (error) { return respondPublicError(error, requestId) } }

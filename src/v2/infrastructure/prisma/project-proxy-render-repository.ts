@@ -13,6 +13,7 @@ import {
   parseCommandImpact,
 } from '../../domain/command-impact.ts'
 import { editCommandRenderPolicy } from '../../domain/edit-command-registry.ts'
+import { PrismaRenderablePlanSnapshotRepository } from './renderable-plan-snapshot-repository.ts'
 
 function parseRecord(value: string, field: string): Record<string, unknown> {
   try {
@@ -105,7 +106,7 @@ function hydrateSource(
   const referencedArtifactIds = [...new Set(clips.flatMap((clip) => [
     clip.sourceArtifactId,
     clip.audioSourceArtifactId ?? clip.sourceArtifactId,
-  ]))].sort()
+  ]).concat(('audioTracks' in editPlan ? editPlan.audioTracks.map((track) => track.artifactId) : [])))].sort()
   const renderSources = referencedArtifactIds.map((artifactId) => {
     const link = project.mediaAssets.find((item) => item.artifactId === artifactId)
     const sourceManifest = link?.artifact.manifests[0]
@@ -128,6 +129,11 @@ function hydrateSource(
         `Referenced render source ${artifactId} is unavailable`,
       )
     }
+    const musicTrack = 'audioTracks' in editPlan ? editPlan.audioTracks.find((track) => track.artifactId === artifactId) : undefined
+    if (musicTrack) {
+      const rights = link.artifact.currentRightsSnapshot
+      if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
+    }
     return Object.freeze({
       artifactId,
       manifestId: sourceManifest.id,
@@ -136,7 +142,7 @@ function hydrateSource(
       byteSize: Number(link.artifact.byteSize),
       mediaType: link.artifact.mediaType as 'video' | 'audio',
       container: link.artifact.container,
-      role: link.role === 'source-master'
+      role: musicTrack ? 'approved-music' as const : link.role === 'source-master'
         ? 'source-master' as const
         : 'selected-insert' as const,
     })
@@ -209,6 +215,7 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           orderBy: [{ role: 'asc' as const }, { createdAt: 'desc' as const }],
           include: { upload: { select: { createdAt: true } }, artifact: {
             include: {
+              currentRightsSnapshot: true,
               manifests: {
                 orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
                 take: 8,
@@ -230,6 +237,73 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
     const project = await this.queryProject(input)
     const source = hydrateSource(project, input)
     return source ? this.attachRangeReuse(input.workspaceId, project!, source) : null
+  }
+
+  async readRenderableSnapshotSource(input: { workspaceId: string; projectId: string; planId: string; planHash: string; format: string }) {
+    const snapshot = await new PrismaRenderablePlanSnapshotRepository(this.client).readByPlan(input)
+    if (!snapshot || snapshot.projectId !== input.projectId || snapshot.plan.projectVersionId.trim().length === 0) return null
+    if (!snapshot.plan.formatVariantRefs.includes(input.format as never)) {
+      throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot is not bound to the requested format')
+    }
+    const project = await this.queryProject({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      projectVersionId: snapshot.plan.projectVersionId,
+    })
+    const version = project?.versions[0]
+    if (!project || !version) return null
+    const clips = snapshot.plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
+    const referencedArtifactIds = [...new Set(clips.flatMap((clip) => [
+      clip.sourceArtifactId,
+      clip.audioSourceArtifactId ?? clip.sourceArtifactId,
+    ]).concat(snapshot.plan.audioTracks.map((track) => track.artifactId)))].sort()
+    const renderSources = referencedArtifactIds.map((artifactId) => {
+      const link = project.mediaAssets.find((item) => item.artifactId === artifactId)
+      const manifest = link?.artifact.manifests[0]
+      const body = manifest ? parseRecord(manifest.manifestJson, `renderable snapshot source manifest ${manifest.id}`) : null
+      const artifact = body?.artifact
+      if (!link || !manifest || link.artifact.status !== 'available' || typeof artifact !== 'object' || artifact === null || Array.isArray(artifact) || typeof (artifact as Record<string, unknown>).artifactKey !== 'string') {
+        throw new DomainError('PERSISTENCE_CONFLICT', `Renderable snapshot source ${artifactId} is unavailable`)
+      }
+      const musicTrack = snapshot.plan.audioTracks.find((track) => track.artifactId === artifactId)
+      if (musicTrack) {
+        const rights = link.artifact.currentRightsSnapshot
+        if (!rights || rights.id !== musicTrack.rightsSnapshotId || rights.status !== 'approved' || (rights.expiresAt && rights.expiresAt <= new Date())) {
+          throw new DomainError('ASSET_RIGHTS_BLOCKED', `Music source ${artifactId} no longer has the approved current rights snapshot`)
+        }
+      }
+      return Object.freeze({
+        artifactId,
+        manifestId: manifest.id,
+        artifactKey: (artifact as Record<string, unknown>).artifactKey as string,
+        sha256: link.artifact.sha256,
+        byteSize: Number(link.artifact.byteSize),
+        mediaType: link.artifact.mediaType as 'video' | 'audio',
+        container: link.artifact.container,
+        role: musicTrack ? 'approved-music' as const : link.role === 'source-master' ? 'source-master' as const : 'selected-insert' as const,
+      })
+    })
+    const primary = renderSources.find((asset) => asset.mediaType === 'video') ?? renderSources[0]
+    const primaryLink = primary ? project.mediaAssets.find((item) => item.artifactId === primary.artifactId) : undefined
+    if (!primary || !primaryLink) throw new DomainError('PERSISTENCE_CONFLICT', 'Renderable snapshot has no source media')
+    return Object.freeze({
+      projectId: project.id,
+      projectVersionId: snapshot.plan.projectVersionId,
+      // The version snapshot remains a lineage anchor only. The discriminated
+      // renderableSnapshot operation context is the plan authority.
+      editPlanSnapshotId: version.editPlanSnapshotId,
+      editPlanHash: snapshot.planHash,
+      editPlan: snapshot.plan,
+      format: input.format,
+      sourceArtifactId: primary.artifactId,
+      sourceManifestId: primary.manifestId,
+      sourceArtifactKey: primary.artifactKey,
+      sourceSha256: primary.sha256,
+      renderSources: Object.freeze(renderSources),
+      originalFileName: primaryLink.originalFileName,
+      uploadReceivedAt: (primaryLink.upload?.createdAt ?? primaryLink.createdAt).toISOString(),
+      criticIssues: parseCriticIssues(version.directorRunAsResult?.qualitySnapshot.contentJson),
+    })
   }
 
   private async readReusableProxy(input: {
@@ -456,6 +530,30 @@ export class PrismaProjectProxyRenderRepository implements ProjectProxyRenderRep
           status: { in: ['planned', 'rendering'] },
         },
         data: { status: 'succeeded' },
+      })
+    })
+  }
+
+  async attachCompletedSnapshotOutput(input: Parameters<ProjectProxyRenderRepository['attachCompletedSnapshotOutput']>[0]): Promise<void> {
+    await this.client.$transaction(async (transaction) => {
+      const [operation, artifact, manifest] = await Promise.all([
+        transaction.v2ProjectProxyRenderOperation.findFirst({ where: {
+          operationId: input.operationId, workspaceId: input.workspaceId, projectId: input.projectId,
+          renderableVariantId: input.variantId, outputArtifactId: input.outputArtifactId,
+          outputManifestId: input.outputManifestId,
+        } }),
+        transaction.v2MediaArtifact.findFirst({ where: { id: input.outputArtifactId, workspaceId: input.workspaceId, status: 'available' } }),
+        transaction.v2MediaArtifactManifest.findFirst({ where: { id: input.outputManifestId, workspaceId: input.workspaceId, artifactId: input.outputArtifactId } }),
+      ])
+      if (!operation || !artifact || !manifest) throw new DomainError('PERSISTENCE_CONFLICT', 'Completed renderable snapshot proxy output is inconsistent')
+      await transaction.v2ProjectMediaAsset.upsert({
+        where: { projectId_artifactId_role: { projectId: input.projectId, artifactId: input.outputArtifactId, role: 'editorial-proxy' } },
+        create: {
+          id: randomUUID(), workspaceId: input.workspaceId, projectId: input.projectId,
+          artifactId: input.outputArtifactId, role: 'editorial-proxy',
+          originalFileName: input.originalFileName, createdAt: new Date(input.createdAt),
+        },
+        update: {},
       })
     })
   }

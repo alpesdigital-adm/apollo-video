@@ -4,6 +4,18 @@ import test from 'node:test'
 import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.localization-profiles.create': { mode: 'durable-covered', evidence: 'Wave21 profile actor/key unique index and payload-bound replay in PrismaLocalizationRepository' },
+  'apollo.projects.localization-canonicals.create': { mode: 'durable-covered', evidence: 'Wave21 immutable alignment hash and canonical actor/key uniqueness; localization PostgreSQL fixture round-trip' },
+  'apollo.projects.localization-variants.create': { mode: 'durable-covered', evidence: 'Wave21 variant genesis and actor-bound action are written in one Serializable transaction' },
+  'apollo.projects.localization-runs.preflight': { mode: 'durable-covered', evidence: 'Wave21 persisted preflight actor/key uniqueness; prisma-localization-translation-preflight.integration.mjs' },
+  'apollo.projects.localization-runs.request': { mode: 'durable-covered', evidence: 'Wave21 atomic single preflight consumption and workspace/variant/revision unique intent; PostgreSQL test' },
+  'apollo.projects.localization-translations.review': { mode: 'durable-covered', evidence: 'Wave21 exact revision/hash CAS and immutable revision plus actor-bound action transaction' },
+  'apollo.projects.localization-media.request': { mode: 'durable-covered', evidence: 'Wave21 unique variant/revision intent and actor/key replay; prisma-localization-media.integration.mjs' },
+  'apollo.projects.localization-media.approve': { mode: 'durable-covered', evidence: 'Wave21 run revision/hash CAS and real completed proxy binding in one Serializable approval transaction' },
+  'apollo.projects.music-montages.compile': { mode: 'durable-covered', evidence: 'Wave21 atomic run/snapshot publication, current-version fence and actor replay; prisma-music-montage.integration.mjs' },
+  'apollo.projects.music-analyses.request': { mode: 'durable-covered', evidence: 'Wave21 actor/key and source authority convergence; prisma-music-analysis.integration.mjs' },
+  'apollo.projects.music-analyses.cancel': { mode: 'durable-covered', evidence: 'Wave21 terminal status CAS, lease invalidation and append-only transition audit; authenticated PostgreSQL test' },
+  'apollo.projects.music-analyses.retry': { mode: 'durable-covered', evidence: 'Wave21 bounded failed-attempt CAS plus unique transition audit; authenticated PostgreSQL test' },
   'apollo.projects.capture-sessions.create': {
     mode: 'durable-covered',
     evidence: 'Wave18 writes the genesis link of the immutable chain and its head pointer in one transaction, with actor-bound idempotency converging a replayed create on the identical session hash',
@@ -573,7 +585,7 @@ test('the concurrency audit has no unclassified durable gap', () => {
   assert.deepEqual(pending, [])
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'durable-covered').length,
-    163,
+    175,
   )
   assert.equal(
     Object.values(coverage).filter((entry) => entry.mode === 'read-only-deterministic').length,
