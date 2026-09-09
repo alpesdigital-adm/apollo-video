@@ -1,6 +1,7 @@
 export const APP_SHELL_DESTINATIONS = [
   { id: 'projects', label: 'Projetos', href: '/', available: true },
   { id: 'batches', label: 'Lotes', href: '/batches', available: true },
+  { id: 'localization', label: 'Localização', href: '/localization', available: true },
   { id: 'library', label: 'Biblioteca', href: '/library', available: true },
   { id: 'presenters', label: 'Apresentadores', href: '/presenters', available: true },
   { id: 'capture-sessions', label: 'Capturas', href: '/capture-sessions', available: true },

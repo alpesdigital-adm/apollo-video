@@ -159,6 +159,12 @@ jobs:
       - name: Run durable TTS-to-avatar provider journey
         run: npm run test:integration:provider-tts-avatar
 
+      - name: Run bounded localization provider integration tests
+        run: npm run test:integration:localization-provider
+
+      - name: Run music-led montage analysis integration tests
+        run: npm run test:integration:music-led-montage
+
       - name: Run vertical upload-to-proxy smoke
         run: npm run test:integration:vertical-smoke
         env:
@@ -586,6 +592,24 @@ jobs:
         env:
           V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-proof-migrate-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
+      - name: Run localization translation preflight persistence proof
+        run: npm run test:integration:localization-preflight
+        env:
+          APOLLO_RUN_LOCALIZATION_PREFLIGHT_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-preflight-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run music analysis authenticated worker persistence proof
+        run: npm run test:integration:music-analysis
+        env:
+          APOLLO_RUN_MUSIC_ANALYSIS_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-music-analysis-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run music montage atomic publication persistence proof
+        run: npm run test:integration:music-montage
+        env:
+          APOLLO_RUN_MUSIC_MONTAGE_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-music-montage-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
       - name: Run proof integrity gate E2E against /v1 and PostgreSQL
         run: npm run test:e2e:proof-integrity
         env:
@@ -893,6 +917,25 @@ jobs:
 
       - name: Build production application for the browser journey
         run: npm run build
+
+      - name: Run localization media fail-closed persistence proof
+        run: npm run test:integration:localization-media
+        env:
+          APOLLO_RUN_LOCALIZATION_MEDIA_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-media-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run localization media proxy-backed positive persistence proof
+        run: npm run test:integration:localization-media-proxy
+        env:
+          APOLLO_RUN_LOCALIZATION_MEDIA_PROXY_PG_E2E: "1"
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-media-proxy-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
+
+      - name: Run localization browser journey against the production build
+        run: npm run test:e2e:localization-browser
+        env:
+          APOLLO_LOCALIZATION_BROWSER_E2E: "1"
+          PLAYWRIGHT_CHROME_EXECUTABLE: /usr/bin/google-chrome
+          V2_DATABASE_URL: postgresql://apollo:apollo-ci-compose-password@127.0.0.1:55432/apollo_video_v2_e2e?schema=public&application_name=apollo-video-e2e-localization-browser-ci&connection_limit=5&pool_timeout=10&connect_timeout=10
 
       - name: Run presenter lifecycle browser journey against PostgreSQL and versioned MinIO
         run: npm run test:e2e:presenter-lifecycle

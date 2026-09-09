@@ -20,7 +20,7 @@ export function projectRenderSourcesFingerprint(
         Number.isSafeInteger(source.byteSize) &&
         source.byteSize > 0 &&
         ['video', 'audio'].includes(source.mediaType) &&
-        ['source-master', 'selected-insert'].includes(source.role)),
+        ['source-master', 'selected-insert', 'approved-music'].includes(source.role)),
     'INVALID_RENDER_INPUT',
     'Project render source bundle is invalid',
   )

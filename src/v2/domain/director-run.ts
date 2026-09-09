@@ -158,6 +158,22 @@ export interface DirectedCtaOverlay {
   text: string
 }
 
+export interface DirectedMusicTrack {
+  id: string
+  kind: 'background-music'
+  artifactId: string
+  analysisId: string
+  analysisHash: string
+  rightsSnapshotId: string
+  sourceInFrame: number
+  sourceOutFrame: number
+  timelineInFrame: number
+  timelineOutFrame: number
+  gainDb: number
+  fadeInFrames: number
+  fadeOutFrames: number
+}
+
 export interface DirectorQualityIssue {
   code: string
   severity: 'hard' | 'warning'
@@ -188,7 +204,7 @@ export interface DirectorQualityReport {
   evaluatedAt: string
 }
 
-export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'overlayTracks' | 'subtitleTracks' | 'effectTracks' | 'subtitlePolicy'> & Readonly<{
+export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'overlayTracks' | 'subtitleTracks' | 'audioTracks' | 'effectTracks' | 'subtitlePolicy'> & Readonly<{
   storyPlanId: string
   treatmentPlanId: string
   directorRunId: string
@@ -207,6 +223,7 @@ export type DirectedEditPlan = Omit<DirectorSourceEditPlan, 'storyPlanId' | 'ove
     cues: readonly Readonly<DirectedSubtitleCue>[]
   }>[]
   effectTracks: readonly never[]
+  audioTracks: readonly Readonly<DirectedMusicTrack>[]
   transitions: readonly Readonly<DirectedTransition>[]
   composition: Readonly<{
     layout: 'landscape-inset'
@@ -362,7 +379,7 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
   assertDomain(plan.effectTracks.length === 0, 'INVALID_RENDER_INPUT', 'Unjustified camera effects are forbidden')
   const clips = plan.videoTracks.find((track) => track.kind === 'base-video')?.clips ?? []
   assertDomain(clips.length > 0, 'INVALID_RENDER_INPUT', 'Director EditPlan needs source clips')
-  assertDomain(plan.audioTimelineHash === createEditorialAudioTimelineHash({ fps: plan.fps, clips }), 'INVALID_RENDER_INPUT', 'Director audio timeline hash is inconsistent')
+  assertDomain(plan.audioTimelineHash === createDirectedAudioTimelineHash({ fps: plan.fps, clips, musicTracks: plan.audioTracks ?? [] }), 'INVALID_RENDER_INPUT', 'Director audio timeline hash is inconsistent')
   let cursor = 0
   for (const clip of clips) {
     assertDomain(clip.timelineInFrame === cursor && clip.timelineOutFrame > clip.timelineInFrame, 'INVALID_RENDER_INPUT', 'Director timeline is not continuous')
@@ -387,7 +404,25 @@ export function validateDirectedEditPlan(plan: DirectedEditPlan): Readonly<Direc
       'Desired action overlay is invalid',
     )
   }
+  const musicTracks = Array.isArray(plan.audioTracks) ? plan.audioTracks : []
+  assertDomain(musicTracks.length <= 1, 'INVALID_RENDER_INPUT', 'Director EditPlan supports at most one background music track')
+  for (const track of musicTracks) assertDomain(
+    track.kind === 'background-music' && typeof track.artifactId === 'string' && track.artifactId.trim().length > 0 && typeof track.analysisHash === 'string' && /^[a-f0-9]{64}$/.test(track.analysisHash) &&
+    typeof track.rightsSnapshotId === 'string' && track.rightsSnapshotId.trim().length > 0 && Number.isSafeInteger(track.sourceInFrame) && Number.isSafeInteger(track.sourceOutFrame) &&
+    Number.isSafeInteger(track.timelineInFrame) && Number.isSafeInteger(track.timelineOutFrame) && track.sourceInFrame >= 0 &&
+    track.sourceOutFrame > track.sourceInFrame && track.timelineInFrame === 0 && track.timelineOutFrame === plan.durationFrames &&
+    track.sourceOutFrame - track.sourceInFrame >= plan.durationFrames && Number.isFinite(track.gainDb) && track.gainDb <= -12 && track.gainDb >= -60 &&
+    Number.isSafeInteger(track.fadeInFrames) && Number.isSafeInteger(track.fadeOutFrames) && track.fadeInFrames >= 0 && track.fadeOutFrames >= 0,
+    'INVALID_RENDER_INPUT',
+    'Background music track is invalid or may mask speech',
+  )
   return Object.freeze(plan)
+}
+
+export function createDirectedAudioTimelineHash(input: { fps: number; clips: readonly Readonly<DirectorSourceEditPlan['videoTracks'][number]['clips'][number]>[]; musicTracks: readonly Readonly<DirectedMusicTrack>[] }): string {
+  const speechHash = createEditorialAudioTimelineHash({ fps: input.fps, clips: input.clips })
+  if (input.musicTracks.length === 0) return speechHash
+  return calculateCanonicalHash({ schemaVersion: 'directed-audio-timeline/v1', speechHash, musicTracks: input.musicTracks })
 }
 
 export function retimedWordsDurationMs(words: readonly RetimedTranscriptWord[], fps: number): number {

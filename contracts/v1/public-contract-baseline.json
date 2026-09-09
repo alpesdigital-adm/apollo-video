@@ -2155,6 +2155,55 @@
       "idempotency": "not-applicable",
       "responseMediaType": "application/json"
     },
+    "apollo.localization-profiles.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:run"
+      ],
+      "inputSchemaRef": "apollo://schemas/localization-profile-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-profile-create-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/localization-profiles"
+      },
+      "toolName": "apollo.localization-profiles.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.localization-profiles.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-profile-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/localization-profiles"
+      },
+      "toolName": "apollo.localization-profiles.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.media.catalog-records.read": {
       "version": "1.0.0",
       "exposure": "public",
@@ -5543,6 +5592,292 @@
       ],
       "responseMediaType": "application/json"
     },
+    "apollo.projects.localization-candidates.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-candidate-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/canonical-script-versions/candidates"
+      },
+      "toolName": "apollo.projects.localization-candidates.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-canonicals.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/localization-canonical-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-canonical-create-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/canonical-script-versions"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-canonicals.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-canonical-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/canonical-script-versions"
+      },
+      "toolName": "apollo.projects.localization-canonicals.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-media.approve": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/localization-media-approval-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-media-approval-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/media-runs/{runId}/approval"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-media.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-media-read-output/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/media-runs/{runId}"
+      },
+      "toolName": "apollo.projects.localization-media.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-media.request": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:run"
+      ],
+      "inputSchemaRef": "apollo://schemas/localization-media-request-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-media-request-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/media-runs"
+      },
+      "toolName": "apollo.projects.localization-media.request",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        202
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-runs.preflight": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "preflight",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:run"
+      ],
+      "inputSchemaRef": "apollo://schemas/localization-run-preflight-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-run-preflight-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/translation-preflight"
+      },
+      "toolName": "apollo.projects.localization-runs.preflight",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-runs.request": {
+      "version": "2.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:run"
+      ],
+      "inputSchemaRef": "apollo://schemas/localization-run-request-input/v2",
+      "outputSchemaRef": "apollo://schemas/localization-run-request-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/runs"
+      },
+      "toolName": "apollo.projects.localization-runs.request",
+      "supportsDryRun": false,
+      "costClass": "variable",
+      "confirmation": "preflight-token",
+      "successStatuses": [
+        200,
+        202
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-translations.review": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [],
+      "inputSchemaRef": "apollo://schemas/localization-translation-review-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-translation-review-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}/translation-review"
+      },
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "human-approval",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-variants.create": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:run"
+      ],
+      "inputSchemaRef": "apollo://schemas/localization-variant-create-input/v1",
+      "outputSchemaRef": "apollo://schemas/localization-variant-create-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/localization-variants"
+      },
+      "toolName": "apollo.projects.localization-variants.create",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-variants.list": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-variant-list/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/localization-variants"
+      },
+      "toolName": "apollo.projects.localization-variants.list",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.localization-variants.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "localization:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/localization-variant-read/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/localization-variants/{variantId}"
+      },
+      "toolName": "apollo.projects.localization-variants.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
     "apollo.projects.long-form-index-workflows.create": {
       "version": "1.2.0",
       "exposure": "public",
@@ -6159,6 +6494,150 @@
         "path": "/v1/projects/{projectId}/multicam-longform-gate/evaluations/{gateId}"
       },
       "toolName": "apollo.projects.multicam-longform-gate.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-analyses.cancel": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/music-analyses/{runId}/cancel"
+      },
+      "toolName": "apollo.projects.music-analyses.cancel",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-analyses.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/music-analyses/{runId}"
+      },
+      "toolName": "apollo.projects.music-analyses.read",
+      "supportsDryRun": false,
+      "costClass": "free",
+      "confirmation": "none",
+      "successStatuses": [
+        200
+      ],
+      "idempotency": "not-applicable",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-analyses.request": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/music-analysis-request-input/v1",
+      "outputSchemaRef": "apollo://schemas/music-analysis-request-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/music-analyses"
+      },
+      "toolName": "apollo.projects.music-analyses.request",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        202
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-analyses.retry": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "outputSchemaRef": "apollo://schemas/music-analysis-read-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/music-analyses/{runId}/retry"
+      },
+      "toolName": "apollo.projects.music-analyses.retry",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        202
+      ],
+      "idempotency": "natural",
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-montages.compile": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "command",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:write"
+      ],
+      "inputSchemaRef": "apollo://schemas/music-montage-compile-input/v1",
+      "outputSchemaRef": "apollo://schemas/music-montage-run-output/v1",
+      "endpoint": {
+        "method": "POST",
+        "path": "/v1/projects/{projectId}/music-montages"
+      },
+      "toolName": "apollo.projects.music-montages.compile",
+      "supportsDryRun": false,
+      "costClass": "low",
+      "confirmation": "none",
+      "successStatuses": [
+        200,
+        201
+      ],
+      "idempotency": "required",
+      "requestBodyRequired": true,
+      "responseMediaType": "application/json"
+    },
+    "apollo.projects.music-montages.read": {
+      "version": "1.0.0",
+      "exposure": "public",
+      "operationKind": "query",
+      "authMode": "required",
+      "requiredScopes": [
+        "projects:read"
+      ],
+      "outputSchemaRef": "apollo://schemas/music-montage-read-output/v1",
+      "endpoint": {
+        "method": "GET",
+        "path": "/v1/projects/{projectId}/music-montages/{runId}"
+      },
+      "toolName": "apollo.projects.music-montages.read",
       "supportsDryRun": false,
       "costClass": "free",
       "confirmation": "none",
@@ -56379,6 +56858,438 @@
         }
       }
     },
+    "apollo://schemas/error-envelope/v5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "category",
+            "retryable",
+            "requestId"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "INVALID_OUTPUT_SPEC",
+                "INVALID_SCOPE",
+                "INVALID_COMMAND",
+                "INVALID_PROJECT_VERSION",
+                "INVALID_WORKSPACE",
+                "INVALID_PROJECT",
+                "PROJECT_TRANSITION_REJECTED",
+                "INVALID_SNAPSHOT",
+                "INVALID_MEDIA_ARTIFACT",
+                "MEDIA_UPLOAD_NOT_FOUND",
+                "MEDIA_UPLOAD_TRANSITION_REJECTED",
+                "MEDIA_DOWNLOAD_GRANT_NOT_FOUND",
+                "MEDIA_DOWNLOAD_GRANT_REJECTED",
+                "INVALID_RENDER_INPUT",
+                "MEDIA_ARTIFACT_NOT_FOUND",
+                "MEDIA_ARTIFACT_TRANSITION_REJECTED",
+                "MEDIA_ARTIFACT_LIFECYCLE_REVISION_MISMATCH",
+                "MEDIA_ARTIFACT_MANIFEST_NOT_FOUND",
+                "MEDIA_ARTIFACT_SOURCE_NOT_FOUND",
+                "MEDIA_TRANSCRIPT_NOT_FOUND",
+                "MEDIA_RANGE_NOT_SATISFIABLE",
+                "INVALID_CURSOR",
+                "ASSET_NOT_FOUND",
+                "ASSET_NOT_USABLE",
+                "ASSET_RIGHTS_BLOCKED",
+                "ASSET_RIGHTS_REVISION_MISMATCH",
+                "PRECONDITION_REQUIRED",
+                "MATERIALIZATION_AUTHORIZATION_NOT_FOUND",
+                "MATERIALIZATION_AUTHORIZATION_REJECTED",
+                "MATERIALIZATION_AUTHORIZATION_EXPIRED",
+                "MATERIALIZATION_REVALIDATION_FAILED",
+                "RENDER_EXECUTION_FAILED",
+                "RENDER_OUTPUT_INVALID",
+                "RENDER_OUTPUT_CONFLICT",
+                "RENDER_OUTPUT_PROMOTION_FAILED",
+                "RENDER_OUTPUT_CLEANUP_FAILED",
+                "RENDER_ELEMENT_MAP_NOT_FOUND",
+                "SUBTITLE_SIDECAR_NOT_FOUND",
+                "SUBTITLE_SIDECAR_ALIGNMENT_MISMATCH",
+                "INVALID_PUBLIC_OPERATION",
+                "INVALID_PUBLIC_EVENT",
+                "INVALID_WEBHOOK",
+                "WEBHOOK_CHALLENGE_NOT_FOUND",
+                "WEBHOOK_CHALLENGE_REJECTED",
+                "WEBHOOK_NETWORK_REJECTED",
+                "WEBHOOK_CHALLENGE_TRANSPORT_FAILED",
+                "WEBHOOK_DELIVERY_TRANSPORT_FAILED",
+                "WEBHOOK_ENDPOINT_NOT_FOUND",
+                "WEBHOOK_ENDPOINT_ALREADY_EXISTS",
+                "WEBHOOK_ENDPOINT_TRANSITION_REJECTED",
+                "WEBHOOK_ENDPOINT_REVISION_MISMATCH",
+                "WEBHOOK_SIGNING_SECRET_ROTATION_NOT_FOUND",
+                "WEBHOOK_SUBSCRIPTION_NOT_FOUND",
+                "WEBHOOK_SUBSCRIPTION_ALREADY_EXISTS",
+                "WEBHOOK_SUBSCRIPTION_CREATE_REJECTED",
+                "WEBHOOK_SUBSCRIPTION_TRANSITION_REJECTED",
+                "WEBHOOK_SUBSCRIPTION_REVISION_MISMATCH",
+                "WEBHOOK_DELIVERY_NOT_FOUND",
+                "WEBHOOK_DELIVERY_REPLAY_REJECTED",
+                "WEBHOOK_EVENT_NOT_FOUND",
+                "WEBHOOK_EVENT_REPLAY_REJECTED",
+                "WEBHOOK_EVENT_REPLAY_LIMIT_EXCEEDED",
+                "WEBHOOK_SHARD_COORDINATION_REJECTED",
+                "WEBHOOK_SECRET_UNAVAILABLE",
+                "WEBHOOK_FANOUT_LIMIT_EXCEEDED",
+                "WEBHOOK_LEASE_REJECTED",
+                "WEBHOOK_SIGNATURE_INVALID",
+                "WEBHOOK_REPLAY_DETECTED",
+                "PUBLIC_OPERATION_NOT_FOUND",
+                "PUBLIC_OPERATION_RETRY_REJECTED",
+                "WORKSPACE_NOT_FOUND",
+                "CAPTURE_PROTOCOL_NOT_FOUND",
+                "SYNC_MARKER_NOT_FOUND",
+                "SYNC_MARKER_CHECKSUM_INVALID",
+                "SYNC_MARKER_FOREIGN_SESSION",
+                "SYNC_DIAGNOSTIC_NOT_FOUND",
+                "SYNC_DIAGNOSTIC_VERSION_STALE",
+                "SYNC_ANCHOR_CONTRADICTORY",
+                "CAPTURE_PROTOCOL_EVALUATION_NOT_FOUND",
+                "CAPTURE_SESSION_NOT_FOUND",
+                "CAPTURE_SESSION_VERSION_STALE",
+                "CAPTURE_TRACK_NOT_FOUND",
+                "CAPTURE_TRACK_PART_NOT_FOUND",
+                "MEDIA_ARTIFACT_IDENTITY_MISMATCH",
+                "CAPTURE_SYNC_RUN_NOT_FOUND",
+                "EDITORIAL_SYNTHESIS_NOT_FOUND",
+                "CAPTURE_COVERAGE_NOT_AVAILABLE",
+                "CAPTURE_COVERAGE_UNVERIFIED",
+                "CAPTURE_COVERAGE_OVERLAP_UNRESOLVED",
+                "CAPTURE_SESSION_DERIVATION_STALE",
+                "DIRECTION_RANGE_UNRESOLVABLE",
+                "DIRECTION_SOURCE_CADENCE_UNSUPPORTED",
+                "CAMERA_IDENTITY_COLLISION",
+                "DIRECTION_CALLER_SUPPLIED_DERIVATION",
+                "MULTICAM_DIRECTION_NOT_FOUND",
+                "COLOR_SOURCES_INCOMPARABLE",
+                "COLOR_HDR_SDR_UNSUPPORTED",
+                "COLOR_RANGES_NOT_COMPARABLE",
+                "COLOR_MEASUREMENT_INSUFFICIENT",
+                "COLOR_REFERENCE_UNAVAILABLE",
+                "COLOR_STAGE_VIOLATION",
+                "MULTICAM_MATCH_PLAN_NOT_FOUND",
+                "COLOR_CRITIC_REPORT_NOT_FOUND",
+                "PLAYBACK_MAP_UNRESOLVED",
+                "PLAYBACK_MAP_VERSION_STALE",
+                "PLAYBACK_MAP_NOT_FOUND",
+                "PLAYBACK_SESSION_NOT_REACT",
+                "PLAYBACK_REACTION_TRACK_AMBIGUOUS",
+                "PLAYBACK_TRACK_NOT_SINGLE_PART",
+                "PLAYBACK_EVIDENCE_INSUFFICIENT",
+                "MULTICAM_LONGFORM_GATE_NOT_FOUND",
+                "PROJECT_NOT_FOUND",
+                "LOCALIZATION_CANONICAL_NOT_FOUND",
+                "LOCALIZATION_PROFILE_NOT_FOUND",
+                "LOCALIZATION_VARIANT_NOT_FOUND",
+                "PRODUCTION_BATCH_NOT_FOUND",
+                "PRODUCTION_BATCH_ITEM_NOT_FOUND",
+                "PRODUCTION_BATCH_PARTIAL_RETRY_NOT_FOUND",
+                "SOURCE_DECONSTRUCTION_NO_CLEAN_RANGE",
+                "SOURCE_DECONSTRUCTION_NOT_FOUND",
+                "SOURCE_DECONSTRUCTION_SOURCE_NOT_FOUND",
+                "CONTAMINATION_REPORT_NOT_FOUND",
+                "CONTAMINATION_REPORT_REVISION_MISMATCH",
+                "SOURCE_CLEANUP_NOT_FOUND",
+                "VALIDATION_ENVELOPE_NOT_FOUND",
+                "PROOF_NEED_RUN_NOT_FOUND",
+                "PROOF_INTEGRITY_RUN_NOT_FOUND",
+                "PROOF_MODE_RUN_NOT_FOUND",
+                "LONG_FORM_INDEX_WORKFLOW_NOT_FOUND",
+                "SPEAKER_DIARIZATION_NOT_FOUND",
+                "SCRIPT_ALIGNMENT_NOT_FOUND",
+                "TAKE_LIBRARY_NOT_FOUND",
+                "COMPATIBILITY_GRAPH_NOT_FOUND",
+                "VARIANT_RECIPE_NOT_FOUND",
+                "VARIANT_PORTFOLIO_PREFLIGHT_NOT_FOUND",
+                "BATCH_EDIT_PREFLIGHT_NOT_FOUND",
+                "BATCH_EDIT_COMMAND_NOT_FOUND",
+                "EXPORT_MATRIX_PREFLIGHT_NOT_FOUND",
+                "EXPORT_MATRIX_NOT_FOUND",
+                "IDEMPOTENCY_PAYLOAD_MISMATCH",
+                "PERSISTENCE_CONFLICT",
+                "PERSISTENCE_NOT_CONFIGURED",
+                "INVALID_API_CLIENT",
+                "API_CLIENT_NOT_FOUND",
+                "API_CREDENTIAL_NOT_FOUND",
+                "AUTH_NOT_CONFIGURED",
+                "AUTH_INVALID",
+                "AUTH_SCOPE_REQUIRED",
+                "VERSION_CONFLICT",
+                "EDITORIAL_ACCEPTANCE_FAILED",
+                "DUPLICATE_CAPABILITY",
+                "INVALID_CAPABILITY",
+                "INVALID_CAPABILITY_POLICY",
+                "INVALID_PUBLIC_SCHEMA",
+                "PUBLIC_SCHEMA_NOT_FOUND",
+                "CAPABILITY_PARITY_MISSING",
+                "TOOL_CONFIRMATION_REQUIRED",
+                "TOOL_CONFIRMATION_INVALID",
+                "PREFLIGHT_TOKEN_INVALID",
+                "PREFLIGHT_TOKEN_EXPIRED",
+                "PREFLIGHT_TOKEN_STALE",
+                "GOVERNANCE_LIMIT_EXCEEDED",
+                "OPERATIONAL_KILL_SWITCH_ACTIVE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "category": {
+              "enum": [
+                "validation",
+                "auth",
+                "policy",
+                "conflict",
+                "quota",
+                "provider",
+                "internal"
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "requestId": {
+              "type": "string"
+            },
+            "details": {
+              "type": "object"
+            },
+            "conflict": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "currentVersionId",
+                "conflictingTargets",
+                "diff"
+              ],
+              "properties": {
+                "currentVersionId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "conflictingTargets": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1024,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "diff": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "commands",
+                    "storyChanges",
+                    "timelineChanges",
+                    "visualChanges",
+                    "audioChanges",
+                    "outputChanges",
+                    "invalidatedArtifacts",
+                    "estimatedCostDelta"
+                  ],
+                  "properties": {
+                    "commands": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "storyChanges": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "commandId",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "commandId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "timelineChanges": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "commandId",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "commandId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "visualChanges": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "commandId",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "commandId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "audioChanges": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "commandId",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "commandId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "outputChanges": {
+                      "type": "array",
+                      "maxItems": 1000,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "commandId",
+                          "target",
+                          "summary"
+                        ],
+                        "properties": {
+                          "commandId": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      }
+                    },
+                    "invalidatedArtifacts": {
+                      "type": "array",
+                      "maxItems": 1024,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128
+                      }
+                    },
+                    "estimatedCostDelta": {
+                      "type": "number",
+                      "minimum": -1000000,
+                      "maximum": 1000000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "apollo://schemas/evaluate-capture-protocol-request/v1": {
       "type": "object",
       "additionalProperties": false,
@@ -66014,6 +66925,973 @@
         },
         "title": {
           "type": "string"
+        }
+      }
+    },
+    "apollo://schemas/localization-candidate-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidates"
+          ],
+          "properties": {
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "alignmentId",
+                  "alignmentHash",
+                  "batchId",
+                  "projectVersionId",
+                  "sourceLocale",
+                  "blocks"
+                ],
+                "properties": {
+                  "alignmentId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "alignmentHash": {
+                    "type": "string"
+                  },
+                  "batchId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceLocale": {
+                    "type": "string"
+                  },
+                  "blocks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-canonical-create-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "alignmentId",
+        "expectedAlignmentHash"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "alignmentId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedAlignmentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "protectionsByBlock": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-canonical-create-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "canonical",
+            "replayed"
+          ],
+          "properties": {
+            "canonical": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-canonical-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "versions"
+          ],
+          "properties": {
+            "versions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "projectVersionId",
+                  "sourceLocale",
+                  "revision",
+                  "blocks",
+                  "approvedAt",
+                  "contentHash"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "projectVersionId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "sourceLocale": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "blocks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "approvedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "contentHash": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-media-approval-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "approved",
+        "expectedRunRevision",
+        "expectedRunHash"
+      ],
+      "properties": {
+        "approved": {
+          "const": true
+        },
+        "expectedRunRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedRunHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "apollo://schemas/localization-media-approval-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-media-read-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-media-request-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "expectedVariantHash",
+        "source"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedVariantHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "artifactId",
+            "artifactSha256",
+            "rightsSnapshotId"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "original-audio",
+                "uploaded-audio"
+              ]
+            },
+            "artifactId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            },
+            "artifactSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsSnapshotId": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-media-request-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-profile-create-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetLocale",
+        "allowedModes"
+      ],
+      "properties": {
+        "targetLocale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "market": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "allowedModes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "authorized-tts",
+              "local-voice",
+              "uploaded",
+              "lip-sync",
+              "regenerated-avatar",
+              "subtitles-only"
+            ]
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-profile-create-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profile",
+            "replayed"
+          ],
+          "properties": {
+            "profile": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "workspaceId",
+                "targetLocale",
+                "allowedModes",
+                "profileHash"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128
+                },
+                "targetLocale": {
+                  "type": "string"
+                },
+                "market": {
+                  "type": "string"
+                },
+                "allowedModes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "profileHash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-profile-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "profiles"
+          ],
+          "properties": {
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "targetLocale",
+                  "allowedModes",
+                  "profileHash"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128
+                  },
+                  "targetLocale": {
+                    "type": "string"
+                  },
+                  "market": {
+                    "type": "string"
+                  },
+                  "allowedModes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "profileHash": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-run-preflight-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "expectedHash"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "apollo://schemas/localization-run-preflight-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preflight",
+            "commitToken",
+            "replayed"
+          ],
+          "properties": {
+            "preflight": {
+              "type": "object"
+            },
+            "commitToken": {
+              "type": "string",
+              "minLength": 80,
+              "maxLength": 4096
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-run-request-input/v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "expectedHash",
+        "preflightId",
+        "expectedPreflightHash",
+        "commitToken"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "preflightId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedPreflightHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "commitToken": {
+          "type": "string",
+          "minLength": 80,
+          "maxLength": 4096
+        }
+      }
+    },
+    "apollo://schemas/localization-run-request-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-translation-review-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "expectedHash",
+        "localizedBlocks"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expectedHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "localizedBlocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "blockId",
+              "text",
+              "protectedValues"
+            ],
+            "properties": {
+              "blockId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "protectedValues": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-translation-review-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "variant",
+            "replayed"
+          ],
+          "properties": {
+            "variant": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-variant-create-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalId",
+        "profileId",
+        "sourceArtifactId",
+        "expectedSourceSha256",
+        "preferredMode",
+        "formats"
+      ],
+      "properties": {
+        "canonicalId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "profileId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "sourceArtifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "expectedSourceSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "preferredMode": {
+          "type": "string",
+          "enum": [
+            "authorized-tts",
+            "local-voice",
+            "uploaded",
+            "lip-sync",
+            "regenerated-avatar",
+            "subtitles-only"
+          ]
+        },
+        "formats": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-variant-create-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "variant",
+            "replayed"
+          ],
+          "properties": {
+            "variant": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-variant-list/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "variants"
+          ],
+          "properties": {
+            "variants": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/localization-variant-read/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "variant"
+          ],
+          "properties": {
+            "variant": {
+              "type": "object"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
         }
       }
     },
@@ -87766,6 +89644,321 @@
             "omittedShots": {
               "type": "integer",
               "minimum": 0
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/music-analysis-read-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/music-analysis-request-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "artifactId"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "artifactId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        }
+      }
+    },
+    "apollo://schemas/music-analysis-request-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/music-montage-compile-input/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectVersionId",
+        "analysisId",
+        "locale",
+        "objective",
+        "sources",
+        "visualSegments"
+      ],
+      "properties": {
+        "projectVersionId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "analysisId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "market": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 16
+        },
+        "objective": {
+          "type": "string",
+          "enum": [
+            "discovery",
+            "awareness",
+            "warming",
+            "lead-generation",
+            "sale",
+            "whatsapp",
+            "booking",
+            "download"
+          ]
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "artifactId",
+              "durationSeconds"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "artifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "durationSeconds": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 86400
+              }
+            }
+          }
+        },
+        "visualSegments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "sourceId",
+              "sourceArtifactId",
+              "sourceRangeMs",
+              "preferredDurationMs"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "sourceId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "sourceArtifactId": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 128
+              },
+              "sourceRangeMs": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 86400000
+                }
+              },
+              "preferredDurationMs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400000
+              }
+            }
+          }
+        },
+        "minimumConfidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maximumSnapDistanceMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "minimumCutSpacingMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "maximumCutsPer10s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "apollo://schemas/music-montage-read-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "apiVersion"
+          ],
+          "properties": {
+            "apiVersion": {
+              "const": "v1"
+            }
+          }
+        }
+      }
+    },
+    "apollo://schemas/music-montage-run-output/v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data",
+        "meta"
+      ],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "run",
+            "replayed"
+          ],
+          "properties": {
+            "run": {
+              "type": "object"
+            },
+            "replayed": {
+              "type": "boolean"
             }
           }
         },

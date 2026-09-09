@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import type { PrismaClient } from '../../../generated/prisma-v2/index.js'
@@ -77,6 +77,14 @@ import type {
   MulticamMatchPlanRepository,
 } from '../application/ports/multicam-match-plan-repository.ts'
 import type { PlaybackMapRepository } from '../application/ports/playback-map-repository.ts'
+import type { LocalizationRepository } from '../application/ports/localization-repository.ts'
+import type { LocalizationRunRepository } from '../application/ports/localization-run-repository.ts'
+import { runNextLocalizationTranslationService } from '../application/localization-translation-worker.ts'
+import { runNextLocalizationMediaService } from '../application/localization-media-worker.ts'
+import { createLocalizationMediaProcessor, createLocalizationSnapshotProxyRuntime } from '../application/localization-media-processor.ts'
+import { enqueueRenderableSnapshotProxyRenderService } from '../application/enqueue-project-proxy-render.ts'
+import { revalidatePersistedActor } from '../application/revalidate-persisted-actor.ts'
+import type { LocalizationMediaRunRepository } from '../application/ports/localization-media-run-repository.ts'
 import type { RenderablePlanSnapshotRepository } from '../application/ports/renderable-plan-snapshot-repository.ts'
 import type {
   LegacyRuntimeAuditPort,
@@ -267,7 +275,6 @@ import { FfmpegColorCriticEvaluator } from './media/ffmpeg-color-critic-evaluato
 import { FfmpegColorMeasurement } from './media/ffmpeg-color-measurement.ts'
 import { FfmpegAudioSyncSignalSource } from './media/ffmpeg-audio-sync-signal-source.ts'
 import { createMarkerMediaAdapter } from './media/marker-media-adapter.ts'
-import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaGovernanceAdmissionRepository } from './prisma/governance-admission-repository.ts'
 import { PrismaSandboxProviderExecutionRepository } from './prisma/sandbox-provider-execution-repository.ts'
 import { PrismaGovernancePolicyRepository } from './prisma/governance-policy-repository.ts'
@@ -298,6 +305,12 @@ import {
   PrismaMulticamMatchPlanRepository,
 } from './prisma/multicam-match-plan-repository.ts'
 import { PrismaPlaybackMapRepository } from './prisma/playback-map-repository.ts'
+import { PrismaMusicAnalysisRepository, PrismaMusicMontagePlanningAuthority, PrismaMusicMontageRunRepository } from './prisma/music-led-montage-repository.ts'
+import { PrismaMusicAnalysisRunRepository } from './prisma/music-analysis-run-repository.ts'
+import { ArtifactMusicSourceMaterializer, PrismaMusicRightsAuthorizer } from './music-analysis-runtime.ts'
+import { FfmpegMusicSignalAnalyzer } from './analysis/ffmpeg-music-signal-analyzer.ts'
+import { runNextMusicAnalysisService } from '../application/music-analysis-worker.ts'
+import { compileMusicLedMontageService } from '../application/compile-music-led-montage.ts'
 import { PrismaRenderablePlanSnapshotRepository } from './prisma/renderable-plan-snapshot-repository.ts'
 import { PrismaMulticamLongformGateRepository } from './prisma/multicam-longform-gate-repository.ts'
 import { ModuleGraphLegacyRuntimeAudit } from './audit/module-graph-legacy-runtime-audit.ts'
@@ -356,6 +369,12 @@ import { PrismaSemanticSearchRepository } from './prisma/semantic-search-reposit
 import { PrismaHierarchicalProcessingRepository } from './prisma/hierarchical-processing-repository.ts'
 import { PrismaProductionBatchRepository } from './prisma/production-batch-repository.ts'
 import { PrismaScriptAlignmentRepository } from './prisma/script-alignment-repository.ts'
+import { PrismaLocalizationRepository } from './prisma/localization-repository.ts'
+import { PrismaLocalizationRunRepository } from './prisma/localization-run-repository.ts'
+import { createLocalizationTranslationProviderFromEnvironment } from './localization-translation-runtime.ts'
+import { PrismaLocalizationMediaRunRepository } from './prisma/localization-media-run-repository.ts'
+import { PrismaLocalizationMediaContextLoader } from './prisma/localization-media-context-loader.ts'
+import { PrismaApiClientRepository } from './prisma/api-client-repository.ts'
 import { PrismaTakeLibraryRepository } from './prisma/take-library-repository.ts'
 import { PrismaCompatibilityGraphRepository } from './prisma/compatibility-graph-repository.ts'
 import { PrismaVariantRecipeRepository } from './prisma/variant-recipe-repository.ts'
@@ -730,6 +749,82 @@ ProductionBatchRepository {
 export function createScriptAlignmentRepository():
 ScriptAlignmentRepository {
   return new PrismaScriptAlignmentRepository(resolveV2Client())
+}
+
+export function createLocalizationRepository(): LocalizationRepository {
+  return new PrismaLocalizationRepository(resolveV2Client())
+}
+
+export function createLocalizationRunRepository(): LocalizationRunRepository {
+  return new PrismaLocalizationRunRepository(resolveV2Client())
+}
+
+export function createLocalizationTranslationRuntime(environment: NodeJS.ProcessEnv = process.env, clock: () => Date = () => new Date()) {
+  const client = resolveV2Client(), runs: LocalizationRunRepository = new PrismaLocalizationRunRepository(client), provider = createLocalizationTranslationProviderFromEnvironment(environment), apiClients = new PrismaApiClientRepository(client)
+  const timeoutMs = Number(environment.APOLLO_LOCALIZATION_EXECUTION_TIMEOUT_MS)
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 599_000) throw new Error('APOLLO_LOCALIZATION_EXECUTION_TIMEOUT_MS must be configured between 1000 and 599000')
+  const authorizeClaim = async (claim: NonNullable<Awaited<ReturnType<typeof runs.claim>>>) => {
+    const audit = await runs.readAuthenticationAudit({ workspaceId: claim.run.workspaceId, runId: claim.run.id })
+    const actor = await revalidatePersistedActor({ audit, clients: apiClients, clock, validateDelegation: async (candidate) => {
+      if (!candidate.delegatedUserId && !candidate.delegatedIdentityId && !candidate.workspaceRole) return true
+      if (!candidate.delegatedUserId || !candidate.delegatedIdentityId || !candidate.workspaceRole) return false
+      return Boolean(await client.v2WorkspaceMember.findFirst({ where: { id: candidate.delegatedUserId, identityId: candidate.delegatedIdentityId, workspaceId: candidate.workspaceId, role: candidate.workspaceRole, status: 'active', identity: { status: 'active' } } }))
+    } })
+    if (!actor.scopes.has('localization:run')) throw new DomainError('AUTH_SCOPE_REQUIRED', 'Persisted actor no longer has localization run authority')
+    await runs.authorizeCurrentSource({ run: claim.run, preflight: claim.preflight, at: clock().toISOString() })
+  }
+  return Object.freeze({ runs, provider, runNext(workerId: string, signal?: AbortSignal) { return runNextLocalizationTranslationService({ runs, provider, authorizeClaim, workerId, clock, executionTimeoutMs: timeoutMs })(signal) }, close() { return client.$disconnect() } })
+}
+
+export function createLocalizationMediaRunRepository(): LocalizationMediaRunRepository {
+  return new PrismaLocalizationMediaRunRepository(resolveV2Client())
+}
+
+export function createLocalizationMediaRuntime(
+  environment: NodeJS.ProcessEnv = process.env,
+  clock: () => Date = () => new Date(),
+  diagnostics: Readonly<{ onProxyWorkerError?: (diagnostic: Readonly<{ operationId: string; error: unknown }>) => void }> = {},
+) {
+  const client = resolveV2Client()
+  const runs = new PrismaLocalizationMediaRunRepository(client)
+  const operations = createPublicOperationRepository()
+  const proxyWorker = createProjectProxyRenderWorker(environment, clock, diagnostics.onProxyWorkerError)
+  const apiClients = new PrismaApiClientRepository(client)
+  const enqueue = enqueueRenderableSnapshotProxyRenderService({
+    projects: createProjectProxyRenderRepository(), snapshots: createRenderablePlanSnapshotRepository(),
+    operations, colorPipelines: createColorPipelineCompilationRepository(), clock,
+    createId: (kind) => `${kind}-${randomUUID()}`,
+  })
+  const revalidateActor = async (run: Parameters<ReturnType<typeof createLocalizationMediaProcessor>['process']>[0]) => {
+    const audit = await runs.readAuthenticationAudit({ workspaceId: run.workspaceId, runId: run.id })
+    return revalidatePersistedActor({
+      audit, clients: apiClients, clock,
+      validateDelegation: async (candidate) => {
+        if (!candidate.delegatedUserId && !candidate.delegatedIdentityId && !candidate.workspaceRole) return true
+        if (!candidate.delegatedUserId || !candidate.delegatedIdentityId || !candidate.workspaceRole) return false
+        const member = await client.v2WorkspaceMember.findFirst({ where: {
+          id: candidate.delegatedUserId, identityId: candidate.delegatedIdentityId,
+          workspaceId: candidate.workspaceId, role: candidate.workspaceRole, status: 'active',
+          identity: { status: 'active' },
+        } })
+        return Boolean(member)
+      },
+    })
+  }
+  const proxy = createLocalizationSnapshotProxyRuntime({
+    revalidateActor, enqueue, operations,
+    runProxyWorker: (leaseOwner, target) => proxyWorker(leaseOwner, target),
+  })
+  const processor = createLocalizationMediaProcessor({
+    contexts: new PrismaLocalizationMediaContextLoader(client), snapshots: createRenderablePlanSnapshotRepository(), proxy, clock,
+  })
+  return Object.freeze({
+    runs,
+    runNext(workerId: string, signal?: AbortSignal) {
+      return runNextLocalizationMediaService({ runs, processor, workerId, clock })(signal)
+    },
+    close() { return client.$disconnect() },
+  })
 }
 
 export function createTakeLibraryRepository():
@@ -2055,6 +2150,7 @@ export function createLongFormIndexWorker(
 export function createProjectProxyRenderWorker(
   environment: NodeJS.ProcessEnv = process.env,
   clock: () => Date = () => new Date(),
+  onFailureDiagnostic?: (diagnostic: Readonly<{ operationId: string; error: unknown }>) => void,
 ) {
   const telemetry = createConfiguredOperationTelemetry(environment)
   const artifactRoot = environment.APOLLO_V2_ARTIFACT_ROOT?.trim()
@@ -2066,6 +2162,7 @@ export function createProjectProxyRenderWorker(
   return runNextProjectProxyRenderOperationService({
     operations: createPublicOperationRepository(telemetry), projects: createProjectProxyRenderRepository(),
     telemetry,
+    ...(onFailureDiagnostic ? { onFailureDiagnostic } : {}),
     artifacts: createMediaArtifactPersistenceRepository(environment), storage: createVerifiedMediaStorage(environment),
     renderer: createFfmpegEditorialProxyRendererFromEnvironment(environment),
     sources: createArtifactSourceMaterializer(environment), clock,
@@ -2411,6 +2508,22 @@ export function createColorCriticReportRepository(): ColorCriticReportRepository
 
 export function createPlaybackMapRepository(): PlaybackMapRepository {
   return new PrismaPlaybackMapRepository(resolveV2Client())
+}
+
+export function createMusicMontageServices(clock: () => Date = () => new Date()) {
+  const client = resolveV2Client()
+  const runs = new PrismaMusicMontageRunRepository(client)
+  return Object.freeze({
+    analyses: new PrismaMusicAnalysisRepository(client),
+    runs,
+    compile: compileMusicLedMontageService({ runs, authority: new PrismaMusicMontagePlanningAuthority(client), clock }),
+  })
+}
+
+export function createMusicAnalysisRuntime(environment: NodeJS.ProcessEnv = process.env, clock: () => Date = () => new Date()) {
+  const client = resolveV2Client(), runs = new PrismaMusicAnalysisRunRepository(client), analyses = new PrismaMusicAnalysisRepository(client)
+  const rights = new PrismaMusicRightsAuthorizer(client), sources = new ArtifactMusicSourceMaterializer(createArtifactSourceMaterializer(environment)), analyzer = new FfmpegMusicSignalAnalyzer({ environment })
+  return Object.freeze({ runs, analyses, rights, sources, analyzer, runNext(workerId: string, signal?: AbortSignal) { return runNextMusicAnalysisService({ runs, analyses, rights, sources, analyzer, workerId, clock })(signal) }, close() { return client.$disconnect() } })
 }
 
 export function createRenderablePlanSnapshotRepository(): RenderablePlanSnapshotRepository {

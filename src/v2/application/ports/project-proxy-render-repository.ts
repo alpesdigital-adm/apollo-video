@@ -47,7 +47,7 @@ export interface ProjectRenderSourceAsset {
   byteSize: number
   mediaType: 'video' | 'audio'
   container: string
-  role: 'source-master' | 'selected-insert'
+  role: 'source-master' | 'selected-insert' | 'approved-music'
 }
 
 export interface ProjectProxyRenderSource {
@@ -109,11 +109,28 @@ export interface ProjectProxyRenderRepository {
     sourceArtifactId: string
     sourceManifestId: string
   }): Promise<Readonly<ProjectProxyRenderSource> | null>
+  readRenderableSnapshotSource(input: {
+    workspaceId: string
+    projectId: string
+    planId: string
+    planHash: string
+    format: string
+  }): Promise<Readonly<ProjectProxyRenderSource> | null>
   attachCompletedOutput(input: {
     workspaceId: string
     operationId: string
     projectId: string
     projectVersionId: string
+    variantId: string
+    outputArtifactId: string
+    outputManifestId: string
+    originalFileName: string
+    createdAt: string
+  }): Promise<void>
+  attachCompletedSnapshotOutput(input: {
+    workspaceId: string
+    operationId: string
+    projectId: string
     variantId: string
     outputArtifactId: string
     outputManifestId: string

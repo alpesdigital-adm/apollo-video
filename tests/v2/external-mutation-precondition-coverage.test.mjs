@@ -5,6 +5,18 @@ import { FOUNDATION_CAPABILITIES } from '../../src/v2/public-api/capability-regi
 import { getPublicSchema } from '../../src/v2/public-api/schema-registry.ts'
 
 const coverage = Object.freeze({
+  'apollo.localization-profiles.create': { mode: 'idempotent-create', evidence: 'Wave21 creates an immutable profile with actor-bound key; no earlier profile is overwritten' },
+  'apollo.projects.localization-canonicals.create': { mode: 'identity-bound-action', fields: ['projectVersionId', 'alignmentId', 'expectedAlignmentHash'], evidence: 'Wave21 exact reviewed alignment and immutable project version are revalidated before canonical persistence' },
+  'apollo.projects.localization-variants.create': { mode: 'identity-bound-action', fields: ['canonicalId', 'profileId', 'sourceArtifactId', 'expectedSourceSha256'], evidence: 'Wave21 source checksum, canonical and profile snapshots bind the new variant' },
+  'apollo.projects.localization-runs.preflight': { mode: 'identity-bound-action', fields: ['expectedRevision', 'expectedHash'], evidence: 'Wave21 preflight binds current variant revision/hash and provider cost configuration' },
+  'apollo.projects.localization-runs.request': { mode: 'identity-bound-action', fields: ['expectedRevision', 'expectedHash', 'preflightId', 'expectedPreflightHash', 'commitToken'], evidence: 'Wave21 signed confirmation is consumed atomically for the exact variant revision' },
+  'apollo.projects.localization-translations.review': { mode: 'identity-bound-action', fields: ['expectedRevision', 'expectedHash'], evidence: 'Wave21 human review advances only the exact current revision/hash' },
+  'apollo.projects.localization-media.request': { mode: 'identity-bound-action', fields: ['expectedRevision', 'expectedVariantHash', 'source'], evidence: 'Wave21 media intent binds reviewed revision and rights-bound artifact checksum' },
+  'apollo.projects.localization-media.approve': { mode: 'identity-bound-action', fields: ['expectedRunRevision', 'expectedRunHash'], evidence: 'Wave21 human approval requires the exact evidenced run and completed proxy operation' },
+  'apollo.projects.music-montages.compile': { mode: 'identity-bound-action', fields: ['projectVersionId', 'analysisId'], evidence: 'Wave21 compiler and Serializable publisher recheck the current immutable version and authorized music analysis' },
+  'apollo.projects.music-analyses.request': { mode: 'identity-bound-action', fields: ['projectVersionId', 'artifactId'], evidence: 'Wave21 analysis resolves current project/version artifact checksum and rights before enqueue' },
+  'apollo.projects.music-analyses.cancel': { mode: 'state-machine-action', evidence: 'Wave21 cancellation only changes claimable states and atomically fences the old lease' },
+  'apollo.projects.music-analyses.retry': { mode: 'state-machine-action', evidence: 'Wave21 retry only changes failed attempts below the bounded limit and records the transition audit' },
   'apollo.projects.capture-sessions.create': {
     mode: 'idempotent-create',
     evidence: 'Wave18 opens the genesis version of a new chain; there is no earlier state to be stale against, and a replayed key converges on the identical session hash',
@@ -718,6 +730,14 @@ test('every external mutation has an explicit precondition strategy', () => {
     if (decision.mode === 'revision-bound-action') {
       requiresBodyRevision(capability)
     }
+    if (decision.mode === 'identity-bound-action') {
+      const schema = getPublicSchema(capability.inputSchemaRef).schema
+      for (const field of decision.fields) {
+        assert.ok(schema.required?.includes(field), `${capability.id} must require ${field}`)
+        assert.ok(schema.properties?.[field], `${capability.id} must define ${field}`)
+      }
+      assert.equal(capability.idempotency, 'required')
+    }
     if (decision.mode === 'base-version-bound-action') {
       requiresImmutableBase(capability)
       assert.equal(capability.idempotency, 'required')
@@ -778,9 +798,10 @@ test('the current public surface has no unguarded state replacement', () => {
   assert.deepEqual(counts, {
     'read-only-preflight': 5,
     'explicit-precondition': 10,
-    'idempotent-create': 69,
+    'idempotent-create': 70,
+    'identity-bound-action': 9,
     'natural-idempotent-create': 11,
-    'state-machine-action': 16,
+    'state-machine-action': 18,
     'single-flight-action': 4,
     'revision-bound-action': 16,
     'base-version-bound-action': 25,

@@ -82,7 +82,6 @@ import {
 } from '../domain/multicam-longform-gate.ts'
 import { COVERAGE_AVAILABILITIES } from '../domain/track-coverage.ts'
 import { DIRECTION_POLICY_OVERRIDE_KEYS } from '../application/multicam-direction.ts'
-import { RENDERABLE_PLAN_ORIGINS } from '../application/renderable-edit-plan.ts'
 import { STRATEGIC_OBJECTIVES } from '../domain/strategic-objective.ts'
 import { MULTICAM_LONGFORM_CHECK_CODES } from './multicam-longform-gate-contract.ts'
 
@@ -99,7 +98,9 @@ export interface PublicSchemaDefinition {
 const idSchema = PUBLIC_ID_SCHEMA
 const dateTimeSchema = PUBLIC_DATE_TIME_SCHEMA
 const sha256Schema = { type: 'string', pattern: '^[a-f0-9]{64}$' }
-const PUBLIC_ERROR_CODES_V3 = PUBLIC_ERROR_CODES.filter((code) =>
+const LOCALIZATION_ERROR_CODES = new Set(['LOCALIZATION_CANONICAL_NOT_FOUND', 'LOCALIZATION_PROFILE_NOT_FOUND', 'LOCALIZATION_VARIANT_NOT_FOUND'])
+const PUBLIC_ERROR_CODES_V4 = PUBLIC_ERROR_CODES.filter((code) => !LOCALIZATION_ERROR_CODES.has(code))
+const PUBLIC_ERROR_CODES_V3 = PUBLIC_ERROR_CODES_V4.filter((code) =>
   code !== 'EXPORT_MATRIX_PREFLIGHT_NOT_FOUND' && code !== 'EXPORT_MATRIX_NOT_FOUND')
 const directorToolNameSchema = {
   enum: DIRECTOR_TOOL_DESCRIPTORS.map(({ name }) => name),
@@ -26170,7 +26171,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         additionalProperties: false,
         required: ['code', 'message', 'category', 'retryable', 'requestId'],
         properties: {
-          code: { enum: PUBLIC_ERROR_CODES },
+          code: { enum: PUBLIC_ERROR_CODES_V4 },
           message: { type: 'string' },
           category: {
             enum: ['validation', 'auth', 'policy', 'conflict', 'quota', 'provider', 'internal'],
@@ -26194,6 +26195,9 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
         },
       },
     },
+  }),
+  defineSchema('error-envelope', 5, 'Public API error envelope with localization errors', {
+    type: 'object', additionalProperties: false, required: ['error'], properties: { error: { type: 'object', additionalProperties: false, required: ['code', 'message', 'category', 'retryable', 'requestId'], properties: { code: { enum: PUBLIC_ERROR_CODES }, message: { type: 'string' }, category: { enum: ['validation', 'auth', 'policy', 'conflict', 'quota', 'provider', 'internal'] }, retryable: { type: 'boolean' }, requestId: { type: 'string' }, details: { type: 'object' }, conflict: { type: 'object', additionalProperties: false, required: ['currentVersionId', 'conflictingTargets', 'diff'], properties: { currentVersionId: idSchema, conflictingTargets: { type: 'array', minItems: 1, maxItems: 1024, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 256 } }, diff: versionDiffSchema } } } } }
   }),
   defineSchema('openapi-document', 1, 'OpenAPI 3.1 document', {
     type: 'object',
@@ -27351,7 +27355,7 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
             // The identity of the cut, over the whole document minus
             // `createdAt`. Two callers holding this hold the same clips.
             planHash: sha256Schema,
-            origin: { type: 'string', enum: [...RENDERABLE_PLAN_ORIGINS] },
+            origin: { type: 'string', enum: ['react-playback', 'multi-range-synthesis'] },
             sourceId: w20DerivedIdSchema,
             // The hash the deciding aggregate held when it was read. A source
             // that later moves leaves this naming a hash nothing matches, which
@@ -27518,6 +27522,34 @@ export const PUBLIC_SCHEMAS = defineSchemaRegistry([
       },
     }),
   ),
+  defineSchema('localization-canonical-list', 1, 'Approved canonical localization scripts', successSchema({ type: 'object', additionalProperties: false, required: ['versions'], properties: { versions: { type: 'array', items: { type: 'object', required: ['id', 'projectVersionId', 'sourceLocale', 'revision', 'blocks', 'approvedAt', 'contentHash'], properties: { id: idSchema, projectVersionId: idSchema, sourceLocale: { type: 'string' }, revision: { type: 'integer', minimum: 1 }, blocks: { type: 'array', items: { type: 'object' } }, approvedAt: dateTimeSchema, contentHash: { type: 'string' } } } } } })),
+  defineSchema('localization-candidate-list', 1, 'Reviewed alignment candidates for canonical localization', successSchema({ type: 'object', additionalProperties: false, required: ['candidates'], properties: { candidates: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['alignmentId', 'alignmentHash', 'batchId', 'projectVersionId', 'sourceLocale', 'blocks'], properties: { alignmentId: idSchema, alignmentHash: { type: 'string' }, batchId: idSchema, projectVersionId: idSchema, sourceLocale: { type: 'string' }, blocks: { type: 'array', items: { type: 'object' } } } } } } })),
+  defineSchema('localization-profile-list', 1, 'Persisted localization policy snapshots', successSchema({ type: 'object', additionalProperties: false, required: ['profiles'], properties: { profiles: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'targetLocale', 'allowedModes', 'profileHash'], properties: { id: idSchema, targetLocale: { type: 'string' }, market: { type: 'string' }, allowedModes: { type: 'array', items: { type: 'string' } }, profileHash: { type: 'string' } } } } } })),
+  defineSchema('localization-variant-list', 1, 'Current localization variants for a project', successSchema({ type: 'object', additionalProperties: false, required: ['variants'], properties: { variants: { type: 'array', items: { type: 'object' } } } })),
+  defineSchema('localization-variant-read', 1, 'One current localization variant', successSchema({ type: 'object', additionalProperties: false, required: ['variant'], properties: { variant: { type: 'object' } } })),
+  defineSchema('localization-profile-create-input', 1, 'Create a localization policy snapshot', { type: 'object', additionalProperties: false, required: ['targetLocale', 'allowedModes'], properties: { targetLocale: { type: 'string', minLength: 2, maxLength: 35 }, market: { type: 'string', minLength: 1, maxLength: 80 }, allowedModes: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['authorized-tts', 'local-voice', 'uploaded', 'lip-sync', 'regenerated-avatar', 'subtitles-only'] } } } }),
+  defineSchema('localization-profile-create-output', 1, 'Created localization policy snapshot', successSchema({ type: 'object', additionalProperties: false, required: ['profile', 'replayed'], properties: { profile: { type: 'object', additionalProperties: false, required: ['id', 'workspaceId', 'targetLocale', 'allowedModes', 'profileHash'], properties: { id: idSchema, workspaceId: idSchema, targetLocale: { type: 'string' }, market: { type: 'string' }, allowedModes: { type: 'array', items: { type: 'string' } }, profileHash: { type: 'string', pattern: '^[a-f0-9]{64}$' } } }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-canonical-create-input', 1, 'Approve a reviewed alignment as canonical localization source', { type: 'object', additionalProperties: false, required: ['projectVersionId', 'alignmentId', 'expectedAlignmentHash'], properties: { projectVersionId: idSchema, alignmentId: idSchema, expectedAlignmentHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, protectionsByBlock: { type: 'object', additionalProperties: { type: 'object' } } } }),
+  defineSchema('localization-canonical-create-output', 1, 'Created canonical localization snapshot', successSchema({ type: 'object', additionalProperties: false, required: ['canonical', 'replayed'], properties: { canonical: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-variant-create-input', 1, 'Create a rights-bound localization variant', { type: 'object', additionalProperties: false, required: ['canonicalId', 'profileId', 'sourceArtifactId', 'expectedSourceSha256', 'preferredMode', 'formats'], properties: { canonicalId: idSchema, profileId: idSchema, sourceArtifactId: idSchema, expectedSourceSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, preferredMode: { type: 'string', enum: ['authorized-tts', 'local-voice', 'uploaded', 'lip-sync', 'regenerated-avatar', 'subtitles-only'] }, formats: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 32 } } } }),
+  defineSchema('localization-variant-create-output', 1, 'Created localization variant revision', successSchema({ type: 'object', additionalProperties: false, required: ['variant', 'replayed'], properties: { variant: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-run-preflight-input', 1, 'Preflight translation for an exact variant revision', { type: 'object', additionalProperties: false, required: ['expectedRevision', 'expectedHash'], properties: { expectedRevision: { type: 'integer', minimum: 1 }, expectedHash: { type: 'string', pattern: '^[a-f0-9]{64}$' } } }),
+  defineSchema('localization-run-preflight-output', 1, 'Bounded translation preflight and confirmation', successSchema({ type: 'object', additionalProperties: false, required: ['preflight', 'commitToken', 'replayed'], properties: { preflight: { type: 'object' }, commitToken: { type: 'string', minLength: 80, maxLength: 4096 }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-run-request-input', 2, 'Confirm translation for an exact preflight and variant revision', { type: 'object', additionalProperties: false, required: ['expectedRevision', 'expectedHash', 'preflightId', 'expectedPreflightHash', 'commitToken'], properties: { expectedRevision: { type: 'integer', minimum: 1 }, expectedHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, preflightId: idSchema, expectedPreflightHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, commitToken: { type: 'string', minLength: 80, maxLength: 4096 } } }),
+  defineSchema('localization-run-request-output', 1, 'Queued localization run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-translation-review-input', 1, 'Human-reviewed localized blocks', { type: 'object', additionalProperties: false, required: ['expectedRevision', 'expectedHash', 'localizedBlocks'], properties: { expectedRevision: { type: 'integer', minimum: 1 }, expectedHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, localizedBlocks: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, required: ['blockId', 'text', 'protectedValues'], properties: { blockId: idSchema, text: { type: 'string', minLength: 1 }, protectedValues: { type: 'object', additionalProperties: { type: 'string' } } } } } } }),
+  defineSchema('localization-translation-review-output', 1, 'Human-reviewed localization variant revision', successSchema({ type: 'object', additionalProperties: false, required: ['variant', 'replayed'], properties: { variant: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('music-montage-compile-input', 1, 'Compile a music-led montage', { type: 'object', additionalProperties: false, required: ['projectVersionId', 'analysisId', 'locale', 'objective', 'sources', 'visualSegments'], properties: { projectVersionId: idSchema, analysisId: idSchema, locale: { type: 'string', minLength: 2, maxLength: 35 }, market: { type: 'string', minLength: 2, maxLength: 16 }, objective: { type: 'string', enum: ['discovery', 'awareness', 'warming', 'lead-generation', 'sale', 'whatsapp', 'booking', 'download'] }, fps: { type: 'integer', minimum: 1, maximum: 120 }, sources: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', additionalProperties: false, required: ['id', 'artifactId', 'durationSeconds'], properties: { id: idSchema, artifactId: idSchema, durationSeconds: { type: 'number', exclusiveMinimum: 0, maximum: 86400 } } } }, visualSegments: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'object', additionalProperties: false, required: ['id', 'sourceId', 'sourceArtifactId', 'sourceRangeMs', 'preferredDurationMs'], properties: { id: idSchema, sourceId: idSchema, sourceArtifactId: idSchema, sourceRangeMs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'integer', minimum: 0, maximum: 86400000 } }, preferredDurationMs: { type: 'integer', minimum: 1, maximum: 86400000 } } } }, minimumConfidence: { type: 'number', minimum: 0, maximum: 1 }, maximumSnapDistanceMs: { type: 'integer', minimum: 0, maximum: 10000 }, minimumCutSpacingMs: { type: 'integer', minimum: 0, maximum: 60000 }, maximumCutsPer10s: { type: 'integer', minimum: 1, maximum: 100 } } }),
+  defineSchema('music-montage-run-output', 1, 'Compiled music-led montage run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('music-montage-read-output', 1, 'One music-led montage run', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object' } } })),
+  defineSchema('music-analysis-request-input', 1, 'Request analysis of a current project music artifact', { type: 'object', additionalProperties: false, required: ['projectVersionId', 'artifactId'], properties: { projectVersionId: idSchema, artifactId: idSchema } }),
+  defineSchema('music-analysis-request-output', 1, 'Queued or replayed music analysis run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('music-analysis-read-output', 1, 'Observable music analysis run state', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object' } } })),
+  defineSchema('localization-media-request-input', 1, 'Request localized media for an exact reviewed variant', { type: 'object', additionalProperties: false, required: ['expectedRevision', 'expectedVariantHash', 'source'], properties: { expectedRevision: { type: 'integer', minimum: 1 }, expectedVariantHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, source: { type: 'object', additionalProperties: false, required: ['kind', 'artifactId', 'artifactSha256', 'rightsSnapshotId'], properties: { kind: { type: 'string', enum: ['original-audio', 'uploaded-audio'] }, artifactId: idSchema, artifactSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, rightsSnapshotId: idSchema } } } }),
+  defineSchema('localization-media-request-output', 1, 'Queued localization media run', successSchema({ type: 'object', additionalProperties: false, required: ['run', 'replayed'], properties: { run: { type: 'object' }, replayed: { type: 'boolean' } } })),
+  defineSchema('localization-media-read-output', 1, 'One localization media run', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object' } } })),
+  defineSchema('localization-media-approval-input', 1, 'Approve an evidenced localization media run', { type: 'object', additionalProperties: false, required: ['approved', 'expectedRunRevision', 'expectedRunHash'], properties: { approved: { const: true }, expectedRunRevision: { type: 'integer', minimum: 1 }, expectedRunHash: { type: 'string', pattern: '^[a-f0-9]{64}$' }, note: { type: 'string', maxLength: 2000 } } }),
+  defineSchema('localization-media-approval-output', 1, 'Human-approved localization media run', successSchema({ type: 'object', additionalProperties: false, required: ['run'], properties: { run: { type: 'object' } } })),
   defineSchema('json-schema-document', 1, 'JSON Schema document', {
     type: 'object',
     required: ['$schema', '$id', 'title'],

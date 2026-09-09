@@ -638,7 +638,7 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         Math.abs(reframePlan.fps - outputFps) > 0.01 ||
         reframePlan.ranges.length !== input.clips.length
       ) throw new DomainError('INVALID_RENDER_INPUT', 'Reframe plan does not describe this render input')
-      for (const clip of input.clips) {
+    for (const clip of input.clips) {
         const range = reframePlan.ranges.find((candidate) => candidate.clipId === clip.id)
         if (
           !range || range.startFrame !== clip.timelineInFrame || range.endFrame !== clip.timelineOutFrame
@@ -654,6 +654,18 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
         }
         reframeRangeByClipId.set(clip.id, range)
       }
+    }
+    const backgroundMusic = input.backgroundMusic
+    if (backgroundMusic) {
+      const source = renderSources[sourceIndex.get(backgroundMusic.artifactId) ?? -1]
+      if (!source || source.mediaType !== 'audio' || typeof backgroundMusic.analysisHash !== 'string' || !/^[a-f0-9]{64}$/.test(backgroundMusic.analysisHash) ||
+        !Number.isSafeInteger(backgroundMusic.sourceInFrame) || !Number.isSafeInteger(backgroundMusic.sourceOutFrame) || backgroundMusic.sourceInFrame < 0 || backgroundMusic.sourceOutFrame <= backgroundMusic.sourceInFrame ||
+        backgroundMusic.timelineInFrame !== 0 || backgroundMusic.timelineOutFrame !== fullExpectedFrames || backgroundMusic.sourceOutFrame - backgroundMusic.sourceInFrame < fullExpectedFrames ||
+        !Number.isFinite(backgroundMusic.gainDb) || backgroundMusic.gainDb > -12 || backgroundMusic.gainDb < -60 ||
+        !Number.isSafeInteger(backgroundMusic.fadeInFrames) || !Number.isSafeInteger(backgroundMusic.fadeOutFrames) || backgroundMusic.fadeInFrames < 0 || backgroundMusic.fadeOutFrames < 0 || backgroundMusic.fadeInFrames + backgroundMusic.fadeOutFrames > fullExpectedFrames) {
+        throw new DomainError('INVALID_RENDER_INPUT', 'Background music source, analysis binding, gain or ranges are invalid')
+      }
+      if (rangeReuse) throw new DomainError('INVALID_RENDER_INPUT', 'Background music requires a full render; partial range reuse is not supported')
     }
     const placementPlan = input.placementPlan
     const placementAssets = input.placementAssets ?? []
@@ -809,9 +821,20 @@ export class FfmpegEditorialProxyRenderer implements EditorialProxyRenderer {
       })
       const concatInputs = composition.clips.map((_, index) => `[v${index}][a${index}]`).join('')
       filters.push(`${concatInputs}concat=n=${composition.clips.length}:v=1:a=1[joinedv][joineda]`)
-      filters.push(
-        '[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]',
-      )
+      if (backgroundMusic) {
+        const musicIndex = sourceIndex.get(backgroundMusic.artifactId)!
+        const musicStart = backgroundMusic.sourceInFrame / input.fps
+        const musicEnd = backgroundMusic.sourceOutFrame / input.fps
+        const fadeIn = backgroundMusic.fadeInFrames / input.fps
+        const fadeOut = backgroundMusic.fadeOutFrames / input.fps
+        const duration = backgroundMusic.timelineOutFrame / input.fps
+        const musicFilters = [`atrim=start=${musicStart.toFixed(6)}:end=${musicEnd.toFixed(6)}`, 'asetpts=PTS-STARTPTS', `atrim=start=0:end=${duration.toFixed(6)}`, `volume=${backgroundMusic.gainDb.toFixed(2)}dB`]
+        if (fadeIn > 0) musicFilters.push(`afade=t=in:st=0:d=${fadeIn.toFixed(6)}`)
+        if (fadeOut > 0) musicFilters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut).toFixed(6)}:d=${fadeOut.toFixed(6)}`)
+        filters.push(`[${musicIndex}:a:0]${musicFilters.join(',')}[musicbed]`)
+        filters.push('[joineda][musicbed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixeda]')
+        filters.push('[mixeda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
+      } else filters.push('[joineda]alimiter=limit=0.794328:attack=5:release=50:level=false:latency=true[outa]')
       filters.push(`[joinedv]split=2[background0][foreground0]`)
       filters.push(`[background0]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=28[background]`)
       const foregroundScale = input.composition?.foregroundScale ?? 1

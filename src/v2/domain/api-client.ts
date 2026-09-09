@@ -12,6 +12,7 @@ export const API_SCOPE_MATRIX = Object.freeze({
   artifacts: Object.freeze(['read', 'render', 'rights', 'write'] as const),
   clients: Object.freeze(['admin'] as const),
   media: Object.freeze(['write'] as const),
+  localization: Object.freeze(['read', 'run'] as const),
   operations: Object.freeze(['cancel', 'read', 'retry'] as const),
   projects: Object.freeze(['approve', 'read', 'write'] as const),
   webhooks: Object.freeze(['admin'] as const),

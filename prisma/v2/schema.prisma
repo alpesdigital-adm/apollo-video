@@ -140,6 +140,14 @@ model V2Workspace {
   productionBatchActions                 V2ProductionBatchAction[]
   scriptAlignmentRuns                    V2ScriptAlignmentRun[]
   scriptAlignmentReviews                 V2ScriptAlignmentReview[]
+  localizationCanonicalScripts           V2LocalizationCanonicalScript[]
+  localizationProfiles                   V2LocalizationProfile[]
+  localizationVariantHeads               V2LocalizationVariantHead[]
+  localizationVariantRevisions           V2LocalizationVariantRevision[]
+  localizationVariantActions             V2LocalizationVariantAction[]
+  localizationRuns                       V2LocalizationRun[]
+  localizationRunRevisions               V2LocalizationRunRevision[]
+  localizationTranslationPreflights      V2LocalizationTranslationPreflight[]
   takeLibraryRuns                        V2TakeLibraryRun[]
   takeLibrarySelections                  V2TakeLibrarySelection[]
   compatibilityGraphRuns                 V2CompatibilityGraphRun[]
@@ -340,6 +348,12 @@ model V2ApiClient {
   productionBatchActions                V2ProductionBatchAction[]            @relation("ProductionBatchActionActor")
   scriptAlignmentRuns                   V2ScriptAlignmentRun[]               @relation("ScriptAlignmentRunCreator")
   scriptAlignmentReviews                V2ScriptAlignmentReview[]            @relation("ScriptAlignmentReviewActor")
+  approvedLocalizationCanonicalScripts  V2LocalizationCanonicalScript[]      @relation("LocalizationCanonicalApprover")
+  createdLocalizationProfiles           V2LocalizationProfile[]              @relation("LocalizationProfileCreator")
+  createdLocalizationVariants           V2LocalizationVariantHead[]          @relation("LocalizationVariantCreator")
+  localizationVariantActions            V2LocalizationVariantAction[]        @relation("LocalizationVariantActionActor")
+  requestedLocalizationRuns             V2LocalizationRun[]                  @relation("LocalizationRunRequester")
+  requestedLocalizationTranslationPreflights V2LocalizationTranslationPreflight[] @relation("LocalizationTranslationPreflightRequester")
   takeLibraryRuns                       V2TakeLibraryRun[]                   @relation("TakeLibraryRunCreator")
   takeLibrarySelections                 V2TakeLibrarySelection[]             @relation("TakeLibrarySelectionActor")
   compatibilityGraphRuns                V2CompatibilityGraphRun[]            @relation("CompatibilityGraphRunCreator")
@@ -700,6 +714,9 @@ model V2Project {
   longFormMomentTranscriptEvidence       V2LongFormMomentTranscriptEvidence[]
   productionBatches                      V2ProductionBatch[]
   scriptAlignmentRuns                    V2ScriptAlignmentRun[]
+  localizationCanonicalScripts           V2LocalizationCanonicalScript[]
+  localizationVariantHeads               V2LocalizationVariantHead[]
+  localizationRuns                       V2LocalizationRun[]
   takeLibraryRuns                        V2TakeLibraryRun[]
   compatibilityGraphRuns                 V2CompatibilityGraphRun[]
   variantRecipeRuns                      V2VariantRecipeRun[]
@@ -981,6 +998,7 @@ model V2ProjectVersion {
   transformationBriefs             V2TransformationBrief[]
   transformationProviderSelections V2TransformationProviderSelection[]
   colorCriticReports               V2ColorCriticReport[]
+  localizationCanonicalScripts     V2LocalizationCanonicalScript[]
 
   @@unique([projectId, sequence])
   @@unique([id, workspaceId])
@@ -1695,6 +1713,8 @@ model V2MediaArtifact {
   criticJudgedArtifacts        V2SyntheticCriticReport[]                 @relation("SyntheticCriticArtifact")
   criticAudioArtifacts         V2SyntheticCriticReport[]                 @relation("SyntheticCriticAudio")
   criticAlignmentArtifacts     V2SyntheticCriticReport[]                 @relation("SyntheticCriticAlignment")
+  localizationOriginalAudio    V2LocalizationVariantHead[]               @relation("LocalizationOriginalAudio")
+  localizationLocalizedAudio   V2LocalizationVariantRevision[]           @relation("LocalizationLocalizedAudio")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, artifactKey])
@@ -2748,8 +2768,10 @@ model V2AssetRightsSnapshot {
   sourceCleanupOutputReviews V2SourceCleanupResult[]       @relation("SourceCleanupReviewOutputRights")
   changes                    V2AssetRightsChange[]
   imageReuseReferences       V2ImageReuseReference[]
+  localizationVariantHeads   V2LocalizationVariantHead[]
 
   @@unique([id, workspaceId])
+  @@unique([id, artifactId, workspaceId])
   @@unique([artifactId, sequence])
   @@unique([artifactId, snapshotHash])
   @@index([workspaceId, status, expiresAt])
@@ -3308,6 +3330,13 @@ model V2ProjectProxyRenderOperation {
   outputArtifactId          String   @db.VarChar(128)
   outputManifestId          String   @db.VarChar(128)
   originalFileName          String   @db.VarChar(240)
+  renderablePlanHash        String?  @db.Char(64)
+  renderablePlanId          String?  @db.VarChar(200)
+  renderableOrigin          String?  @db.VarChar(32)
+  renderableSourceId        String?  @db.VarChar(160)
+  renderableSourceHash      String?  @db.Char(64)
+  renderableVariantId       String?  @db.VarChar(160)
+  renderableFormat          String?  @db.VarChar(16)
   reusedFromOperationId     String?  @db.VarChar(128)
   reuseCommandId            String?  @db.VarChar(128)
   reuseImpactHash           String?  @db.Char(64)
@@ -3319,6 +3348,7 @@ model V2ProjectProxyRenderOperation {
   project          V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   version          V2ProjectVersion                @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
   editPlanSnapshot V2ProjectSnapshot               @relation("ProjectProxyEditPlanSnapshot", fields: [editPlanSnapshotId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict)
+  renderableSnapshot V2RenderablePlanSnapshot?     @relation("RenderableSnapshotProxyOperations", fields: [workspaceId, renderablePlanHash], references: [workspaceId, planHash], onDelete: Restrict)
   sourceArtifact   V2MediaArtifact                 @relation("ProjectProxySourceArtifact", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   sourceManifest   V2MediaArtifactManifest         @relation("ProjectProxySourceManifest", fields: [sourceManifestId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict)
   review           V2ProxyReview?
@@ -6734,14 +6764,16 @@ model V2ScriptAlignmentRun {
   createdAt               DateTime @db.Timestamptz(3)
   updatedAt               DateTime @db.Timestamptz(3)
 
-  workspace     V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project       V2Project                 @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  batch         V2ProductionBatch         @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  createdBy     V2ApiClient               @relation("ScriptAlignmentRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  reviews       V2ScriptAlignmentReview[]
-  takeLibraries V2TakeLibraryRun[]
+  workspace                    V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project                      V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  batch                        V2ProductionBatch               @relation(fields: [batchId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  createdBy                    V2ApiClient                     @relation("ScriptAlignmentRunCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  reviews                      V2ScriptAlignmentReview[]
+  takeLibraries                V2TakeLibraryRun[]
+  localizationCanonicalScripts V2LocalizationCanonicalScript[]
 
   @@unique([id, workspaceId])
+  @@unique([id, projectId, workspaceId])
   @@unique([workspaceId, createdByClientId, idempotencyKey])
   @@index([workspaceId, batchId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "script_alignment_runs_actor_context_idx")
@@ -6781,6 +6813,318 @@ model V2ScriptAlignmentReview {
   @@index([workspaceId, runId, createdAt(sort: Desc)])
   @@index([workspaceId, actorContextHash, createdAt(sort: Desc)], map: "script_alignment_reviews_actor_context_idx")
   @@map("script_alignment_reviews")
+}
+
+model V2LocalizationCanonicalScript {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  projectId               String   @db.VarChar(128)
+  projectVersionId        String   @db.VarChar(128)
+  alignmentId             String   @db.VarChar(128)
+  alignmentRunHash        String   @db.Char(64)
+  sourceLocale            String   @db.VarChar(35)
+  revision                Int
+  snapshotJson            String   @db.Text
+  contentHash             String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  approvedByClientId      String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  approvedAt              DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_canonical_scripts_workspace_fkey")
+  project        V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_canonical_scripts_project_fkey")
+  projectVersion V2ProjectVersion                @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "localization_canonical_scripts_version_fkey")
+  alignment      V2ScriptAlignmentRun            @relation(fields: [alignmentId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "localization_canonical_scripts_alignment_fkey")
+  approvedBy     V2ApiClient                     @relation("LocalizationCanonicalApprover", fields: [approvedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_canonical_scripts_approver_fkey")
+  variants       V2LocalizationVariantHead[]
+  revisions      V2LocalizationVariantRevision[]
+
+  @@unique([id, workspaceId])
+  @@unique([id, projectId, workspaceId])
+  @@unique([workspaceId, approvedByClientId, idempotencyKey])
+  @@unique([workspaceId, projectId, projectVersionId, revision])
+  @@index([workspaceId, alignmentId, alignmentRunHash])
+  @@map("localization_canonical_scripts")
+}
+
+model V2LocalizationProfile {
+  id                      String   @id @db.VarChar(128)
+  workspaceId             String   @db.VarChar(128)
+  targetLocale            String   @db.VarChar(35)
+  market                  String?  @db.VarChar(80)
+  allowedModesJson        String   @db.Text
+  snapshotJson            String   @db.Text
+  profileHash             String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  createdByClientId       String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_profiles_workspace_fkey")
+  createdBy V2ApiClient                 @relation("LocalizationProfileCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_profiles_creator_fkey")
+  variants  V2LocalizationVariantHead[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, profileHash])
+  @@unique([workspaceId, createdByClientId, idempotencyKey])
+  @@map("localization_profiles")
+}
+
+model V2LocalizationVariantHead {
+  id                       String   @id @db.VarChar(128)
+  workspaceId              String   @db.VarChar(128)
+  projectId                String   @db.VarChar(128)
+  canonicalScriptVersionId String   @db.VarChar(128)
+  profileId                String   @db.VarChar(128)
+  sourceArtifactId         String   @db.VarChar(128)
+  sourceSha256             String   @db.Char(64)
+  sourceRightsSnapshotId   String   @db.VarChar(128)
+  currentRevision          Int
+  currentVariantHash       String   @db.Char(64)
+  status                   String   @db.VarChar(32)
+  createdByClientId        String   @db.VarChar(80)
+  createdAt                DateTime @db.Timestamptz(3)
+  updatedAt                DateTime @db.Timestamptz(3)
+
+  workspace            V2Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_variant_heads_workspace_fkey")
+  project              V2Project                       @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_heads_project_fkey")
+  canonical            V2LocalizationCanonicalScript   @relation(fields: [canonicalScriptVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Restrict, map: "localization_variant_heads_canonical_fkey")
+  profile              V2LocalizationProfile           @relation(fields: [profileId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_heads_profile_fkey")
+  sourceArtifact       V2MediaArtifact                 @relation("LocalizationOriginalAudio", fields: [sourceArtifactId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_heads_source_fkey")
+  sourceRightsSnapshot V2AssetRightsSnapshot           @relation(fields: [sourceRightsSnapshotId, sourceArtifactId, workspaceId], references: [id, artifactId, workspaceId], onDelete: Restrict, map: "localization_variant_heads_rights_fkey")
+  createdBy            V2ApiClient                     @relation("LocalizationVariantCreator", fields: [createdByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_heads_creator_fkey")
+  revisions            V2LocalizationVariantRevision[]
+  actions              V2LocalizationVariantAction[]
+  runs                 V2LocalizationRun[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectId, status, updatedAt(sort: Desc)])
+  @@map("localization_variant_heads")
+}
+
+model V2LocalizationVariantRevision {
+  id                       String   @id @db.VarChar(160)
+  workspaceId              String   @db.VarChar(128)
+  variantId                String   @db.VarChar(128)
+  revision                 Int
+  canonicalScriptVersionId String   @db.VarChar(128)
+  localizedAudioAssetId    String?  @db.VarChar(128)
+  status                   String   @db.VarChar(32)
+  stage                    String   @db.VarChar(80)
+  variantJson              String   @db.Text
+  variantHash              String   @db.Char(64)
+  createdAt                DateTime @db.Timestamptz(3)
+
+  workspace      V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_variant_revisions_workspace_fkey")
+  variant        V2LocalizationVariantHead     @relation(fields: [variantId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_revisions_variant_fkey")
+  canonical      V2LocalizationCanonicalScript @relation(fields: [canonicalScriptVersionId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_revisions_canonical_fkey")
+  localizedAudio V2MediaArtifact?              @relation("LocalizationLocalizedAudio", fields: [localizedAudioAssetId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_revisions_audio_fkey")
+
+  @@unique([variantId, revision])
+  @@unique([variantId, variantHash])
+  @@index([workspaceId, canonicalScriptVersionId])
+  @@map("localization_variant_revisions")
+}
+
+model V2LocalizationVariantAction {
+  id                      String   @id @db.VarChar(160)
+  workspaceId             String   @db.VarChar(128)
+  variantId               String   @db.VarChar(128)
+  action                  String   @db.VarChar(32)
+  expectedRevision        Int
+  resultRevision          Int
+  resultVariantHash       String   @db.Char(64)
+  requestFingerprint      String   @db.Char(64)
+  idempotencyKey          String   @db.VarChar(128)
+  actorClientId           String   @db.VarChar(80)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(16)
+  actorAuthenticationKind String   @db.VarChar(16)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_variant_actions_workspace_fkey")
+  variant   V2LocalizationVariantHead @relation(fields: [variantId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_actions_variant_fkey")
+  actor     V2ApiClient               @relation("LocalizationVariantActionActor", fields: [actorClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_variant_actions_actor_fkey")
+
+  @@unique([workspaceId, actorClientId, idempotencyKey])
+  @@unique([variantId, resultRevision])
+  @@index([workspaceId, variantId, createdAt(sort: Desc)])
+  @@map("localization_variant_actions")
+}
+
+model V2LocalizationRun {
+  id                       String    @id @db.VarChar(128)
+  workspaceId              String    @db.VarChar(128)
+  projectId                String    @db.VarChar(128)
+  variantId                String    @db.VarChar(128)
+  variantRevision          Int
+  variantHash              String    @db.Char(64)
+  canonicalScriptVersionId String    @db.VarChar(128)
+  canonicalContentHash     String    @db.Char(64)
+  status                   String    @db.VarChar(32)
+  attempt                  Int
+  runJson                  String    @db.Text
+  runHash                  String    @db.Char(64)
+  requestFingerprint       String    @db.Char(64)
+  idempotencyKey           String    @db.VarChar(128)
+  requestedByClientId      String    @db.VarChar(80)
+  preflightId              String?   @unique @db.VarChar(128)
+  actorCredentialId        String    @db.VarChar(128)
+  actorEnvironment         String    @db.VarChar(16)
+  actorAuthenticationKind  String    @db.VarChar(16)
+  actorContextHash         String    @db.Char(64)
+  delegatedUserId          String?   @db.VarChar(128)
+  delegatedIdentityId      String?   @db.VarChar(128)
+  workspaceRole            String?   @db.VarChar(32)
+  leaseOwner               String?   @db.VarChar(128)
+  leaseTokenHash           String?   @db.Char(64)
+  leaseExpiresAt           DateTime? @db.Timestamptz(3)
+  heartbeatAt              DateTime? @db.Timestamptz(3)
+  createdAt                DateTime  @db.Timestamptz(3)
+  updatedAt                DateTime  @db.Timestamptz(3)
+
+  workspace   V2Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_runs_workspace_fkey")
+  project     V2Project                   @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_runs_project_fkey")
+  variant     V2LocalizationVariantHead   @relation(fields: [variantId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_runs_variant_fkey")
+  requestedBy V2ApiClient                 @relation("LocalizationRunRequester", fields: [requestedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_runs_requester_fkey")
+  revisions   V2LocalizationRunRevision[]
+  preflight   V2LocalizationTranslationPreflight? @relation(fields: [preflightId], references: [id], onDelete: Restrict)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, requestedByClientId, idempotencyKey])
+  @@unique([workspaceId, variantId, variantRevision])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)])
+  @@map("localization_runs")
+}
+
+model V2LocalizationTranslationPreflight {
+  id                       String    @id @db.VarChar(128)
+  workspaceId              String    @db.VarChar(128)
+  projectId                String    @db.VarChar(128)
+  variantId                String    @db.VarChar(128)
+  variantRevision          Int
+  variantHash              String    @db.Char(64)
+  canonicalScriptVersionId String    @db.VarChar(128)
+  canonicalContentHash     String    @db.Char(64)
+  preflightJson            String    @db.Text
+  preflightHash            String    @db.Char(64)
+  costFingerprint          String    @db.Char(64)
+  requestFingerprint       String    @db.Char(64)
+  idempotencyKey           String    @db.VarChar(128)
+  requestedByClientId      String    @db.VarChar(80)
+  actorCredentialId        String    @db.VarChar(128)
+  actorEnvironment         String    @db.VarChar(16)
+  actorAuthenticationKind  String    @db.VarChar(16)
+  actorContextHash         String    @db.Char(64)
+  delegatedUserId          String?   @db.VarChar(128)
+  delegatedIdentityId      String?   @db.VarChar(128)
+  workspaceRole            String?   @db.VarChar(32)
+  consumedAt               DateTime? @db.Timestamptz(3)
+  consumedByRunId          String?   @unique @db.VarChar(128)
+  createdAt                DateTime  @db.Timestamptz(3)
+  expiresAt                DateTime  @db.Timestamptz(3)
+
+  workspace   V2Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  requestedBy V2ApiClient @relation("LocalizationTranslationPreflightRequester", fields: [requestedByClientId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  run         V2LocalizationRun?
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, requestedByClientId, idempotencyKey])
+  @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)])
+  @@map("localization_translation_preflights")
+}
+
+model V2LocalizationRunRevision {
+  id          String   @id @db.VarChar(160)
+  workspaceId String   @db.VarChar(128)
+  runId       String   @db.VarChar(128)
+  revision    Int
+  status      String   @db.VarChar(32)
+  runJson     String   @db.Text
+  runHash     String   @db.Char(64)
+  createdAt   DateTime @db.Timestamptz(3)
+
+  workspace V2Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict, map: "localization_run_revisions_workspace_fkey")
+  run       V2LocalizationRun @relation(fields: [runId, workspaceId], references: [id, workspaceId], onDelete: Restrict, map: "localization_run_revisions_run_fkey")
+
+  @@unique([runId, revision])
+  @@index([workspaceId, runId, createdAt(sort: Desc)])
+  @@map("localization_run_revisions")
+}
+
+model V2LocalizationMediaRun {
+  id                       String    @id @db.VarChar(128)
+  workspaceId              String    @db.VarChar(128)
+  projectId                String    @db.VarChar(128)
+  variantId                String    @db.VarChar(128)
+  variantRevision          Int
+  variantHash              String    @db.Char(64)
+  canonicalContentHash     String    @db.Char(64)
+  sourceArtifactId         String    @db.VarChar(128)
+  sourceSha256             String    @db.Char(64)
+  sourceRightsSnapshotId   String    @db.VarChar(128)
+  status                   String    @db.VarChar(40)
+  revision                 Int
+  attempt                  Int
+  runJson                  String    @db.Text
+  runHash                  String    @db.Char(64)
+  requestFingerprint       String    @db.Char(64)
+  idempotencyKey           String    @db.VarChar(128)
+  requestedByClientId      String    @db.VarChar(80)
+  actorCredentialId        String    @db.VarChar(128)
+  actorEnvironment         String    @db.VarChar(16)
+  actorAuthenticationKind  String    @db.VarChar(16)
+  actorContextHash         String    @db.Char(64)
+  delegatedUserId          String?   @db.VarChar(128)
+  delegatedIdentityId      String?   @db.VarChar(128)
+  workspaceRole            String?   @db.VarChar(32)
+  leaseOwner               String?   @db.VarChar(128)
+  leaseTokenHash           String?   @db.Char(64)
+  leaseExpiresAt           DateTime? @db.Timestamptz(3)
+  heartbeatAt              DateTime? @db.Timestamptz(3)
+  createdAt                DateTime  @db.Timestamptz(3)
+  updatedAt                DateTime  @db.Timestamptz(3)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, requestedByClientId, idempotencyKey])
+  @@unique([workspaceId, variantId, variantRevision])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([workspaceId, projectId, variantId, createdAt(sort: Desc)])
+  @@map("localization_media_runs")
+}
+
+model V2LocalizationMediaRunRevision {
+  id          String   @id @db.VarChar(160)
+  workspaceId String   @db.VarChar(128)
+  runId       String   @db.VarChar(128)
+  revision    Int
+  status      String   @db.VarChar(40)
+  runJson     String   @db.Text
+  runHash     String   @db.Char(64)
+  createdAt   DateTime @db.Timestamptz(3)
+
+  @@unique([runId, revision])
+  @@index([workspaceId, runId, createdAt(sort: Desc)])
+  @@map("localization_media_run_revisions")
 }
 
 model V2TakeLibraryRun {
@@ -9399,10 +9743,10 @@ model V2CameraColorMeasurement {
   measurementHash    String   @db.Char(64)
   createdAt          DateTime @db.Timestamptz(3)
 
-  workspace  V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  session    V2CaptureSessionHead?         @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
-  dimensions V2ColorMeasurementDimension[]
-  matchPlans V2MatchPlanMeasurement[]
+  workspace     V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  session       V2CaptureSessionHead?            @relation(fields: [sessionId, workspaceId], references: [sessionId, workspaceId], onDelete: Cascade)
+  dimensions    V2ColorMeasurementDimension[]
+  matchPlans    V2MatchPlanMeasurement[]
   criticReports V2ColorCriticReportMeasurement[]
 
   @@unique([id, workspaceId])
@@ -9701,9 +10045,9 @@ model V2ColorCriticReport {
   reportHash                String   @db.Char(64)
   createdAt                 DateTime @db.Timestamptz(3)
 
-  workspace      V2Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project        V2Project                      @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  projectVersion V2ProjectVersion               @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
+  workspace      V2Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project        V2Project                        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  projectVersion V2ProjectVersion                 @relation(fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
   dimensions     V2ColorCriticDimensionResult[]
   issues         V2ColorCriticIssue[]
   proposedDeltas V2ColorCriticProposedDelta[]
@@ -9762,24 +10106,24 @@ model V2ColorCriticDimensionResult {
 }
 
 model V2ColorCriticIssue {
-  id                 String  @id @db.VarChar(160)
-  workspaceId        String  @db.VarChar(128)
-  reportId           String  @db.VarChar(128)
-  ordinal            Int
-  code               String  @db.VarChar(64)
-  dimension          String  @db.VarChar(24)
-  severity           String  @db.VarChar(16)
-  classification     String  @db.VarChar(24)
-  cause              String  @db.VarChar(40)
-  stage              String  @db.VarChar(32)
-  cameraId           String? @db.VarChar(128)
-  rangeStartTicks    BigInt?
-  rangeEndTicks      BigInt?
-  measured           Float?
-  threshold          Float?
-  thresholdVersion   String  @db.VarChar(64)
-  confidence         Float
-  evidenceRefsJson   String  @default("[]") @db.Text
+  id               String  @id @db.VarChar(160)
+  workspaceId      String  @db.VarChar(128)
+  reportId         String  @db.VarChar(128)
+  ordinal          Int
+  code             String  @db.VarChar(64)
+  dimension        String  @db.VarChar(24)
+  severity         String  @db.VarChar(16)
+  classification   String  @db.VarChar(24)
+  cause            String  @db.VarChar(40)
+  stage            String  @db.VarChar(32)
+  cameraId         String? @db.VarChar(128)
+  rangeStartTicks  BigInt?
+  rangeEndTicks    BigInt?
+  measured         Float?
+  threshold        Float?
+  thresholdVersion String  @db.VarChar(64)
+  confidence       Float
+  evidenceRefsJson String  @default("[]") @db.Text
 
   workspace V2Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   report    V2ColorCriticReport @relation(fields: [reportId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -10007,6 +10351,7 @@ model V2RenderablePlanSnapshot {
   workspace      V2Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   project        V2Project        @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   projectVersion V2ProjectVersion @relation("RenderablePlanSnapshotVersion", fields: [projectVersionId, projectId, workspaceId], references: [id, projectId, workspaceId], onDelete: Cascade)
+  proxyRenderOperations V2ProjectProxyRenderOperation[] @relation("RenderableSnapshotProxyOperations")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, planHash])
@@ -10068,9 +10413,9 @@ model V2MulticamLongformGate {
   evaluatedAt             DateTime @db.Timestamptz(3)
   createdAt               DateTime @db.Timestamptz(3)
 
-  workspace V2Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  project   V2Project                          @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  createdBy V2ApiClient                        @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace V2Workspace                       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  project   V2Project                         @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  createdBy V2ApiClient                       @relation(fields: [createdById, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   criteria  V2MulticamLongformGateCriterion[]
 
   @@unique([id, workspaceId])
@@ -10096,8 +10441,8 @@ model V2MulticamLongformGateCriterion {
   unverifiedReferenceCount Int     @default(0)
   unhashedReferenceCount   Int     @default(0)
 
-  workspace V2Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  gate      V2MulticamLongformGate       @relation(fields: [gateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace V2Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  gate      V2MulticamLongformGate        @relation(fields: [gateId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   checks    V2MulticamLongformGateCheck[]
 
   @@unique([id, workspaceId])
@@ -10155,4 +10500,145 @@ model V2MulticamLongformGateEvidence {
   @@index([workspaceId, resourceType, resourceId])
   @@index([workspaceId, gateId, criterion])
   @@map("multicam_longform_gate_evidence")
+}
+
+model V2MusicAnalysis {
+  id               String   @id @db.VarChar(128)
+  workspaceId      String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  sourceArtifactId String   @db.VarChar(128)
+  sourceSha256     String   @db.Char(64)
+  sourceByteSize   BigInt
+  rightsSnapshotId String   @db.VarChar(128)
+  analyzerId       String   @db.VarChar(128)
+  analyzerVersion  String   @db.VarChar(64)
+  durationMs       Int
+  bpm              Float?
+  confidence       Float
+  analysisJson     String
+  analysisHash     String   @db.Char(64)
+  createdAt        DateTime @db.Timestamptz(6)
+
+  @@unique([workspaceId, sourceArtifactId, sourceSha256, analyzerId, analyzerVersion], map: "music_analyses_source_analyzer_key")
+  @@unique([id, workspaceId])
+  @@index([workspaceId, projectVersionId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceArtifactId])
+  @@map("music_analyses")
+}
+
+model V2MusicAnalysisAuthorization {
+  id               String   @id @db.VarChar(160)
+  workspaceId      String   @db.VarChar(128)
+  analysisId       String   @db.VarChar(128)
+  projectVersionId String   @db.VarChar(128)
+  rightsSnapshotId String   @db.VarChar(128)
+  authorizedAt     DateTime @db.Timestamptz(6)
+
+  @@unique([workspaceId, analysisId, projectVersionId, rightsSnapshotId], map: "music_analysis_authorizations_identity_key")
+  @@index([workspaceId, analysisId, rightsSnapshotId])
+  @@map("music_analysis_authorizations")
+}
+
+model V2MusicAnalysisRunAction {
+  id                      String   @id @db.VarChar(160)
+  workspaceId             String   @db.VarChar(128)
+  runId                   String   @db.VarChar(128)
+  action                  String   @db.VarChar(16)
+  previousStatus          String   @db.VarChar(16)
+  resultStatus            String   @db.VarChar(16)
+  attempt                 Int
+  actorClientId           String   @db.VarChar(128)
+  actorCredentialId       String   @db.VarChar(128)
+  actorEnvironment        String   @db.VarChar(32)
+  actorAuthenticationKind String   @db.VarChar(32)
+  actorContextHash        String   @db.Char(64)
+  delegatedUserId         String?  @db.VarChar(128)
+  delegatedIdentityId     String?  @db.VarChar(128)
+  workspaceRole           String?  @db.VarChar(32)
+  createdAt               DateTime @db.Timestamptz(6)
+
+  @@unique([workspaceId, runId, action, attempt, previousStatus], map: "music_analysis_run_actions_transition_key")
+  @@index([workspaceId, runId, createdAt])
+  @@map("music_analysis_run_actions")
+}
+
+model V2MusicAnalysisRun {
+  id String @id @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  projectId String @db.VarChar(128)
+  projectVersionId String @db.VarChar(128)
+  sourceArtifactId String @db.VarChar(128)
+  sourceArtifactKey String @db.VarChar(512)
+  sourceSha256 String @db.Char(64)
+  sourceByteSize BigInt
+  rightsSnapshotId String @db.VarChar(128)
+  locale String @db.VarChar(35)
+  status String @db.VarChar(16)
+  attempt Int @default(0)
+  analysisId String? @db.VarChar(128)
+  analysisHash String? @db.Char(64)
+  failureCode String? @db.VarChar(64)
+  failureMessage String? @db.VarChar(500)
+  requestFingerprint String @db.Char(64)
+  sourceFingerprint String @db.Char(64)
+  idempotencyKey String @db.VarChar(128)
+  requestedByClientId String @db.VarChar(128)
+  actorCredentialId String @db.VarChar(128)
+  actorEnvironment String @db.VarChar(32)
+  actorAuthenticationKind String @db.VarChar(32)
+  actorContextHash String @db.Char(64)
+  delegatedUserId String? @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole String? @db.VarChar(32)
+  leaseOwner String? @db.VarChar(200)
+  leaseTokenHash String? @db.Char(64)
+  leaseExpiresAt DateTime? @db.Timestamptz(6)
+  heartbeatAt DateTime? @db.Timestamptz(6)
+  createdAt DateTime @db.Timestamptz(6)
+  updatedAt DateTime @db.Timestamptz(6)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, requestedByClientId, idempotencyKey], map: "music_analysis_runs_idempotency_key")
+  @@index([workspaceId, sourceFingerprint, status, createdAt(sort: Desc)], map: "music_analysis_runs_source_fingerprint_idx")
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@map("music_analysis_runs")
+}
+
+model V2MusicMontageRun {
+  id                String   @id @db.VarChar(128)
+  workspaceId       String   @db.VarChar(128)
+  projectId         String   @db.VarChar(128)
+  projectVersionId  String   @db.VarChar(128)
+  locale            String?  @db.VarChar(35)
+  market            String?  @db.VarChar(16)
+  rightsSnapshotId  String   @db.VarChar(128)
+  musicAnalysisId   String   @db.VarChar(128)
+  musicAnalysisHash String   @db.Char(64)
+  montagePlanJson   String
+  montagePlanHash   String   @db.Char(64)
+  editPlanId        String   @db.VarChar(128)
+  editPlanHash      String   @db.Char(64)
+  criticJson        String
+  eligibleForRender Boolean
+  runJson           String
+  runHash           String   @db.Char(64)
+  requestFingerprint String  @db.Char(64)
+  idempotencyKey    String   @db.VarChar(128)
+  createdByClientId String   @db.VarChar(128)
+  actorCredentialId String   @db.VarChar(128)
+  actorEnvironment  String   @db.VarChar(32)
+  actorAuthenticationKind String @db.VarChar(32)
+  actorContextHash  String   @db.Char(64)
+  delegatedUserId   String?  @db.VarChar(128)
+  delegatedIdentityId String? @db.VarChar(128)
+  workspaceRole     String?  @db.VarChar(32)
+  createdAt         DateTime @db.Timestamptz(6)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, projectVersionId, montagePlanHash], map: "music_montage_runs_version_plan_key")
+  @@unique([workspaceId, idempotencyKey], map: "music_montage_runs_idempotency_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)])
+  @@index([workspaceId, musicAnalysisId])
+  @@map("music_montage_runs")
 }

@@ -18,6 +18,7 @@ test('batch, final matrix, variable generation and destructive actions require t
   const required = new Map([
     ['batch-edit.commit', 'batch'],
     ['variant-portfolio.confirm', 'variable-generation'],
+    ['localization-translation.enqueue', 'variable-generation'],
     ['final-export-matrix.commit', 'final-matrix'],
     ['destructive-command.commit', 'destructive'],
   ])
@@ -51,6 +52,7 @@ test('operational high-impact services use the central action registry', async (
     'batch-edits.ts',
     'variant-portfolio-preflights.ts',
     'enqueue-project-final-export.ts',
+    'localization-translation-worker.ts',
   ].map((file) => readFile(
     new URL(`../../src/v2/application/${file}`, import.meta.url),
     'utf8',
@@ -62,6 +64,8 @@ test('operational high-impact services use the central action registry', async (
   assert.match(sources[1], /actionId: 'variant-portfolio\.confirm'/)
   assert.doesNotMatch(sources[1], /validatePreflightCommitTokenService/)
   assert.match(sources[2], /actionId: 'project-final-export\.enqueue'/)
+  assert.match(sources[3], /requirePreflightForActionService/)
+  assert.match(sources[3], /actionId: 'localization-translation\.enqueue'/)
 
   const directValidators = []
   for (const entry of await readdir(applicationRoot, {

@@ -59,6 +59,9 @@ test('the scope-free surface is a closed set, and every member authenticates its
       'apollo.contracts.schemas.read',
       'apollo.media.uploads.content.put',
       'apollo.media.download-grants.consume',
+      'apollo.projects.localization-canonicals.create',
+      'apollo.projects.localization-translations.review',
+      'apollo.projects.localization-media.approve',
       'apollo.provider-callbacks.receive',
     ],
   )
